@@ -1,11 +1,8 @@
-## My Project
+## OpenSearch Migrations
 
-TODO: Fill this README out!
 
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
+This repo will contain code and documentation to assist in migrations and upgrades of 
+OpenSearch clusters.
 
 ## Security
 
