@@ -20,6 +20,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+You can exit the Python virtual environment and remove its resources like so:
+```
+deactivate
+rm -rf .venv
+```
+
+Learn more about venv [here](https://docs.python.org/3/library/venv.html).
+
 ### Step 2 - Run Pytest
 The unit tests are executed by invoking Pytest:
 
