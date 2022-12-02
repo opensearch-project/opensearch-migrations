@@ -18,7 +18,6 @@ LINE_SEP = '\u2063' # Invisible Unicode character.  Makes figuring out the begin
             # easier, given they can contain new line characters themselves.
 
 class LoggingWrangler:
-    # TODO: rework as a singleton to avoid having to pass this through multiple layers of abstraction?
     def __init__(self, workspace: WorkspaceWrangler):
         logfile_base_path = os.path.join(workspace.logs_directory, self._default_log_name())
 

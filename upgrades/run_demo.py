@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import json
-import os
 
 from upgrade_testing_framework.core.framework_runner import FrameworkRunner
 from upgrade_testing_framework.core.logging_wrangler import LoggingWrangler
-import upgrade_testing_framework.steps as steps
+import upgrade_testing_framework.workflows as workflows
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 
 def get_command_line_args():
@@ -29,7 +27,7 @@ def main():
     workspace = WorkspaceWrangler()
     logging = LoggingWrangler(workspace)
 
-    FrameworkRunner(logging, workspace, step_order=steps.DEMO_STEPS).run(resume)  
+    FrameworkRunner(logging, workspace, step_order=workflows.DEMO_STEPS).run(resume)  
 
 if __name__ == "__main__":
     main()

@@ -9,12 +9,13 @@ from upgrade_testing_framework.core.framework_step import FrameworkStep
 from upgrade_testing_framework.core.logging_wrangler import FrameworkLoggingAdapter, LoggingWrangler
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 import upgrade_testing_framework.steps as steps
+import upgrade_testing_framework.workflows as workflows
 
 ISSUE_LINK = "https://github.com/opensearch-project/opensearch-migrations/issues/new/choose"
 
 class FrameworkRunner:
     def __init__(self, logging_context: LoggingWrangler, workspace: WorkspaceWrangler,
-            step_order: List[FrameworkStep] = steps.DEFAULT_STEPS):
+            step_order: List[FrameworkStep] = workflows.DEFAULT_STEPS):
         self.logging_context = logging_context
         self.logger = FrameworkLoggingAdapter(logging.getLogger(__name__), {'step': self.__class__.__name__})
         self.workspace = workspace
@@ -46,8 +47,8 @@ class FrameworkRunner:
             self.logger.warning('User aborted the operation')
             self._set_exit_state_for_exception(state, exception)
         except exceptions.StepFailedException as exception:
-            exit_message = (f"A Framework step failed.  Please review the terminal and log output to understand why."
-                f" You can find the log output here: {self.log_file}")
+            exit_message = (f"A Framework step {current_step.cls_name()} failed.  Please review the terminal and log"
+                f" output to understand why. You can find the log output here: {self.log_file}")
             self.logger.warning(exit_message)
             cut_an_issue_message = ("Please cut an issue to us on GitHub so that we can address the problem:"
                 f" {ISSUE_LINK}")

@@ -16,8 +16,12 @@ class FrameworkStep(ABC):
 
     def fail(self, message: str, last_exception: BaseException = None):
         """
-        This method is used when your step has failed unrecoverably and you want to exit it.  The message you supply
-        should indicate why it failed in a user-friendly manner.  
+        This method is used when your step has failed unrecoverably and you want to exit it.  Ideally, this should be
+        invoked whenever there is a "runtime" exception in a Step, as that indicates we've probably handled the
+        scenario gracefully.
+        
+        The message you supply should indicate why it failed in a user-friendly manner.  If there was a precipitating
+        exception that lead you to fail the step, it should be passed in via last_exception.
         """
         raise StepFailedException("{} - {}".format(self.name, message), original_exception=last_exception)
 
@@ -29,10 +33,13 @@ class FrameworkStep(ABC):
             self.logger.error('Keyboard interrupt')
             raise UserAbortException('Keyboard interrupt')
         except StepFailedException as exception:
+            # All "runtime" exceptions should funnel through here by way of catching them and then invoking self.fail()
             exception_message = str(exception)
             self.logger.error(exception_message)
             raise exception
         except BaseException as exception:
+            # If an exception hits this section of code, then we probably haven't done our jobs correctly as it likely
+            # means we're not gracefully handling an issue for the user.
             exception_message = str(exception)
             self.logger.error(exception_message)
             raise RuntimeFrameworkException(exception_message, exception)
