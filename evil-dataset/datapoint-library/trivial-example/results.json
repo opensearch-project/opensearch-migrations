@@ -1,0 +1,39 @@
+{
+  "took" : 32,
+  "timed_out" : false,
+  "_shards" : {
+    "total" : 6,
+    "successful" : 6,
+    "skipped" : 0,
+    "failed" : 0
+  },
+  "hits" : {
+    "total" : {
+      "value" : 2,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "date-range-test",
+        "_type" : "_doc",
+        "_id" : "sw6G5IQB2vy30Mw7fgct",
+        "_score" : 1.0,
+        "_source" : {
+          "created_at" : "2022-12-04",
+          "name" : "B"
+        }
+      },
+      {
+        "_index" : "date-range-test",
+        "_type" : "_doc",
+        "_id" : "tA6G5IQB2vy30Mw7fgct",
+        "_score" : 1.0,
+        "_source" : {
+          "created_at" : "2022-12-05",
+          "name" : "C"
+        }
+      }
+    ]
+  }
+}

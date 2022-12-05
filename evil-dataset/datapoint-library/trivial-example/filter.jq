@@ -1,0 +1,1 @@
+. | {count: .hits.total.value, names: [.hits.hits[]._source.name]}

@@ -1,0 +1,6 @@
+{ "create": { "_index": "date-range-test"} }
+{ "created_at": "2022-12-03", "name": "A" }
+{ "create": { "_index": "date-range-test"} }
+{ "created_at": "2022-12-04", "name": "B" }
+{ "create": { "_index": "date-range-test"} }
+{ "created_at": "2022-12-05", "name": "C" }
