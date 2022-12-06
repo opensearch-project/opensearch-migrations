@@ -1,0 +1,48 @@
+{
+    "mappings":
+    {
+        "properties":
+        {
+            "vendor_id":
+            {
+                "type": "integer"
+            },
+            "pickup_datetime":
+            {
+                "type": "date",
+                "format": "YYY-MM-dd HH:mm:ss"
+            },
+            "dropoff_datetime":
+            {
+                "type": "date",
+                "format": "YYY-MM-dd HH:mm:ss"
+            },
+            "passenger_count":
+            {
+                "type": "integer"
+            },
+            "pickup_location":
+            {
+                "type": "geo_point",
+                "ignore_malformed": "true"
+            },
+            "dropoff_location":
+            {
+                "type": "geo_point",
+                "ignore_malformed": "true"
+            },
+            "trip_duration":
+            {
+                "type": "integer"
+            }
+        }
+    },
+    "settings":
+    {
+        "index":
+        {
+            "number_of_shards": 1,
+            "number_of_replicas": 2
+        }
+    }
+}
