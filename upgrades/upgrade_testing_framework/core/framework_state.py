@@ -19,14 +19,8 @@ class FrameworkState:
         self._state[key] = value
         return value
 
-def get_initial_state(workspace: WorkspaceWrangler, first_step: str, is_resume: bool) -> FrameworkState:
-    if is_resume and os.path.isfile(workspace.state_file):
-        with open(workspace.state_file, 'r') as state_file_handle:
-            beginning_state = json.load(state_file_handle)
-    else:
-        beginning_state = {}
-
-    if not beginning_state.get('current_step', None):
-        beginning_state['current_step'] = first_step
+def get_initial_state(test_config_path: str) -> FrameworkState:
+    beginning_state = {}
+    beginning_state['test_config_path'] = test_config_path
 
     return FrameworkState(beginning_state)

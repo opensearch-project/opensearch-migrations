@@ -1,2 +1,3 @@
 # Bring all the individual steps into a single convenient namespace
 from upgrade_testing_framework.steps.step_bootstrap_docker import BootstrapDocker
+from upgrade_testing_framework.steps.step_start_source_cluster import StartSourceCluster

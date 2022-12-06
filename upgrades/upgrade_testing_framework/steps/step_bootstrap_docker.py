@@ -8,7 +8,7 @@ class BootstrapDocker(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        # source_dockerfile_path = self._get_state_value("source_dockerfile_path") # Exception will be thrown if not available
+        # None needed, currently
 
         # Begin the step body
         # We'll start by trying to make a Docker client to see if the user's setup is correct
@@ -27,9 +27,8 @@ class BootstrapDocker(FrameworkStep):
             self.fail("Docker server was not responsive")
         self.logger.info("Docker appears to be installed and available")
 
-        # Next, let's build the Docker Image
-        
-
+        # This is where we will later build our Dockerfiles into local images, if the user supplies one
+        # However - we'll tackle that later
         
         # Update our state
         self.state.docker_client = docker_client

@@ -25,14 +25,14 @@ class FrameworkRunner:
     def log_file(self):
         return self.logging_context.log_file
 
-    def run(self, resume: bool):
-        state = get_initial_state(self.workspace, self.step_order[0].cls_name(), resume)
+    def run(self, test_config_path: str):
+        state = get_initial_state(test_config_path)
         state.set('log_file', self.log_file)
 
         try:
-            # Figure out where in the list of steps we should begin.  This enables us to resume runs from the statefile
-            starting_step = getattr(steps, state.get('current_step'), None)
-            starting_step_index = self.step_order.index(starting_step)
+            # Figure out where in the list of steps we should begin.  Should just be the first one, but if we want to
+            # be able to resume a previous run this would be the spot you'd pick something else
+            starting_step_index = 0
 
             # From that starting step through the end of the step list, run the steps
             for step_index in range(starting_step_index, len(self.step_order)):

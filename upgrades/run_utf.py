@@ -11,10 +11,9 @@ def get_command_line_args():
         description="Script to invoke the Upgrade Testing Framework."
     )
 
-    parser.add_argument("--resume", help="DEBUG FEATURE - Resume your previous run",
-        dest="resume",
-        action='store_true',
-        default=False
+    parser.add_argument("--test_config", help="Path to your test config file (see README for more details)",
+        dest="test_config",
+        required=True
     )
 
     return parser.parse_args()
@@ -22,12 +21,12 @@ def get_command_line_args():
 
 def main():
     args = get_command_line_args()
-    resume = args.resume
+    test_config = args.test_config
 
     workspace = WorkspaceWrangler()
     logging = LoggingWrangler(workspace)
 
-    FrameworkRunner(logging, workspace, step_order=workflows.DEFAULT_STEPS).run(resume)  
+    FrameworkRunner(logging, workspace, step_order=workflows.DEFAULT_STEPS).run(test_config)  
 
 if __name__ == "__main__":
     main()

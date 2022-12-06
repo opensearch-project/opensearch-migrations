@@ -4,7 +4,7 @@ import unittest.mock as mock
 
 from docker.errors import DockerException
 
-from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, DockerNotInPathException, DockerNotResponsiveException
+import upgrade_testing_framework.cluster_management.docker_framework_client as dfc
 
 
 
@@ -14,8 +14,8 @@ from upgrade_testing_framework.cluster_management.docker_framework_client import
 @mock.patch.dict(os.environ, {"PATH": ""})
 def test_WHEN_create_docker_client_AND_docker_not_in_path_THEN_raises():
     # Run our test
-    with pytest.raises(DockerNotInPathException):
-        DockerFrameworkClient()
+    with pytest.raises(dfc.DockerNotInPathException):
+        dfc.DockerFrameworkClient()
 
 @mock.patch('upgrade_testing_framework.cluster_management.docker_framework_client.docker.client')
 def test_WHEN_create_docker_client_AND_docker_not_running_THEN_raises(mock_dock_client_module):
@@ -23,8 +23,8 @@ def test_WHEN_create_docker_client_AND_docker_not_running_THEN_raises(mock_dock_
     mock_dock_client_module.from_env.side_effect = DockerException()
 
     # Run our test
-    with pytest.raises(DockerNotResponsiveException):
-        DockerFrameworkClient()
+    with pytest.raises(dfc.DockerNotResponsiveException):
+        dfc.DockerFrameworkClient()
 
 # class EndTestExpectedException(Exception):
 #     pass
