@@ -18,7 +18,6 @@ def get_command_line_args():
 
     return parser.parse_args()
 
-
 def main():
     args = get_command_line_args()
     test_config = args.test_config

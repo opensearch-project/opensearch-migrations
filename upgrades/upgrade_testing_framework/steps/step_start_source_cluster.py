@@ -11,8 +11,7 @@ class StartSourceCluster(FrameworkStep):
         # source_docker_image = self._get_state_value("source_docker_image") # Exception will be thrown if not available
 
         # Begin the step body
+        self.logger.info("Do work")
         
         # Update our state
         
-
-        pass

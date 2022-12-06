@@ -8,7 +8,7 @@ class BootstrapDocker(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        # None needed, currently
+        source_docker_image = self._get_state_value("test_config")["source_docker_image"]
 
         # Begin the step body
         # We'll start by trying to make a Docker client to see if the user's setup is correct
