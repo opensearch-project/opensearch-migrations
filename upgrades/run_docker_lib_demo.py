@@ -1,7 +1,7 @@
 import logging
 import sys
 from docker.types import Ulimit
-from upgrade_testing_framework.core.docker_framework_client import DockerFrameworkClient
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
 
 
 '''

@@ -8,7 +8,7 @@ from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 
 def get_command_line_args():
     parser = argparse.ArgumentParser(
-        description="A quick script to demo the framework.  Delete in next commit."
+        description="Script to invoke the Upgrade Testing Framework."
     )
 
     parser.add_argument("--resume", help="DEBUG FEATURE - Resume your previous run",
@@ -27,7 +27,7 @@ def main():
     workspace = WorkspaceWrangler()
     logging = LoggingWrangler(workspace)
 
-    FrameworkRunner(logging, workspace, step_order=workflows.DEMO_STEPS).run(resume)  
+    FrameworkRunner(logging, workspace, step_order=workflows.DEFAULT_STEPS).run(resume)  
 
 if __name__ == "__main__":
     main()

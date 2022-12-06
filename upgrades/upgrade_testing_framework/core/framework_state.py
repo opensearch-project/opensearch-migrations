@@ -1,10 +1,12 @@
 import json
 import os
 
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 
 class FrameworkState:
-    def __init__(self, state: dict):
+    def __init__(self, state: dict, docker_client: DockerFrameworkClient = None):
+        self.docker_client = docker_client
         self._state = state
 
     def __str__(self) -> str:
