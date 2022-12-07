@@ -1,0 +1,62 @@
+# This docker-compose demos a basic mixed OpenSearch 1.0 cluster with two nodes.
+version: '3'
+services:
+  elasticsearch-node1:
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+    container_name: elasticsearch-node1
+    environment:
+      - cluster.name=es-cluster
+      - node.name=elasticsearch-node1
+      - discovery.seed_hosts=elasticsearch-node1,elasticserach-node2
+      - cluster.initial_master_nodes=elasticsearch-node1,elasticsearch-node2
+      - bootstrap.memory_lock=true # along with the memlock settings below, disables swapping
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
+      - path.repo=/opt/elasticsearch/snapshots
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+        hard: 65536
+    volumes:
+      - elasticsearch-data1:/usr/share/elasticsearch/data
+      - elasticsearch-snapshot:/opt/elasticsearch/snapshots
+    ports:
+      - 9200:9200
+    networks:
+      - elasticsearch-net
+
+  elasticsearch-node2:
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+    container_name: elasticsearch-node2
+    environment:
+      - cluster.name=es-cluster
+      - node.name=elasticsearch-node2
+      - discovery.seed_hosts=elasticsearch-node1,elasticserach-node2
+      - cluster.initial_master_nodes=elasticsearch-node1,elasticsearch-node2
+      - bootstrap.memory_lock=true # along with the memlock settings below, disables swapping
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
+      - path.repo=/opt/elasticsearch/snapshots
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+        hard: 65536
+    volumes:
+      - elasticsearch-data2:/usr/share/elasticsearch/data
+      - elasticsearch-snapshot:/opt/elasticsearch/snapshots
+    ports:
+      - 9201:9200
+    networks:
+      - elasticsearch-net
+
+volumes:
+  elasticsearch-data1:
+  elasticsearch-data2:
+  elasticsearch-snapshot:
+
+networks:
+  elasticsearch-net:
