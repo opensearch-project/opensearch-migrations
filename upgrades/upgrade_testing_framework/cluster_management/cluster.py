@@ -62,6 +62,22 @@ class Cluster:
             # Remove ready nodes from list
 
             # Sleep
+
+    def stop(self):
+        # call stop on each of the Nodes
+
+        pass
+
+    def remove(self):
+        # ensure nodes are stopped
+
+        # call remove on each node
+
+        # remove any shared volumes
+
+        # remove network
+        
+        pass
             
 
     

@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import logging
 
 from upgrade_testing_framework.core.exception_base import RuntimeFrameworkException, StepFailedException, UserAbortException
+from upgrade_testing_framework.core.framework_state import FrameworkState
 from upgrade_testing_framework.core.logging_wrangler import FrameworkLoggingAdapter
 
 class MissingStateError(Exception):
@@ -10,7 +11,7 @@ class MissingStateError(Exception):
             .format(step, key))
 
 class FrameworkStep(ABC):
-    def __init__(self, state: dict):
+    def __init__(self, state: FrameworkState):
         self.logger = FrameworkLoggingAdapter(logging.getLogger(__name__), {'step': self.name})
         self.state = state
 
@@ -49,17 +50,17 @@ class FrameworkStep(ABC):
         pass
 
     def _get_state_value(self, key: str) -> any:
-        value = self.state.get(key)
+        value = self.state.get_key(key)
         if value == None:
             raise MissingStateError(self.name, key)
         return value
 
     def _get_state_value_could_be_none(self, key: str) -> any:
         # Instead of failing if it's not set, just pass through the None
-        return self.state.get(key)
+        return self.state.get_key(key)
 
     def _set_state_value(self, key:str, value: any) -> any:
-        return self.state.set(key, value)
+        return self.state.set_key(key, value)
 
     @classmethod
     def cls_name(cls) -> str:

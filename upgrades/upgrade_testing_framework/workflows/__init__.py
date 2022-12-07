@@ -5,5 +5,7 @@ from upgrade_testing_framework.steps import *
 DEFAULT_STEPS = [
     LoadTestConfig,
     BootstrapDocker,
-    StartSourceCluster
+    StartSourceCluster,
+    TestSourceCluster,
+    StopSourceCluster
 ]

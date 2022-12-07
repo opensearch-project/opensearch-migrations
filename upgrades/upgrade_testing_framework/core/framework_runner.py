@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import List
 
@@ -27,7 +26,7 @@ class FrameworkRunner:
 
     def run(self, test_config_path: str):
         state = get_initial_state(test_config_path)
-        state.set('log_file', self.log_file)
+        state.set_key('log_file', self.log_file)
 
         try:
             # Figure out where in the list of steps we should begin.  Should just be the first one, but if we want to
@@ -37,12 +36,12 @@ class FrameworkRunner:
             # From that starting step through the end of the step list, run the steps
             for step_index in range(starting_step_index, len(self.step_order)):
                 current_step = self.step_order[step_index]
-                state.set('current_step', current_step.cls_name())
+                state.set_key('current_step', current_step.cls_name())
                 self.logger.info(f"Running Step: {current_step.cls_name()}")
                 current_step(state).run()
                 self.logger.info(f"Step Succeeded: {current_step.cls_name()}")
             self.logger.info("Ran through all steps successfully")
-            state.set('exit_type', constants.EXIT_TYPE_SUCCESS)
+            state.set_key('exit_type', constants.EXIT_TYPE_SUCCESS)
         except exceptions.UserAbortException as exception:
             self.logger.warning('User aborted the operation')
             self._set_exit_state_for_exception(state, exception)
@@ -68,33 +67,33 @@ class FrameworkRunner:
                 self.logger.debug('Exception encountered:', exc_info = True)
         
         finally:
-            if state.get('exit_type') in constants.EXIT_TYPES_FAILURE:
-                self.logger.warning("Step Failed: {}".format(state.get('current_step')))
-            if not state.get('state_file'):
-                state.set('state_file', self.workspace.state_file)
+            if state.get_key('exit_type') in constants.EXIT_TYPES_FAILURE:
+                self.logger.warning("Step Failed: {}".format(state.get_key('current_step')))
+            if not state.get_key('state_file'):
+                state.set_key('state_file', self.workspace.state_file)
             self.logger.info('Saving application state to file...')
-            with open(state.get('state_file'), 'w') as config_file:
-                config_file.write(json.dumps(state._state, sort_keys=True, indent=4))
+            with open(state.get_key('state_file'), 'w') as config_file:
+                config_file.write(str(state))
             self.logger.info('Application state saved')
                 
-            self.logger.info("Application state saved to: {}".format(state.get('state_file')))
+            self.logger.info("Application state saved to: {}".format(state.get_key('state_file')))
             self.logger.info("Full run details logged to: {}".format(self.log_file))
 
             return state
 
     def _set_exit_state_for_exception(self, state: FrameworkState, exception: BaseException):
         if exceptions.is_exception_in_type_list(exception, [exceptions.UserAbortException]):
-            state.set('exit_type', constants.EXIT_TYPE_ABORT)
+            state.set_key('exit_type', constants.EXIT_TYPE_ABORT)
         elif exceptions.is_exception_in_type_list(exception, [exceptions.StepFailedException]):
-            state.set('exit_type', constants.EXIT_TYPE_FAILURE)
+            state.set_key('exit_type', constants.EXIT_TYPE_FAILURE)
             if exception.original_exception:
-                state.set('last_exception_message', str(exception.original_exception))
-                state.set('last_exception_type', exception.original_exception.__class__.__name__)
+                state.set_key('last_exception_message', str(exception.original_exception))
+                state.set_key('last_exception_type', exception.original_exception.__class__.__name__)
         elif exceptions.is_exception_in_type_list(exception, [exceptions.RuntimeFrameworkException]):
-            state.set('exit_type', constants.EXIT_TYPE_FAILURE_UNEXPECTED)
-            state.set('last_exception_message', str(exception.original_exception))
-            state.set('last_exception_type', exception.original_exception.__class__.__name__)
+            state.set_key('exit_type', constants.EXIT_TYPE_FAILURE_UNEXPECTED)
+            state.set_key('last_exception_message', str(exception.original_exception))
+            state.set_key('last_exception_type', exception.original_exception.__class__.__name__)
         else:
-            state.set('exit_type', constants.EXIT_TYPE_FAILURE_UNHANDLED)
-            state.set('last_exception_message', str(exception))
-            state.set('last_exception_type', exception.__class__.__name__)
+            state.set_key('exit_type', constants.EXIT_TYPE_FAILURE_UNHANDLED)
+            state.set_key('last_exception_message', str(exception))
+            state.set_key('last_exception_type', exception.__class__.__name__)

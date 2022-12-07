@@ -101,7 +101,7 @@ class TestFrameworkRunner():
         assert call_register.Step1.called
         assert call_register.Step2.called
         assert call_register.Step3.called
-        assert constants.EXIT_TYPE_SUCCESS == end_state.get('exit_type')
+        assert constants.EXIT_TYPE_SUCCESS == end_state.get_key('exit_type')
 
     def test_WHEN_run_called_AND_user_abort_THEN_invokes_expected_steps(self, reset_call_register, test_logging_context, test_workspace):
         # Test values
@@ -118,7 +118,7 @@ class TestFrameworkRunner():
         assert call_register.Step1.called
         assert call_register.StepAbortException.called
         assert not call_register.Step3.called
-        assert constants.EXIT_TYPE_ABORT == end_state.get('exit_type')
+        assert constants.EXIT_TYPE_ABORT == end_state.get_key('exit_type')
 
     def test_WHEN_run_called_THEN_writes_state_file(self, reset_call_register, test_logging_context, test_workspace):
         # Test values

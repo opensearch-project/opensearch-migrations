@@ -1,4 +1,6 @@
 import logging
+from typing import List
+
 import docker.client
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from docker.models.networks import Network
@@ -26,6 +28,10 @@ class DockerNotResponsiveException(Exception):
         self.original_exception = original_exception
         super().__init__(f"The Docker server on your system is not responsive")
 
+class DockerImageUnavailableException(Exception):
+    def __init__(self, image: str):
+        super().__init__(f"The Docker {image} is not available either locally or in your remote repos")
+
 class DockerFrameworkClient:
     def _try_create_docker_client() -> docker.client.DockerClient:
         # First check to see if Docker is available in the user's PATH.  The Docker SDK doesn't provide a good
@@ -48,9 +54,64 @@ class DockerFrameworkClient:
 
         if docker_client == None:
             self._docker_client = DockerFrameworkClient._try_create_docker_client()
+        else:
+            self._docker_client = docker_client
 
-    def toJson(self):
-        return "DockerFrameworkClient"
+    def _is_image_available_locally(self, image: str) -> bool:
+        try:
+            self._docker_client.images.get(image)
+        except ImageNotFound:
+            self.logger.debug(f"Image {image} not available locally")
+            return False
+        self.logger.debug(f"Image {image} is available locally")
+        return True
+    
+    def ensure_image_available(self, image: str):
+        """
+        Check if the supplied image is available locally; try to pull it from remote repos if it isn't.
+        """
+        if not self._is_image_available_locally(image):
+            self.logger.debug(f"Attempting to pull image from remote repositories...")
+            try:
+                self._docker_client.images.pull(image)
+                self.logger.debug(f"Pulled image {image} successfully")
+            except ImageNotFound:
+                raise DockerImageUnavailableException(image)
+
+    def create_network(self, name: str, driver="bridge") -> Network:
+        self.logger.debug(f"Creating network {name}...")
+        network = self._docker_client.networks.create(name, driver=driver)
+        self.logger.debug(f"Created network {name} with ID {network.id}")
+        return network
+
+    def remove_network(self, network: Network):
+        self.logger.debug(f"Removing network {network.name} with ID {network.id}...")
+        network.remove()
+        self.logger.debug(f"Removed network {network.name}")
+
+    def create_volume(self, name: str) -> Volume:
+        self.logger.debug(f"Creating volume {name}...")
+        volume = self._docker_client.volumes.create(name)
+        self.logger.debug(f"Created volume {name}")
+        return volume
+
+    def remove_volume(self, volume: Volume):
+        self.logger.debug(f"Removing volume {volume.name}...")
+        volume.remove()
+        self.logger.debug(f"Removed volume {volume.name}")
+
+    def create_container(self, image: str, container_name: str, network: Network, ports: dict, volumes: List[Volume], ulimits: list,
+                         env_variables: dict) -> Container:
+
+        # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
+        volume_mapping = {volume.attrs["Name"]: {"bind": volume.attrs["Mountpoint"], "mode": "rw"} for volume in volumes}
+        
+        self.logger.debug("Creating container named: {}".format(container_name))
+        container = self._docker_client.containers.run(image, name=container_name, network=network.name, ports=ports, volumes=volume_mapping,
+                                                      ulimits=ulimits,
+                                                      detach=True,
+                                                      environment=env_variables)
+        return container
 
     # def is_container_running(self, container: Container) -> bool:
     #     # TODO: Make more robust, case where this attr is not valid
@@ -61,19 +122,13 @@ class DockerFrameworkClient:
 
     # def does_container_exist(self, container_name: str) -> bool:
     #     try:
-    #         self.docker_client.containers.get(container_id=container_name)
+    #         self._docker_client.containers.get(container_id=container_name)
     #     except NotFound:
     #         return False
     #     else:
     #         return True
 
-    # def does_image_exist_locally(self, image: str) -> bool:
-    #     try:
-    #         self.docker_client.images.get(image)
-    #     except ImageNotFound:
-    #         return False
-    #     else:
-    #         return True
+    
 
     # def create_container(self, image: str, container_name: str, network_name: str, ports: dict, volumes: dict, ulimits: list,
     #                      environment: dict) -> Container:
@@ -94,9 +149,6 @@ class DockerFrameworkClient:
 
     #     # Further checks to add:
     #     # Check if volume exists
-    #     # Sanity on image str
-    #     # Check that docker service is up
-    #     # Check docker sanity
     #     # Check for adequate disk space
     #     # Check for restricted ports
     #     # Check for necessary environment fields
@@ -106,10 +158,10 @@ class DockerFrameworkClient:
 
     #     if not self.does_image_exist_locally(image):
     #         self.logger.info("Docker image {} not found locally. Attempting to fetch from remote repository...".format(image))
-    #         self.docker_client.images.pull(image)
+    #         self._docker_client.images.pull(image)
 
     #     self.logger.debug("Creating container named: {}".format(container_name))
-    #     container = self.docker_client.containers.run(image, name=container_name, network=network_name, ports=ports, volumes=volumes,
+    #     container = self._docker_client.containers.run(image, name=container_name, network=network_name, ports=ports, volumes=volumes,
     #                                                   ulimits=ulimits,
     #                                                   detach=True,
     #                                                   environment=environment)
@@ -123,20 +175,4 @@ class DockerFrameworkClient:
     #     self.logger.debug("Removing container: {}".format(container.id))
     #     container.remove()
 
-    # def create_network(self, name: str, driver="bridge") -> Network:
-    #     # TODO: Additional checks and testing needed
-    #     network = self.docker_client.networks.create(name, driver=driver)
-    #     return network
-
-    # def remove_network(self, network: Network):
-    #     # TODO: Additional checks and testing needed
-    #     network.remove()
-
-    # def create_volume(self, name: str) -> Volume:
-    #     # TODO: Additional checks and testing needed
-    #     volume = self.docker_client.volumes.create(name)
-    #     return volume
-
-    # def remove_volume(self, volume: Volume):
-    #     # TODO: Additional checks and testing needed
-    #     volume.remove()
+    
