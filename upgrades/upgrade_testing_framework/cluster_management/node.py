@@ -10,7 +10,7 @@ from docker.models.networks import Network
 from docker.models.volumes import Volume
 from docker.types import Ulimit
 
-from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, PortMapping
 import upgrade_testing_framework.core.shell_interactions as shell
 
 class NodeConfiguration:
@@ -30,7 +30,7 @@ class NodeConfiguration:
         }
 
 class ContainerConfiguration:
-    def __init__(self, image: str, network: Network, port_mappings: dict, volumes: List[Volume], 
+    def __init__(self, image: str, network: Network, port_mappings: List[PortMapping], volumes: List[Volume], 
             ulimits: List[Ulimit] = [Ulimit(name='memlock', soft=-1, hard=-1)]):
         self.image = image
         self.network = network
@@ -49,6 +49,8 @@ class Node:
         self._node_config = node_config
 
     def start(self):
+        # TODO: handle when the container is already running
+
         # run the container
         container = self._docker_client.create_container(
             self._container_config.image,
@@ -64,14 +66,18 @@ class Node:
         self._container = container
 
     def stop(self):
+        # TODO: handle when the container is not running
+
         self.logger.debug(f"Stopping node {self.name}...")
         self._container.stop()
         self.logger.debug(f"Node {self.name} has been stopped")
 
     def clean_up(self):
+        # TODO: handle when the container is not stopped
+
         self.logger.debug(f"Removing underlying resources of node {self.name}...")
 
-        # delete container and update container reference (None?)
+        # delete container and update container reference
         self.logger.debug(f"Deleting container {self._container.name}...")
         self._container.remove()
         self.logger.debug(f"Container {self._container.name} has been deleted")

@@ -14,23 +14,15 @@ class StopSourceCluster(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        docker_client: dfc.DockerFrameworkClient = self.state.docker_client
-        networks: List[Network] = self.state.networks
-        node: Node = self.state.node
-        volumes: List[Volume] = self.state.volumes
+        cluster = self.state.source_cluster
 
         # Begin the step body
-        node.stop()
-        node.clean_up()
-
-        for network in networks:
-            docker_client.remove_network(network)
-
-        for volume in volumes:
-            docker_client.remove_volume(volume)
+        self.logger.info(f"Stopping cluster {cluster.name}...")
+        cluster.stop()
+        self.logger.info(f"Cleaning up underlying resources for cluster {cluster.name}...")
+        cluster.clean_up()
 
         # Update our state
-        self.state.networks = []
-        self.state.volumes = []
+        self.state.source_cluster = None
         
         

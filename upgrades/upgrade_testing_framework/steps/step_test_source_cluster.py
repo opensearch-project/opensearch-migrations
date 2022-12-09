@@ -10,7 +10,7 @@ class TestSourceCluster(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        node: Node = self.state.node
+        # N/A
 
         # Begin the step body
         _, output = shell.call_shell_command("curl -X GET \"localhost:9200/\"")

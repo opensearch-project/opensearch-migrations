@@ -1,23 +1,15 @@
+from collections import namedtuple
 import logging
-from typing import List
+from typing import Dict, List
 
 import docker.client
-from docker.errors import APIError, DockerException, ImageNotFound, NotFound
+from docker.errors import DockerException, ImageNotFound
 from docker.models.networks import Network
 from docker.models.containers import Container
 from docker.models.volumes import Volume
+from docker.types import Ulimit
 
 import upgrade_testing_framework.core.shell_interactions as shell
-
-# class RemoveRunningContainerException(Exception):
-#     def __init__(self, container: Container):
-#         self.container = container
-#         super().__init__("A running container should be stopped before attempting to remove: {}".format(container.id))
-
-# class ExistingContainerException(Exception):
-#     def __init__(self, container_name: str):
-#         self.container_name = container_name
-#         super().__init__("There already exists a container with the name: {}".format(container_name))
 
 class DockerNotInPathException(Exception):
     def __init__(self):
@@ -31,6 +23,8 @@ class DockerNotResponsiveException(Exception):
 class DockerImageUnavailableException(Exception):
     def __init__(self, image: str):
         super().__init__(f"The Docker {image} is not available either locally or in your remote repos")
+
+PortMapping = namedtuple("PortMapping", "host_port container_port")
 
 class DockerFrameworkClient:
     def _try_create_docker_client() -> docker.client.DockerClient:
@@ -100,79 +94,42 @@ class DockerFrameworkClient:
         volume.remove()
         self.logger.debug(f"Removed volume {volume.name}")
 
-    def create_container(self, image: str, container_name: str, network: Network, ports: dict, volumes: List[Volume], ulimits: list,
-                         env_variables: dict) -> Container:
+    def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping], volumes: List[Volume], ulimits: List[Ulimit],
+                         env_variables: Dict[str, str]) -> Container:
+
+        # TODO - need handle if container already exists (name collision)
+        # TODO - need handle if we exceed the resource allocation for Docker
+        # TODO - need handle port contention
 
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
+        port_mapping = {pair.container_port: pair.host_port for pair in ports}
         volume_mapping = {volume.attrs["Name"]: {"bind": volume.attrs["Mountpoint"], "mode": "rw"} for volume in volumes}
         
-        self.logger.debug("Creating container named: {}".format(container_name))
-        container = self._docker_client.containers.run(image, name=container_name, network=network.name, ports=ports, volumes=volume_mapping,
-                                                      ulimits=ulimits,
-                                                      detach=True,
-                                                      environment=env_variables)
+        self.logger.debug(f"Creating container named {container_name}...")
+        container = self._docker_client.containers.run(
+            image,
+            name=container_name,
+            network=network.name,
+            ports=port_mapping,
+            volumes=volume_mapping,
+            ulimits=ulimits,
+            detach=True,
+            environment=env_variables
+        )
+        self.logger.debug("Created container")
         return container
 
-    # def is_container_running(self, container: Container) -> bool:
-    #     # TODO: Make more robust, case where this attr is not valid
-    #     if container is None:
-    #         raise TypeError("Provided argument is not of type docker.models.containers.Container")
-    #     container_state = container.attrs['State']
-    #     return container_state == 'running'
+    def stop_container(self, container: Container):
+        self.logger.debug(f"Stopping container {container.name}...")
+        container.stop()
+        self.logger.debug(f"Stopped container {container.name}")
 
-    # def does_container_exist(self, container_name: str) -> bool:
-    #     try:
-    #         self._docker_client.containers.get(container_id=container_name)
-    #     except NotFound:
-    #         return False
-    #     else:
-    #         return True
+    def remove_container(self, container: Container):
+        # TODO - Need to handle when container isn't stopped
+        self.logger.debug(f"Removing container {container.name}...")
+        container.remove()
+        self.logger.debug(f"Removed container {container.name}")
 
     
-
-    # def create_container(self, image: str, container_name: str, network_name: str, ports: dict, volumes: dict, ulimits: list,
-    #                      environment: dict) -> Container:
-    #     """
-    #     After performing some basic sanity checks, this function will create and start a Docker container with the supplied parameters
-
-    #     :param image: The docker image to run, i.e. opensearchproject/opensearch:2.4.0
-    #     :param container_name: The docker container name
-    #     :param network_name: The existing network this container will connect to at creation time, i.e. opensearch-net
-    #     :param ports: A dictionary of ports to bind inside container, i.e. {'9200': '9200', '9600': '9600'}
-    #     :param volumes: A dictionary of volumes to mount, i.e. {'vol1': {'bind': '/usr/share/opensearch/data', 'mode': 'rw'}}
-    #     :param ulimits: A list of docker.types.Ulimit instances to limit resource utilization, i.e. [Ulimit(name='memlock', soft=-1, hard=-1)]
-    #     :param environment: A dictionary of environment fields to be used by the container process, i.e. {'node.name': 'opensearch-node1'}
-    #     :return: Container object for the running container
-
-    #     For Docker specific details on parameters see: https://docker-py.readthedocs.io/en/stable/containers.html
-    #     """
-
-    #     # Further checks to add:
-    #     # Check if volume exists
-    #     # Check for adequate disk space
-    #     # Check for restricted ports
-    #     # Check for necessary environment fields
-
-    #     if self.does_container_exist(container_name):
-    #         raise ExistingContainerException(container_name)
-
-    #     if not self.does_image_exist_locally(image):
-    #         self.logger.info("Docker image {} not found locally. Attempting to fetch from remote repository...".format(image))
-    #         self._docker_client.images.pull(image)
-
-    #     self.logger.debug("Creating container named: {}".format(container_name))
-    #     container = self._docker_client.containers.run(image, name=container_name, network=network_name, ports=ports, volumes=volumes,
-    #                                                   ulimits=ulimits,
-    #                                                   detach=True,
-    #                                                   environment=environment)
-    #     return container
-
-    # def remove_container(self, container: Container):
-    #     if container is None:
-    #         raise TypeError("Provided argument is not of type docker.models.containers.Container")
-    #     if self.is_container_running(container):
-    #         raise RemoveRunningContainerException(container)
-    #     self.logger.debug("Removing container: {}".format(container.id))
-    #     container.remove()
 
     
