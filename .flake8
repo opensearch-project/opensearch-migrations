@@ -1,0 +1,10 @@
+[flake8]
+# pep8 codes - http://pep8.readthedocs.io/en/release-1.7.x/intro.html#error-codes
+# E501 - line too long
+# E265 - block comment should start with '# '
+# E402 - module level import not at top of file
+# E999 - SyntaxError: EOL while scanning string literal
+# W504 - Line break occurred after a binary operator
+ignore = E265,E402,E999,W504
+max-line-length = 120
+exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules
