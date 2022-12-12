@@ -1,5 +1,3 @@
-import pytest
-
 import upgrade_testing_framework.core.exception_base as exceptions
 
 def test_WHEN_is_exception_in_type_list_called_AND_is_not_in_list_THEN_returns_false():

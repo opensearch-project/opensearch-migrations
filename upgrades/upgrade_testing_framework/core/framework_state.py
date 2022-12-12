@@ -1,8 +1,16 @@
 import json
 
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
-from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 
+"""
+This class needs some work.  Right now, we putting a mish-mash of key/value pairs and objects into it using a mix of
+formal methods and direct assignment to un-initialized internal variables.  We need to come up with a formal strategy
+for how the rest of the code should be interacting with it.
+
+Additionally, want to be able to dump all useful information to the state file for debugging purposes.  However, we
+currently only dump the key/value pairs in the _state_dict.  As a result, we don't get any information about the
+cluster we're storing as an internal member during the FrameworkSteps.  We need to invest in this area of the code.
+"""
 class FrameworkState:
     def __init__(self, state: dict):
         self.docker_client: DockerFrameworkClient | None = None

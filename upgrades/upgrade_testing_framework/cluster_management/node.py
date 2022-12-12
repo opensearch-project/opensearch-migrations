@@ -11,7 +11,6 @@ from docker.models.volumes import Volume
 from docker.types import Ulimit
 
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, PortMapping
-import upgrade_testing_framework.core.shell_interactions as shell
 
 class NodeConfiguration:
     def __init__(self, node_name: str, cluster_name: str, master_nodes: List[str], seed_hosts: List[str]):
@@ -40,10 +39,10 @@ class ContainerConfiguration:
 
 class Node:
     def __init__(self, name: str, container_config: ContainerConfiguration, node_config: NodeConfiguration, 
-            docker_client: DockerFrameworkClient):
+            docker_client: DockerFrameworkClient, container: Container = None):
         self.logger = logging.getLogger(__name__)
         self.name = name
-        self._container: Container = None
+        self._container = container
         self._container_config = container_config
         self._docker_client = docker_client
         self._node_config = node_config
@@ -69,7 +68,7 @@ class Node:
         # TODO: handle when the container is not running
 
         self.logger.debug(f"Stopping node {self.name}...")
-        self._container.stop()
+        self._docker_client.stop_container(self._container)
         self.logger.debug(f"Node {self.name} has been stopped")
 
     def clean_up(self):
@@ -79,7 +78,7 @@ class Node:
 
         # delete container and update container reference
         self.logger.debug(f"Deleting container {self._container.name}...")
-        self._container.remove()
+        self._docker_client.remove_container(self._container)
         self.logger.debug(f"Container {self._container.name} has been deleted")
         self._container = None
 
@@ -88,6 +87,6 @@ class Node:
         if self._container == None:
             return False
         
-        exit_code, output = self._container.exec_run("curl -X GET \"localhost:9200/\"")
+        exit_code, output = self._docker_client.run(self._container, "curl -X GET \"localhost:9200/\"")
         self.logger.debug(f"Exit Code: {exit_code}, Output: {output}")
         return exit_code == 0

@@ -174,3 +174,22 @@ def test_WHEN_remove_container_THEN_removes_it():
 
     # Check our results
     assert mock_container.remove.called
+
+def test_WHEN_run_THEN_runs_command():
+    # Set up our test
+    mock_inner_client = mock.Mock()
+    mock_container = mock.Mock()
+
+    test_return_value = (0, "line1\nline2")
+    mock_container.exec_run.return_value = test_return_value
+
+    # Run our test
+    test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
+    actual_value = test_client.run(mock_container, "test")
+
+    # Check our results
+    expected_args = [mock.call(
+        "test"
+    )]
+    assert expected_args == mock_container.exec_run.call_args_list
+    assert test_return_value == actual_value

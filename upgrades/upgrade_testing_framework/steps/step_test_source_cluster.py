@@ -13,7 +13,7 @@ class TestSourceCluster(FrameworkStep):
         # N/A
 
         # Begin the step body
-        _, output = shell.call_shell_command("curl -X GET \"localhost:9200/\"")
+        _, output = shell.call_shell_command("curl -X GET \"localhost:9200/_cat/nodes?v=true&pretty\"")
         self.logger.info("\n".join(output))
         
         # Update our state

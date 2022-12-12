@@ -1,6 +1,6 @@
 from collections import namedtuple
 import logging
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import docker.client
 from docker.errors import DockerException, ImageNotFound
@@ -129,6 +129,12 @@ class DockerFrameworkClient:
         self.logger.debug(f"Removing container {container.name}...")
         container.remove()
         self.logger.debug(f"Removed container {container.name}")
+
+    def run(self, container: Container, command: str) -> Tuple[int, str]:
+        # TODO - Need to handle when container isn't stopped
+        self.logger.debug(f"Running command {command} in container {container.name}...")
+        return container.exec_run(command)
+
 
     
 

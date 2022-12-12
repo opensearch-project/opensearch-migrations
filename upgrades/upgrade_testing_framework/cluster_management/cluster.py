@@ -15,7 +15,7 @@ class ClusterNotStartedInTimeException(Exception):
 """
 The goal of this class's abstraction is to isolate the rest of the codebase from the details of precisely how we
 are implementing clusters for our tests.  Ideally, the rest of the code should not know of things like where the
-nodes are hosted (e.g. local Docker, other machines, etc).  The current implementation fell a bit short of that, but
+nodes are hosted (e.g. local Docker, local installs, etc).  The current implementation fell a bit short of that, but
 we can iterate.
 
 Additionally, Since the initial cut is focused on upgrades via the snapshot/restore mechanism, it feels like we can
@@ -83,7 +83,7 @@ class Cluster:
             node.start()
 
     def wait_for_cluster_to_start_up(self, wait_limit_sec: int = None):
-        wait_interval_sec = 3 # time between checks, arbitrarily chosen
+        wait_interval_sec = 1 # time between checks, arbitrarily chosen
         min_wait_time_sec = wait_interval_sec
 
         if wait_limit_sec != None and wait_limit_sec < min_wait_time_sec:
@@ -103,8 +103,8 @@ class Cluster:
             if not nodes_to_wait_for: # all nodes active
                 break
             
-            # TODO: Check resolution is wait_interval_sec, so doesn't entirely respect wait_limit_sec
-            if total_wait_time_sec >= wait_limit_sec:
+            # TODO: Check resolution is wait_interval_sec, so might not respect wait_limit_sec if > 1
+            if not None == wait_limit_sec and total_wait_time_sec >= wait_limit_sec:
                 raise ClusterNotStartedInTimeException()
             
             total_wait_time_sec += wait_interval_sec
@@ -113,6 +113,8 @@ class Cluster:
 
     def stop(self):
         # TODO: handle when the container is not running
+        
+        self.logger.debug(f"Stopping cluster {self.name}...")
 
         # call stop() on each of the Nodes
         for node in self._nodes.values():
@@ -120,8 +122,13 @@ class Cluster:
 
         # TODO: confirm all nodes are stopped(?)
 
+        self.logger.debug(f"Stopped cluster {self.name}")
+
     def clean_up(self):
         # TODO: handle when the cluster is not stopped
+
+
+        self.logger.debug(f"Cleaning up cluster {self.name}...")
 
         # call clean_up() on each node
         for node in self._nodes.values():
@@ -134,6 +141,8 @@ class Cluster:
         # remove network
         for network in self._networks:
             self._docker_client.remove_network(network)
+        
+        self.logger.debug(f"Cleaned up cluster {self.name}")
             
 
     

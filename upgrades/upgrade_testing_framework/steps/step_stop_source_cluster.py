@@ -1,11 +1,4 @@
-from typing import List
-
-from docker.models.networks import Network
-from docker.models.volumes import Volume
-
 from upgrade_testing_framework.core.framework_step import FrameworkStep
-import upgrade_testing_framework.cluster_management.docker_framework_client as dfc
-from upgrade_testing_framework.cluster_management.node import Node
 
 class StopSourceCluster(FrameworkStep):
     """
