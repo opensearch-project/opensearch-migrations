@@ -1,30 +1,33 @@
 import json
-import os
 
-from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
 
+"""
+This class needs some work.  Right now, we putting a mish-mash of key/value pairs and objects into it using a mix of
+formal methods and direct assignment to un-initialized internal variables.  We need to come up with a formal strategy
+for how the rest of the code should be interacting with it.
+
+Additionally, want to be able to dump all useful information to the state file for debugging purposes.  However, we
+currently only dump the key/value pairs in the _state_dict.  As a result, we don't get any information about the
+cluster we're storing as an internal member during the FrameworkSteps.  We need to invest in this area of the code.
+"""
 class FrameworkState:
     def __init__(self, state: dict):
-        self._state = state
+        self.docker_client: DockerFrameworkClient | None = None
+        self._state_dict = state
 
     def __str__(self) -> str:
-        return str(self._state)
+        return json.dumps(self._state_dict, sort_keys=True, indent=4) 
 
-    def get(self, key: str) -> any:
-        return self._state.get(key, None)
+    def get_key(self, key: str) -> any:
+        return self._state_dict.get(key, None)
 
-    def set(self, key: str, value: any) -> any:
-        self._state[key] = value
+    def set_key(self, key: str, value: any) -> any:
+        self._state_dict[key] = value
         return value
 
-def get_initial_state(workspace: WorkspaceWrangler, first_step: str, is_resume: bool) -> FrameworkState:
-    if is_resume and os.path.isfile(workspace.state_file):
-        with open(workspace.state_file, 'r') as state_file_handle:
-            beginning_state = json.load(state_file_handle)
-    else:
-        beginning_state = {}
-
-    if not beginning_state.get('current_step', None):
-        beginning_state['current_step'] = first_step
+def get_initial_state(test_config_path: str) -> FrameworkState:
+    beginning_state = {}
+    beginning_state['test_config_path'] = test_config_path
 
     return FrameworkState(beginning_state)
