@@ -7,5 +7,8 @@ DEFAULT_STEPS = [
     BootstrapDocker,
     StartSourceCluster,
     TestSourceCluster,
-    StopSourceCluster
+    StartTargetCluster,
+    TestTargetCluster,
+    StopSourceCluster,
+    StopTargetCluster
 ]

@@ -1,19 +1,20 @@
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 from upgrade_testing_framework.cluster_management.cluster import Cluster, ClusterNotStartedInTimeException
 
-class StartSourceCluster(FrameworkStep):
+class StartTargetCluster(FrameworkStep):
     """
-    This step starts the source cluster and ensures it is healthy
+    This step starts the target cluster and ensures it is healthy
     """
 
     def _run(self):
-        # Get the state we need
-        source_cluster_config = self.state.test_config.source_cluster
+        source_cluster = self.state.source_cluster
+        target_cluster_config = self.state.test_config.target_cluster
         docker_client = self.state.docker_client
 
         # Begin the step body
-        self.logger.info("Creating source cluster...")
-        cluster = Cluster("source-cluster", source_cluster_config, docker_client)
+        self.logger.info("Creating target cluster...")
+        starting_port = max(source_cluster.rest_ports) + 1
+        cluster = Cluster("target-cluster", target_cluster_config, docker_client, starting_port)
         cluster.start()
 
         try: 
@@ -25,5 +26,5 @@ class StartSourceCluster(FrameworkStep):
         self.logger.info(f"Cluster {cluster.name} is active")
         
         # Update our state
-        self.state.source_cluster = cluster
+        self.state.target_cluster = cluster
         

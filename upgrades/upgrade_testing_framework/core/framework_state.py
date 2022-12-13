@@ -1,6 +1,8 @@
 import json
 
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
+from upgrade_testing_framework.cluster_management.cluster import Cluster
+from upgrade_testing_framework.core.test_config_wrangling import TestClustersDef
 
 """
 This class needs some work.  Right now, we putting a mish-mash of key/value pairs and objects into it using a mix of
@@ -13,7 +15,10 @@ cluster we're storing as an internal member during the FrameworkSteps.  We need 
 """
 class FrameworkState:
     def __init__(self, state: dict):
-        self.docker_client: DockerFrameworkClient | None = None
+        self.docker_client: DockerFrameworkClient = None
+        self.source_cluster: Cluster = None
+        self.target_cluster: Cluster = None
+        self.test_config: TestClustersDef = None
         self._state_dict = state
 
     def __str__(self) -> str:

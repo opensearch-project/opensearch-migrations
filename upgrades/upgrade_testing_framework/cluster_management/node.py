@@ -3,7 +3,7 @@ This class encapsulates an ElasticSearch/OpenSearch Node and its underlying proc
 """
 
 import logging
-from typing import List
+from typing import Dict, List
 
 from docker.models.containers import Container
 from docker.models.networks import Network
@@ -13,7 +13,8 @@ from docker.types import Ulimit
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, PortMapping
 
 class NodeConfiguration:
-    def __init__(self, node_name: str, cluster_name: str, master_nodes: List[str], seed_hosts: List[str]):
+    def __init__(self, node_name: str, cluster_name: str, master_nodes: List[str], seed_hosts: List[str], 
+            additional_config: Dict[str, str] = {}):
         self.config = {
             # Core configuration
             "cluster.name": cluster_name,
@@ -22,11 +23,9 @@ class NodeConfiguration:
             "node.name": node_name,
 
             # Stuff we might change later
-            "bootstrap.memory_lock": "true",
-
-            # Stuff we'll absolutely change later
-            "ES_JAVA_OPTS": "-Xms512m -Xmx512m", #TODO - tied to a specific engine version
+            "bootstrap.memory_lock": "true"
         }
+        self.config.update(additional_config)
 
 class ContainerConfiguration:
     def __init__(self, image: str, network: Network, port_mappings: List[PortMapping], volumes: List[Volume], 
@@ -37,11 +36,17 @@ class ContainerConfiguration:
         self.ulimits = ulimits
         self.volumes = volumes
 
+        self.rest_port: int = None
+        for host_port, container_port in self.port_mappings:
+            if 9200 == container_port:
+                self.rest_port = host_port        
+
 class Node:
     def __init__(self, name: str, container_config: ContainerConfiguration, node_config: NodeConfiguration, 
             docker_client: DockerFrameworkClient, container: Container = None):
         self.logger = logging.getLogger(__name__)
         self.name = name
+        self.rest_port = container_config.rest_port
         self._container = container
         self._container_config = container_config
         self._docker_client = docker_client

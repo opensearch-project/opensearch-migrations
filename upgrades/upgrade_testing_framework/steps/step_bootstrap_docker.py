@@ -8,7 +8,8 @@ class BootstrapDocker(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        source_docker_image = self._get_state_value("test_config")["source_docker_image"]
+        source_docker_image = self.state.test_config.source_cluster.image
+        target_docker_image = self.state.test_config.target_cluster.image
 
         # Begin the step body
         # We'll start by trying to make a Docker client to see if the user's setup is correct
@@ -28,14 +29,15 @@ class BootstrapDocker(FrameworkStep):
         self.logger.info("Docker appears to be installed and available")
 
         # Ensure Docker images are available (or die trying)
-        try:
-            self.logger.info(f"Ensuring the Docker image {source_docker_image} is available either locally or remotely...")
-            docker_client.ensure_image_available(source_docker_image)
-            self.logger.info(f"Docker image {source_docker_image} is available")
-        except dfc.DockerImageUnavailableException as exception:
-            self.logger.warn(f"Your Docker image {source_docker_image} was not available.  Ensure you spelled it"
-                " correctly, have the require access to the remote repository, etc...")
-            self.fail(f"Docker image {source_docker_image} unavailable", exception)
+        for image in [source_docker_image, target_docker_image]:
+            try:
+                self.logger.info(f"Ensuring the Docker image {image} is available either locally or remotely...")
+                docker_client.ensure_image_available(image)
+                self.logger.info(f"Docker image {image} is available")
+            except dfc.DockerImageUnavailableException as exception:
+                self.logger.warn(f"Your Docker image {image} was not available.  Ensure you spelled it"
+                    " correctly, have the require access to the remote repository, etc...")
+                self.fail(f"Docker image {image} unavailable", exception)
 
         # This is where we will later build our Dockerfiles into local images, if the user supplies one
         # However - we'll tackle that later

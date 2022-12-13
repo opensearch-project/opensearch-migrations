@@ -1,4 +1,3 @@
-import upgrade_testing_framework.cluster_management.docker_framework_client as dfc
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 import upgrade_testing_framework.core.test_config_wrangling as tcw
 
@@ -20,5 +19,5 @@ class LoadTestConfig(FrameworkStep):
         self.logger.info("Loaded test config file successfully")
         
         # Update our state
-        self._set_state_value("test_config", test_config)
+        self.state.test_config = test_config
         

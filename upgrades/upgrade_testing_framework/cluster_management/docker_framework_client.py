@@ -65,10 +65,10 @@ class DockerFrameworkClient:
         Check if the supplied image is available locally; try to pull it from remote repos if it isn't.
         """
         if not self._is_image_available_locally(image):
-            self.logger.debug(f"Attempting to pull image from remote repositories...")
+            self.logger.info(f"Attempting to pull image {image} from remote repository...")
             try:
                 self._docker_client.images.pull(image)
-                self.logger.debug(f"Pulled image {image} successfully")
+                self.logger.info(f"Pulled image {image} successfully")
             except ImageNotFound:
                 raise DockerImageUnavailableException(image)
 
@@ -102,10 +102,10 @@ class DockerFrameworkClient:
         # TODO - need handle port contention
 
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
-        port_mapping = {pair.container_port: pair.host_port for pair in ports}
+        port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
         volume_mapping = {volume.attrs["Name"]: {"bind": volume.attrs["Mountpoint"], "mode": "rw"} for volume in volumes}
         
-        self.logger.debug(f"Creating container named {container_name}...")
+        self.logger.debug(f"Creating container {container_name}...")
         container = self._docker_client.containers.run(
             image,
             name=container_name,
@@ -116,7 +116,7 @@ class DockerFrameworkClient:
             detach=True,
             environment=env_variables
         )
-        self.logger.debug("Created container")
+        self.logger.debug(f"Created container {container_name}")
         return container
 
     def stop_container(self, container: Container):

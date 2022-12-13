@@ -1,6 +1,8 @@
 import pytest
 import unittest.mock as mock
 
+
+import upgrade_testing_framework.cluster_management.docker_framework_client as dfc
 import upgrade_testing_framework.cluster_management.node as node
 
 def test_WHEN_create_NodeConfiguration_THEN_has_expected_values():
@@ -9,9 +11,10 @@ def test_WHEN_create_NodeConfiguration_THEN_has_expected_values():
     test_cluster_name = "cluster-name"
     test_master_nodes = ["m1", "m2"]
     test_seed_hosts = ["s1", "s2"]
+    test_additional_config = {"k1": "v1"}
 
     # Run our test
-    actual_value = node.NodeConfiguration(test_node_name, test_cluster_name, test_master_nodes, test_seed_hosts)
+    actual_value = node.NodeConfiguration(test_node_name, test_cluster_name, test_master_nodes, test_seed_hosts, test_additional_config)
 
     # Check the results
     expected_value = {
@@ -20,14 +23,31 @@ def test_WHEN_create_NodeConfiguration_THEN_has_expected_values():
         "discovery.seed_hosts": ",".join(test_seed_hosts),
         "node.name": test_node_name,
         "bootstrap.memory_lock": "true",
-        "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
+        "k1": "v1"
     }
     assert expected_value == actual_value.config
+
+def test_WHEN_create_ContainerConfiguration_THEN_extracts_rest_port():
+    # Set up our test
+    test_port = 9201
+    test_container_config = node.ContainerConfiguration(
+        "",
+        None,
+        [dfc.PortMapping(1, 1), dfc.PortMapping(test_port, 9200)],
+        []
+    )
+
+    # Run our test
+    actual_value = test_container_config.rest_port
+
+    # Check the results
+    assert test_port == actual_value
 
 def test_WHEN_node_start_THEN_as_expected():
     # Set up our test
     test_container = mock.Mock()
     test_container_config = mock.Mock()
+    test_container_config.rest_port = 9200
     test_docker_client = mock.Mock()
     test_docker_client.create_container.return_value = test_container
     test_node_config = mock.Mock()
@@ -50,6 +70,7 @@ def test_WHEN_node_start_THEN_as_expected():
     assert expected_value == test_docker_client.create_container.call_args_list
 
     assert test_container == test_node._container
+    assert 9200 == test_node.rest_port
 
 def test_WHEN_node_stop_THEN_as_expected():
     # Set up our test

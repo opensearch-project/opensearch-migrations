@@ -3,17 +3,17 @@ from upgrade_testing_framework.core.framework_step import FrameworkStep
 import upgrade_testing_framework.core.shell_interactions as shell
 
 
-class TestSourceCluster(FrameworkStep):
+class TestTargetCluster(FrameworkStep):
     """
-    This step is where you run tests on the source cluster
+    This step is where you run tests on the target cluster
     """
 
     def _run(self):
         # Get the state we need
-        source_cluster = self.state.source_cluster
+        target_cluster = self.state.target_cluster
 
         # Begin the step body
-        port = source_cluster.rest_ports[0]
+        port = target_cluster.rest_ports[0]
         _, output = shell.call_shell_command(f"curl -X GET \"localhost:{port}/_cat/nodes?v=true&pretty\"")
         self.logger.info("\n".join(output))
         

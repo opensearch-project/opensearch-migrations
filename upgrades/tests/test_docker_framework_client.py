@@ -89,7 +89,7 @@ def test_WHEN_create_volume_THEN_returns_it():
     mock_inner_client = mock.Mock()
     mock_volume = mock.Mock()
     mock_inner_client.volumes.create.return_value = mock_volume
-
+    
     # Run our test
     test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
     test_volume = test_client.create_volume("volume-name")
@@ -118,7 +118,7 @@ def test_WHEN_create_container_called_THEN_executes_normally():
     test_container_name = "test-container"
     mock_network = mock.Mock()
     mock_network.name = "network1"
-    test_ports = [dfc.PortMapping("1", "1"), dfc.PortMapping("2", "3")]
+    test_ports = [dfc.PortMapping(1, 1), dfc.PortMapping(2, 3)]
     mock_volume = mock.Mock()
     mock_volume.attrs = {"Name": "volume1", "Mountpoint": "mount/point"}
     mock_ulimit = mock.Mock()
@@ -142,7 +142,7 @@ def test_WHEN_create_container_called_THEN_executes_normally():
             test_image,
             name=test_container_name,
             network=mock_network.name,
-            ports={pair.container_port: pair.host_port for pair in test_ports},
+            ports={str(pair.container_port): str(pair.host_port) for pair in test_ports},
             volumes={mock_volume.attrs["Name"]: {"bind": mock_volume.attrs["Mountpoint"], "mode": "rw"}},
             ulimits=[mock_ulimit],
             detach=True,

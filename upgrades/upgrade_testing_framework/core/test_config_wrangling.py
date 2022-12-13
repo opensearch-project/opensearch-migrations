@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Dict, List
 
 class TestConfigFileDoesntExistException(Exception):
     def __init__(self, test_config_path_full):
@@ -17,7 +18,63 @@ class TestConfigFileMissingFieldException(Exception):
     def __init__(self, missing_field):
         super().__init__(f"The test config is missing a required field: {missing_field}")
 
-def load_test_config(test_config_path: str) -> dict:
+class TestClustersDef:
+    def __init__(self, raw_config: dict):
+        raw_source_config = raw_config.get("source", None)
+        if raw_source_config is None:
+            raise TestConfigFileMissingFieldException("source")
+        self.source_cluster = TestClusterConfig(raw_source_config)
+
+        raw_target_config = raw_config.get("target", None)
+        if raw_target_config is None:
+            raise TestConfigFileMissingFieldException("target")
+        self.target_cluster = TestClusterConfig(raw_target_config)
+
+    def to_dict(self) -> dict:
+        return {
+            "source": self.source_cluster.to_dict(),
+            "target": self.target_cluster.to_dict()
+        }    
+
+    def __eq__(self, other):
+        return self.to_dict() == other.to_dict()
+
+class TestClusterConfig:
+    def __init__(self, raw_config: dict):
+        # Manually declare the internal members so IDEs know they exist
+        self.image: str = None
+        self.node_count: int = None
+        self.additional_node_config: Dict[str, str] = None
+
+        # Load the real values from the config
+        self._load_attrs_by_list(raw_config, [
+            "image",
+            "node_count",
+            "additional_node_config"
+        ])        
+    
+    def _load_attrs_by_list(self, raw_config: dict, attr_names: List[str]):
+        """
+        Pulls values from raw_config using keys from attr_names and stores them in the object into members of the same
+        name
+        """
+        for attr_name in attr_names:
+            attr = raw_config.get(attr_name, None)
+            if attr is None:
+                raise TestConfigFileMissingFieldException(attr_name)
+            setattr(self, attr_name, attr)
+
+    def to_dict(self) -> dict:
+        return {
+            "image": self.image,
+            "node_count": self.node_count,
+            "additional_node_config": self.additional_node_config
+        }    
+
+    def __eq__(self, other):
+        return self.to_dict() == other.to_dict()
+
+def load_test_config(test_config_path: str) -> TestClustersDef:
     # Confirm the file exists
     test_config_path_full = os.path.abspath(test_config_path)
     if not os.path.exists(test_config_path):
@@ -33,8 +90,8 @@ def load_test_config(test_config_path: str) -> dict:
         raise TestConfigCantReadFileException(test_config_path_full, exception)
 
     # Confirm expected fields present
-    if not test_config.get('source_docker_image', None):
-        raise TestConfigFileMissingFieldException('source_docker_image')
-
-    return test_config
+    raw_clusters_def = test_config.get('cluster_def', None)
+    if raw_clusters_def is None:
+        raise TestConfigFileMissingFieldException('cluster_def')
+    return TestClustersDef(raw_clusters_def)
 
