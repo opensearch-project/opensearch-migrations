@@ -4,7 +4,8 @@ import unittest.mock as mock
 import upgrade_testing_framework.cluster_management.cluster as cluster
 import upgrade_testing_framework.core.test_config_wrangling as tcw
 
-TEST_CLUSTER_CONFIG = tcw.TestClusterConfig({
+TEST_CLUSTER_CONFIG = tcw.ClusterConfig({
+    "engine_version": "ES_7_10_2",
     "image": "image",
     "node_count": 2,
     "additional_node_config": {}
@@ -12,7 +13,8 @@ TEST_CLUSTER_CONFIG = tcw.TestClusterConfig({
 
 def test_WHEN_create_Cluster_AND_not_enough_nodes_THEN_raises():
     # Set up test
-    test_cluster_config = tcw.TestClusterConfig({
+    test_cluster_config = tcw.ClusterConfig({
+        "engine_version": "ES_7_10_2",
         "image": "image",
         "node_count": 0, # must be >= 1
         "additional_node_config": {}

@@ -8,8 +8,8 @@ class BootstrapDocker(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        source_docker_image = self.state.test_config.source_cluster.image
-        target_docker_image = self.state.test_config.target_cluster.image
+        source_docker_image = self.state.test_config.clusters_def.source.image
+        target_docker_image = self.state.test_config.clusters_def.target.image
 
         # Begin the step body
         # We'll start by trying to make a Docker client to see if the user's setup is correct

@@ -120,7 +120,8 @@ def test_WHEN_create_container_called_THEN_executes_normally():
     mock_network.name = "network1"
     test_ports = [dfc.PortMapping(1, 1), dfc.PortMapping(2, 3)]
     mock_volume = mock.Mock()
-    mock_volume.attrs = {"Name": "volume1", "Mountpoint": "mount/point"}
+    mock_volume.attrs = {"Name": "volume1"}
+    mock_docker_volume = dfc.DockerVolume("/mount/point", mock_volume)    
     mock_ulimit = mock.Mock()
     test_env_vars = {"key": "value"}
 
@@ -131,7 +132,7 @@ def test_WHEN_create_container_called_THEN_executes_normally():
         test_container_name,
         mock_network,
         test_ports,
-        [mock_volume],
+        [mock_docker_volume],
         [mock_ulimit],
         test_env_vars
     )
@@ -143,7 +144,7 @@ def test_WHEN_create_container_called_THEN_executes_normally():
             name=test_container_name,
             network=mock_network.name,
             ports={str(pair.container_port): str(pair.host_port) for pair in test_ports},
-            volumes={mock_volume.attrs["Name"]: {"bind": mock_volume.attrs["Mountpoint"], "mode": "rw"}},
+            volumes={mock_volume.attrs["Name"]: {"bind": mock_docker_volume.mount_point, "mode": "rw"}},
             ulimits=[mock_ulimit],
             detach=True,
             environment=test_env_vars
@@ -193,3 +194,20 @@ def test_WHEN_run_THEN_runs_command():
     )]
     assert expected_args == mock_container.exec_run.call_args_list
     assert test_return_value == actual_value
+
+def test_WHEN_set_ownership_of_directory_THEN_runs_command():
+    # Set up our test
+    mock_inner_client = mock.Mock()
+    mock_container = mock.Mock()
+    test_dir = "/my/dir"
+    test_owner = "test_user"
+
+    # Run our test
+    test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
+    test_client.set_ownership_of_directory(mock_container, test_owner, test_dir)
+
+    # Check our results
+    expected_args = [mock.call(
+        f"chown -R {test_owner} {test_dir}"
+    )]
+    assert expected_args == mock_container.exec_run.call_args_list

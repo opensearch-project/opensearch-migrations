@@ -1,6 +1,5 @@
-from collections import namedtuple
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, NamedTuple, Tuple
 
 import docker.client
 from docker.errors import DockerException, ImageNotFound
@@ -24,7 +23,13 @@ class DockerImageUnavailableException(Exception):
     def __init__(self, image: str):
         super().__init__(f"The Docker {image} is not available either locally or in your remote repos")
 
-PortMapping = namedtuple("PortMapping", "host_port container_port")
+class DockerVolume(NamedTuple):
+    mount_point: str
+    volume: Volume
+
+class PortMapping(NamedTuple):
+    container_port: int
+    host_port: int
 
 class DockerFrameworkClient:
     def _try_create_docker_client() -> docker.client.DockerClient:
@@ -41,7 +46,6 @@ class DockerFrameworkClient:
             raise DockerNotResponsiveException(exception)
 
         return docker_client
-
 
     def __init__(self, logger=logging.getLogger(__name__), docker_client=None):
         self.logger = logger
@@ -94,8 +98,8 @@ class DockerFrameworkClient:
         volume.remove()
         self.logger.debug(f"Removed volume {volume.name}")
 
-    def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping], volumes: List[Volume], ulimits: List[Ulimit],
-                         env_variables: Dict[str, str]) -> Container:
+    def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping], volumes: List[DockerVolume], 
+            ulimits: List[Ulimit], env_variables: Dict[str, str]) -> Container:
 
         # TODO - need handle if container already exists (name collision)
         # TODO - need handle if we exceed the resource allocation for Docker
@@ -103,7 +107,7 @@ class DockerFrameworkClient:
 
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
         port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
-        volume_mapping = {volume.attrs["Name"]: {"bind": volume.attrs["Mountpoint"], "mode": "rw"} for volume in volumes}
+        volume_mapping = {dv.volume.attrs["Name"]: {"bind": dv.mount_point, "mode": "rw"} for dv in volumes}
         
         self.logger.debug(f"Creating container {container_name}...")
         container = self._docker_client.containers.run(
@@ -131,9 +135,17 @@ class DockerFrameworkClient:
         self.logger.debug(f"Removed container {container.name}")
 
     def run(self, container: Container, command: str) -> Tuple[int, str]:
-        # TODO - Need to handle when container isn't stopped
+        # TODO - Need to handle when container isn't running
         self.logger.debug(f"Running command {command} in container {container.name}...")
         return container.exec_run(command)
+
+    def set_ownership_of_directory(self, container: Container, new_owner: str, dir: str):
+        # TODO - Need to handle when container isn't running
+        self.logger.debug(f"Setting ownership of {dir} to {new_owner} in container {container.name}...")
+        chown_command = f"chown -R {new_owner} {dir}"
+        self.run(container, chown_command)
+
+        
 
 
     

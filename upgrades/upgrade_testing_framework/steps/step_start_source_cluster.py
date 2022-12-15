@@ -8,12 +8,13 @@ class StartSourceCluster(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        source_cluster_config = self.state.test_config.source_cluster
         docker_client = self.state.docker_client
+        shared_volume = self.state.shared_volume
+        source_cluster_config = self.state.test_config.clusters_def.source
 
         # Begin the step body
         self.logger.info("Creating source cluster...")
-        cluster = Cluster("source-cluster", source_cluster_config, docker_client)
+        cluster = Cluster("source-cluster", source_cluster_config, docker_client, shared_volume=shared_volume)
         cluster.start()
 
         try: 

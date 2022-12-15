@@ -1,47 +1,16 @@
-"""
-This class encapsulates an ElasticSearch/OpenSearch Node and its underlying process/container/etc.
-"""
-
 import logging
-from typing import Dict, List
 
 from docker.models.containers import Container
-from docker.models.networks import Network
-from docker.models.volumes import Volume
-from docker.types import Ulimit
 
-from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, PortMapping
-
-class NodeConfiguration:
-    def __init__(self, node_name: str, cluster_name: str, master_nodes: List[str], seed_hosts: List[str], 
-            additional_config: Dict[str, str] = {}):
-        self.config = {
-            # Core configuration
-            "cluster.name": cluster_name,
-            "cluster.initial_master_nodes": ",".join(master_nodes),
-            "discovery.seed_hosts": ",".join(seed_hosts),
-            "node.name": node_name,
-
-            # Stuff we might change later
-            "bootstrap.memory_lock": "true"
-        }
-        self.config.update(additional_config)
-
-class ContainerConfiguration:
-    def __init__(self, image: str, network: Network, port_mappings: List[PortMapping], volumes: List[Volume], 
-            ulimits: List[Ulimit] = [Ulimit(name='memlock', soft=-1, hard=-1)]):
-        self.image = image
-        self.network = network
-        self.port_mappings = port_mappings
-        self.ulimits = ulimits
-        self.volumes = volumes
-
-        self.rest_port: int = None
-        for host_port, container_port in self.port_mappings:
-            if 9200 == container_port:
-                self.rest_port = host_port        
+from upgrade_testing_framework.cluster_management.container_configuration import ContainerConfiguration
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
+from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
 
 class Node:
+    """
+    This class encapsulates an ElasticSearch/OpenSearch Node and its underlying process/container/etc.
+    """
+
     def __init__(self, name: str, container_config: ContainerConfiguration, node_config: NodeConfiguration, 
             docker_client: DockerFrameworkClient, container: Container = None):
         self.logger = logging.getLogger(__name__)
@@ -69,6 +38,10 @@ class Node:
         # store container reference
         self._container = container
 
+        # make sure the engine has permissions on the the volume mount points
+        for volume in self._container_config.volumes:
+            self._docker_client.set_ownership_of_directory(self._container, self._node_config.user, volume.mount_point)
+
     def stop(self):
         # TODO: handle when the container is not running
 
@@ -95,3 +68,7 @@ class Node:
         exit_code, output = self._docker_client.run(self._container, "curl -X GET \"localhost:9200/\"")
         self.logger.debug(f"Exit Code: {exit_code}, Output: {output}")
         return exit_code == 0
+
+    def get_logs(self):
+        # TODO: handle when the container is not running
+        return self._container.logs().decode("utf-8")

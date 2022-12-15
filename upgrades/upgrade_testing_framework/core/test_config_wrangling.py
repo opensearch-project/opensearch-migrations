@@ -2,6 +2,8 @@ import json
 import os
 from typing import Dict, List
 
+import upgrade_testing_framework.core.versions_engine as ev
+
 class TestConfigFileDoesntExistException(Exception):
     def __init__(self, test_config_path_full):
         super().__init__(f"There is no file at the path you specified for your test config: {test_config_path_full}")
@@ -18,36 +20,43 @@ class TestConfigFileMissingFieldException(Exception):
     def __init__(self, missing_field):
         super().__init__(f"The test config is missing a required field: {missing_field}")
 
-class TestClustersDef:
+"""
+These configuration classes can probably be auto-generated from a template using some combination of Python's
+meta-class, decorator, and/or introspection features.  If the config gets much more complicated, we should explore
+doing that.
+"""
+class ClustersDef:
     def __init__(self, raw_config: dict):
         raw_source_config = raw_config.get("source", None)
         if raw_source_config is None:
             raise TestConfigFileMissingFieldException("source")
-        self.source_cluster = TestClusterConfig(raw_source_config)
+        self.source = ClusterConfig(raw_source_config)
 
         raw_target_config = raw_config.get("target", None)
         if raw_target_config is None:
             raise TestConfigFileMissingFieldException("target")
-        self.target_cluster = TestClusterConfig(raw_target_config)
+        self.target = ClusterConfig(raw_target_config)
 
     def to_dict(self) -> dict:
         return {
-            "source": self.source_cluster.to_dict(),
-            "target": self.target_cluster.to_dict()
+            "source": self.source.to_dict(),
+            "target": self.target.to_dict()
         }    
 
     def __eq__(self, other):
         return self.to_dict() == other.to_dict()
 
-class TestClusterConfig:
+class ClusterConfig:
     def __init__(self, raw_config: dict):
         # Manually declare the internal members so IDEs know they exist
+        self.engine_version: str = None
         self.image: str = None
         self.node_count: int = None
         self.additional_node_config: Dict[str, str] = None
 
         # Load the real values from the config
         self._load_attrs_by_list(raw_config, [
+            "engine_version",
             "image",
             "node_count",
             "additional_node_config"
@@ -74,7 +83,43 @@ class TestClusterConfig:
     def __eq__(self, other):
         return self.to_dict() == other.to_dict()
 
-def load_test_config(test_config_path: str) -> TestClustersDef:
+class UpgradeDef:
+    def __init__(self, raw_config: dict):
+        style = raw_config.get("style", None)
+        if style is None:
+            raise TestConfigFileMissingFieldException("style")
+        self.style = style
+
+    def to_dict(self) -> dict:
+        return {
+            "style": self.style
+        }    
+
+    def __eq__(self, other):
+        return self.to_dict() == other.to_dict()
+
+class TestConfig:
+    def __init__(self, raw_config: dict):
+        raw_clusters_def = raw_config.get("clusters_def", None)
+        if raw_clusters_def is None:
+            raise TestConfigFileMissingFieldException("clusters_def")
+        self.clusters_def = ClustersDef(raw_clusters_def)
+        
+        raw_upgrade_def = raw_config.get("upgrade_def", None)
+        if raw_upgrade_def is None:
+            raise TestConfigFileMissingFieldException("upgrade_def")
+        self.upgrade_def = UpgradeDef(raw_upgrade_def)
+
+    def to_dict(self) -> dict:
+        return {
+            "clusters_def": self.clusters_def.to_dict(),
+            "upgrade_def": self.upgrade_def.to_dict()
+        }    
+
+    def __eq__(self, other):
+        return self.to_dict() == other.to_dict()
+
+def load_test_config(test_config_path: str) -> TestConfig:
     # Confirm the file exists
     test_config_path_full = os.path.abspath(test_config_path)
     if not os.path.exists(test_config_path):
@@ -83,15 +128,11 @@ def load_test_config(test_config_path: str) -> TestClustersDef:
     # Pull the contents and convert to JSON
     try:
         with open(test_config_path_full, "r") as file_handle:
-            test_config = json.load(file_handle)
+            raw_test_config = json.load(file_handle)
     except json.JSONDecodeError as exception:
         raise TestConfigFileNotJSONException(test_config_path_full, exception)
     except IOError as exception:
         raise TestConfigCantReadFileException(test_config_path_full, exception)
 
-    # Confirm expected fields present
-    raw_clusters_def = test_config.get('cluster_def', None)
-    if raw_clusters_def is None:
-        raise TestConfigFileMissingFieldException('cluster_def')
-    return TestClustersDef(raw_clusters_def)
+    return TestConfig(raw_test_config)
 

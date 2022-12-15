@@ -7,14 +7,15 @@ class StartTargetCluster(FrameworkStep):
     """
 
     def _run(self):
-        source_cluster = self.state.source_cluster
-        target_cluster_config = self.state.test_config.target_cluster
         docker_client = self.state.docker_client
+        shared_volume = self.state.shared_volume
+        source_cluster = self.state.source_cluster
+        target_cluster_config = self.state.test_config.clusters_def.target
 
         # Begin the step body
         self.logger.info("Creating target cluster...")
         starting_port = max(source_cluster.rest_ports) + 1
-        cluster = Cluster("target-cluster", target_cluster_config, docker_client, starting_port)
+        cluster = Cluster("target-cluster", target_cluster_config, docker_client, starting_port=starting_port, shared_volume=shared_volume)
         cluster.start()
 
         try: 

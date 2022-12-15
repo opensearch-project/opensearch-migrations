@@ -1,8 +1,9 @@
 import json
+from typing import List
 
-from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, DockerVolume
 from upgrade_testing_framework.cluster_management.cluster import Cluster
-from upgrade_testing_framework.core.test_config_wrangling import TestClustersDef
+from upgrade_testing_framework.core.test_config_wrangling import TestConfig
 
 """
 This class needs some work.  Right now, we putting a mish-mash of key/value pairs and objects into it using a mix of
@@ -18,11 +19,16 @@ class FrameworkState:
         self.docker_client: DockerFrameworkClient = None
         self.source_cluster: Cluster = None
         self.target_cluster: Cluster = None
-        self.test_config: TestClustersDef = None
+        self.test_config: TestConfig = None
         self._state_dict = state
 
+        # The fact that we need to store this in our FrameworkState means we probably need to be more sophisticated in
+        # order to support multiple upgrade types.  Since we're only supporting Snapshot/Restore for now, we can solve
+        # that problem later.
+        self.shared_volume: DockerVolume = None
+
     def __str__(self) -> str:
-        return json.dumps(self._state_dict, sort_keys=True, indent=4) 
+        return json.dumps(self._state_dict, sort_keys=True, indent=4)
 
     def get_key(self, key: str) -> any:
         return self._state_dict.get(key, None)

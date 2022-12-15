@@ -1,13 +1,15 @@
 import logging
 import time
-from typing import Dict, List
+from typing import Dict, List, NamedTuple
 
 from docker.models.networks import Network
 from docker.models.volumes import Volume
 
-from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, PortMapping
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, DockerVolume, PortMapping
 from upgrade_testing_framework.cluster_management.node import ContainerConfiguration, Node, NodeConfiguration
-from upgrade_testing_framework.core.test_config_wrangling import TestClusterConfig
+from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
+from upgrade_testing_framework.core.test_config_wrangling import ClusterConfig
+import upgrade_testing_framework.core.versions_engine as ev
 
 class ClusterNotStartedInTimeException(Exception):
     def __init__(self):
@@ -26,13 +28,15 @@ out the door with the expectation that we will iterate on the design as requirem
 As a result, this abstraction is probably "right for now", but "wrong" in the long run.  
 """
 class Cluster:
-    def __init__(self, name: str, cluster_config: TestClusterConfig, docker_client: DockerFrameworkClient, starting_port: int = 9200):
+    def __init__(self, name: str, cluster_config: ClusterConfig, docker_client: DockerFrameworkClient, 
+            shared_volume: DockerVolume = None, starting_port: int = 9200):
         self.logger = logging.getLogger(__name__)
         self.name = name
         self._cluster_config = cluster_config
         self._docker_client = docker_client
         self._networks: List[Network] = []
         self._nodes: Dict[str, Node] = {}
+        self._shared_volume = shared_volume
         self._starting_port = starting_port
         
         if self._cluster_config.node_count < 1:
@@ -67,17 +71,31 @@ class Cluster:
         starting_seed_hosts = [self._generate_node_name(node_num) for node_num in range(1, self._cluster_config.node_count + 1)]
 
         for node_num in range(1, self._cluster_config.node_count + 1):
-            # Create the node's data volume
-            node_volume = self._docker_client.create_volume(self._generate_volume_name(node_num))
-            self._volumes.append(node_volume)
-
-            # Create the node name, node config, container config
+            # Create the node configuration first, as other things depend on it
+            engine_version = ev.get_version(self._cluster_config.engine_version)
             node_name = self._generate_node_name(node_num)
-            node_config = NodeConfiguration(node_name, self.name, starting_master_nodes, starting_seed_hosts, self._cluster_config.additional_node_config)
+            node_env_config = self._cluster_config.additional_node_config
+            if self._shared_volume is not None: # enables snapshot sharing between clusters
+                node_env_config["path.repo"] = self._shared_volume.mount_point
+            node_config = NodeConfiguration(engine_version, node_name, self.name, starting_master_nodes, starting_seed_hosts, node_env_config)
+
+            # Create the node's data volume
+            data_volume = self._docker_client.create_volume(self._generate_volume_name(node_num))
+            self._volumes.append(data_volume) # track to clean up on teardown
+            
+            # Put together the list of volumes to mount in the container
+            node_volumes = []            
+            node_volumes.append(DockerVolume(node_config.data_dir, data_volume)) # make data persist after stop/start
+            if self._shared_volume is not None:
+                node_volumes.append(self._shared_volume) # enables snapshot sharing between clusters
+
+            # Put together the list of ports to channel between the host and container
             port_mappings = [
-                PortMapping(self._generate_port_number(node_num - 1), 9200)
+                PortMapping(9200, self._generate_port_number(node_num - 1))
             ]
-            container_config = ContainerConfiguration(self._cluster_config.image, network, port_mappings, self._volumes)
+
+            # Assemble the container configuration based on the 
+            container_config = ContainerConfiguration(self._cluster_config.image, network, port_mappings, node_volumes)            
 
             # Instantiate node
             node = Node(node_name, container_config, node_config, self._docker_client)
