@@ -11,9 +11,21 @@ from upgrade_testing_framework.cluster_management.node_configuration import Node
 from upgrade_testing_framework.core.test_config_wrangling import ClusterConfig
 import upgrade_testing_framework.core.versions_engine as ev
 
+class ClusterNotRunningException(Exception):
+    def __init__(self):
+        super().__init__(f"The cluster is not currently running")
+
 class ClusterNotStartedInTimeException(Exception):
     def __init__(self):
-        super().__init__(f"The Cluster did not start up within the specified time frame")
+        super().__init__(f"The cluster did not start up within the specified time frame")
+
+class ClusterNotStoppedException(Exception):
+    def __init__(self):
+        super().__init__(f"The cluster is not currently stopped")
+
+STATE_NOT_STARTED = "NOT_STARTED"
+STATE_RUNNING = "RUNNING"
+STATE_STOPPED = "STOPPED"
 
 """
 The goal of this class's abstraction is to isolate the rest of the codebase from the details of precisely how we
@@ -44,6 +56,8 @@ class Cluster:
 
         self._volumes: List[Volume] = []
 
+        self._cluster_state = STATE_NOT_STARTED
+
     def _generate_network_name(self) -> str:
         return f"{self.name}-network"
 
@@ -57,14 +71,13 @@ class Cluster:
         return self._starting_port + number
 
     def start(self):
-        # TODO: Handle cluster already started
+        if self._cluster_state == STATE_RUNNING:
+            self.logger.debug(f"Cluster {self.name} is already running")
+            return # no-op
 
         # Create network
         network = self._docker_client.create_network(self._generate_network_name())
         self._networks.append(network)
-
-        # Create shared volume(s)
-        # None for now
 
         # Create any shared values
         starting_master_nodes = [self._generate_node_name(node_num) for node_num in range(1, self._cluster_config.node_count + 1)]
@@ -104,7 +117,13 @@ class Cluster:
             # Invoke start
             node.start()
 
+        self._cluster_state = STATE_RUNNING
+
     def wait_for_cluster_to_start_up(self, max_wait_time_sec: int = None):
+        if self._cluster_state != STATE_RUNNING:
+            self.logger.debug(f"Cluster {self.name} is not running")
+            raise ClusterNotRunningException()
+
         wait_interval_sec = 1 # time between checks, arbitrarily chosen
         min_wait_time_sec = wait_interval_sec
 
@@ -134,36 +153,44 @@ class Cluster:
             time.sleep(wait_interval_sec)
 
     def stop(self):
-        # TODO: handle when the container is not running
+        if self._cluster_state != STATE_RUNNING:
+            self.logger.debug(f"Cluster {self.name} is not running")
+            return # no-op
         
         self.logger.debug(f"Stopping cluster {self.name}...")
 
         # call stop() on each of the Nodes
         for node in self._nodes.values():
             node.stop()
-
-        # TODO: confirm all nodes are stopped(?)
-
         self.logger.debug(f"Stopped cluster {self.name}")
 
+        self._cluster_state = STATE_STOPPED
+
     def clean_up(self):
-        # TODO: handle when the cluster is not stopped
+        if self._cluster_state != STATE_STOPPED:
+            self.logger.debug(f"Cluster {self.name} is not stopped")
+            raise ClusterNotStoppedException()
 
         self.logger.debug(f"Cleaning up cluster {self.name}...")
 
         # call clean_up() on each node
         for node in self._nodes.values():
             node.clean_up()
+        self._nodes = []
 
         # remove any volumes
         for volume in self._volumes:
             self._docker_client.remove_volume(volume)
+        self._volumes = []
 
         # remove network
         for network in self._networks:
             self._docker_client.remove_network(network)
+        self._networks = []
         
         self.logger.debug(f"Cleaned up cluster {self.name}")
+
+        self._cluster_state = STATE_NOT_STARTED
 
     @property
     def rest_ports(self) -> List[int]:

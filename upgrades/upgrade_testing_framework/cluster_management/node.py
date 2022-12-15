@@ -6,6 +6,18 @@ from upgrade_testing_framework.cluster_management.container_configuration import
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
 from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
 
+STATE_NOT_STARTED = "NOT_STARTED"
+STATE_RUNNING = "RUNNING"
+STATE_STOPPED = "STOPPED"
+
+class NodeNotRunningException(Exception):
+    def __init__(self):
+        super().__init__(f"The node is not currently running")
+
+class NodeNotStoppedException(Exception):
+    def __init__(self):
+        super().__init__(f"The node is not stopped")
+
 class Node:
     """
     This class encapsulates an ElasticSearch/OpenSearch Node and its underlying process/container/etc.
@@ -21,8 +33,12 @@ class Node:
         self._docker_client = docker_client
         self._node_config = node_config
 
+        self._node_state = STATE_NOT_STARTED
+
     def start(self):
-        # TODO: handle when the container is already running
+        if self._node_state == STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is already running")
+            return # no-op
 
         # run the container
         container = self._docker_client.create_container(
@@ -42,15 +58,23 @@ class Node:
         for volume in self._container_config.volumes:
             self._docker_client.set_ownership_of_directory(self._container, self._node_config.user, volume.mount_point)
 
+        self._node_state = STATE_RUNNING
+
     def stop(self):
-        # TODO: handle when the container is not running
+        if self._node_state != STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is not running")
+            return # no-op
 
         self.logger.debug(f"Stopping node {self.name}...")
         self._docker_client.stop_container(self._container)
         self.logger.debug(f"Node {self.name} has been stopped")
 
+        self._node_state = STATE_STOPPED
+
     def clean_up(self):
-        # TODO: handle when the container is not stopped
+        if self._node_state != STATE_STOPPED:
+            self.logger.debug(f"Node {self.name} is not stopped")
+            raise NodeNotStoppedException()
 
         self.logger.debug(f"Removing underlying resources of node {self.name}...")
 
@@ -60,7 +84,13 @@ class Node:
         self.logger.debug(f"Container {self._container.name} has been deleted")
         self._container = None
 
-    def is_active(self):
+        self._node_state = STATE_NOT_STARTED
+
+    def is_active(self) -> bool:
+        if self._node_state != STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is not running")
+            return False
+
         self.logger.debug(f"Checking if node {self.name} is active...")
         if self._container == None:
             return False
@@ -69,6 +99,9 @@ class Node:
         self.logger.debug(f"Exit Code: {exit_code}, Output: {output}")
         return exit_code == 0
 
-    def get_logs(self):
-        # TODO: handle when the container is not running
+    def get_logs(self) -> str:
+        if self._node_state != STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is not running")
+            raise NodeNotRunningException()
+        
         return self._container.logs().decode("utf-8")
