@@ -132,7 +132,7 @@ class TestFrameworkRunner():
         runner.run(TEST_CONFIG_FILE_PATH)
 
         # Check our results
-        expected_contents = {
+        expected_app_state = {
             'current_step': 'Step3',
             'exit_type': constants.EXIT_TYPE_SUCCESS,
             'log_file': runner.log_file,
@@ -141,7 +141,7 @@ class TestFrameworkRunner():
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
-        assert expected_contents == actual_contents
+        assert expected_app_state == actual_contents["app_state"]
     
     def test_WHEN_run_called_AND_step_throws_exception_THEN_writes_state_file_AND_exits_normally(self, reset_call_register, test_logging_context, test_workspace):
         # Test values
@@ -155,7 +155,7 @@ class TestFrameworkRunner():
         end_state = runner.run(TEST_CONFIG_FILE_PATH)
 
         # Check our results
-        expected_contents = {
+        expected_app_state = {
             'current_step': 'StepRaiseRuntimeFrameworkException',
             'exit_type': constants.EXIT_TYPE_FAILURE_UNEXPECTED,
             'last_exception_message': 'This is a test',
@@ -166,7 +166,7 @@ class TestFrameworkRunner():
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
-        assert expected_contents == actual_contents
+        assert expected_app_state == actual_contents["app_state"]
 
     def test_WHEN_run_called_AND_step_fails_THEN_writes_state_file_AND_exits_normally(self, reset_call_register, test_logging_context, test_workspace):
         # Test values
@@ -180,7 +180,7 @@ class TestFrameworkRunner():
         end_state = runner.run(TEST_CONFIG_FILE_PATH)
 
         # Check our results
-        expected_contents = {
+        expected_app_state = {
             'current_step': 'StepRaiseStepFailedException',
             'exit_type': constants.EXIT_TYPE_FAILURE,
             'last_exception_message': 'This is a test',
@@ -191,7 +191,7 @@ class TestFrameworkRunner():
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
-        assert expected_contents == actual_contents
+        assert expected_app_state == actual_contents["app_state"]
     
     def test_WHEN_run_called_AND_step_throws_unhandled_exception_THEN_writes_state_file_AND_exits_normally(self, reset_call_register, test_logging_context, test_workspace):
         # Test values
@@ -205,7 +205,7 @@ class TestFrameworkRunner():
         end_state = runner.run(TEST_CONFIG_FILE_PATH)
 
         # Check our results
-        expected_contents = {
+        expected_app_state = {
             'current_step': 'StepRaiseUnhandledException',
             'exit_type': constants.EXIT_TYPE_FAILURE_UNHANDLED,
             'last_exception_message': 'This is a test',
@@ -216,4 +216,4 @@ class TestFrameworkRunner():
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
-        assert expected_contents == actual_contents
+        assert expected_app_state == actual_contents["app_state"]

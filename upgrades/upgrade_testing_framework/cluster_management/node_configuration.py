@@ -31,3 +31,10 @@ class NodeConfiguration:
         }
         self.config.update(additional_config)
 
+    def to_dict(self) -> dict:
+        return {
+            "config": self.config,
+            "data_dir": self.data_dir,
+            "user": self.user
+        }
+

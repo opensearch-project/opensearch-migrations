@@ -23,9 +23,14 @@ class ClusterNotStoppedException(Exception):
     def __init__(self):
         super().__init__(f"The cluster is not currently stopped")
 
+class ClusterRestartNotAllowedException(Exception):
+    def __init__(self):
+        super().__init__(f"Restarting stopped clusters is not yet allowed")
+
 STATE_NOT_STARTED = "NOT_STARTED"
 STATE_RUNNING = "RUNNING"
 STATE_STOPPED = "STOPPED"
+STATE_CLEANED = "CLEANED_UP"
 
 """
 The goal of this class's abstraction is to isolate the rest of the codebase from the details of precisely how we
@@ -58,6 +63,14 @@ class Cluster:
 
         self._cluster_state = STATE_NOT_STARTED
 
+    def to_dict(self) -> dict:
+        return {
+            "cluster_config": self._cluster_config.to_dict(),
+            "cluster_state": self._cluster_state,
+            "name": self.name,
+            "nodes": {node_name: node.to_dict() for node_name, node in self._nodes.items()},
+        }
+
     def _generate_network_name(self) -> str:
         return f"{self.name}-network"
 
@@ -74,6 +87,9 @@ class Cluster:
         if self._cluster_state == STATE_RUNNING:
             self.logger.debug(f"Cluster {self.name} is already running")
             return # no-op
+
+        if self._cluster_state in [STATE_STOPPED, STATE_CLEANED]:
+            raise ClusterRestartNotAllowedException()
 
         # Create network
         network = self._docker_client.create_network(self._generate_network_name())
@@ -176,7 +192,7 @@ class Cluster:
         # call clean_up() on each node
         for node in self._nodes.values():
             node.clean_up()
-        self._nodes = []
+        self._nodes = {}
 
         # remove any volumes
         for volume in self._volumes:
@@ -190,7 +206,7 @@ class Cluster:
         
         self.logger.debug(f"Cleaned up cluster {self.name}")
 
-        self._cluster_state = STATE_NOT_STARTED
+        self._cluster_state = STATE_CLEANED
 
     @property
     def rest_ports(self) -> List[int]:

@@ -27,9 +27,21 @@ class DockerVolume(NamedTuple):
     mount_point: str
     volume: Volume
 
+    def to_dict(self) -> dict:
+        return {
+            "mount_point": self.mount_point,
+            "volume": self.volume.attrs
+        }
+
 class PortMapping(NamedTuple):
     container_port: int
     host_port: int
+
+    def to_dict(self) -> dict:
+        return {
+            "container_port": self.container_port,
+            "host_port": self.host_port
+        }
 
 class DockerFrameworkClient:
     def _try_create_docker_client() -> docker.client.DockerClient:

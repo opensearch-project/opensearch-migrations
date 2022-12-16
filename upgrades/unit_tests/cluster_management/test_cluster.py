@@ -76,6 +76,30 @@ def test_WHEN_start_AND_already_running_THEN_no_op(mock_node_class):
     # Check the results
     assert 0 == mock_node_class.call_count
 
+def test_WHEN_start_AND_stopped_THEN_raises():
+    # Set up test
+    test_cluster_name = "cluster-name"
+    mock_docker_client = mock.Mock()
+
+    test_cluster = cluster.Cluster(test_cluster_name, TEST_CLUSTER_CONFIG, mock_docker_client)
+    test_cluster._cluster_state = cluster.STATE_STOPPED
+
+    # Run our test
+    with pytest.raises(cluster.ClusterRestartNotAllowedException):
+        test_cluster.start()
+
+def test_WHEN_start_AND_cleaned_THEN_raises():
+    # Set up test
+    test_cluster_name = "cluster-name"
+    mock_docker_client = mock.Mock()
+
+    test_cluster = cluster.Cluster(test_cluster_name, TEST_CLUSTER_CONFIG, mock_docker_client)
+    test_cluster._cluster_state = cluster.STATE_CLEANED
+
+    # Run our test
+    with pytest.raises(cluster.ClusterRestartNotAllowedException):
+        test_cluster.start()
+
 @mock.patch('upgrade_testing_framework.cluster_management.cluster.time')
 def test_WHEN_wait_for_cluster_to_start_up_THEN_as_expected(mock_time):
     # Set up test
@@ -222,7 +246,7 @@ def test_WHEN_clean_up_THEN_as_expected():
     assert 0 == len(test_cluster._nodes)
     assert 0 == len(test_cluster._volumes)
 
-    assert cluster.STATE_NOT_STARTED == test_cluster._cluster_state
+    assert cluster.STATE_CLEANED == test_cluster._cluster_state
 
 def test_WHEN_clean_up_AND_not_stopped_THEN_raises():
     # Set up test

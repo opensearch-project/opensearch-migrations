@@ -9,6 +9,7 @@ from upgrade_testing_framework.cluster_management.node_configuration import Node
 STATE_NOT_STARTED = "NOT_STARTED"
 STATE_RUNNING = "RUNNING"
 STATE_STOPPED = "STOPPED"
+STATE_CLEANED = "CLEANED_UP"
 
 class NodeNotRunningException(Exception):
     def __init__(self):
@@ -17,6 +18,10 @@ class NodeNotRunningException(Exception):
 class NodeNotStoppedException(Exception):
     def __init__(self):
         super().__init__(f"The node is not stopped")
+
+class NodeRestartNotAllowedException(Exception):
+    def __init__(self):
+        super().__init__(f"Restarting stopped nodes is not yet allowed")
 
 class Node:
     """
@@ -35,10 +40,22 @@ class Node:
 
         self._node_state = STATE_NOT_STARTED
 
+    def to_dict(self) -> dict:
+        return {
+            "container": self._container.attrs if self._container else None,
+            "container_config": self._container_config.to_dict(),
+            "name": self.name,
+            "node_config": self._node_config.to_dict(),
+            "node_state": self._node_state,
+        }
+
     def start(self):
         if self._node_state == STATE_RUNNING:
             self.logger.debug(f"Node {self.name} is already running")
             return # no-op
+
+        if self._node_state in [STATE_STOPPED, STATE_CLEANED]:
+            raise NodeRestartNotAllowedException()
 
         # run the container
         container = self._docker_client.create_container(
@@ -84,7 +101,7 @@ class Node:
         self.logger.debug(f"Container {self._container.name} has been deleted")
         self._container = None
 
-        self._node_state = STATE_NOT_STARTED
+        self._node_state = STATE_CLEANED
 
     def is_active(self) -> bool:
         if self._node_state != STATE_RUNNING:
