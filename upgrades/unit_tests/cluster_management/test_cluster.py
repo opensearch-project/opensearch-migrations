@@ -243,7 +243,7 @@ def test_WHEN_clean_up_THEN_as_expected():
     assert expected_remove_volumes == test_cluster._docker_client.remove_volume.call_args_list
 
     assert 0 == len(test_cluster._networks)
-    assert 0 == len(test_cluster._nodes)
+    assert 2 == len(test_cluster._nodes)
     assert 0 == len(test_cluster._volumes)
 
     assert cluster.STATE_CLEANED == test_cluster._cluster_state

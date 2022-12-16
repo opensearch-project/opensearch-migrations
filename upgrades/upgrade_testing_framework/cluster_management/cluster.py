@@ -192,7 +192,6 @@ class Cluster:
         # call clean_up() on each node
         for node in self._nodes.values():
             node.clean_up()
-        self._nodes = {}
 
         # remove any volumes
         for volume in self._volumes:
