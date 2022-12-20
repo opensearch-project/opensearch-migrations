@@ -1,6 +1,5 @@
-from collections import namedtuple
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, NamedTuple, Tuple
 
 import docker.client
 from docker.errors import DockerException, ImageNotFound
@@ -24,7 +23,25 @@ class DockerImageUnavailableException(Exception):
     def __init__(self, image: str):
         super().__init__(f"The Docker {image} is not available either locally or in your remote repos")
 
-PortMapping = namedtuple("PortMapping", "host_port container_port")
+class DockerVolume(NamedTuple):
+    mount_point: str
+    volume: Volume
+
+    def to_dict(self) -> dict:
+        return {
+            "mount_point": self.mount_point,
+            "volume": self.volume.attrs
+        }
+
+class PortMapping(NamedTuple):
+    container_port: int
+    host_port: int
+
+    def to_dict(self) -> dict:
+        return {
+            "container_port": self.container_port,
+            "host_port": self.host_port
+        }
 
 class DockerFrameworkClient:
     def _try_create_docker_client() -> docker.client.DockerClient:
@@ -42,7 +59,6 @@ class DockerFrameworkClient:
 
         return docker_client
 
-
     def __init__(self, logger=logging.getLogger(__name__), docker_client=None):
         self.logger = logger
 
@@ -51,7 +67,7 @@ class DockerFrameworkClient:
         else:
             self._docker_client = docker_client
 
-    def _is_image_available_locally(self, image: str) -> bool:
+    def is_image_available_locally(self, image: str) -> bool:
         try:
             self._docker_client.images.get(image)
         except ImageNotFound:
@@ -60,17 +76,13 @@ class DockerFrameworkClient:
         self.logger.debug(f"Image {image} is available locally")
         return True
     
-    def ensure_image_available(self, image: str):
-        """
-        Check if the supplied image is available locally; try to pull it from remote repos if it isn't.
-        """
-        if not self._is_image_available_locally(image):
-            self.logger.debug(f"Attempting to pull image from remote repositories...")
-            try:
-                self._docker_client.images.pull(image)
-                self.logger.debug(f"Pulled image {image} successfully")
-            except ImageNotFound:
-                raise DockerImageUnavailableException(image)
+    def pull_image(self, image: str):
+        self.logger.debug(f"Attempting to pull image {image} from remote repository...")
+        try:
+            self._docker_client.images.pull(image)
+            self.logger.debug(f"Pulled image {image} successfully")
+        except ImageNotFound:
+            raise DockerImageUnavailableException(image)
 
     def create_network(self, name: str, driver="bridge") -> Network:
         self.logger.debug(f"Creating network {name}...")
@@ -94,18 +106,18 @@ class DockerFrameworkClient:
         volume.remove()
         self.logger.debug(f"Removed volume {volume.name}")
 
-    def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping], volumes: List[Volume], ulimits: List[Ulimit],
-                         env_variables: Dict[str, str]) -> Container:
+    def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping], volumes: List[DockerVolume], 
+            ulimits: List[Ulimit], env_variables: Dict[str, str]) -> Container:
 
         # TODO - need handle if container already exists (name collision)
         # TODO - need handle if we exceed the resource allocation for Docker
         # TODO - need handle port contention
 
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
-        port_mapping = {pair.container_port: pair.host_port for pair in ports}
-        volume_mapping = {volume.attrs["Name"]: {"bind": volume.attrs["Mountpoint"], "mode": "rw"} for volume in volumes}
+        port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
+        volume_mapping = {dv.volume.attrs["Name"]: {"bind": dv.mount_point, "mode": "rw"} for dv in volumes}
         
-        self.logger.debug(f"Creating container named {container_name}...")
+        self.logger.debug(f"Creating container {container_name}...")
         container = self._docker_client.containers.run(
             image,
             name=container_name,
@@ -116,7 +128,7 @@ class DockerFrameworkClient:
             detach=True,
             environment=env_variables
         )
-        self.logger.debug("Created container")
+        self.logger.debug(f"Created container {container_name}")
         return container
 
     def stop_container(self, container: Container):
@@ -130,10 +142,18 @@ class DockerFrameworkClient:
         container.remove()
         self.logger.debug(f"Removed container {container.name}")
 
-    def run(self, container: Container, command: str) -> Tuple[int, str]:
-        # TODO - Need to handle when container isn't stopped
+    def run_command(self, container: Container, command: str) -> Tuple[int, str]:
+        # TODO - Need to handle when container isn't running
         self.logger.debug(f"Running command {command} in container {container.name}...")
         return container.exec_run(command)
+
+    def set_ownership_of_directory(self, container: Container, new_owner: str, dir: str):
+        # TODO - Need to handle when container isn't running
+        self.logger.debug(f"Setting ownership of {dir} to {new_owner} in container {container.name}...")
+        chown_command = f"chown -R {new_owner} {dir}"
+        self.run_command(container, chown_command)
+
+        
 
 
     

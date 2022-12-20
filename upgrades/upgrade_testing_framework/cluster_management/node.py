@@ -1,54 +1,61 @@
-"""
-This class encapsulates an ElasticSearch/OpenSearch Node and its underlying process/container/etc.
-"""
-
 import logging
-from typing import List
 
 from docker.models.containers import Container
-from docker.models.networks import Network
-from docker.models.volumes import Volume
-from docker.types import Ulimit
 
-from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, PortMapping
+from upgrade_testing_framework.cluster_management.container_configuration import ContainerConfiguration
+from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
+from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
 
-class NodeConfiguration:
-    def __init__(self, node_name: str, cluster_name: str, master_nodes: List[str], seed_hosts: List[str]):
-        self.config = {
-            # Core configuration
-            "cluster.name": cluster_name,
-            "cluster.initial_master_nodes": ",".join(master_nodes),
-            "discovery.seed_hosts": ",".join(seed_hosts),
-            "node.name": node_name,
+STATE_NOT_STARTED = "NOT_STARTED"
+STATE_RUNNING = "RUNNING"
+STATE_STOPPED = "STOPPED"
+STATE_CLEANED = "CLEANED_UP"
 
-            # Stuff we might change later
-            "bootstrap.memory_lock": "true",
+class NodeNotRunningException(Exception):
+    def __init__(self):
+        super().__init__(f"The node is not currently running")
 
-            # Stuff we'll absolutely change later
-            "ES_JAVA_OPTS": "-Xms512m -Xmx512m", #TODO - tied to a specific engine version
-        }
+class NodeNotStoppedException(Exception):
+    def __init__(self):
+        super().__init__(f"The node is not stopped")
 
-class ContainerConfiguration:
-    def __init__(self, image: str, network: Network, port_mappings: List[PortMapping], volumes: List[Volume], 
-            ulimits: List[Ulimit] = [Ulimit(name='memlock', soft=-1, hard=-1)]):
-        self.image = image
-        self.network = network
-        self.port_mappings = port_mappings
-        self.ulimits = ulimits
-        self.volumes = volumes
+class NodeRestartNotAllowedException(Exception):
+    def __init__(self):
+        super().__init__(f"Restarting stopped nodes is not yet allowed")
 
 class Node:
+    """
+    This class encapsulates an ElasticSearch/OpenSearch Node and its underlying process/container/etc.
+    """
+
     def __init__(self, name: str, container_config: ContainerConfiguration, node_config: NodeConfiguration, 
             docker_client: DockerFrameworkClient, container: Container = None):
         self.logger = logging.getLogger(__name__)
         self.name = name
+        self.rest_port = container_config.rest_port
         self._container = container
         self._container_config = container_config
         self._docker_client = docker_client
         self._node_config = node_config
 
+        self._node_state = STATE_NOT_STARTED
+
+    def to_dict(self) -> dict:
+        return {
+            "container": self._container.attrs if self._container else None,
+            "container_config": self._container_config.to_dict(),
+            "name": self.name,
+            "node_config": self._node_config.to_dict(),
+            "node_state": self._node_state,
+        }
+
     def start(self):
-        # TODO: handle when the container is already running
+        if self._node_state == STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is already running")
+            return # no-op
+
+        if self._node_state in [STATE_STOPPED, STATE_CLEANED]:
+            raise NodeRestartNotAllowedException()
 
         # run the container
         container = self._docker_client.create_container(
@@ -64,15 +71,27 @@ class Node:
         # store container reference
         self._container = container
 
+        # make sure the engine has permissions on the the volume mount points
+        for volume in self._container_config.volumes:
+            self._docker_client.set_ownership_of_directory(self._container, self._node_config.user, volume.mount_point)
+
+        self._node_state = STATE_RUNNING
+
     def stop(self):
-        # TODO: handle when the container is not running
+        if self._node_state != STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is not running")
+            return # no-op
 
         self.logger.debug(f"Stopping node {self.name}...")
         self._docker_client.stop_container(self._container)
         self.logger.debug(f"Node {self.name} has been stopped")
 
+        self._node_state = STATE_STOPPED
+
     def clean_up(self):
-        # TODO: handle when the container is not stopped
+        if self._node_state != STATE_STOPPED:
+            self.logger.debug(f"Node {self.name} is not stopped")
+            raise NodeNotStoppedException()
 
         self.logger.debug(f"Removing underlying resources of node {self.name}...")
 
@@ -82,11 +101,24 @@ class Node:
         self.logger.debug(f"Container {self._container.name} has been deleted")
         self._container = None
 
-    def is_active(self):
+        self._node_state = STATE_CLEANED
+
+    def is_active(self) -> bool:
+        if self._node_state != STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is not running")
+            return False
+
         self.logger.debug(f"Checking if node {self.name} is active...")
         if self._container == None:
             return False
         
-        exit_code, output = self._docker_client.run(self._container, "curl -X GET \"localhost:9200/\"")
+        exit_code, output = self._docker_client.run_command(self._container, "curl -X GET \"localhost:9200/\"")
         self.logger.debug(f"Exit Code: {exit_code}, Output: {output}")
         return exit_code == 0
+
+    def get_logs(self) -> str:
+        if self._node_state != STATE_RUNNING:
+            self.logger.debug(f"Node {self.name} is not running")
+            raise NodeNotRunningException()
+        
+        return self._container.logs().decode("utf-8")

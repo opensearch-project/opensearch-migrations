@@ -14,7 +14,7 @@ ISSUE_LINK = "https://github.com/opensearch-project/opensearch-migrations/issues
 
 class FrameworkRunner:
     def __init__(self, logging_context: LoggingWrangler, workspace: WorkspaceWrangler,
-            step_order: List[FrameworkStep] = workflows.DEFAULT_STEPS):
+            step_order: List[FrameworkStep] = workflows.SNAPSHOT_RESTORE_STEPS):
         self.logging_context = logging_context
         self.logger = FrameworkLoggingAdapter(logging.getLogger(__name__), {'step': self.__class__.__name__})
         self.workspace = workspace

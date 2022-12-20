@@ -24,7 +24,7 @@ jobs:
           python -m pip install -r requirements.txt coverage pytest-cov
       - name: Run Tests with Coverage
         run: |
-          python -m pytest tests/ --cov=upgrade_testing_framework --cov-report=xml --cov-branch
+          python -m pytest unit_tests/ --cov=upgrade_testing_framework --cov-report=xml --cov-branch
       - name: Upload Coverage Report
         uses: codecov/codecov-action@v3
         with:

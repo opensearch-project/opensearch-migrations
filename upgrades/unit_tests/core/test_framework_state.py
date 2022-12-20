@@ -27,6 +27,6 @@ def test_WHEN_get_initial_state_called_AND_new_run_THEN_behaves_as_expected(tmpd
     test_result = get_initial_state(test_config_path)
 
     # Check our results
-    assert test_result._state_dict == {
+    assert test_result._app_state == {
         "test_config_path": test_config_path
     }

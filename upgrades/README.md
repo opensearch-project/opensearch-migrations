@@ -32,7 +32,7 @@ Learn more about venv [here](https://docs.python.org/3/library/venv.html).
 The unit tests are executed by invoking Pytest:
 
 ```
-python -m pytest tests/
+python -m pytest unit_tests/
 ```
 
 You can read more about running unit tests with Pytest [here](https://docs.pytest.org/en/7.2.x/how-to/usage.html).  

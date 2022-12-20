@@ -1,0 +1,24 @@
+{
+    "clusters_def": {
+        "source": {
+            "engine_version": "ES_7_10_2",
+            "image": "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
+            "node_count": 2,
+            "additional_node_config": {
+                "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
+            }
+        },
+        "target": {
+            "engine_version": "OS_1_3_6",
+            "image": "opensearchproject/opensearch:1.3.6",
+            "node_count": 2,
+            "additional_node_config": {
+                "plugins.security.disabled": "true",
+                "OPENSEARCH_JAVA_OPTS": "-Xms512m -Xmx512m"
+            }
+        }
+    },
+    "upgrade_def": {
+        "style": "snapshot-restore"
+    }
+}

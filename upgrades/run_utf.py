@@ -25,7 +25,7 @@ def main():
     workspace = WorkspaceWrangler()
     logging = LoggingWrangler(workspace)
 
-    FrameworkRunner(logging, workspace, step_order=workflows.DEFAULT_STEPS).run(test_config)  
+    FrameworkRunner(logging, workspace, step_order=workflows.SNAPSHOT_RESTORE_STEPS).run(test_config)  
 
 if __name__ == "__main__":
     main()
