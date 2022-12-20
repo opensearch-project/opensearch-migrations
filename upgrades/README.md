@@ -1,4 +1,4 @@
-# Upgrade Testing Framework
+# Upgrade Testing Framework.
 
 This project scripts and library code to facilitate testing of ElasticSearch and OpenSearch upgrades
 
