@@ -21,41 +21,55 @@ def test_WHEN_create_docker_client_AND_docker_not_running_THEN_raises(mock_dock_
     with pytest.raises(dfc.DockerNotResponsiveException):
         dfc.DockerFrameworkClient()
 
-def test_WHEN_ensure_image_available_AND_is_local_THEN_returns():
+def test_WHEN_is_image_available_locally_AND_is_available_THEN_true():
     # Set up our test
     mock_inner_client = mock.Mock() # no exception thrown when we invoke docker_client.images.get()
 
     # Run our test
     test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
-    test_client.ensure_image_available("test-image")
+    actual_value = test_client.is_image_available_locally("test-image")
 
     # Check our results
+    expected_value = True
+    assert expected_value == actual_value
+
     expected_get_calls = [mock.call("test-image")]
     assert expected_get_calls == mock_inner_client.images.get.call_args_list
 
-def test_WHEN_ensure_image_available_AND_is_not_local_THEN_pulls():
+def test_WHEN_is_image_available_locally_AND_not_available_THEN_false():
     # Set up our test
     mock_inner_client = mock.Mock()
     mock_inner_client.images.get.side_effect = ImageNotFound("Not found")
 
     # Run our test
     test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
-    test_client.ensure_image_available("test-image")
+    actual_value = test_client.is_image_available_locally("test-image")
+
+    # Check our results
+    expected_value = False
+    assert expected_value == actual_value
+
+def test_WHEN_pull_image_AND_is_available_THEN_pulls():
+    # Set up our test
+    mock_inner_client = mock.Mock() # no exception thrown when we invoke docker_client.images.pull()
+
+    # Run our test
+    test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
+    test_client.pull_image("test-image")
 
     # Check our results
     expected_pull_calls = [mock.call("test-image")]
     assert expected_pull_calls == mock_inner_client.images.pull.call_args_list
 
-def test_WHEN_ensure_image_available_AND_is_not_available_THEN_raises():
+def test_WHEN_pull_image_AND_not_available_THEN_raises():
     # Set up our test
     mock_inner_client = mock.Mock()
-    mock_inner_client.images.get.side_effect = ImageNotFound("Not found")
     mock_inner_client.images.pull.side_effect = ImageNotFound("Not found")
 
     # Run our test
+    test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
     with pytest.raises(dfc.DockerImageUnavailableException):
-        test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
-        test_client.ensure_image_available("test-image")
+        test_client.pull_image("test-image")
 
 def test_WHEN_create_network_THEN_returns_it():
     # Set up our test
@@ -176,7 +190,7 @@ def test_WHEN_remove_container_THEN_removes_it():
     # Check our results
     assert mock_container.remove.called
 
-def test_WHEN_run_THEN_runs_command():
+def test_WHEN_run_command_THEN_runs_command():
     # Set up our test
     mock_inner_client = mock.Mock()
     mock_container = mock.Mock()
@@ -186,7 +200,7 @@ def test_WHEN_run_THEN_runs_command():
 
     # Run our test
     test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
-    actual_value = test_client.run(mock_container, "test")
+    actual_value = test_client.run_command(mock_container, "test")
 
     # Check our results
     expected_args = [mock.call(

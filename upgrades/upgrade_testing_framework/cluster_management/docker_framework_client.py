@@ -67,7 +67,7 @@ class DockerFrameworkClient:
         else:
             self._docker_client = docker_client
 
-    def _is_image_available_locally(self, image: str) -> bool:
+    def is_image_available_locally(self, image: str) -> bool:
         try:
             self._docker_client.images.get(image)
         except ImageNotFound:
@@ -76,17 +76,13 @@ class DockerFrameworkClient:
         self.logger.debug(f"Image {image} is available locally")
         return True
     
-    def ensure_image_available(self, image: str):
-        """
-        Check if the supplied image is available locally; try to pull it from remote repos if it isn't.
-        """
-        if not self._is_image_available_locally(image):
-            self.logger.info(f"Attempting to pull image {image} from remote repository...")
-            try:
-                self._docker_client.images.pull(image)
-                self.logger.info(f"Pulled image {image} successfully")
-            except ImageNotFound:
-                raise DockerImageUnavailableException(image)
+    def pull_image(self, image: str):
+        self.logger.debug(f"Attempting to pull image {image} from remote repository...")
+        try:
+            self._docker_client.images.pull(image)
+            self.logger.debug(f"Pulled image {image} successfully")
+        except ImageNotFound:
+            raise DockerImageUnavailableException(image)
 
     def create_network(self, name: str, driver="bridge") -> Network:
         self.logger.debug(f"Creating network {name}...")
@@ -146,7 +142,7 @@ class DockerFrameworkClient:
         container.remove()
         self.logger.debug(f"Removed container {container.name}")
 
-    def run(self, container: Container, command: str) -> Tuple[int, str]:
+    def run_command(self, container: Container, command: str) -> Tuple[int, str]:
         # TODO - Need to handle when container isn't running
         self.logger.debug(f"Running command {command} in container {container.name}...")
         return container.exec_run(command)
@@ -155,7 +151,7 @@ class DockerFrameworkClient:
         # TODO - Need to handle when container isn't running
         self.logger.debug(f"Setting ownership of {dir} to {new_owner} in container {container.name}...")
         chown_command = f"chown -R {new_owner} {dir}"
-        self.run(container, chown_command)
+        self.run_command(container, chown_command)
 
         
 

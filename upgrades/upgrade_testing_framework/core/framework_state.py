@@ -6,13 +6,14 @@ from upgrade_testing_framework.cluster_management.cluster import Cluster
 from upgrade_testing_framework.core.test_config_wrangling import TestConfig
 
 """
-This class needs some work.  Right now, we putting a mish-mash of key/value pairs and objects into it using a mix of
-formal methods and direct assignment to un-initialized internal variables.  We need to come up with a formal strategy
-for how the rest of the code should be interacting with it.
+The long-term trajectory of this class is a bit unclear.  We currently store both key/value pairs in a dictionary as
+well as specifically declared/assigned objects.  That works for us currently, but we should be open to moving entirely
+to one or the other approach if we see the need/opportunity.  KV-pairs are better for quick assignment if we have a
+bunch of things to assign/re-use, but declared objects are better for code clarity and make using an IDE easier.  We'll
+likely learn more about what this *should* be once we start running real tests through the UTF and support multiple
+upgrade styles, as that should force changes in this class.
 
-Additionally, want to be able to dump all useful information to the state file for debugging purposes.  However, we
-currently only dump the key/value pairs in the _state_dict.  As a result, we don't get any information about the
-cluster we're storing as an internal member during the FrameworkSteps.  We need to invest in this area of the code.
+In general though, it is recommended that this be an append-only data store for the application.
 """
 class FrameworkState:
     def __init__(self, state: dict):

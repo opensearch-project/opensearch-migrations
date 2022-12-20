@@ -5,7 +5,9 @@ ENGINE_OPENSEARCH = "OpenSearch"
 
 class CouldNotParseEngineVersionException(Exception):
     def __init__(self, version_string: str):
-        super().__init__(f"Could not parse version string: {version_string}")
+        super().__init__(f"Could not parse version string: {version_string}.  Expected something like 'ES_7_10_2' or"
+            " 'OS_1_3_6'."
+        )
 
 @dataclass
 class EngineVersion:

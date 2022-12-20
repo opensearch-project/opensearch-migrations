@@ -123,7 +123,7 @@ class Cluster:
                 PortMapping(9200, self._generate_port_number(node_num - 1))
             ]
 
-            # Assemble the container configuration based on the 
+            # Assemble the container configuration based on the preceding work
             container_config = ContainerConfiguration(self._cluster_config.image, network, port_mappings, node_volumes)            
 
             # Instantiate node

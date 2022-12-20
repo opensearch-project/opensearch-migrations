@@ -30,17 +30,26 @@ class BootstrapDocker(FrameworkStep):
 
         # Ensure Docker images are available (or die trying)
         for image in [source_docker_image, target_docker_image]:
-            try:
-                self.logger.info(f"Ensuring the Docker image {image} is available either locally or remotely...")
-                docker_client.ensure_image_available(image)
-                self.logger.info(f"Docker image {image} is available")
-            except dfc.DockerImageUnavailableException as exception:
-                self.logger.warn(f"Your Docker image {image} was not available.  Ensure you spelled it"
-                    " correctly, have the require access to the remote repository, etc...")
-                self.fail(f"Docker image {image} unavailable", exception)
+            self.logger.info(f"Ensuring the Docker image {image} is available either locally or remotely...")
+            self._ensure_image_available(docker_client, image)
+            self.logger.info(f"Docker image {image} is available")
 
         # This is where we will later build our Dockerfiles into local images, if the user supplies one
         # However - we'll tackle that later
         
         # Update our state
         self.state.docker_client = docker_client
+
+    def _ensure_image_available(self, docker_client: dfc.DockerFrameworkClient, image: str):
+        """
+        Check if the supplied image is available locally; try to pull it from remote repos if it isn't.
+        """
+        if not docker_client.is_image_available_locally(image):
+            try:
+                self.logger.info(f"Image {image} not available locally, pulling from remote repo...")
+                docker_client.pull_image(image)
+                self.logger.info(f"Pulled image {image} successfully")
+            except dfc.DockerImageUnavailableException as exception:
+                self.logger.warn(f"Your Docker image {image} was not available.  Ensure you spelled it"
+                    " correctly, have the require access to the remote repository, etc...")
+                self.fail(f"Docker image {image} unavailable", exception)

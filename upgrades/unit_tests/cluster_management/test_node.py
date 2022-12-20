@@ -172,7 +172,7 @@ def test_WHEN_node_is_active_AND_active_THEN_returns_true():
     test_container = mock.Mock()
     test_container_config = mock.Mock()
     test_docker_client = mock.Mock()
-    test_docker_client.run.return_value = (0, "")
+    test_docker_client.run_command.return_value = (0, "")
     test_node_config = mock.Mock()
     test_node_name = "node-name"
 
@@ -186,7 +186,7 @@ def test_WHEN_node_is_active_AND_active_THEN_returns_true():
         test_container,
         "curl -X GET \"localhost:9200/\""
     )]
-    assert expected_args == test_docker_client.run.call_args_list
+    assert expected_args == test_docker_client.run_command.call_args_list
 
     assert True == actual_value
 
@@ -195,7 +195,7 @@ def test_WHEN_node_is_active_AND_inactive_THEN_returns_false():
     test_container = mock.Mock()
     test_container_config = mock.Mock()
     test_docker_client = mock.Mock()
-    test_docker_client.run.return_value = (1, "")
+    test_docker_client.run_command.return_value = (1, "")
     test_node_config = mock.Mock()
     test_node_name = "node-name"
 
@@ -210,7 +210,7 @@ def test_WHEN_node_is_active_AND_not_started_THEN_returns_false():
     # Set up our test
     test_container_config = mock.Mock()
     test_docker_client = mock.Mock()
-    test_docker_client.run.return_value = (0, "") # Will cause True to be returned if not working
+    test_docker_client.run_command.return_value = (0, "") # Will cause True to be returned if not working
     test_node_config = mock.Mock()
     test_node_name = "node-name"
 

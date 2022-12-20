@@ -112,7 +112,7 @@ class Node:
         if self._container == None:
             return False
         
-        exit_code, output = self._docker_client.run(self._container, "curl -X GET \"localhost:9200/\"")
+        exit_code, output = self._docker_client.run_command(self._container, "curl -X GET \"localhost:9200/\"")
         self.logger.debug(f"Exit Code: {exit_code}, Output: {output}")
         return exit_code == 0
 
