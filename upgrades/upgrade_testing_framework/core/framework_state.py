@@ -3,6 +3,7 @@ from typing import List
 
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, DockerVolume
 from upgrade_testing_framework.cluster_management.cluster import Cluster
+from upgrade_testing_framework.cluster_management.cluster_objects import ClusterSnapshot
 from upgrade_testing_framework.core.test_config_wrangling import TestConfig
 
 """
@@ -27,6 +28,7 @@ class FrameworkState:
         # order to support multiple upgrade types.  Since we're only supporting Snapshot/Restore for now, we can solve
         # that problem later.
         self.shared_volume: DockerVolume = None
+        self.snapshot: ClusterSnapshot = None
 
     def to_dict(self) -> dict:
         return {

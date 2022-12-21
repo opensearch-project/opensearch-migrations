@@ -16,6 +16,8 @@ class NodeConfiguration:
     def __init__(self, engine_version: ev.EngineVersion, node_name: str, cluster_name: str, master_nodes: List[str], 
             seed_hosts: List[str], additional_config: Dict[str, str] = {}):
 
+        self.engine_version = engine_version
+
         self.data_dir: str = _get_engine_data_dir_for_version(engine_version)
         self.user: str = _get_engine_user_for_version(engine_version)
 
@@ -35,6 +37,7 @@ class NodeConfiguration:
         return {
             "config": self.config,
             "data_dir": self.data_dir,
+            "engine_version": str(self.engine_version),
             "user": self.user
         }
 

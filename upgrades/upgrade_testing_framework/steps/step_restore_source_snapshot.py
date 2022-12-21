@@ -1,8 +1,8 @@
 import json
 import time
 
+import upgrade_testing_framework.clients as clients
 from upgrade_testing_framework.core.framework_step import FrameworkStep
-import upgrade_testing_framework.core.shell_interactions as shell
 
 class RestoreSourceSnapshot(FrameworkStep):
     """
@@ -10,49 +10,39 @@ class RestoreSourceSnapshot(FrameworkStep):
     """
 
     def _run(self):
-        """
-        The contents of this are quick/dirty.  Instead of raw curl commands we should probably be using the Python SDK
-        for Elasticsearch/OpenSearch.  At the very least, we should wrap the curl commands in our own pseudo-client.
-        """
-
         # Get the state we need
         shared_volume = self.state.shared_volume
+        snapshot = self.state.snapshot
+        source_doc_id = self.state.source_doc_id
         target_cluster = self.state.target_cluster
 
         # Begin the step body
         self.logger.info("Checking if source snapshots are visible on target...")
-        port = target_cluster.rest_ports[0]
+        node = target_cluster.nodes[0] # shouldn't matter which node we pick
+        port = node.rest_port
+        engine_version = node.engine_version
+        rest_client = clients.get_rest_client(engine_version)
 
-        register_cmd = f"""curl -X PUT 'localhost:{port}/_snapshot/noldor' -H 'Content-Type: application/json' -d '{{
-            "type": "fs",
-                "settings": {{
-                    "location": "{shared_volume.mount_point}"
-            }}
-        }}'
-        """
-        _, _ = shell.call_shell_command(register_cmd)
+        rest_client.register_snapshot_dir(port, snapshot.repo_name, shared_volume.mount_point)
+        response_all_snapshots = rest_client.get_snapshots_all(port, snapshot.repo_name)
 
-        check_cmd = f"curl -X GET 'localhost:{port}/_snapshot/noldor/_all?pretty' -ku 'admin:admin'"
-        _, output = shell.call_shell_command(check_cmd)
-        if "noldor" in "\n".join(output):
+        if "noldor" in response_all_snapshots.response_text:
             self.logger.info("Source snapshot visible to target cluster")
         else:
             self.fail("Snapshot restoration failed; source snapshots not visible to target cluster")
 
         self.logger.info("Restoring source snapshot onto target...")
-        restore_cmd = f"curl -X POST 'localhost:{port}/_snapshot/noldor/1/_restore?pretty' -ku 'admin:admin'"
-        _, _ = shell.call_shell_command(restore_cmd)
+        rest_client.restore_snapshot(port, snapshot.repo_name, snapshot.snapshot_id)
 
         self.logger.info("Waiting a few seconds for the snapshot to be restored...")
-        time.sleep(5)
+        time.sleep(3)
 
         self.logger.info("Attempting to retrieve source doc from target cluster...")
-        get_cmd = f"curl -X GET 'localhost:{port}/noldor/_doc/1?pretty'"
-        _, output = shell.call_shell_command(get_cmd)
-        if "Finwe" in "\n".join(output):
+        response_get_doc = rest_client.get_doc_by_id(port, "noldor", source_doc_id)
+
+        if "Finwe" in response_get_doc.response_text:
             self.logger.info("Document retrieved, snapshot restored successfully")
-            snapshot_get = json.loads("".join(output))
-            self.logger.info(json.dumps(snapshot_get, sort_keys=True, indent=4))
+            self.logger.info(response_get_doc.response_text)
         else:
             self.fail("Snapshot restoration failed; document from source cluster unable to be retrieved")
         
