@@ -6,6 +6,8 @@ from upgrade_testing_framework.cluster_management.container_configuration import
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
 from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
 
+from upgrade_testing_framework.core.versions_engine import EngineVersion
+
 STATE_NOT_STARTED = "NOT_STARTED"
 STATE_RUNNING = "RUNNING"
 STATE_STOPPED = "STOPPED"
@@ -32,13 +34,20 @@ class Node:
             docker_client: DockerFrameworkClient, container: Container = None):
         self.logger = logging.getLogger(__name__)
         self.name = name
-        self.rest_port = container_config.rest_port
         self._container = container
         self._container_config = container_config
         self._docker_client = docker_client
         self._node_config = node_config
 
         self._node_state = STATE_NOT_STARTED
+
+    @property
+    def engine_version(self) -> EngineVersion:
+        return self._node_config.engine_version
+
+    @property
+    def rest_port(self) -> int:
+        return self._container_config.rest_port
 
     def to_dict(self) -> dict:
         return {

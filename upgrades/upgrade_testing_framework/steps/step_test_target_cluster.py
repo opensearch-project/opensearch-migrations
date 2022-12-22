@@ -1,11 +1,11 @@
-from upgrade_testing_framework.cluster_management.cluster import Cluster
+from upgrade_testing_framework.clients.rest_client_default import RESTClientDefault
 from upgrade_testing_framework.core.framework_step import FrameworkStep
-import upgrade_testing_framework.core.shell_interactions as shell
 
 
 class TestTargetCluster(FrameworkStep):
     """
-    This step is where you run tests on the target cluster
+    This step is where you run tests on the target cluster.  The code currently in here is for demo purposes only, and
+    will be deleted once we've incorporated the Robot tests into the UTF.
     """
 
     def _run(self):
@@ -14,8 +14,10 @@ class TestTargetCluster(FrameworkStep):
 
         # Begin the step body
         port = target_cluster.rest_ports[0]
-        _, output = shell.call_shell_command(f"curl -X GET \"localhost:{port}/_cat/nodes?v=true&pretty\"")
-        self.logger.info("\n".join(output))
+        rest_client = RESTClientDefault()
+
+        response_status = rest_client.get_nodes_status(port)
+        self.logger.info(response_status.response_text)
         
         # Update our state
         # N/A

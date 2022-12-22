@@ -24,6 +24,7 @@ def test_WHEN_create_NodeConfiguration_AND_elasticsearch_THEN_has_expected_value
             "k1": "v1"
         },
         "data_dir": "/usr/share/elasticsearch/data",
+        "engine_version": str(test_engine_version),
         "user": "elasticsearch"
     }
     assert expected_value == actual_value.to_dict()
@@ -51,6 +52,7 @@ def test_WHEN_create_NodeConfiguration_AND_opensearch_THEN_has_expected_values()
             "k1": "v1"
         },
         "data_dir": "/usr/share/opensearch/data",
+        "engine_version": str(test_engine_version),
         "user": "elasticsearch"
     }
     assert expected_value == actual_value.to_dict()

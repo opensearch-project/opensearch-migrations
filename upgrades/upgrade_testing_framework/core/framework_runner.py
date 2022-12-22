@@ -38,7 +38,7 @@ class FrameworkRunner:
             for step_index in range(starting_step_index, len(self.step_order)):
                 current_step = self.step_order[step_index]
                 state.set_key('current_step', current_step.cls_name())
-                self.logger.info(f"Running Step: {current_step.cls_name()}")
+                self.logger.info(f"============ Running Step: {current_step.cls_name()} ============")
                 current_step(state).run()
                 self.logger.info(f"Step Succeeded: {current_step.cls_name()}")
             self.logger.info("Ran through all steps successfully")

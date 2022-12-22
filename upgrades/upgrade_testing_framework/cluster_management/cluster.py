@@ -63,6 +63,14 @@ class Cluster:
 
         self._cluster_state = STATE_NOT_STARTED
 
+    @property
+    def nodes(self) -> List[Node]:
+        return list(self._nodes.values())
+
+    @property
+    def rest_ports(self) -> List[int]:
+        return [node.rest_port for node in self._nodes.values()]
+
     def to_dict(self) -> dict:
         return {
             "cluster_config": self._cluster_config.to_dict(),
@@ -206,7 +214,3 @@ class Cluster:
         self.logger.debug(f"Cleaned up cluster {self.name}")
 
         self._cluster_state = STATE_CLEANED
-
-    @property
-    def rest_ports(self) -> List[int]:
-        return [node.rest_port for node in self._nodes.values()]
