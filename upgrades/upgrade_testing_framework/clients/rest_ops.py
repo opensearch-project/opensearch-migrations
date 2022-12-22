@@ -42,7 +42,7 @@ class RESTResponse:
 
         self.succeeded = response.status_code in [200, 201]
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "response_json": self.response_json,
             "response_text": self.response_text,
@@ -55,7 +55,7 @@ class RESTResponse:
     def __str__(self):
         return json.dumps(self.to_dict())
 
-def perform_get(rest_path: RESTPath = RESTPath(), params={}, auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
+def perform_get(rest_path: RESTPath = RESTPath(), params: dict = {}, auth = HTTPBasicAuth("admin", "admin")) -> RESTResponse:
     raw_reponse = requests.get(
         url=str(rest_path),
         auth=auth,
@@ -66,7 +66,8 @@ def perform_get(rest_path: RESTPath = RESTPath(), params={}, auth=HTTPBasicAuth(
     logger.debug(f"REST GET Response : {rest_response}")
     return rest_response
 
-def perform_post(rest_path: RESTPath = RESTPath(), data="", params={}, headers={}, auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
+def perform_post(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {}, 
+        auth = HTTPBasicAuth("admin", "admin")) -> RESTResponse:
     raw_reponse = requests.post(
         url=str(rest_path),
         auth=auth,
@@ -79,7 +80,8 @@ def perform_post(rest_path: RESTPath = RESTPath(), data="", params={}, headers={
     logger.debug(f"REST POST Response : {rest_response}")
     return rest_response
 
-def perform_put(rest_path: RESTPath = RESTPath(), data="", params={}, headers={}, auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
+def perform_put(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {}, 
+        auth = HTTPBasicAuth("admin", "admin")) -> RESTResponse:
     raw_reponse = requests.put(
         url=str(rest_path),
         auth=auth,

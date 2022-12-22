@@ -104,7 +104,7 @@ def test_WHEN_create_snapshot_THEN_as_expected(mock_post):
 
     expected_calls = [mock.call(
         rest_path = RESTPath(port = TEST_PORT, suffix = f"_snapshot/{TEST_REPO}/{TEST_SNAPSHOT_ID}"),
-        params = {"pretty": "true", "wait_for_completion": "true"}
+        params = {"pretty": "true"}
     )]
     assert expected_calls == mock_post.call_args_list
 
