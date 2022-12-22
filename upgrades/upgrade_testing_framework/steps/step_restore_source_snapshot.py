@@ -13,7 +13,6 @@ class RestoreSourceSnapshot(FrameworkStep):
         # Get the state we need
         shared_volume = self.state.shared_volume
         snapshot = self.state.snapshot
-        source_doc_id = self.state.source_doc_id
         target_cluster = self.state.target_cluster
 
         # Begin the step body
@@ -26,25 +25,18 @@ class RestoreSourceSnapshot(FrameworkStep):
         rest_client.register_snapshot_dir(port, snapshot.repo_name, shared_volume.mount_point)
         response_all_snapshots = rest_client.get_snapshots_all(port, snapshot.repo_name)
 
-        if "noldor" in response_all_snapshots.response_text:
+        if snapshot.snapshot_id in response_all_snapshots.response_text:
             self.logger.info("Source snapshot visible to target cluster")
         else:
             self.fail("Snapshot restoration failed; source snapshots not visible to target cluster")
 
         self.logger.info("Restoring source snapshot onto target...")
-        rest_client.restore_snapshot(port, snapshot.repo_name, snapshot.snapshot_id)
+        response_restore = rest_client.restore_snapshot(port, snapshot.repo_name, snapshot.snapshot_id)
 
-        self.logger.info("Waiting a few seconds for the snapshot to be restored...")
-        time.sleep(3)
-
-        self.logger.info("Attempting to retrieve source doc from target cluster...")
-        response_get_doc = rest_client.get_doc_by_id(port, "noldor", source_doc_id)
-
-        if "Finwe" in response_get_doc.response_text:
-            self.logger.info("Document retrieved, snapshot restored successfully")
-            self.logger.info(response_get_doc.response_text)
+        if response_restore.succeeded:
+            self.logger.info("Snapshot restored successfully")
         else:
-            self.fail("Snapshot restoration failed; document from source cluster unable to be retrieved")
+            self.fail("Snapshot restoration failed")
         
         # Update our state
         # N/A
