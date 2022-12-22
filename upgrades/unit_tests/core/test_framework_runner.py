@@ -137,7 +137,8 @@ class TestFrameworkRunner():
             'exit_type': constants.EXIT_TYPE_SUCCESS,
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
-            'test_config_path': TEST_CONFIG_FILE_PATH
+            'test_config_path': TEST_CONFIG_FILE_PATH,
+            'test_results_directory': test_workspace.test_results_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
@@ -162,7 +163,8 @@ class TestFrameworkRunner():
             'last_exception_type': 'UnexpectedException',
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
-            'test_config_path': TEST_CONFIG_FILE_PATH
+            'test_config_path': TEST_CONFIG_FILE_PATH,
+            'test_results_directory': test_workspace.test_results_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
@@ -187,7 +189,8 @@ class TestFrameworkRunner():
             'last_exception_type': 'ExpectedException',
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
-            'test_config_path': TEST_CONFIG_FILE_PATH
+            'test_config_path': TEST_CONFIG_FILE_PATH,
+            'test_results_directory': test_workspace.test_results_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
@@ -212,7 +215,8 @@ class TestFrameworkRunner():
             'last_exception_type': 'UnexpectedException',
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
-            'test_config_path': TEST_CONFIG_FILE_PATH
+            'test_config_path': TEST_CONFIG_FILE_PATH,
+            'test_results_directory': test_workspace.test_results_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
