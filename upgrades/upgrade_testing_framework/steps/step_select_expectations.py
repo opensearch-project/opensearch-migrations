@@ -1,6 +1,6 @@
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 
-class ExpectationSelector(FrameworkStep):
+class SelectExpectations(FrameworkStep):
     """
     This step is where we collect applicable expectations based on our cluster details
     """
@@ -13,4 +13,5 @@ class ExpectationSelector(FrameworkStep):
         self.logger.info("Querying applicable expectations...")
 
         # Update our state
+        # TODO Temporary measure until this step queries for expectations
         self.state.eligible_expectations = ['consistent-document-count']

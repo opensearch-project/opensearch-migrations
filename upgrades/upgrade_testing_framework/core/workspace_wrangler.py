@@ -29,5 +29,9 @@ class WorkspaceWrangler:
         return os.path.join(self.utf_base_directory, 'state-file')
 
     @property
+    def test_results_directory(self):
+        return os.path.join(self.utf_base_directory, 'test-results')
+
+    @property
     def utf_base_directory(self):
         return self.base_directory

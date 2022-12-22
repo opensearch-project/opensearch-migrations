@@ -1,7 +1,7 @@
 import setuptools
 
 setuptools.setup(
-    name="robottests",
+    name="robot_tests_cluster_upgrade",
     version="0.1",
     description="Robot framework to simplify writing upgrade tests",
     author="opensearch-migrations",
