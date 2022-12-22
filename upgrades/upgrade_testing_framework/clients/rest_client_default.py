@@ -54,10 +54,10 @@ class RESTClientDefault(RESTClientBase):
 
     def create_snapshot(self, port: int, repo: str, snapshot_id: str) -> ops.RESTResponse:
         """
-        Create a snapshot of the cluster into a repo
+        Create a snapshot of the cluster into a repo by synchronously blocking on completion
         """
         rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}/{snapshot_id}")
-        params = {"pretty": "true"}
+        params = {"pretty": "true", "wait_for_completion": "true"}
 
         return ops.perform_post(rest_path = rest_path, params = params)
 
@@ -67,7 +67,7 @@ class RESTClientDefault(RESTClientBase):
         """
         rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}/{snapshot_id}")
         params = {"pretty": "true"}
-        return ops.perform_get(rest_path = rest_path, params = params)    
+        return ops.perform_get(rest_path = rest_path, params = params)
 
     def get_snapshots_all(self, port: int, repo: str) -> ops.RESTResponse:
         """
@@ -95,8 +95,8 @@ class RESTClientDefault(RESTClientBase):
 
     def restore_snapshot(self, port: int, repo: str, snapshot_id: int) -> ops.RESTResponse:
         """
-        Restore a snapshot
+        Restore a snapshot by synchronously blocking on completion
         """
         rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}/{snapshot_id}/_restore")
-        params = {"pretty": "true"}
-        return ops.perform_post(rest_path = rest_path, params = params)    
+        params = {"pretty": "true", "wait_for_completion": "true"}
+        return ops.perform_post(rest_path = rest_path, params = params)

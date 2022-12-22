@@ -27,9 +27,7 @@ class CreateSourceSnapshot(FrameworkStep):
         response_confirm = rest_client.get_snapshot_by_id(port, repo_name, snapshot_id)
         if response_confirm.succeeded:
             self.logger.info("Source snapshot created successfully")
-            self.logger.info(response_confirm.response_text)
         else:
-            self.logger.info(response_confirm.response_text)
             self.fail("Snapshot creation failed")
         
         # Update our state
