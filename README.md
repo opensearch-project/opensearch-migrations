@@ -10,7 +10,7 @@ This repo will contain code and documentation to assist in migrations and upgrad
 
 ## Setup for commits
 
-Developers must run the "setup.sh" script in order to add the pre-commit hook.
+Developers must run the "install_githooks.sh" script in order to add the pre-commit hook.
 
 ## Security
 
