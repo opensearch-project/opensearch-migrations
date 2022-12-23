@@ -32,3 +32,15 @@ def test_WHEN_get_version_AND_version_not_int_THEN_raises():
     # Run our test
     with pytest.raises(versions.CouldNotParseEngineVersionException):
         versions.get_version("OS_1_3b_6")
+
+def test_WHEN_version_comparison_AND_same_engine_THEN_compares():
+    # Major versions are different
+    assert versions.get_version("ES_7_0_2") > versions.get_version("ES_3_5_0")
+    # Major versions are same
+    assert versions.get_version("ES_7_10_2") > versions.get_version("ES_7_0_0")
+    assert versions.get_version("OS_2_0_0") < versions.get_version("OS_2_4_0")
+    assert versions.get_version("OS_2_4_0") >= versions.get_version("OS_2_4_0")
+
+def test_WHEN_version_comparison_AND_different_engine_THEN_compares():
+    assert versions.get_version("ES_7_10_2") < versions.get_version("OS_1_0_0")
+    assert versions.get_version("OS_2_4_0") >= versions.get_version("ES_3_5_0")

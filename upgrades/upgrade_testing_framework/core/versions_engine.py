@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import total_ordering
 
 ENGINE_ELASTICSEARCH = "Elasticsearch"
 ENGINE_OPENSEARCH = "OpenSearch"
@@ -10,11 +11,21 @@ class CouldNotParseEngineVersionException(Exception):
         )
 
 @dataclass
+@total_ordering
 class EngineVersion:
     engine: str
     major: int
     minor: int
     patch: int
+
+    def __lt__(self, other) -> bool:
+        # TODO: Check for post-fork ES versions, which can't be compared.
+        if self.engine == other.engine:
+            # If the engines are the same, lexically compare the versions
+            return (self.major, self.minor, self.patch) < (other.major, other.minor, other.patch)
+        # otherwise, ES < OS
+        return self.engine == ENGINE_ELASTICSEARCH and other.engine == ENGINE_OPENSEARCH
+
 
 def get_version(version_string: str) -> EngineVersion:
     # expected an input string like: "ES_7_10_2"
