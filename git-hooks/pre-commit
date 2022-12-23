@@ -18,7 +18,6 @@ if __name__ == '__main__':
         repo_base_folder = loc_proc.communicate()[0].decode('utf-8').strip()
         flake8_config_path = os.path.join(repo_base_folder, FLAKE8_CFG_FILE)
 
-
         if not os.path.isfile(flake8_config_path):
             skip_flake8 = True
             print('Warning: Could not find flake8 config file at repo base ({}).'.format(flake8_config_path))
@@ -28,12 +27,13 @@ if __name__ == '__main__':
         else:
             print('________________________' + 'Running Flake8' + '_______________________')
             flake8_proc = subprocess.Popen('python3 -m flake8 --config={}'.format(flake8_config_path).split(),
-                                            stdout=subprocess.PIPE)
+                                           stdout=subprocess.PIPE)
             flake_output = flake8_proc.communicate()[0].decode('utf-8')
             num_flake8_errors = len(flake_output.splitlines())
             if num_flake8_errors:
                 print(flake_output)
-                abort_messages.append(('{} flake8 errors. Please fix code style before committing.'.format(num_flake8_errors)))
+                abort_messages.append(('{} flake8 errors. Please fix code style before committing.'
+                                      .format(num_flake8_errors)))
                 abort = True
 
     except Exception as error:
@@ -46,4 +46,3 @@ if __name__ == '__main__':
                 print(msg)
             sys.exit(ABORT)
         print('___________________' + 'pre-commit checks passed' + '___________________')
-
