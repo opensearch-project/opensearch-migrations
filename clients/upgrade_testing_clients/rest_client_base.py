@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import logging
 
-import upgrade_testing_framework.clients.rest_ops as ops
+import upgrade_testing_clients.rest_ops as ops
 
 class RESTClientBase(ABC):
     """

@@ -1,8 +1,8 @@
 import json
 import unittest.mock as mock
 
-from upgrade_testing_framework.clients.rest_ops import RESTPath
-from upgrade_testing_framework.clients.rest_client_default import RESTClientDefault
+from upgrade_testing_clients.rest_ops import RESTPath
+from upgrade_testing_clients.rest_client_default import RESTClientDefault
 
 TEST_DIR = "/path/to/dir"
 TEST_DOC_ID = "Beren"
@@ -12,7 +12,7 @@ TEST_PORT = 9200
 TEST_REPO = "repo"
 TEST_SNAPSHOT_ID = "snapshot"
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_get")
 def test_WHEN_get_node_info_THEN_as_expected(mock_get):
     # Set up test
     mock_response = mock.Mock()
@@ -30,7 +30,7 @@ def test_WHEN_get_node_info_THEN_as_expected(mock_get):
     )]
     assert expected_calls == mock_get.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_get")
 def test_WHEN_get_nodes_status_THEN_as_expected(mock_get):
     # Set up test
     mock_response = mock.Mock()
@@ -49,7 +49,7 @@ def test_WHEN_get_nodes_status_THEN_as_expected(mock_get):
     )]
     assert expected_calls == mock_get.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_get")
 def test_WHEN_get_doc_by_id_THEN_as_expected(mock_get):
     # Set up test
     mock_response = mock.Mock()
@@ -68,7 +68,7 @@ def test_WHEN_get_doc_by_id_THEN_as_expected(mock_get):
     )]
     assert expected_calls == mock_get.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_post")
 def test_WHEN_post_doc_to_index_THEN_as_expected(mock_post):
     # Set up test
     mock_response = mock.Mock()
@@ -89,7 +89,7 @@ def test_WHEN_post_doc_to_index_THEN_as_expected(mock_post):
     )]
     assert expected_calls == mock_post.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_post")
 def test_WHEN_create_snapshot_THEN_as_expected(mock_post):
     # Set up test
     mock_response = mock.Mock()
@@ -108,7 +108,7 @@ def test_WHEN_create_snapshot_THEN_as_expected(mock_post):
     )]
     assert expected_calls == mock_post.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_get")
 def test_WHEN_get_snapshot_by_id_THEN_as_expected(mock_get):
     # Set up test
     mock_response = mock.Mock()
@@ -127,7 +127,7 @@ def test_WHEN_get_snapshot_by_id_THEN_as_expected(mock_get):
     )]
     assert expected_calls == mock_get.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_get")
 def test_WHEN_get_snapshots_all_THEN_as_expected(mock_get):
     # Set up test
     mock_response = mock.Mock()
@@ -146,7 +146,7 @@ def test_WHEN_get_snapshots_all_THEN_as_expected(mock_get):
     )]
     assert expected_calls == mock_get.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_post")
 def test_WHEN_register_snapshot_dir_THEN_as_expected(mock_post):
     # Set up test
     mock_response = mock.Mock()
@@ -171,7 +171,7 @@ def test_WHEN_register_snapshot_dir_THEN_as_expected(mock_post):
     )]
     assert expected_calls == mock_post.call_args_list
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
+@mock.patch("upgrade_testing_clients.rest_ops.perform_post")
 def test_WHEN_restore_snapshot_THEN_as_expected(mock_post):
     # Set up test
     mock_response = mock.Mock()

@@ -22,7 +22,7 @@ class FrameworkState:
         self.source_cluster: Cluster = None
         self.target_cluster: Cluster = None
         self.test_config: TestConfig = None
-        self.eligible_expectations = []
+        self.eligible_expectations: List[str] = []
         self._app_state = state
 
         # The fact that we need to store this in our FrameworkState means we probably need to be more sophisticated in

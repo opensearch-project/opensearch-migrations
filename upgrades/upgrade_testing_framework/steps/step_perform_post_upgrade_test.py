@@ -11,7 +11,7 @@ class PerformPostUpgradeTest(FrameworkStep):
         target_cluster = self.state.target_cluster
         port = target_cluster.rest_ports[0]
         expectations = self.state.eligible_expectations
-        output_directory = f"{self.state.get_key('test_results_directory')}/post_upgrade"
+        output_directory = self.state.get_key('test_results_post_upgrade_directory')
 
         # Pull host and credentials (if security is enabled) from state
         test_executor = TestExecutor("localhost", port)

@@ -1,7 +1,7 @@
 import json
 
-from upgrade_testing_framework.clients.rest_client_base import RESTClientBase
-import upgrade_testing_framework.clients.rest_ops as ops
+from upgrade_testing_clients.rest_client_base import RESTClientBase
+import upgrade_testing_clients.rest_ops as ops
 
 class RESTClientDefault(RESTClientBase):
     """

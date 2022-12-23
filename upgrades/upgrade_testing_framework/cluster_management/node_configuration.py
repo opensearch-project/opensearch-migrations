@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-import upgrade_testing_framework.core.versions_engine as ev
+import upgrade_testing_clients.versions_engine as ev
 
 def _get_engine_data_dir_for_version(version: ev.EngineVersion) -> str:
     if ev.ENGINE_ELASTICSEARCH == version.engine:

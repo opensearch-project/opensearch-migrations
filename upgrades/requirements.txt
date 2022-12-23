@@ -1,2 +1,3 @@
+-e ../clients
 -e ../robot_tests
 -e .

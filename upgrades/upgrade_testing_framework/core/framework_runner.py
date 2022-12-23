@@ -27,7 +27,8 @@ class FrameworkRunner:
     def run(self, test_config_path: str):
         state = get_initial_state(test_config_path)
         state.set_key('log_file', self.log_file)
-        state.set_key('test_results_directory', self.workspace.test_results_directory)
+        state.set_key('test_results_pre_upgrade_directory', self.workspace.test_results_pre_upgrade_directory)
+        state.set_key('test_results_post_upgrade_directory', self.workspace.test_results_post_upgrade_directory)
 
         try:
             # Figure out where in the list of steps we should begin.  Should just be the first one, but if we want to

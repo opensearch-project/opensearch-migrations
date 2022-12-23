@@ -11,7 +11,7 @@ class PerformPreUpgradeTest(FrameworkStep):
         source_cluster = self.state.source_cluster
         port = source_cluster.rest_ports[0]
         expectations = self.state.eligible_expectations
-        output_directory = f"{self.state.get_key('test_results_directory')}/pre_upgrade"
+        output_directory = self.state.get_key('test_results_pre_upgrade_directory')
 
         # Pull host and credentials (if security is enabled) from state
         test_executor = TestExecutor("localhost", port)

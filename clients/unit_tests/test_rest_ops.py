@@ -2,7 +2,7 @@ import json
 import pytest
 import unittest.mock as mock
 
-import upgrade_testing_framework.clients.rest_ops as ops
+import upgrade_testing_clients.rest_ops as ops
 
 REST_PATH = ops.RESTPath(9200, "http://gondolin", "turgon")
 
@@ -26,7 +26,7 @@ def failure_response():
     response.url = str(REST_PATH)
     return response
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.requests")
+@mock.patch("upgrade_testing_clients.rest_ops.requests")
 def test_WHEN_perform_get_AND_success_THEN_as_expected(mock_requests, success_response):
     # Set up test
     mock_requests.get.return_value = success_response
@@ -45,7 +45,7 @@ def test_WHEN_perform_get_AND_success_THEN_as_expected(mock_requests, success_re
     }
     assert expected_value == actual_value.to_dict()
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.requests")
+@mock.patch("upgrade_testing_clients.rest_ops.requests")
 def test_WHEN_perform_get_AND_failed_THEN_as_expected(mock_requests, failure_response):
     # Set up test
     mock_requests.get.return_value = failure_response
@@ -64,7 +64,7 @@ def test_WHEN_perform_get_AND_failed_THEN_as_expected(mock_requests, failure_res
     }
     assert expected_value == actual_value.to_dict()
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.requests")
+@mock.patch("upgrade_testing_clients.rest_ops.requests")
 def test_WHEN_perform_post_AND_success_THEN_as_expected(mock_requests, success_response):
     # Set up test
     mock_requests.post.return_value = success_response
@@ -83,7 +83,7 @@ def test_WHEN_perform_post_AND_success_THEN_as_expected(mock_requests, success_r
     }
     assert expected_value == actual_value.to_dict()
 
-@mock.patch("upgrade_testing_framework.clients.rest_ops.requests")
+@mock.patch("upgrade_testing_clients.rest_ops.requests")
 def test_WHEN_perform_put_AND_success_THEN_as_expected(mock_requests, success_response):
     # Set up test
     mock_requests.put.return_value = success_response

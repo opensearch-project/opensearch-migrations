@@ -1,5 +1,6 @@
 *** Settings ***
 Library    ../lib/OpenSearchClientLibrary.py  ${host}  ${port}
+Library    ${rest_client}
 
 *** Keywords ***
 #Create an index

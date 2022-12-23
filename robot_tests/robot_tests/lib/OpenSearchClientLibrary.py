@@ -1,6 +1,6 @@
 from opensearchpy import OpenSearch
 
-# Change this library to use REST requests instead of Python client
+# Remove opensearch python client functions here in favor of shared clients package
 class OpenSearchClientLibrary(object):
 
     def __init__(self, host="localhost", port=9200):

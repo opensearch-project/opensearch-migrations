@@ -9,7 +9,7 @@ from upgrade_testing_framework.cluster_management.docker_framework_client import
 from upgrade_testing_framework.cluster_management.node import ContainerConfiguration, Node, NodeConfiguration
 from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
 from upgrade_testing_framework.core.test_config_wrangling import ClusterConfig
-import upgrade_testing_framework.core.versions_engine as ev
+import upgrade_testing_clients.versions_engine as ev
 
 class ClusterNotRunningException(Exception):
     def __init__(self):

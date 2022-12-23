@@ -6,7 +6,7 @@ from upgrade_testing_framework.cluster_management.container_configuration import
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient
 from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
 
-from upgrade_testing_framework.core.versions_engine import EngineVersion
+from upgrade_testing_clients.versions_engine import EngineVersion
 
 STATE_NOT_STARTED = "NOT_STARTED"
 STATE_RUNNING = "RUNNING"

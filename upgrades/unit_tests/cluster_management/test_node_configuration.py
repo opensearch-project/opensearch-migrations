@@ -1,5 +1,5 @@
 from upgrade_testing_framework.cluster_management.node_configuration import NodeConfiguration
-import upgrade_testing_framework.core.versions_engine as ev
+import upgrade_testing_clients.versions_engine as ev
 
 def test_WHEN_create_NodeConfiguration_AND_elasticsearch_THEN_has_expected_values():
     # Set up our test

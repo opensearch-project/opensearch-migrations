@@ -1,6 +1,6 @@
 import pytest
 
-import upgrade_testing_framework.core.versions_engine as versions
+import upgrade_testing_clients.versions_engine as versions
 
 def test_WHEN_get_version_AND_valid_es_THEN_returns():
     # Run our test

@@ -12,8 +12,7 @@ setuptools.setup(
         "docker",
         "pexpect",
         "py",
-        "pytest",
-        "requests"
+        "pytest"
     ],
     python_requires=">=3.6",
 )

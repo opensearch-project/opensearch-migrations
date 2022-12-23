@@ -138,7 +138,8 @@ class TestFrameworkRunner():
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
             'test_config_path': TEST_CONFIG_FILE_PATH,
-            'test_results_directory': test_workspace.test_results_directory
+            'test_results_pre_upgrade_directory': test_workspace.test_results_pre_upgrade_directory,
+            'test_results_post_upgrade_directory': test_workspace.test_results_post_upgrade_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
@@ -164,7 +165,8 @@ class TestFrameworkRunner():
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
             'test_config_path': TEST_CONFIG_FILE_PATH,
-            'test_results_directory': test_workspace.test_results_directory
+            'test_results_pre_upgrade_directory': test_workspace.test_results_pre_upgrade_directory,
+            'test_results_post_upgrade_directory': test_workspace.test_results_post_upgrade_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
@@ -190,7 +192,8 @@ class TestFrameworkRunner():
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
             'test_config_path': TEST_CONFIG_FILE_PATH,
-            'test_results_directory': test_workspace.test_results_directory
+            'test_results_pre_upgrade_directory': test_workspace.test_results_pre_upgrade_directory,
+            'test_results_post_upgrade_directory': test_workspace.test_results_post_upgrade_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
@@ -216,7 +219,8 @@ class TestFrameworkRunner():
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
             'test_config_path': TEST_CONFIG_FILE_PATH,
-            'test_results_directory': test_workspace.test_results_directory
+            'test_results_pre_upgrade_directory': test_workspace.test_results_pre_upgrade_directory,
+            'test_results_post_upgrade_directory': test_workspace.test_results_post_upgrade_directory
         }
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 

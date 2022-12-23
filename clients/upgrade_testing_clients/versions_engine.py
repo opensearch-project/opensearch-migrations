@@ -3,6 +3,11 @@ from dataclasses import dataclass
 ENGINE_ELASTICSEARCH = "Elasticsearch"
 ENGINE_OPENSEARCH = "OpenSearch"
 
+'''
+This module doesn't have a clear home currently. It will be useful for a range of cases and should belong
+in a shared package, however its only use case is not limited to interaction with rest clients.
+'''
+
 class CouldNotParseEngineVersionException(Exception):
     def __init__(self, version_string: str):
         super().__init__(f"Could not parse version string: {version_string}.  Expected something like 'ES_7_10_2' or"

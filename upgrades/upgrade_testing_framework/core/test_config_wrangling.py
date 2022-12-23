@@ -2,7 +2,6 @@ import json
 import os
 from typing import Dict, List
 
-import upgrade_testing_framework.core.versions_engine as ev
 
 class TestConfigFileDoesntExistException(Exception):
     def __init__(self, test_config_path_full):
