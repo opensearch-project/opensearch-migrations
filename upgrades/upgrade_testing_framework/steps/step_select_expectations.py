@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from upgrade_testing_framework.core.framework_step import FrameworkStep
-from upgrade_testing_framework.core.expectation import Expectation, load_knowledge_base
+from upgrade_testing_framework.core.expectation import load_knowledge_base
 
 
 class SelectExpectations(FrameworkStep):
@@ -22,7 +22,8 @@ class SelectExpectations(FrameworkStep):
         expectations = load_knowledge_base(path_to_knowledge_base)
         # Filter for relevant ones
         relevant_expectation_ids = [e.id for e in expectations
-            if e.is_relevant_to_version(source_version) or e.is_relevant_to_version(target_version)]
+                                    if e.is_relevant_to_version(source_version) or
+                                    e.is_relevant_to_version(target_version)]
         self.logger.info(f"Found {len(relevant_expectation_ids)} relevant expectations.")
         self.logger.debug(f"Relevant expectations: {relevant_expectation_ids}")
 
