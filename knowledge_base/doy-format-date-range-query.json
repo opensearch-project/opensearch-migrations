@@ -3,10 +3,10 @@
         "id": "doy-format-date-range-query-bug",
         "description": "Given 1/ an index created in ES 7.x; 2/ documents with dates uploaded in a yyyy-DDD (day of year) format, and a query that uses an inclusive date range, the results of the query will fail to include documents where the date of the document is the same day as the inclusive endpoint of the range. See https://github.com/opensearch-project/OpenSearch/issues/4285",
         "versions":
-        {
+        [{
             "gte": "ES_7_0_0",
             "lt": "OS_2_4_0"
-        }
+        }]
     },
     {
         "id": "doy-format-date-range-query-bug-fix",

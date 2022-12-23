@@ -13,7 +13,7 @@ class SelectExpectations(FrameworkStep):
         # Get the state we need
         source_version = self.state.test_config.clusters_def.source.engine_version
         target_version = self.state.test_config.clusters_def.target.engine_version
-        # path_to_knowledge_base = self.state.test_config.path_to_knowledge_base
+
         path_to_knowledge_base = Path("../knowledge_base")
 
         # Begin the step body
@@ -22,8 +22,8 @@ class SelectExpectations(FrameworkStep):
         expectations = load_knowledge_base(path_to_knowledge_base)
         # Filter for relevant ones
         relevant_expectation_ids = [e.id for e in expectations
-                                    if e.is_relevant_to_version(source_version) or
-                                    e.is_relevant_to_version(target_version)]
+                                    if e.applies_to_version(source_version) or
+                                    e.applies_to_version(target_version)]
         self.logger.info(f"Found {len(relevant_expectation_ids)} relevant expectations.")
         self.logger.debug(f"Relevant expectations: {relevant_expectation_ids}")
 
