@@ -15,6 +15,6 @@ SNAPSHOT_RESTORE_STEPS = [
     steps.PerformPostUpgradeTest,
     steps.StopSourceCluster,
     steps.StopTargetCluster,
-    steps.SnapshotRestoreTeardown
+    steps.SnapshotRestoreTeardown,
     steps.ReportResults
 ]
