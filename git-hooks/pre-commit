@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+
+ABORT = 1
+
+
+if __name__ == '__main__':
+    try:
+        abort = False
+        abort_messages = []
+        skip_flake8 = False
+        FLAKE8_CFG_FILE = '.flake8'
+
+        # Get base folder of repo
+        loc_proc = subprocess.Popen('git rev-parse --show-toplevel'.split(), stdout=subprocess.PIPE)
+        repo_base_folder = loc_proc.communicate()[0].decode('utf-8').strip()
+        flake8_config_path = os.path.join(repo_base_folder, FLAKE8_CFG_FILE)
+
+        if not os.path.isfile(flake8_config_path):
+            skip_flake8 = True
+            print('Warning: Could not find flake8 config file at repo base ({}).'.format(flake8_config_path))
+
+        if skip_flake8:
+            print('________________________' + 'Skipping Flake8' + '_______________________')
+        else:
+            print('________________________' + 'Running Flake8' + '_______________________')
+            flake8_proc = subprocess.Popen('python3 -m flake8 --config={}'.format(flake8_config_path).split(),
+                                           stdout=subprocess.PIPE)
+            flake_output = flake8_proc.communicate()[0].decode('utf-8')
+            num_flake8_errors = len(flake_output.splitlines())
+            if num_flake8_errors:
+                print(flake_output)
+                abort_messages.append(('{} flake8 errors. Please fix code style before committing.'
+                                      .format(num_flake8_errors)))
+                abort = True
+
+    except Exception as error:
+        abort = True
+        print('Exception occurred during git pre-commit validation:\n{}.'.format(str(error)), file=sys.stderr)
+    finally:
+        if abort:
+            print('________________________' + 'Aborting Commit' + '_______________________')
+            for msg in abort_messages:
+                print(msg)
+            sys.exit(ABORT)
+        print('___________________' + 'pre-commit checks passed' + '___________________')
