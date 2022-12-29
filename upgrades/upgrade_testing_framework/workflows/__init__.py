@@ -16,4 +16,5 @@ SNAPSHOT_RESTORE_STEPS = [
     steps.StopSourceCluster,
     steps.StopTargetCluster,
     steps.SnapshotRestoreTeardown
+    steps.ReportResults
 ]
