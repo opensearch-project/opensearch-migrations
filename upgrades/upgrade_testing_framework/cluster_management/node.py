@@ -16,17 +16,17 @@ STATE_CLEANED = "CLEANED_UP"
 
 class NodeNotRunningException(Exception):
     def __init__(self):
-        super().__init__(f"The node is not currently running")
+        super().__init__("The node is not currently running")
 
 
 class NodeNotStoppedException(Exception):
     def __init__(self):
-        super().__init__(f"The node is not stopped")
+        super().__init__("The node is not stopped")
 
 
 class NodeRestartNotAllowedException(Exception):
     def __init__(self):
-        super().__init__(f"Restarting stopped nodes is not yet allowed")
+        super().__init__("Restarting stopped nodes is not yet allowed")
 
 
 class Node:

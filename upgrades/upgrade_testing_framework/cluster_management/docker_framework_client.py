@@ -13,13 +13,13 @@ import upgrade_testing_framework.core.shell_interactions as shell
 
 class DockerNotInPathException(Exception):
     def __init__(self):
-        super().__init__(f"The 'docker' CLI is not in your system's PATH")
+        super().__init__("The 'docker' CLI is not in your system's PATH")
 
 
 class DockerNotResponsiveException(Exception):
     def __init__(self, original_exception):
         self.original_exception = original_exception
-        super().__init__(f"The Docker server on your system is not responsive")
+        super().__init__("The Docker server on your system is not responsive")
 
 
 class DockerImageUnavailableException(Exception):

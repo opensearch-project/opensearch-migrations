@@ -15,22 +15,22 @@ import upgrade_testing_framework.core.versions_engine as ev
 
 class ClusterNotRunningException(Exception):
     def __init__(self):
-        super().__init__(f"The cluster is not currently running")
+        super().__init__("The cluster is not currently running")
 
 
 class ClusterNotStartedInTimeException(Exception):
     def __init__(self):
-        super().__init__(f"The cluster did not start up within the specified time frame")
+        super().__init__("The cluster did not start up within the specified time frame")
 
 
 class ClusterNotStoppedException(Exception):
     def __init__(self):
-        super().__init__(f"The cluster is not currently stopped")
+        super().__init__("The cluster is not currently stopped")
 
 
 class ClusterRestartNotAllowedException(Exception):
     def __init__(self):
-        super().__init__(f"Restarting stopped clusters is not yet allowed")
+        super().__init__("Restarting stopped clusters is not yet allowed")
 
 
 STATE_NOT_STARTED = "NOT_STARTED"

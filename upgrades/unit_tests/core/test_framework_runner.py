@@ -96,6 +96,7 @@ def state_file_for_resume(test_workspace):
 
 TEST_CONFIG_FILE_PATH = "./path/to/test_config.json"
 
+
 # This patch replaces the namespace of the "steps" module with that of this current file
 @mock.patch('upgrade_testing_framework.core.framework_runner.steps', sys.modules[__name__])
 class TestFrameworkRunner():
