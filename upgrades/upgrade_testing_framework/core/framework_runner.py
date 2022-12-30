@@ -7,6 +7,7 @@ from upgrade_testing_framework.core.framework_state import FrameworkState, get_i
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 from upgrade_testing_framework.core.logging_wrangler import FrameworkLoggingAdapter, LoggingWrangler
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
+import upgrade_testing_framework.steps as steps  # noqa F401 -- used by the unit tests
 import upgrade_testing_framework.workflows as workflows
 
 ISSUE_LINK = "https://github.com/opensearch-project/opensearch-migrations/issues/new/choose"

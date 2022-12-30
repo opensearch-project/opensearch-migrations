@@ -99,7 +99,6 @@ TEST_CONFIG_FILE_PATH = "./path/to/test_config.json"
 # This patch replaces the namespace of the "steps" module with that of this current file
 @mock.patch('upgrade_testing_framework.core.framework_runner.steps', sys.modules[__name__])
 class TestFrameworkRunner():
-
     def test_WHEN_run_called_THEN_invokes_all_steps(self, reset_call_register, test_logging_context, test_workspace):
         # Test values
         step_order = [Step1, Step2, Step3]
@@ -169,7 +168,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        # end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        end_state = runner.run(TEST_CONFIG_FILE_PATH)  # noqa F841
 
         # Check our results
         expected_app_state = {
@@ -196,7 +195,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        # end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        end_state = runner.run(TEST_CONFIG_FILE_PATH)  # noqa F841
 
         # Check our results
         expected_app_state = {
@@ -223,7 +222,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        # end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        end_state = runner.run(TEST_CONFIG_FILE_PATH)  # noqa F841
 
         # Check our results
         expected_app_state = {
