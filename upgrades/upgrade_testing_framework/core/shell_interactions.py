@@ -7,11 +7,13 @@ import pexpect
 
 logger = logging.getLogger(__name__)
 
-def call_shell_command(command: str, cwd: str = None, env: str = None, request_response_pairs: List[Tuple[str, str]] = [], suppress_stdout: bool = False):
+
+def call_shell_command(command: str, cwd: str = None, env: str = None,
+                       request_response_pairs: List[Tuple[str, str]] = [], suppress_stdout: bool = False):
     """
     Execute a command in a child shell process.  By default, stdout from the child process is logged at the DEBUG
     level.
-    
+
     The user can optionally supply a list of request/response pairs in order to handle command invocations that expect
     a user response.  For example, if the shell command invocation requires the user to confirm an action with a "yes"
     response, the user might specify an argument value like:
@@ -31,24 +33,25 @@ def call_shell_command(command: str, cwd: str = None, env: str = None, request_r
 
     while True:
         # Get the list of things we're looking for to delineate the end of the next chunk of output
-        default_expectation = [os.linesep, pexpect.EOF] # by default, we just look for line seps and then end of output
-        expectations = [pair[0] for pair in request_response_pairs] # look for any user-provided values first
-        expectations.extend(default_expectation) # then our default stuff
+        default_expectation = [os.linesep, pexpect.EOF]  # by default, we just look for line seps and then end of output
+        expectations = [pair[0] for pair in request_response_pairs]  # look for any user-provided values first
+        expectations.extend(default_expectation)  # then our default stuff
 
         responses = [pair[1] for pair in request_response_pairs]
         match_number = process_handle.expect(expectations)
 
-        if match_number < len(responses): # if we found a user-supplied value, then supply the response
+        if match_number < len(responses):  # if we found a user-supplied value, then supply the response
             logger.debug("Found Match: {}".format(match_number))
             process_handle.sendline(responses[match_number])
 
         _store_and_print_output(process_handle.before, std_out, suppress_stdout)
 
-        if match_number == len(expectations) - 1: # EOF, i.e. the end of the output
+        if match_number == len(expectations) - 1:  # EOF, i.e. the end of the output
             break
 
     process_handle.close()
     return (process_handle.exitstatus, std_out)
+
 
 def _store_and_print_output(output, container, suppress):
     if output:
@@ -58,9 +61,11 @@ def _store_and_print_output(output, container, suppress):
             no_ansi_codes = _remove_ansi_codes(unicode_output)
             logger.debug(no_ansi_codes)
 
+
 def _remove_ansi_codes(text: str):
     # See: https://en.wikipedia.org/wiki/ANSI_escape_code
     return re.sub('(\\[[0-9]+m|\x1b)', '', text)
+
 
 def remove_ansi_escape_sequences(string_to_clean: str):
     """

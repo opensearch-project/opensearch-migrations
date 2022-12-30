@@ -1,6 +1,7 @@
 import os
 
-DEFAULT_BASE_DIR = '/tmp/utf' #arbitrarily chosen
+DEFAULT_BASE_DIR = '/tmp/utf'  # arbitrarily chosen
+
 
 class WorkspaceWrangler:
     """
@@ -15,7 +16,7 @@ class WorkspaceWrangler:
         if not os.path.exists(self.utf_base_directory):
             print("Base directory ({}) doesn't exist, creating...".format(self.utf_base_directory))
             os.makedirs(self.utf_base_directory)
-            
+
         if not os.path.exists(self.logs_directory):
             print("Logs directory ({}) doesn't exist, creating...".format(self.logs_directory))
             os.makedirs(self.logs_directory)

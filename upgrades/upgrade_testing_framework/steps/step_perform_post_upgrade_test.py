@@ -1,6 +1,7 @@
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 from robot_tests.test_executor import TestExecutor
 
+
 class PerformPostUpgradeTest(FrameworkStep):
     """
     This step is where you run post-upgrade tests

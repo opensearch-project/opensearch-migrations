@@ -10,18 +10,22 @@ from docker.types import Ulimit
 
 import upgrade_testing_framework.core.shell_interactions as shell
 
+
 class DockerNotInPathException(Exception):
     def __init__(self):
         super().__init__(f"The 'docker' CLI is not in your system's PATH")
+
 
 class DockerNotResponsiveException(Exception):
     def __init__(self, original_exception):
         self.original_exception = original_exception
         super().__init__(f"The Docker server on your system is not responsive")
 
+
 class DockerImageUnavailableException(Exception):
     def __init__(self, image: str):
         super().__init__(f"The Docker {image} is not available either locally or in your remote repos")
+
 
 class DockerVolume(NamedTuple):
     mount_point: str
@@ -33,6 +37,7 @@ class DockerVolume(NamedTuple):
             "volume": self.volume.attrs
         }
 
+
 class PortMapping(NamedTuple):
     container_port: int
     host_port: int
@@ -43,11 +48,12 @@ class PortMapping(NamedTuple):
             "host_port": self.host_port
         }
 
+
 class DockerFrameworkClient:
     def _try_create_docker_client() -> docker.client.DockerClient:
         # First check to see if Docker is available in the user's PATH.  The Docker SDK doesn't provide a good
         # way to distinguish between this case and Docker just not running.
-        exit_code, _ = shell.call_shell_command("which docker") # TODO not platform agnostic, and should wrap this
+        exit_code, _ = shell.call_shell_command("which docker")  # TODO not platform agnostic, and should wrap this
         if exit_code != 0:
             raise DockerNotInPathException
 
@@ -62,7 +68,7 @@ class DockerFrameworkClient:
     def __init__(self, logger=logging.getLogger(__name__), docker_client=None):
         self.logger = logger
 
-        if docker_client == None:
+        if docker_client is None:
             self._docker_client = DockerFrameworkClient._try_create_docker_client()
         else:
             self._docker_client = docker_client
@@ -75,7 +81,7 @@ class DockerFrameworkClient:
             return False
         self.logger.debug(f"Image {image} is available locally")
         return True
-    
+
     def pull_image(self, image: str):
         self.logger.debug(f"Attempting to pull image {image} from remote repository...")
         try:
@@ -106,8 +112,9 @@ class DockerFrameworkClient:
         volume.remove()
         self.logger.debug(f"Removed volume {volume.name}")
 
-    def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping], volumes: List[DockerVolume], 
-            ulimits: List[Ulimit], env_variables: Dict[str, str]) -> Container:
+    def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping],
+                         volumes: List[DockerVolume], ulimits: List[Ulimit], env_variables: Dict[str, str]
+                         ) -> Container:
 
         # TODO - need handle if container already exists (name collision)
         # TODO - need handle if we exceed the resource allocation for Docker
@@ -116,7 +123,7 @@ class DockerFrameworkClient:
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
         port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
         volume_mapping = {dv.volume.attrs["Name"]: {"bind": dv.mount_point, "mode": "rw"} for dv in volumes}
-        
+
         self.logger.debug(f"Creating container {container_name}...")
         container = self._docker_client.containers.run(
             image,
@@ -152,10 +159,3 @@ class DockerFrameworkClient:
         self.logger.debug(f"Setting ownership of {dir} to {new_owner} in container {container.name}...")
         chown_command = f"chown -R {new_owner} {dir}"
         self.run_command(container, chown_command)
-
-        
-
-
-    
-
-    

@@ -7,6 +7,7 @@ from requests.auth import HTTPBasicAuth
 
 logger = logging.getLogger(__name__)
 
+
 class RESTOperationFailedException(Exception):
     def __init__(self, operation: str, url: str, status_code: int, text: str):
         self.operation = operation
@@ -15,16 +16,18 @@ class RESTOperationFailedException(Exception):
         self.text = text
         super().__init__(f"REST operation {operation} to {url} failed with code {status_code}.  Message: {text}")
 
+
 @dataclass
 class RESTPath:
     port: int = 9200
     prefix: str = "http://localhost"
     suffix: str = ""
-    
+
     def __str__(self):
         # Something like: "http://localhost:9200/"
         base_path = f"{self.prefix}:{self.port}"
         return "/".join([base_path, self.suffix])
+
 
 @dataclass
 class RESTResponse:
@@ -55,7 +58,9 @@ class RESTResponse:
     def __str__(self):
         return json.dumps(self.to_dict())
 
-def perform_get(rest_path: RESTPath = RESTPath(), params: dict = {}, auth = HTTPBasicAuth("admin", "admin")) -> RESTResponse:
+
+def perform_get(rest_path: RESTPath = RESTPath(), params: dict = {},
+                auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
     raw_reponse = requests.get(
         url=str(rest_path),
         auth=auth,
@@ -66,8 +71,9 @@ def perform_get(rest_path: RESTPath = RESTPath(), params: dict = {}, auth = HTTP
     logger.debug(f"REST GET Response : {rest_response}")
     return rest_response
 
-def perform_post(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {}, 
-        auth = HTTPBasicAuth("admin", "admin")) -> RESTResponse:
+
+def perform_post(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {},
+                 auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
     raw_reponse = requests.post(
         url=str(rest_path),
         auth=auth,
@@ -80,8 +86,9 @@ def perform_post(rest_path: RESTPath = RESTPath(), data: str = "", params: dict 
     logger.debug(f"REST POST Response : {rest_response}")
     return rest_response
 
-def perform_put(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {}, 
-        auth = HTTPBasicAuth("admin", "admin")) -> RESTResponse:
+
+def perform_put(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {},
+                auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
     raw_reponse = requests.put(
         url=str(rest_path),
         auth=auth,

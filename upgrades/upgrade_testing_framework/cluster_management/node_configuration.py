@@ -2,19 +2,22 @@ from typing import Dict, List
 
 import upgrade_testing_framework.core.versions_engine as ev
 
+
 def _get_engine_data_dir_for_version(version: ev.EngineVersion) -> str:
     if ev.ENGINE_ELASTICSEARCH == version.engine:
         return "/usr/share/elasticsearch/data"
     return "/usr/share/opensearch/data"
+
 
 def _get_engine_user_for_version(version: ev.EngineVersion) -> str:
     if ev.ENGINE_ELASTICSEARCH == version.engine:
         return "elasticsearch"
     return "elasticsearch"
 
+
 class NodeConfiguration:
-    def __init__(self, engine_version: ev.EngineVersion, node_name: str, cluster_name: str, master_nodes: List[str], 
-            seed_hosts: List[str], additional_config: Dict[str, str] = {}):
+    def __init__(self, engine_version: ev.EngineVersion, node_name: str, cluster_name: str, master_nodes: List[str],
+                 seed_hosts: List[str], additional_config: Dict[str, str] = {}):
 
         self.engine_version = engine_version
 
@@ -40,4 +43,3 @@ class NodeConfiguration:
             "engine_version": str(self.engine_version),
             "user": self.user
         }
-

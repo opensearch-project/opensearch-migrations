@@ -1,5 +1,6 @@
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 
+
 class StopTargetCluster(FrameworkStep):
     """
     This step tears down the target cluster and its resources.
@@ -17,5 +18,3 @@ class StopTargetCluster(FrameworkStep):
 
         # Update our state
         # N/A
-        
-        

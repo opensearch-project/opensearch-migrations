@@ -7,17 +7,19 @@ import sys
 import upgrade_testing_framework.core.exception_base as exceptions
 import upgrade_testing_framework.core.constants as constants
 from upgrade_testing_framework.core.framework_runner import FrameworkRunner
-from upgrade_testing_framework.core.framework_state import FrameworkState
 from upgrade_testing_framework.core.logging_wrangler import LoggingWrangler
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 
 call_register = mock.Mock()
 
+
 class ExpectedException(Exception):
     pass
 
+
 class UnexpectedException(Exception):
     pass
+
 
 class MockStep(mock.Mock):
     def __init__(self, *args, **kwargs):
@@ -30,20 +32,25 @@ class MockStep(mock.Mock):
     def cls_name(cls) -> str:
         return cls.__name__
 
+
 class Step1(MockStep):
     pass
+
 
 class Step2(MockStep):
     pass
 
+
 class Step3(MockStep):
     pass
+
 
 class StepAbortException(MockStep):
     def run(self):
         super().run()
         exception = ExpectedException('This is a test')
-        raise exceptions.UserAbortException("User Abort")
+        raise exceptions.UserAbortException("User Abort", exception)
+
 
 class StepRaiseStepFailedException(MockStep):
     def run(self):
@@ -51,34 +58,41 @@ class StepRaiseStepFailedException(MockStep):
         exception = ExpectedException('This is a test')
         raise exceptions.StepFailedException("Fail", exception)
 
+
 class StepRaiseRuntimeFrameworkException(MockStep):
     def run(self):
         super().run()
         exception = UnexpectedException('This is a test')
         raise exceptions.RuntimeFrameworkException(str(exception), exception)
 
+
 class StepRaiseUnhandledException(MockStep):
     def run(self):
         super().run()
         raise UnexpectedException('This is a test')
 
+
 @pytest.fixture
 def reset_call_register():
     setattr(sys.modules[__name__], 'call_register', mock.Mock())
+
 
 @pytest.fixture
 def test_workspace(tmpdir):
     return WorkspaceWrangler(base_directory=tmpdir.strpath)
 
+
 @pytest.fixture
 def test_logging_context(test_workspace):
     return LoggingWrangler(test_workspace)
+
 
 @pytest.fixture
 def state_file_for_resume(test_workspace):
     state = {'current_step': 'Step2'}
     state_file = py.path.local(test_workspace.state_file)
     state_file.write(json.dumps(state, sort_keys=True, indent=4))
+
 
 TEST_CONFIG_FILE_PATH = "./path/to/test_config.json"
 
@@ -103,7 +117,8 @@ class TestFrameworkRunner():
         assert call_register.Step3.called
         assert constants.EXIT_TYPE_SUCCESS == end_state.get_key('exit_type')
 
-    def test_WHEN_run_called_AND_user_abort_THEN_invokes_expected_steps(self, reset_call_register, test_logging_context, test_workspace):
+    def test_WHEN_run_called_AND_user_abort_THEN_invokes_expected_steps(self, reset_call_register,
+                                                                        test_logging_context, test_workspace):
         # Test values
         step_order = [Step1, StepAbortException, Step3]
         runner = FrameworkRunner(test_logging_context, test_workspace, mock.Mock())
@@ -143,8 +158,9 @@ class TestFrameworkRunner():
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
         assert expected_app_state == actual_contents["app_state"]
-    
-    def test_WHEN_run_called_AND_step_throws_exception_THEN_writes_state_file_AND_exits_normally(self, reset_call_register, test_logging_context, test_workspace):
+
+    def test_WHEN_run_called_AND_step_throws_exception_THEN_writes_state_file_AND_exits_normally(
+            self, reset_call_register, test_logging_context, test_workspace):
         # Test values
         step_order = [Step1, StepRaiseRuntimeFrameworkException, Step3]
         runner = FrameworkRunner(test_logging_context, test_workspace, mock.Mock())
@@ -153,7 +169,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        # end_state = runner.run(TEST_CONFIG_FILE_PATH)
 
         # Check our results
         expected_app_state = {
@@ -170,7 +186,8 @@ class TestFrameworkRunner():
 
         assert expected_app_state == actual_contents["app_state"]
 
-    def test_WHEN_run_called_AND_step_fails_THEN_writes_state_file_AND_exits_normally(self, reset_call_register, test_logging_context, test_workspace):
+    def test_WHEN_run_called_AND_step_fails_THEN_writes_state_file_AND_exits_normally(
+            self, reset_call_register, test_logging_context, test_workspace):
         # Test values
         step_order = [Step1, StepRaiseStepFailedException, Step3]
         runner = FrameworkRunner(test_logging_context, test_workspace, mock.Mock())
@@ -179,7 +196,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        # end_state = runner.run(TEST_CONFIG_FILE_PATH)
 
         # Check our results
         expected_app_state = {
@@ -195,8 +212,9 @@ class TestFrameworkRunner():
         actual_contents = json.load(py.path.local(test_workspace.state_file))
 
         assert expected_app_state == actual_contents["app_state"]
-    
-    def test_WHEN_run_called_AND_step_throws_unhandled_exception_THEN_writes_state_file_AND_exits_normally(self, reset_call_register, test_logging_context, test_workspace):
+
+    def test_WHEN_run_called_AND_step_throws_unhandled_exception_THEN_writes_state_file_AND_exits_normally(
+            self, reset_call_register, test_logging_context, test_workspace):
         # Test values
         step_order = [Step1, StepRaiseUnhandledException, Step3]
         runner = FrameworkRunner(test_logging_context, test_workspace, mock.Mock())
@@ -205,7 +223,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        # end_state = runner.run(TEST_CONFIG_FILE_PATH)
 
         # Check our results
         expected_app_state = {

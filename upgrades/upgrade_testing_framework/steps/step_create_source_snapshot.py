@@ -2,6 +2,7 @@ import upgrade_testing_framework.clients as clients
 from upgrade_testing_framework.cluster_management.cluster_objects import ClusterSnapshot
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 
+
 class CreateSourceSnapshot(FrameworkStep):
     """
     This step creates the snapshot on the source cluster.
@@ -14,7 +15,7 @@ class CreateSourceSnapshot(FrameworkStep):
 
         # Begin the step body
         self.logger.info("Creating snapshot of source cluster...")
-        node = source_cluster.nodes[0] # shouldn't matter which node we pick
+        node = source_cluster.nodes[0]  # shouldn't matter which node we pick
         port = node.rest_port
         engine_version = node.engine_version
         rest_client = clients.get_rest_client(engine_version)
@@ -29,7 +30,6 @@ class CreateSourceSnapshot(FrameworkStep):
             self.logger.info("Source snapshot created successfully")
         else:
             self.fail("Snapshot creation failed")
-        
+
         # Update our state
         self.state.snapshot = ClusterSnapshot(repo_name, snapshot_id)
-        

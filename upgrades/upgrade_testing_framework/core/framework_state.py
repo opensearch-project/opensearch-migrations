@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerFrameworkClient, DockerVolume
 from upgrade_testing_framework.cluster_management.cluster import Cluster
@@ -16,6 +15,8 @@ upgrade styles, as that should force changes in this class.
 
 In general though, it is recommended that this be an append-only data store for the application.
 """
+
+
 class FrameworkState:
     def __init__(self, state: dict):
         self.docker_client: DockerFrameworkClient = None
@@ -50,6 +51,7 @@ class FrameworkState:
     def set_key(self, key: str, value: any) -> any:
         self._app_state[key] = value
         return value
+
 
 def get_initial_state(test_config_path: str) -> FrameworkState:
     beginning_state = {}

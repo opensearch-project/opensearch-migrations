@@ -4,6 +4,7 @@ import unittest.mock as mock
 import upgrade_testing_framework.cluster_management.node as node
 import upgrade_testing_framework.cluster_management.docker_framework_client as dfc
 
+
 def test_WHEN_node_start_THEN_as_expected():
     # Set up our test
     test_container = mock.Mock()
@@ -48,6 +49,7 @@ def test_WHEN_node_start_THEN_as_expected():
 
     assert node.STATE_RUNNING == test_node._node_state
 
+
 def test_WHEN_node_start_AND_already_running_THEN_no_op():
     # Set up our test
     test_container_config = mock.Mock()
@@ -67,6 +69,7 @@ def test_WHEN_node_start_AND_already_running_THEN_no_op():
     expected_ownership_calls = []
     assert expected_ownership_calls == test_docker_client.set_ownership_of_directory.call_args_list
 
+
 def test_WHEN_node_start_AND_stopped_THEN_raises():
     # Set up our test
     test_container_config = mock.Mock()
@@ -81,6 +84,7 @@ def test_WHEN_node_start_AND_stopped_THEN_raises():
     with pytest.raises(node.NodeRestartNotAllowedException):
         test_node.start()
 
+
 def test_WHEN_node_start_AND_cleaned_THEN_raises():
     # Set up our test
     test_container_config = mock.Mock()
@@ -94,6 +98,7 @@ def test_WHEN_node_start_AND_cleaned_THEN_raises():
 
     with pytest.raises(node.NodeRestartNotAllowedException):
         test_node.start()
+
 
 def test_WHEN_node_stop_THEN_as_expected():
     # Set up our test
@@ -116,6 +121,7 @@ def test_WHEN_node_stop_THEN_as_expected():
     assert expected_stop_calls == test_docker_client.stop_container.call_args_list
     assert node.STATE_STOPPED == test_node._node_state
 
+
 def test_WHEN_node_stop_AND_not_started_THEN_no_op():
     # Set up our test
     test_container = mock.Mock()
@@ -131,6 +137,7 @@ def test_WHEN_node_stop_AND_not_started_THEN_no_op():
     # Check the results
     expected_stop_calls = []
     assert expected_stop_calls == test_docker_client.stop_container.call_args_list
+
 
 def test_WHEN_node_clean_up_THEN_as_expected():
     # Set up our test
@@ -151,8 +158,9 @@ def test_WHEN_node_clean_up_THEN_as_expected():
     )]
     assert expected_value == test_docker_client.remove_container.call_args_list
 
-    assert None == test_node._container
+    assert None is test_node._container
     assert node.STATE_CLEANED == test_node._node_state
+
 
 def test_WHEN_node_clean_up_AND_not_stopped_THEN_raises():
     # Set up our test
@@ -166,6 +174,7 @@ def test_WHEN_node_clean_up_AND_not_stopped_THEN_raises():
 
     with pytest.raises(node.NodeNotStoppedException):
         test_node.clean_up()
+
 
 def test_WHEN_node_is_active_AND_active_THEN_returns_true():
     # Set up our test
@@ -188,7 +197,8 @@ def test_WHEN_node_is_active_AND_active_THEN_returns_true():
     )]
     assert expected_args == test_docker_client.run_command.call_args_list
 
-    assert True == actual_value
+    assert True is actual_value
+
 
 def test_WHEN_node_is_active_AND_inactive_THEN_returns_false():
     # Set up our test
@@ -204,13 +214,14 @@ def test_WHEN_node_is_active_AND_inactive_THEN_returns_false():
     actual_value = test_node.is_active()
 
     # Check the results
-    assert False == actual_value
+    assert False is actual_value
+
 
 def test_WHEN_node_is_active_AND_not_started_THEN_returns_false():
     # Set up our test
     test_container_config = mock.Mock()
     test_docker_client = mock.Mock()
-    test_docker_client.run_command.return_value = (0, "") # Will cause True to be returned if not working
+    test_docker_client.run_command.return_value = (0, "")  # Will cause True to be returned if not working
     test_node_config = mock.Mock()
     test_node_name = "node-name"
 
@@ -219,4 +230,4 @@ def test_WHEN_node_is_active_AND_not_started_THEN_returns_false():
     actual_value = test_node.is_active()
 
     # Check the results
-    assert False == actual_value
+    assert False is actual_value

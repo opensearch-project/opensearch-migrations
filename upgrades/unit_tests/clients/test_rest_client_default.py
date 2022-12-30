@@ -12,6 +12,7 @@ TEST_PORT = 9200
 TEST_REPO = "repo"
 TEST_SNAPSHOT_ID = "snapshot"
 
+
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
 def test_WHEN_get_node_info_THEN_as_expected(mock_get):
     # Set up test
@@ -26,9 +27,10 @@ def test_WHEN_get_node_info_THEN_as_expected(mock_get):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT)
+        rest_path=RESTPath(port=TEST_PORT)
     )]
     assert expected_calls == mock_get.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
 def test_WHEN_get_nodes_status_THEN_as_expected(mock_get):
@@ -44,10 +46,11 @@ def test_WHEN_get_nodes_status_THEN_as_expected(mock_get):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = "_cat/nodes"),
-        params = {"v": "true", "pretty": "true"}
+        rest_path=RESTPath(port=TEST_PORT, suffix="_cat/nodes"),
+        params={"v": "true", "pretty": "true"}
     )]
     assert expected_calls == mock_get.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
 def test_WHEN_get_doc_by_id_THEN_as_expected(mock_get):
@@ -63,10 +66,11 @@ def test_WHEN_get_doc_by_id_THEN_as_expected(mock_get):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = f"{TEST_INDEX}/_doc/{TEST_DOC_ID}"),
-        params = {"pretty": "true"}
+        rest_path=RESTPath(port=TEST_PORT, suffix=f"{TEST_INDEX}/_doc/{TEST_DOC_ID}"),
+        params={"pretty": "true"}
     )]
     assert expected_calls == mock_get.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
 def test_WHEN_post_doc_to_index_THEN_as_expected(mock_post):
@@ -82,12 +86,13 @@ def test_WHEN_post_doc_to_index_THEN_as_expected(mock_post):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = f"{TEST_INDEX}/_doc"),
-        data = json.dumps(TEST_DOC),
-        params = {"pretty": "true"},
-        headers = {"Content-Type": "application/json"}
+        rest_path=RESTPath(port=TEST_PORT, suffix=f"{TEST_INDEX}/_doc"),
+        data=json.dumps(TEST_DOC),
+        params={"pretty": "true"},
+        headers={"Content-Type": "application/json"}
     )]
     assert expected_calls == mock_post.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
 def test_WHEN_create_snapshot_THEN_as_expected(mock_post):
@@ -103,10 +108,11 @@ def test_WHEN_create_snapshot_THEN_as_expected(mock_post):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = f"_snapshot/{TEST_REPO}/{TEST_SNAPSHOT_ID}"),
-        params = {"pretty": "true", "wait_for_completion": "true"}
+        rest_path=RESTPath(port=TEST_PORT, suffix=f"_snapshot/{TEST_REPO}/{TEST_SNAPSHOT_ID}"),
+        params={"pretty": "true", "wait_for_completion": "true"}
     )]
     assert expected_calls == mock_post.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
 def test_WHEN_get_snapshot_by_id_THEN_as_expected(mock_get):
@@ -122,10 +128,11 @@ def test_WHEN_get_snapshot_by_id_THEN_as_expected(mock_get):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = f"_snapshot/{TEST_REPO}/{TEST_SNAPSHOT_ID}"),
-        params = {"pretty": "true"}
+        rest_path=RESTPath(port=TEST_PORT, suffix=f"_snapshot/{TEST_REPO}/{TEST_SNAPSHOT_ID}"),
+        params={"pretty": "true"}
     )]
     assert expected_calls == mock_get.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_get")
 def test_WHEN_get_snapshots_all_THEN_as_expected(mock_get):
@@ -141,10 +148,11 @@ def test_WHEN_get_snapshots_all_THEN_as_expected(mock_get):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = f"_snapshot/{TEST_REPO}/_all"),
-        params = {"pretty": "true"}
+        rest_path=RESTPath(port=TEST_PORT, suffix=f"_snapshot/{TEST_REPO}/_all"),
+        params={"pretty": "true"}
     )]
     assert expected_calls == mock_get.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
 def test_WHEN_register_snapshot_dir_THEN_as_expected(mock_post):
@@ -160,16 +168,17 @@ def test_WHEN_register_snapshot_dir_THEN_as_expected(mock_post):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = f"_snapshot/{TEST_REPO}"),
-        data = json.dumps({
+        rest_path=RESTPath(port=TEST_PORT, suffix=f"_snapshot/{TEST_REPO}"),
+        data=json.dumps({
             "type": "fs",
-                "settings": {
-                    "location": TEST_DIR
+            "settings": {
+                "location": TEST_DIR
             }
         }),
-        headers = {"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json"}
     )]
     assert expected_calls == mock_post.call_args_list
+
 
 @mock.patch("upgrade_testing_framework.clients.rest_ops.perform_post")
 def test_WHEN_restore_snapshot_THEN_as_expected(mock_post):
@@ -185,7 +194,7 @@ def test_WHEN_restore_snapshot_THEN_as_expected(mock_post):
     assert mock_response == actual_value
 
     expected_calls = [mock.call(
-        rest_path = RESTPath(port = TEST_PORT, suffix = f"_snapshot/{TEST_REPO}/{TEST_SNAPSHOT_ID}/_restore"),
-        params = {"pretty": "true", "wait_for_completion": "true"}
+        rest_path=RESTPath(port=TEST_PORT, suffix=f"_snapshot/{TEST_REPO}/{TEST_SNAPSHOT_ID}/_restore"),
+        params={"pretty": "true", "wait_for_completion": "true"}
     )]
     assert expected_calls == mock_post.call_args_list

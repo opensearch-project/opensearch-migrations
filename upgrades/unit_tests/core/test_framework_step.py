@@ -7,6 +7,7 @@ from upgrade_testing_framework.core.framework_state import FrameworkState
 
 TEST_STATE_DICT = {'key': 'value'}
 
+
 def test_WHEN_run_called_AND_happy_path_THEN_nothing_wacky_happens():
     # Test values
     class TestRule(step.FrameworkStep):
@@ -20,6 +21,7 @@ def test_WHEN_run_called_AND_happy_path_THEN_nothing_wacky_happens():
 
     # Check the results
     assert True
+
 
 @mock.patch('upgrade_testing_framework.core.framework_step.FrameworkLoggingAdapter')
 def test_WHEN_fail_called_THEN_raises(mock_adapter):
@@ -41,6 +43,7 @@ def test_WHEN_fail_called_THEN_raises(mock_adapter):
     # Check the results
     assert mock_logger.error.called
 
+
 @mock.patch('upgrade_testing_framework.core.framework_step.FrameworkLoggingAdapter')
 def test_WHEN_keyboard_interrupt_THEN_captured(mock_adapter):
     # Test values
@@ -55,12 +58,13 @@ def test_WHEN_keyboard_interrupt_THEN_captured(mock_adapter):
     mock_adapter.return_value = mock_logger
 
     # Run our test
-    with pytest.raises(exceptions.UserAbortException) as exc_info:
+    with pytest.raises(exceptions.UserAbortException):
         TestRule(test_state).run()
 
     # Check the results
     assert mock_logger.warn.called
     assert mock_logger.error.called
+
 
 @mock.patch('upgrade_testing_framework.core.framework_step.FrameworkLoggingAdapter')
 def test_WHEN_runtime_exception_in_step_THEN_captured(mock_adapter):
