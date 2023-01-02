@@ -37,3 +37,8 @@ python -m pytest unit_tests/
 
 You can read more about running unit tests with Pytest [here](https://docs.pytest.org/en/7.2.x/how-to/usage.html).  
 
+### Step 3 - Run UTF Framework
+Run the UTF framework with the `run_utf.py` script and a test config file. For the default snapshot/restore upgrade from Elasticsearch 7.10.2 to OpenSearch 1.3.6, it can be invoked with:
+```
+./run_utf.py --test_config test_configs/snapshot_restore_es_7_10_2_to_os_1_3_6.json
+```

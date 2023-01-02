@@ -41,7 +41,7 @@ class ClustersDef:
         return {
             "source": self.source.to_dict(),
             "target": self.target.to_dict()
-        }    
+        }
 
     def __eq__(self, other):
         return self.to_dict() == other.to_dict()

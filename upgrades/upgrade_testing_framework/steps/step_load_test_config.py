@@ -8,7 +8,7 @@ class LoadTestConfig(FrameworkStep):
 
     def _run(self):
         # Get the state we need
-        test_config_path = self._get_state_value("test_config_path") 
+        test_config_path = self._get_state_value("test_config_path")
 
         # Begin the step body
         self.logger.info("Loading test config file...")
