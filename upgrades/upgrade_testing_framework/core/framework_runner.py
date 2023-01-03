@@ -7,14 +7,15 @@ from upgrade_testing_framework.core.framework_state import FrameworkState, get_i
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 from upgrade_testing_framework.core.logging_wrangler import FrameworkLoggingAdapter, LoggingWrangler
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
-import upgrade_testing_framework.steps as steps
+import upgrade_testing_framework.steps as steps  # noqa F401 -- used by the unit tests
 import upgrade_testing_framework.workflows as workflows
 
 ISSUE_LINK = "https://github.com/opensearch-project/opensearch-migrations/issues/new/choose"
 
+
 class FrameworkRunner:
     def __init__(self, logging_context: LoggingWrangler, workspace: WorkspaceWrangler,
-            step_order: List[FrameworkStep] = workflows.SNAPSHOT_RESTORE_STEPS):
+                 step_order: List[FrameworkStep] = workflows.SNAPSHOT_RESTORE_STEPS):
         self.logging_context = logging_context
         self.logger = FrameworkLoggingAdapter(logging.getLogger(__name__), {'step': self.__class__.__name__})
         self.workspace = workspace
@@ -48,25 +49,26 @@ class FrameworkRunner:
             self._set_exit_state_for_exception(state, exception)
         except exceptions.StepFailedException as exception:
             exit_message = (f"A Framework step {current_step.cls_name()} failed.  Please review the terminal and log"
-                f" output to understand why. You can find the log output here: {self.log_file}")
+                            f" output to understand why. You can find the log output here: {self.log_file}")
             self.logger.warning(exit_message)
             cut_an_issue_message = ("Please cut an issue to us on GitHub so that we can address the problem:"
-                f" {ISSUE_LINK}")
+                                    f" {ISSUE_LINK}")
             self.logger.warning(cut_an_issue_message)
             self._set_exit_state_for_exception(state, exception)
         except BaseException as exception:
             try:
-                self.logger.debug('Exception encountered:', exc_info = True)
-                exit_message = (f"We're exiting unexpectedly while attempting step {current_step.cls_name()}. Please review the"
+                self.logger.debug('Exception encountered:', exc_info=True)
+                exit_message = (
+                    f"We're exiting unexpectedly while attempting step {current_step.cls_name()}. Please review the"
                     f"  terminal and log output to understand why.  You can find the log output here: {self.log_file}")
                 self.logger.warning(exit_message)
                 cut_an_issue_message = ("Please cut an issue to us on GitHub so that we can address the problem:"
-                    f" {ISSUE_LINK}")
+                                        f" {ISSUE_LINK}")
                 self.logger.warning(cut_an_issue_message)
                 self._set_exit_state_for_exception(state, exception)
-            except BaseException as exception:
-                self.logger.debug('Exception encountered:', exc_info = True)
-        
+            except BaseException:
+                self.logger.debug('Exception encountered:', exc_info=True)
+
         finally:
             if state.get_key('exit_type') in constants.EXIT_TYPES_FAILURE:
                 self.logger.warning("Step Failed: {}".format(state.get_key('current_step')))
@@ -76,7 +78,7 @@ class FrameworkRunner:
             with open(state.get_key('state_file'), 'w') as config_file:
                 config_file.write(str(state))
             self.logger.info('Application state saved')
-                
+
             self.logger.info("Application state saved to: {}".format(state.get_key('state_file')))
             self.logger.info("Full run details logged to: {}".format(self.log_file))
 

@@ -2,6 +2,7 @@ from upgrade_testing_framework.cluster_management.docker_framework_client import
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 from upgrade_testing_framework.core.constants import UPGRADE_STYLE_SNAPSHOT
 
+
 class SnapshotRestoreSetup(FrameworkStep):
     """
     Setup work for a snapshot/restore upgrade

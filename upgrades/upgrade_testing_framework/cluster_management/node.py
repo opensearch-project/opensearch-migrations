@@ -13,25 +13,29 @@ STATE_RUNNING = "RUNNING"
 STATE_STOPPED = "STOPPED"
 STATE_CLEANED = "CLEANED_UP"
 
+
 class NodeNotRunningException(Exception):
     def __init__(self):
-        super().__init__(f"The node is not currently running")
+        super().__init__("The node is not currently running")
+
 
 class NodeNotStoppedException(Exception):
     def __init__(self):
-        super().__init__(f"The node is not stopped")
+        super().__init__("The node is not stopped")
+
 
 class NodeRestartNotAllowedException(Exception):
     def __init__(self):
-        super().__init__(f"Restarting stopped nodes is not yet allowed")
+        super().__init__("Restarting stopped nodes is not yet allowed")
+
 
 class Node:
     """
     This class encapsulates an ElasticSearch/OpenSearch Node and its underlying process/container/etc.
     """
 
-    def __init__(self, name: str, container_config: ContainerConfiguration, node_config: NodeConfiguration, 
-            docker_client: DockerFrameworkClient, container: Container = None):
+    def __init__(self, name: str, container_config: ContainerConfiguration, node_config: NodeConfiguration,
+                 docker_client: DockerFrameworkClient, container: Container = None):
         self.logger = logging.getLogger(__name__)
         self.name = name
         self._container = container
@@ -61,7 +65,7 @@ class Node:
     def start(self):
         if self._node_state == STATE_RUNNING:
             self.logger.debug(f"Node {self.name} is already running")
-            return # no-op
+            return  # no-op
 
         if self._node_state in [STATE_STOPPED, STATE_CLEANED]:
             raise NodeRestartNotAllowedException()
@@ -89,7 +93,7 @@ class Node:
     def stop(self):
         if self._node_state != STATE_RUNNING:
             self.logger.debug(f"Node {self.name} is not running")
-            return # no-op
+            return  # no-op
 
         self.logger.debug(f"Stopping node {self.name}...")
         self._docker_client.stop_container(self._container)
@@ -118,9 +122,9 @@ class Node:
             return False
 
         self.logger.debug(f"Checking if node {self.name} is active...")
-        if self._container == None:
+        if self._container is None:
             return False
-        
+
         exit_code, output = self._docker_client.run_command(self._container, "curl -X GET \"localhost:9200/\"")
         self.logger.debug(f"Exit Code: {exit_code}, Output: {output}")
         return exit_code == 0
@@ -129,5 +133,5 @@ class Node:
         if self._node_state != STATE_RUNNING:
             self.logger.debug(f"Node {self.name} is not running")
             raise NodeNotRunningException()
-        
+
         return self._container.logs().decode("utf-8")

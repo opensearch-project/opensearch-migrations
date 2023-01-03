@@ -1,7 +1,7 @@
 import os
-import pytest
 
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
+
 
 def test_WHEN_workspace_wrangler_used_THEN_workspace_created_as_expected(tmpdir):
     # Test values

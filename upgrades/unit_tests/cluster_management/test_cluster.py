@@ -11,12 +11,13 @@ TEST_CLUSTER_CONFIG = tcw.ClusterConfig({
     "additional_node_config": {}
 })
 
+
 def test_WHEN_create_Cluster_AND_not_enough_nodes_THEN_raises():
     # Set up test
     test_cluster_config = tcw.ClusterConfig({
         "engine_version": "ES_7_10_2",
         "image": "image",
-        "node_count": 0, # must be >= 1
+        "node_count": 0,  # must be >= 1
         "additional_node_config": {}
     })
     test_cluster_name = "cluster-name"
@@ -25,6 +26,7 @@ def test_WHEN_create_Cluster_AND_not_enough_nodes_THEN_raises():
     # Run our test
     with pytest.raises(ValueError):
         cluster.Cluster(test_cluster_name, test_cluster_config, mock_docker_client)
+
 
 @mock.patch('upgrade_testing_framework.cluster_management.cluster.Node')
 def test_WHEN_start_THEN_as_expected(mock_node_class):
@@ -55,11 +57,12 @@ def test_WHEN_start_THEN_as_expected(mock_node_class):
     assert {
         test_cluster._generate_node_name(1): mock_node_1,
         test_cluster._generate_node_name(2): mock_node_2
-        } == test_cluster._nodes
+    } == test_cluster._nodes
     assert mock_node_1.start.called
     assert mock_node_2.start.called
 
     assert test_cluster._cluster_state == cluster.STATE_RUNNING
+
 
 @mock.patch('upgrade_testing_framework.cluster_management.cluster.Node')
 def test_WHEN_start_AND_already_running_THEN_no_op(mock_node_class):
@@ -76,6 +79,7 @@ def test_WHEN_start_AND_already_running_THEN_no_op(mock_node_class):
     # Check the results
     assert 0 == mock_node_class.call_count
 
+
 def test_WHEN_start_AND_stopped_THEN_raises():
     # Set up test
     test_cluster_name = "cluster-name"
@@ -88,6 +92,7 @@ def test_WHEN_start_AND_stopped_THEN_raises():
     with pytest.raises(cluster.ClusterRestartNotAllowedException):
         test_cluster.start()
 
+
 def test_WHEN_start_AND_cleaned_THEN_raises():
     # Set up test
     test_cluster_name = "cluster-name"
@@ -99,6 +104,7 @@ def test_WHEN_start_AND_cleaned_THEN_raises():
     # Run our test
     with pytest.raises(cluster.ClusterRestartNotAllowedException):
         test_cluster.start()
+
 
 @mock.patch('upgrade_testing_framework.cluster_management.cluster.time')
 def test_WHEN_wait_for_cluster_to_start_up_THEN_as_expected(mock_time):
@@ -126,6 +132,7 @@ def test_WHEN_wait_for_cluster_to_start_up_THEN_as_expected(mock_time):
     assert 3 == mock_node_1.is_active.call_count
     assert 2 == mock_node_2.is_active.call_count
 
+
 @mock.patch('upgrade_testing_framework.cluster_management.cluster.time')
 def test_WHEN_wait_for_cluster_to_start_up_AND_max_wait_exceeded_THEN_raises(mock_time):
     # Set up test
@@ -152,8 +159,9 @@ def test_WHEN_wait_for_cluster_to_start_up_AND_max_wait_exceeded_THEN_raises(moc
     assert 1 == mock_time.sleep.call_count
     assert 2 == mock_node_1.is_active.call_count
     assert 2 == mock_node_2.is_active.call_count
-    
-def test_WHEN_wait_for_cluster_to_start_up_AND_max_wait_exceeded_THEN_raises():
+
+
+def test_WHEN_wait_for_cluster_to_start_up_AND_max_wait_exceeded_again_THEN_raises():
     # Set up test
     test_cluster_name = "cluster-name"
     mock_docker_client = mock.Mock()
@@ -163,6 +171,7 @@ def test_WHEN_wait_for_cluster_to_start_up_AND_max_wait_exceeded_THEN_raises():
     # Run our test
     with pytest.raises(cluster.ClusterNotRunningException):
         test_cluster.wait_for_cluster_to_start_up(1)
+
 
 def test_WHEN_stop_THEN_as_expected():
     # Set up test
@@ -179,7 +188,7 @@ def test_WHEN_stop_THEN_as_expected():
     test_cluster._nodes = {
         test_cluster._generate_node_name(1): mock_node_1,
         test_cluster._generate_node_name(2): mock_node_2
-        }
+    }
 
     # Run our test
     test_cluster.stop()
@@ -187,6 +196,7 @@ def test_WHEN_stop_THEN_as_expected():
     # Check the results
     assert 1 == mock_node_1.stop.call_count
     assert 1 == mock_node_2.stop.call_count
+
 
 def test_WHEN_stop_AND_not_running_THEN_no_op():
     # Set up test
@@ -200,7 +210,7 @@ def test_WHEN_stop_AND_not_running_THEN_no_op():
     test_cluster._nodes = {
         test_cluster._generate_node_name(1): mock_node_1,
         test_cluster._generate_node_name(2): mock_node_2
-        }
+    }
 
     # Run our test
     test_cluster.stop()
@@ -208,6 +218,7 @@ def test_WHEN_stop_AND_not_running_THEN_no_op():
     # Check the results
     assert not mock_node_1.stop.called
     assert not mock_node_2.stop.called
+
 
 def test_WHEN_clean_up_THEN_as_expected():
     # Set up test
@@ -226,7 +237,7 @@ def test_WHEN_clean_up_THEN_as_expected():
     test_cluster._nodes = {
         test_cluster._generate_node_name(1): mock_node_1,
         test_cluster._generate_node_name(2): mock_node_2
-        }
+    }
     test_cluster._cluster_state = cluster.STATE_STOPPED
 
     # Run our test
@@ -248,6 +259,7 @@ def test_WHEN_clean_up_THEN_as_expected():
 
     assert cluster.STATE_CLEANED == test_cluster._cluster_state
 
+
 def test_WHEN_clean_up_AND_not_stopped_THEN_raises():
     # Set up test
     test_cluster_name = "cluster-name"
@@ -258,4 +270,3 @@ def test_WHEN_clean_up_AND_not_stopped_THEN_raises():
     # Run our test
     with pytest.raises(cluster.ClusterNotStoppedException):
         test_cluster.clean_up()
-    

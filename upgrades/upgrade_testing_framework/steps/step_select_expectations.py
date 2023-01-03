@@ -4,6 +4,7 @@ from upgrade_testing_framework.core.framework_step import FrameworkStep
 from upgrade_testing_framework.core.expectation import load_knowledge_base
 
 
+
 class SelectExpectations(FrameworkStep):
     """
     This step is where we collect applicable expectations based on our cluster details

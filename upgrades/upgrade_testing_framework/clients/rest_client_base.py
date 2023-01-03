@@ -3,6 +3,7 @@ import logging
 
 import upgrade_testing_framework.clients.rest_ops as ops
 
+
 class RESTClientBase(ABC):
     """
     Abstract base class for the REST clients that inferface w/ the cluster.
@@ -37,7 +38,7 @@ class RESTClientBase(ABC):
     @abstractmethod
     def get_snapshot_by_id(self, port: int, repo: str, snapshot_id: int) -> ops.RESTResponse:
         pass
-    
+
     @abstractmethod
     def get_snapshots_all(self, port: int, repo: str) -> ops.RESTResponse:
         pass

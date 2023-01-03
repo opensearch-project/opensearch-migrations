@@ -1,6 +1,7 @@
 import upgrade_testing_framework.cluster_management.docker_framework_client as dfc
 from upgrade_testing_framework.cluster_management.container_configuration import ContainerConfiguration
 
+
 def test_WHEN_create_ContainerConfiguration_THEN_extracts_rest_port():
     # Set up our test
     test_port = 9201

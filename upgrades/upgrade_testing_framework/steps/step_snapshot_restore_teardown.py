@@ -1,6 +1,7 @@
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 from upgrade_testing_framework.core.constants import UPGRADE_STYLE_SNAPSHOT
 
+
 class SnapshotRestoreTeardown(FrameworkStep):
     """
     This step tears down any state specifically associated with a snapshot/restore upgrade

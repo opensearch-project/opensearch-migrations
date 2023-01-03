@@ -5,9 +5,10 @@ from docker.types import Ulimit
 
 from upgrade_testing_framework.cluster_management.docker_framework_client import DockerVolume, PortMapping
 
+
 class ContainerConfiguration:
-    def __init__(self, image: str, network: Network, port_mappings: List[PortMapping], volumes: List[DockerVolume], 
-            ulimits: List[Ulimit] = [Ulimit(name='memlock', soft=-1, hard=-1)]):
+    def __init__(self, image: str, network: Network, port_mappings: List[PortMapping], volumes: List[DockerVolume],
+                 ulimits: List[Ulimit] = [Ulimit(name='memlock', soft=-1, hard=-1)]):
         self.image = image
         self.network = network
         self.port_mappings = port_mappings

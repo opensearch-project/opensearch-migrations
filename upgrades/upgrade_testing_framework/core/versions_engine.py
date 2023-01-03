@@ -33,7 +33,7 @@ def get_version(version_string: str) -> EngineVersion:
     # expected an input string like: "ES_7_10_2"
     try:
         raw_engine, raw_major, raw_minor, raw_patch = version_string.split("_")
-    except:
+    except:  # noqa: E722
         raise CouldNotParseEngineVersionException(version_string)
 
     if "ES" == raw_engine:
@@ -45,7 +45,7 @@ def get_version(version_string: str) -> EngineVersion:
 
     try:
         engine_version = EngineVersion(engine, int(raw_major), int(raw_minor), int(raw_patch))
-    except:
+    except:  # noqa: E722
         raise CouldNotParseEngineVersionException(version_string)
 
     return engine_version

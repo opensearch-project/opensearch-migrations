@@ -1,6 +1,7 @@
 from upgrade_testing_framework.core.framework_step import FrameworkStep
 from robot_tests.test_executor import TestExecutor
 
+
 class PerformPreUpgradeTest(FrameworkStep):
     """
     This step is where you run pre-upgrade setup and tests

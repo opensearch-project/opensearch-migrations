@@ -8,3 +8,7 @@
 ignore = E265,E402,E999,W504
 max-line-length = 120
 exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules
+
+# F401 - Unused imports -- this is the only way to have a file-wide rule exception
+per-file-ignores =
+    upgrades/upgrade_testing_framework/steps/__init__.py:F401

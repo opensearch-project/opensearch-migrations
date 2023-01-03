@@ -1,8 +1,6 @@
-import json
-import time
-
 import upgrade_testing_framework.clients as clients
 from upgrade_testing_framework.core.framework_step import FrameworkStep
+
 
 class RestoreSourceSnapshot(FrameworkStep):
     """
@@ -17,7 +15,7 @@ class RestoreSourceSnapshot(FrameworkStep):
 
         # Begin the step body
         self.logger.info("Checking if source snapshots are visible on target...")
-        node = target_cluster.nodes[0] # shouldn't matter which node we pick
+        node = target_cluster.nodes[0]  # shouldn't matter which node we pick
         port = node.rest_port
         engine_version = node.engine_version
         rest_client = clients.get_rest_client(engine_version)
@@ -37,7 +35,6 @@ class RestoreSourceSnapshot(FrameworkStep):
             self.logger.info("Snapshot restored successfully")
         else:
             self.fail("Snapshot restoration failed")
-        
+
         # Update our state
         # N/A
-        

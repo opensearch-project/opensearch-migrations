@@ -5,17 +5,22 @@ import os
 
 from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 
+
 class FrameworkLoggingAdapter(logging.LoggerAdapter):
     # Print the name of the currently-executing step, then the log message
     def process(self, msg, kwargs):
         return "[{}] {}".format(self.extra['step'], msg), kwargs
 
+
 class FrameworkLoggingFormatter(logging.Formatter):
-     def formatTime(self, record, datefmt=None):
+    def formatTime(self, record, datefmt=None):
         return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')
 
-LINE_SEP = '\u2063' # Invisible Unicode character.  Makes figuring out the beginning/end of a log entry much
-            # easier, given they can contain new line characters themselves.
+
+# Invisible Unicode character.  Makes figuring out the beginning/end of a log entry much
+# easier, given they can contain new line characters themselves.
+LINE_SEP = '\u2063'
+
 
 class LoggingWrangler:
     def __init__(self, workspace: WorkspaceWrangler):
@@ -27,9 +32,9 @@ class LoggingWrangler:
 
     def _initialize_logging(self):
         # Write high level logs intended for humans to stdout, and low-level debug logs to a file.
-        
+
         root_logger = logging.getLogger()
-        root_logger.handlers = [] # Make sure we're starting with a clean slate
+        root_logger.handlers = []  # Make sure we're starting with a clean slate
         root_logger.setLevel(logging.DEBUG)
 
         # Send INFO+ level logs to stdout, and enable colorized messages

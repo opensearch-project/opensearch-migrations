@@ -3,6 +3,7 @@ import json
 from upgrade_testing_framework.clients.rest_client_base import RESTClientBase
 import upgrade_testing_framework.clients.rest_ops as ops
 
+
 class RESTClientDefault(RESTClientBase):
     """
     Default REST client for interfacing w/ Elasticsearch and OpenSearch clusters.
@@ -23,80 +24,80 @@ class RESTClientDefault(RESTClientBase):
         """
         Get basic about the specific node you hit, such as version.
         """
-        rest_path = ops.RESTPath(port = port)
-        return ops.perform_get(rest_path = rest_path)
+        rest_path = ops.RESTPath(port=port)
+        return ops.perform_get(rest_path=rest_path)
 
     def get_nodes_status(self, port: int) -> ops.RESTResponse:
         """
         Get info on the cluster's nodes.
         """
-        rest_path = ops.RESTPath(port = port, suffix = "_cat/nodes")
+        rest_path = ops.RESTPath(port=port, suffix="_cat/nodes")
         params = {"v": "true", "pretty": "true"}
-        return ops.perform_get(rest_path = rest_path, params = params)
+        return ops.perform_get(rest_path=rest_path, params=params)
 
     def get_doc_by_id(self, port: int, index: str, doc_id: str) -> ops.RESTResponse:
         """
         Get a document by its ID
         """
-        rest_path = ops.RESTPath(port = port, suffix = f"{index}/_doc/{doc_id}")
+        rest_path = ops.RESTPath(port=port, suffix=f"{index}/_doc/{doc_id}")
         params = {"pretty": "true"}
-        return ops.perform_get(rest_path = rest_path, params = params)
+        return ops.perform_get(rest_path=rest_path, params=params)
 
     def post_doc_to_index(self, port: int, index: str, doc: dict) -> ops.RESTResponse:
         """
         Post a single document to an index
         """
-        rest_path = ops.RESTPath(port = port, suffix = f"{index}/_doc")
+        rest_path = ops.RESTPath(port=port, suffix=f"{index}/_doc")
         params = {"pretty": "true"}
-        headers={"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json"}
 
-        return ops.perform_post(rest_path = rest_path, data = json.dumps(doc), headers = headers, params = params)
+        return ops.perform_post(rest_path=rest_path, data=json.dumps(doc), headers=headers, params=params)
 
     def create_snapshot(self, port: int, repo: str, snapshot_id: str) -> ops.RESTResponse:
         """
         Create a snapshot of the cluster into a repo by synchronously blocking on completion
         """
-        rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}/{snapshot_id}")
+        rest_path = ops.RESTPath(port=port, suffix=f"_snapshot/{repo}/{snapshot_id}")
         params = {"pretty": "true", "wait_for_completion": "true"}
 
-        return ops.perform_post(rest_path = rest_path, params = params)
+        return ops.perform_post(rest_path=rest_path, params=params)
 
     def get_snapshot_by_id(self, port: int, repo: str, snapshot_id: str) -> ops.RESTResponse:
         """
         Get a snapshot by its ID
         """
-        rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}/{snapshot_id}")
+        rest_path = ops.RESTPath(port=port, suffix=f"_snapshot/{repo}/{snapshot_id}")
         params = {"pretty": "true"}
-        return ops.perform_get(rest_path = rest_path, params = params)
+        return ops.perform_get(rest_path=rest_path, params=params)
 
     def get_snapshots_all(self, port: int, repo: str) -> ops.RESTResponse:
         """
         Get all snapshots from a repo
         """
-        rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}/_all")
+        rest_path = ops.RESTPath(port=port, suffix=f"_snapshot/{repo}/_all")
         params = {"pretty": "true"}
-        return ops.perform_get(rest_path = rest_path, params = params)
-    
+        return ops.perform_get(rest_path=rest_path, params=params)
+
     def register_snapshot_dir(self, port: int, repo: str, dir_path: str) -> ops.RESTResponse:
         """
         Register a directory on the node as the place to store snapshots for an snapshot repo
         """
-        rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}")
-        headers={"Content-Type": "application/json"}
+        rest_path = ops.RESTPath(port=port, suffix=f"_snapshot/{repo}")
+        headers = {"Content-Type": "application/json"}
 
         register_args = {
             "type": "fs",
-                "settings": {
-                    "location": dir_path
+            "settings": {
+                "location": dir_path
             }
         }
 
-        return ops.perform_post(rest_path = rest_path, data = json.dumps(register_args), headers = headers)
+        return ops.perform_post(rest_path=rest_path, data=json.dumps(register_args), headers=headers)
 
     def restore_snapshot(self, port: int, repo: str, snapshot_id: int) -> ops.RESTResponse:
         """
         Restore a snapshot by synchronously blocking on completion
         """
-        rest_path = ops.RESTPath(port = port, suffix = f"_snapshot/{repo}/{snapshot_id}/_restore")
+        rest_path = ops.RESTPath(port=port, suffix=f"_snapshot/{repo}/{snapshot_id}/_restore")
         params = {"pretty": "true", "wait_for_completion": "true"}
-        return ops.perform_post(rest_path = rest_path, params = params)
+        return ops.perform_post(rest_path=rest_path, params=params)
