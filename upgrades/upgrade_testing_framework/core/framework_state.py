@@ -23,7 +23,7 @@ class FrameworkState:
         self.source_cluster: Cluster = None
         self.target_cluster: Cluster = None
         self.test_config: TestConfig = None
-        self.eligible_expectations = []
+        self.eligible_expectations: List[str] = []
         self._app_state = state
 
         # The fact that we need to store this in our FrameworkState means we probably need to be more sophisticated in
@@ -38,6 +38,7 @@ class FrameworkState:
             "shared_volume": self.shared_volume.to_dict() if self.shared_volume else None,
             "source_cluster": self.source_cluster.to_dict() if self.source_cluster else None,
             "target_cluster": self.target_cluster.to_dict() if self.target_cluster else None,
+            "snapshot": self.snapshot.to_dict() if self.snapshot else None,
             "test_config": self.test_config.to_dict() if self.test_config else None,
             "eligible_expectations": self.eligible_expectations
         }

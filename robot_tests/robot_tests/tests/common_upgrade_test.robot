@@ -21,6 +21,6 @@ Perform pre-upgrade setup of "consistent-document-count" expectation
 
 Perform post-upgrade assertion of "consistent-document-count" expectation
     [Tags]  consistent-document-count  post-upgrade
-    ${stored_count} =  Retrieve stored number by label  consistent-document-count
+    ${stored_count} =  Retrieve stored data by label  consistent-document-count
     ${count} =  Count documents in index  sample-index
     Should Be Equal  ${stored_count}  ${count}
