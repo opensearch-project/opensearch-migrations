@@ -5,5 +5,4 @@ coverage.xml
 .venv
 __pycache__
 *.egg-info*
-temp-storage.txt
 .python-version

@@ -1,6 +1,6 @@
-from upgrade_testing_framework.cluster_management.docker_framework_client import DockerVolume
-from upgrade_testing_framework.core.framework_step import FrameworkStep
-from upgrade_testing_framework.core.constants import UPGRADE_STYLE_SNAPSHOT
+from cluster_migration_core.cluster_management.docker_framework_client import DockerVolume
+from cluster_migration_core.core.framework_step import FrameworkStep
+from cluster_migration_core.core.constants import UPGRADE_STYLE_SNAPSHOT
 
 
 class SnapshotRestoreSetup(FrameworkStep):

@@ -4,7 +4,8 @@ from typing import Any
 
 from opensearchpy import OpenSearch
 
-DEFAULT_TEMP_STORAGE="/tmp/utf/robot_data.json"
+DEFAULT_TEMP_STORAGE = "/tmp/utf/robot_data.json"
+
 
 # Change this library to use REST requests instead of Python client
 class OpenSearchClientLibrary(object):

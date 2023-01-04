@@ -1,6 +1,6 @@
-import upgrade_testing_framework.clients as clients
-from upgrade_testing_framework.cluster_management.cluster_objects import ClusterSnapshot
-from upgrade_testing_framework.core.framework_step import FrameworkStep
+import cluster_migration_core.clients as clients
+from cluster_migration_core.cluster_management.cluster_objects import ClusterSnapshot
+from cluster_migration_core.core.framework_step import FrameworkStep
 
 
 class CreateSourceSnapshot(FrameworkStep):
