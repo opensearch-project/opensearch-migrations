@@ -1,7 +1,6 @@
 import json
 from typing import List
 
-from typing import List
 from cluster_migration_core.cluster_management.docker_framework_client import DockerFrameworkClient, DockerVolume
 from cluster_migration_core.cluster_management.cluster import Cluster
 from cluster_migration_core.cluster_management.cluster_objects import ClusterSnapshot

@@ -1,5 +1,5 @@
 *** Settings ***
-Library    ../lib/OpenSearchClientLibrary.py  ${host}  ${port}
+Library    ../robot_lib/OpenSearchClientLibrary.py  ${host}  ${port}
 
 *** Keywords ***
 #Create an index

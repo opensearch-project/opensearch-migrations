@@ -13,7 +13,8 @@ setuptools.setup(
         "pexpect",
         "py",
         "pytest",
-        "requests"
+        "requests",
+        "robotframework"
     ],
     python_requires=">=3.6",
 )
