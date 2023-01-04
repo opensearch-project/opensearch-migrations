@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import argparse
 
-from upgrade_testing_framework.core.framework_runner import FrameworkRunner
-from upgrade_testing_framework.core.logging_wrangler import LoggingWrangler
+from cluster_migration_core.core.framework_runner import FrameworkRunner
+from cluster_migration_core.core.logging_wrangler import LoggingWrangler
+from cluster_migration_core.core.workspace_wrangler import WorkspaceWrangler
+
 import upgrade_testing_framework.workflows as workflows
-from upgrade_testing_framework.core.workspace_wrangler import WorkspaceWrangler
 
 
 def get_command_line_args():

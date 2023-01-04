@@ -1,5 +1,5 @@
-from upgrade_testing_framework.core.framework_step import FrameworkStep
-from upgrade_testing_framework.cluster_management.cluster import Cluster, ClusterNotStartedInTimeException
+from cluster_migration_core.core.framework_step import FrameworkStep
+from cluster_migration_core.cluster_management.cluster import Cluster, ClusterNotStartedInTimeException
 
 
 class StartTargetCluster(FrameworkStep):

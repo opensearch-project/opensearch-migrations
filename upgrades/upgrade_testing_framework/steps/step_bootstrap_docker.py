@@ -1,5 +1,5 @@
-from upgrade_testing_framework.core.framework_step import FrameworkStep
-import upgrade_testing_framework.cluster_management.docker_framework_client as dfc
+from cluster_migration_core.core.framework_step import FrameworkStep
+import cluster_migration_core.cluster_management.docker_framework_client as dfc
 
 
 class BootstrapDocker(FrameworkStep):

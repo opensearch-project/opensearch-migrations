@@ -1,10 +1,10 @@
-# Upgrade Testing Framework
+# Cluster Migration Core
 
-This package is built on the `cluster_migration_core` library and provides runnable steps to test ElasticSearch and OpenSearch upgrades
+Core library to assist with testing migrations/upgrades between versions of ElasticSearch and OpenSearch
 
-## Running the Upgrade Testing Framework
+## Running Unit Tests
 
-To run the UTF, perform the following steps
+To run the unit tests of the library code, perform the following steps
 
 ### PRE-REQUISITES
 
@@ -28,8 +28,11 @@ rm -rf .venv
 
 Learn more about venv [here](https://docs.python.org/3/library/venv.html).
 
-### Step 2 - Run the UTF
-Run the UTF framework with the `run_utf.py` script and a test config file. For the default snapshot/restore upgrade from Elasticsearch 7.10.2 to OpenSearch 1.3.6, it can be invoked with:
+### Step 2 - Run Pytest
+The unit tests are executed by invoking Pytest:
+
 ```
-./run_utf.py --test_config test_configs/snapshot_restore_es_7_10_2_to_os_1_3_6.json
+python -m pytest unit_tests/
 ```
+
+You can read more about running unit tests with Pytest [here](https://docs.pytest.org/en/7.2.x/how-to/usage.html).

@@ -4,8 +4,8 @@ from pathlib import Path
 from itertools import groupby
 import textwrap
 
-from upgrade_testing_framework.core.framework_step import FrameworkStep
-from upgrade_testing_framework.core.expectation import load_knowledge_base, Expectation
+from cluster_migration_core.core.framework_step import FrameworkStep
+from cluster_migration_core.core.expectation import load_knowledge_base, Expectation
 
 
 class ReportResults(FrameworkStep):

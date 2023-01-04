@@ -1,4 +1,4 @@
-from upgrade_testing_framework.core.framework_step import FrameworkStep
+from cluster_migration_core.core.framework_step import FrameworkStep
 
 
 class StopTargetCluster(FrameworkStep):

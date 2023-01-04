@@ -7,13 +7,6 @@ setuptools.setup(
     author="Chris Helma",
     package_dir={"": "upgrade_testing_framework"},
     packages=setuptools.find_packages(where="upgrade_testing_framework"),
-    install_requires=[
-        "coloredlogs",
-        "docker",
-        "pexpect",
-        "py",
-        "pytest",
-        "requests"
-    ],
+    install_requires=[],
     python_requires=">=3.6",
 )

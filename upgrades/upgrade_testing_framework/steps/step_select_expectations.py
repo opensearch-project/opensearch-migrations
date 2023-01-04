@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from upgrade_testing_framework.core.framework_step import FrameworkStep
-from upgrade_testing_framework.core.expectation import load_knowledge_base
-
+from cluster_migration_core.core.framework_step import FrameworkStep
+from cluster_migration_core.core.expectation import load_knowledge_base
 
 
 class SelectExpectations(FrameworkStep):
