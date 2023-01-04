@@ -95,6 +95,7 @@ def state_file_for_resume(test_workspace):
 
 
 TEST_CONFIG_FILE_PATH = "./path/to/test_config.json"
+KNOWLEDGE_BASE_PATH = "./path/to/knowledge_base"
 
 
 class TestFrameworkRunner():
@@ -107,7 +108,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        end_state = runner.run(TEST_CONFIG_FILE_PATH, KNOWLEDGE_BASE_PATH)
 
         # Check our results
         assert call_register.Step1.called
@@ -125,7 +126,7 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)
+        end_state = runner.run(TEST_CONFIG_FILE_PATH, KNOWLEDGE_BASE_PATH)
 
         # Check our results
         assert call_register.Step1.called
@@ -142,12 +143,13 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        runner.run(TEST_CONFIG_FILE_PATH)
+        runner.run(TEST_CONFIG_FILE_PATH, KNOWLEDGE_BASE_PATH)
 
         # Check our results
         expected_app_state = {
             'current_step': 'Step3',
             'exit_type': constants.EXIT_TYPE_SUCCESS,
+            'knowledge_base_path': KNOWLEDGE_BASE_PATH,
             'log_file': runner.log_file,
             'state_file': test_workspace.state_file,
             'test_config_path': TEST_CONFIG_FILE_PATH,
@@ -167,12 +169,13 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)  # noqa F841
+        end_state = runner.run(TEST_CONFIG_FILE_PATH, KNOWLEDGE_BASE_PATH)  # noqa F841
 
         # Check our results
         expected_app_state = {
             'current_step': 'StepRaiseRuntimeFrameworkException',
             'exit_type': constants.EXIT_TYPE_FAILURE_UNEXPECTED,
+            'knowledge_base_path': KNOWLEDGE_BASE_PATH,
             'last_exception_message': 'This is a test',
             'last_exception_type': 'UnexpectedException',
             'log_file': runner.log_file,
@@ -194,12 +197,13 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)  # noqa F841
+        end_state = runner.run(TEST_CONFIG_FILE_PATH, KNOWLEDGE_BASE_PATH)  # noqa F841
 
         # Check our results
         expected_app_state = {
             'current_step': 'StepRaiseStepFailedException',
             'exit_type': constants.EXIT_TYPE_FAILURE,
+            'knowledge_base_path': KNOWLEDGE_BASE_PATH,
             'last_exception_message': 'This is a test',
             'last_exception_type': 'ExpectedException',
             'log_file': runner.log_file,
@@ -221,12 +225,13 @@ class TestFrameworkRunner():
         runner.step_order = step_order
 
         # Run our test
-        end_state = runner.run(TEST_CONFIG_FILE_PATH)  # noqa F841
+        end_state = runner.run(TEST_CONFIG_FILE_PATH, KNOWLEDGE_BASE_PATH)  # noqa F841
 
         # Check our results
         expected_app_state = {
             'current_step': 'StepRaiseUnhandledException',
             'exit_type': constants.EXIT_TYPE_FAILURE_UNHANDLED,
+            'knowledge_base_path': KNOWLEDGE_BASE_PATH,
             'last_exception_message': 'This is a test',
             'last_exception_type': 'UnexpectedException',
             'log_file': runner.log_file,

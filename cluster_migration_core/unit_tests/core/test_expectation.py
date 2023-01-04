@@ -36,6 +36,13 @@ TEST_EXPECTATION_MISSING_ID = {
     }]
 }
 
+TEST_EXPECTATION_MISSING_DESCRIPTION = {
+    "id": "expectation-id-2",
+    "versions": [{
+        "gt": "OS_1_0_0"
+    }]
+}
+
 
 @pytest.fixture
 def valid_knowledge_base_dir(tmpdir):
@@ -72,6 +79,15 @@ def knowledge_base_dir_with_expectation_missing_id(tmpdir):
     test_kb_dir.mkdir()
     expectation_file = test_kb_dir / "ex.json"
     expectation_file.write(json.dumps(TEST_EXPECTATION_MISSING_ID))
+    return test_kb_dir
+
+
+@pytest.fixture
+def knowledge_base_dir_with_expectation_missing_desc(tmpdir):
+    test_kb_dir = tmpdir / "knowledge_base"
+    test_kb_dir.mkdir()
+    expectation_file = test_kb_dir / "ex.json"
+    expectation_file.write(json.dumps(TEST_EXPECTATION_MISSING_DESCRIPTION))
     return test_kb_dir
 
 
@@ -120,6 +136,12 @@ def test_WHEN_load_knowledge_base_called_AND_no_expectation_id_THEN_raises(
         knowledge_base_dir_with_expectation_missing_id):
     with pytest.raises(expectations.ExpectationMissingIdException):
         load_knowledge_base(knowledge_base_dir_with_expectation_missing_id)
+
+
+def test_WHEN_load_knowledge_base_called_AND_no_expectation_desc_THEN_raises(
+        knowledge_base_dir_with_expectation_missing_desc):
+    with pytest.raises(expectations.ExpectationMissingDescriptionException):
+        load_knowledge_base(knowledge_base_dir_with_expectation_missing_desc)
 
 
 def test_WHEN_load_knowledge_base_called_AND_not_a_dir_THEN_raises(knowledge_base_not_a_dir):

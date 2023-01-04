@@ -16,10 +16,10 @@ class ReportResults(FrameworkStep):
     def _run(self):
         # Get the state we need
         eligible_expectation_ids = self.state.eligible_expectations
+        path_to_knowledge_base = Path(self.state.get_key('knowledge_base_path'))
         test_output_directory = Path(self.state.get_key('test_results_directory'))
 
         # Begin the step body
-        path_to_knowledge_base = Path("../knowledge_base")
         knowledge_base = load_knowledge_base(path_to_knowledge_base)
         expectations: Dict[str, Expectation] = {e.id: e for e in knowledge_base if e.id in eligible_expectation_ids}
         test_results: Dict[str, Dict] = parse_robot_results(test_output_directory, eligible_expectation_ids)
