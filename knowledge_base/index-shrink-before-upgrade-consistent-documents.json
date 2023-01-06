@@ -1,0 +1,4 @@
+{
+  "id": "index-shrink-before-upgrade-consistent-documents",
+  "description": "An index should have the same documents when its number of shards are reduced before the index is migrated or upgraded"
+}

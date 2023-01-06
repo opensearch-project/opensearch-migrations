@@ -1,0 +1,4 @@
+{
+  "id": "new-index-replica-after-upgrade-consistent-documents",
+  "description": "An index and its replica should contain the same documents when the replica is created after a migration or upgrade"
+}
