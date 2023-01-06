@@ -16,7 +16,7 @@ def get_command_line_args():
     parser.add_argument("--test_config", help="Path to your test config file (see README for more details)",
                         dest="test_config",
                         required=True
-                        )    
+                        )
 
     kbd_help = "Path to the knowledge base directory.  This is the top-level directory containing the expectations."
     parser.add_argument("--knowledge_base", help=kbd_help,
@@ -35,7 +35,8 @@ def main():
     workspace = WorkspaceWrangler()
     logging = LoggingWrangler(workspace)
 
-    FrameworkRunner(logging, workspace, step_order=workflows.SNAPSHOT_RESTORE_STEPS).run(test_config, knowledge_base_path)
+    runner = FrameworkRunner(logging, workspace, step_order=workflows.SNAPSHOT_RESTORE_STEPS)
+    runner.run(test_config, knowledge_base_path)
 
 
 if __name__ == "__main__":

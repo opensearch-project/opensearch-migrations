@@ -1,4 +1,4 @@
-from robot import run
+import robot
 
 from cluster_migration_core.robot_actions.action_executor import ActionExecutor
 
@@ -14,12 +14,12 @@ class ClusterActionExecutor(ActionExecutor):
         super().__init__(*args, **kwargs)
 
     def _execute(self) -> None:
-        run(
+        robot.run(
             self.actions_dir,
             include=self.include_tags,
             exclude=self.exclude_tags,
             outputdir=self.output_dir,
             variable=[f"host:{self.hostname}", f"port:{self.port}"],
-            consolewidth=self.consolewidth,
-            loglevel=self.loglevel
+            consolewidth=self.console_width,
+            loglevel=self.log_level
         )

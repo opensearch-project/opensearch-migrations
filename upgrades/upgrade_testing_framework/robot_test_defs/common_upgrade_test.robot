@@ -10,7 +10,7 @@ Library    ../robot_lib/OpenSearchClientLibrary.py  ${host}  ${port}
 
 # Link to expectation description
 Perform pre-upgrade setup of "consistent-document-count" expectation
-    [Tags]  consistent-document-count  pre-upgrade
+    [Tags]  expectation::consistent-document-count  stage::pre-upgrade
     Create index  sample-index
     Create document in index  sample-index  {"color":"blue", "name":"sky"}
     Create document in index  sample-index  {"color":"green", "name":"grass"}
@@ -20,7 +20,7 @@ Perform pre-upgrade setup of "consistent-document-count" expectation
     Should Be Equal  ${count}  ${2}
 
 Perform post-upgrade assertion of "consistent-document-count" expectation
-    [Tags]  consistent-document-count  post-upgrade
+    [Tags]  expectation::consistent-document-count  stage::post-upgrade
     ${stored_count} =  Retrieve stored data by label  consistent-document-count
     ${count} =  Count documents in index  sample-index
     Should Be Equal  ${stored_count}  ${count}

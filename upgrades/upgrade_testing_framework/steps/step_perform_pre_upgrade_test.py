@@ -19,13 +19,13 @@ class PerformPreUpgradeTest(FrameworkStep):
         # Get the state we need
         source_cluster = self.state.source_cluster
         port = source_cluster.rest_ports[0]
-        expectations = self.state.eligible_expectations
+        eligible_expectations = self.state.eligible_expectations
         output_directory = f"{self.state.get_key('test_results_directory')}/{STAGE_TAG}"
 
         # Begin the step body
         path_to_actions = Path(TESTS_DIR)
         path_to_outputs = Path(output_directory)
-        included_tags = [f"{id}AND{STAGE_TAG}" for id in expectations]
+        included_tags = [f"expectation::{e.id}ANDstage::{STAGE_TAG}" for e in eligible_expectations]
         pre_upgrade_executor = ClusterActionExecutor(
             hostname="localhost",
             port=port,
@@ -37,4 +37,4 @@ class PerformPreUpgradeTest(FrameworkStep):
         pre_upgrade_executor.execute()
 
         # Update our state
-        # N/A
+        self.state.pre_upgrade_actions = pre_upgrade_executor
