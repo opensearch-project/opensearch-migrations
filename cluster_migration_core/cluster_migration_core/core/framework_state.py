@@ -1,10 +1,12 @@
 import json
-
 from typing import List
+
 from cluster_migration_core.cluster_management.docker_framework_client import DockerFrameworkClient, DockerVolume
 from cluster_migration_core.cluster_management.cluster import Cluster
 from cluster_migration_core.cluster_management.cluster_objects import ClusterSnapshot
 from cluster_migration_core.core.test_config_wrangling import TestConfig
+from cluster_migration_core.core.expectation import Expectation
+from cluster_migration_core.robot_actions.cluster_action_executor import ClusterActionExecutor
 
 """
 The long-term trajectory of this class is a bit unclear.  We currently store both key/value pairs in a dictionary as
@@ -20,18 +22,21 @@ In general though, it is recommended that this be an append-only data store for 
 
 class FrameworkState:
     def __init__(self, state: dict):
-        self.docker_client: DockerFrameworkClient = None
-        self.source_cluster: Cluster = None
-        self.target_cluster: Cluster = None
-        self.test_config: TestConfig = None
-        self.eligible_expectations: List[str] = []
         self._app_state = state
 
-        # The fact that we need to store this in our FrameworkState means we probably need to be more sophisticated in
-        # order to support multiple upgrade types.  Since we're only supporting Snapshot/Restore for now, we can solve
-        # that problem later.
+        # The fact that we need to store these in our FrameworkState means we probably need to be more sophisticated in
+        # order to support multiple use cases.  Since we're only supporting upgrade testing for Snapshot/Restore for
+        # now, we can solve that problem later.  It's likely we'll end up making use-case specific State types and
+        # sticking their definition in the Python package that uses them (such as the Upgrade Testing Framework).
+        self.docker_client: DockerFrameworkClient = None
+        self.test_config: TestConfig = None
+        self.source_cluster: Cluster = None
+        self.target_cluster: Cluster = None
         self.shared_volume: DockerVolume = None
         self.snapshot: ClusterSnapshot = None
+        self.eligible_expectations: List[Expectation] = []
+        self.pre_upgrade_actions: ClusterActionExecutor = None
+        self.post_upgrade_actions: ClusterActionExecutor = None
 
     def to_dict(self) -> dict:
         return {
@@ -41,7 +46,9 @@ class FrameworkState:
             "target_cluster": self.target_cluster.to_dict() if self.target_cluster else None,
             "snapshot": self.snapshot.to_dict() if self.snapshot else None,
             "test_config": self.test_config.to_dict() if self.test_config else None,
-            "eligible_expectations": self.eligible_expectations
+            "eligible_expectations": [e.to_dict() for e in self.eligible_expectations],
+            "pre_upgrade_actions": self.pre_upgrade_actions.to_dict() if self.pre_upgrade_actions else None,
+            "post_upgrade_actions": self.post_upgrade_actions.to_dict() if self.post_upgrade_actions else None
         }
 
     def __str__(self) -> str:

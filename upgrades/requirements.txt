@@ -1,3 +1,2 @@
 -e ../cluster_migration_core
--e ../robot_tests
 -e .

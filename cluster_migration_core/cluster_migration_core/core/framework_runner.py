@@ -23,8 +23,9 @@ class FrameworkRunner:
     def log_file(self):
         return self.logging_context.log_file
 
-    def run(self, test_config_path: str):
+    def run(self, test_config_path: str, knowledge_base_path: str):
         state = get_initial_state(test_config_path)
+        state.set_key('knowledge_base_path', knowledge_base_path)
         state.set_key('log_file', self.log_file)
         state.set_key('test_results_directory', self.workspace.test_results_directory)
 

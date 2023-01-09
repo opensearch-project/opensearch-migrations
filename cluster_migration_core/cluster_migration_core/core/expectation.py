@@ -15,14 +15,19 @@ class KnowledgeBaseDirectoryDoesntExistException(Exception):
 
 class ExpectationCantReadFileException(Exception):
     def __init__(self, expecation_path, original_exception):
-        super().__init__(f"Unable to read test config file at path {expecation_path}. "
+        super().__init__(f"Unable to read expectation file at path {expecation_path}. "
                          f"Details: {str(original_exception)}")
 
 
 class ExpectationFileNotJSONException(Exception):
     def __init__(self, expecation_path, original_exception):
-        super().__init__(f"The test config at path {expecation_path} is not parsible as JSON. "
+        super().__init__(f"The expectation file at path {expecation_path} is not parsible as JSON. "
                          f"Details: {str(original_exception)}")
+
+
+class ExpectationMissingDescriptionException(Exception):
+    def __init__(self, expectation_id):
+        super().__init__(f"The expectation {expectation_id} is missing a description")
 
 
 class ExpectationMissingIdException(Exception):
@@ -44,6 +49,8 @@ class Expectation:
         if self.id is None:
             raise ExpectationMissingIdException()
         self.description = raw_expectation.get("description", None)
+        if self.description is None:
+            raise ExpectationMissingDescriptionException(self.id)
         self.version_filters = raw_expectation.get("versions", None)
         self.logger = logging.getLogger(__name__)
 
