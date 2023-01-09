@@ -42,6 +42,10 @@ class ReportResults(FrameworkStep):
                       f" Framework's README file: {readme_url}")
         self.logger.info(help_blurb)
 
+        kb_url = "https://github.com/opensearch-project/opensearch-migrations/tree/main/knowledge_base"
+        kb_blurb = (f"You can find the expectation definitions here: {kb_url}")
+        self.logger.info(kb_blurb)
+
         # Update our state
         # N/A
 
@@ -52,7 +56,7 @@ class ReportResults(FrameworkStep):
         padding_char = "="
         padding_chars_per_side = int((title_len_chars - len(title)) / 2 - 1)  # one space per side too
         padding_per_side = padding_char * padding_chars_per_side
-        title = f"{padding_per_side} {title} {padding_per_side}"  # Like: "====== TITLE ======"
+        title = f"\n{padding_per_side} {title} {padding_per_side}"  # Like: "====== TITLE ======"
 
         # Assemble the results
         final_results = {

@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import List
 
 
+logger = logging.getLogger(__name__)
+
+
 class ActionsUnexecutedExeception(Exception):
     def __init__(self):
         super().__init__("The actions associated with this ActionExecuter have not yet been executed")
@@ -25,6 +28,10 @@ class ActionExecutor(ABC):
 
         self._output_xml_path: Path = None
 
+    def __str__(self) -> str:
+        return (f"Action Executor: {{Actions Dir: {self.actions_dir}, Include Tags: {self.include_tags},"
+                f" Exclude Tags: {self.include_tags}}}")
+
     def to_dict(self) -> dict:
         return {
             "actions_dir": str(self.actions_dir),
@@ -43,6 +50,7 @@ class ActionExecutor(ABC):
         root_logger_level = logging.getLogger().getEffectiveLevel()
 
         # Run the actions
+        logger.debug(f"Executing actions for {str(self)}")
         self._execute()
 
         # Reset the root logger level to what it was at the start
@@ -50,6 +58,7 @@ class ActionExecutor(ABC):
 
         # Store a Path to the results
         self._output_xml_path = self.output_dir.joinpath("output.xml")
+        logger.debug(f"Actions executed; output stored at: {str(self._output_xml_path)}")
 
     @abstractmethod
     def _execute(self):
