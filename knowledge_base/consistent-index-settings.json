@@ -1,0 +1,4 @@
+{
+  "id": "consistent-index-settings",
+  "description": "An index should have the same core index settings and associated data values before and after a migration or upgrade."
+}
