@@ -2,8 +2,6 @@ import json
 
 from cluster_migration_core.clients.rest_client_base import RESTClientBase
 import cluster_migration_core.clients.rest_ops as ops
-#import requests
-#import RestResponse
 
 
 class RESTClientDefault(RESTClientBase):
@@ -48,7 +46,7 @@ class RESTClientDefault(RESTClientBase):
 
     def create_an_index(self, port: int, index: str) -> ops.RESTResponse:
         """
-        Post a single document to an index
+        Creates an index
         """
         rest_path = ops.RESTPath(port=port, suffix=f"{index}")
         params = {"pretty": "true"}
