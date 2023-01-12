@@ -82,6 +82,7 @@ class RESTClientDefault(RESTClientBase):
         params = {"pretty": "true"}
 
         return ops.perform_post(rest_path=rest_path, params=params)
+
     def create_snapshot(self, port: int, repo: str, snapshot_id: str) -> ops.RESTResponse:
         """
         Create a snapshot of the cluster into a repo by synchronously blocking on completion

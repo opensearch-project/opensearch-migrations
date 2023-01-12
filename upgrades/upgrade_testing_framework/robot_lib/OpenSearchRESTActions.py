@@ -6,9 +6,11 @@ import cluster_migration_core.clients as clients
 
 DEFAULT_TEMP_STORAGE = "/tmp/utf/robot_data.json"
 
+
 class CouldNotRetreiveAttributeFromRESTResponse(Exception):
     def __init__(self, key: str, response: dict):
         super().__init__(f"Could not find key '{key}' in the RESTResponse json: {response}")
+
 
 class OpenSearchRESTActions(object):
 
@@ -20,9 +22,9 @@ class OpenSearchRESTActions(object):
         self._temp_storage_location = Path(temp_storage_location)
         self._port = port
 
-
     def create_index(self, index_name: str):
         self._rest_client.create_an_index(port=self._port, index=index_name)
+
     def create_document(self, index_name: str, document: dict):
         self._rest_client.post_doc_to_index(port=self._port, index=index_name, doc=document)
 
