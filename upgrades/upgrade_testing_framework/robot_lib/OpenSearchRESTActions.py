@@ -1,34 +1,42 @@
 from pathlib import Path
 import json
 from typing import Any
-
-from opensearchpy import OpenSearch
+import cluster_migration_core.core.versions_engine as ev
+import cluster_migration_core.clients as clients
 
 DEFAULT_TEMP_STORAGE = "/tmp/utf/robot_data.json"
 
+class CouldNotRetreiveAttributeFromRESTResponse(Exception):
+    def __init__(self, key: str, response: dict):
+        super().__init__(f"Could not find key '{key}' in the RESTResponse json: {response}")
 
-# Change this library to use REST requests instead of Python client
-class OpenSearchClientLibrary(object):
+class OpenSearchRESTActions(object):
 
     def __init__(self, host="localhost", port=9200, temp_storage_location=DEFAULT_TEMP_STORAGE):
-        os_client = OpenSearch(hosts=[{'host': host, 'port': port}])
-        self._os_client = os_client
+        #This is temporary, this will be provided by the executor
+        engine_version = ev.EngineVersion(ev.ENGINE_OPENSEARCH, 1, 3, 6)
+        rest_client = clients.get_rest_client(engine_version)
+        self._rest_client = rest_client
         self._temp_storage_location = Path(temp_storage_location)
+        self._port = port
+
 
     def create_index(self, index_name: str):
-        self._os_client.indices.create(index_name)
-
-    def create_document_in_index(self, index_name: str, document: str):
-        self._os_client.index(index=index_name, body=document)
-
-    def execute_query_on_index(self, index_name: str, query: str) -> str:
-        return self._os_client.search(index=index_name, body=query)
+        self._rest_client.create_an_index(port=self._port, index=index_name)
+    def create_document(self, index_name: str, document: dict):
+        self._rest_client.post_doc_to_index(port=self._port, index=index_name, doc=document)
 
     def count_documents_in_index(self, index_name: str) -> int:
-        return self._os_client.count(index=index_name).get('count')
+        response = self._rest_client.count_doc_in_index(port=self._port, index=index_name).response_json
+        count_key = "count"
+        try:
+            count = response[count_key]
+            return count
+        except CouldNotRetreiveAttributeFromRESTResponse(count_key, response):
+            print('Please enter a valid attribute from RESTResponse')
 
     def refresh_index(self, index_name):
-        self._os_client.indices.refresh(index=index_name)
+        self._rest_client.refresh_index(port=self._port, index=index_name)
 
     # Storing intermediate state needs to be thought through, this uses a
     # a file to store state for time being. "Any" is a bit generous of a type

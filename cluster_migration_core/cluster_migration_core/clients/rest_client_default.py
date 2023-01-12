@@ -2,6 +2,8 @@ import json
 
 from cluster_migration_core.clients.rest_client_base import RESTClientBase
 import cluster_migration_core.clients.rest_ops as ops
+#import requests
+#import RestResponse
 
 
 class RESTClientDefault(RESTClientBase):
@@ -41,7 +43,17 @@ class RESTClientDefault(RESTClientBase):
         """
         rest_path = ops.RESTPath(port=port, suffix=f"{index}/_doc/{doc_id}")
         params = {"pretty": "true"}
+
         return ops.perform_get(rest_path=rest_path, params=params)
+
+    def create_an_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Post a single document to an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=f"{index}")
+        params = {"pretty": "true"}
+
+        return ops.perform_post(rest_path=rest_path, params=params)
 
     def post_doc_to_index(self, port: int, index: str, doc: dict) -> ops.RESTResponse:
         """
@@ -53,6 +65,23 @@ class RESTClientDefault(RESTClientBase):
 
         return ops.perform_post(rest_path=rest_path, data=json.dumps(doc), headers=headers, params=params)
 
+    def count_doc_in_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Count documents in an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=f"{index}/_count")
+        params = {"pretty": "true"}
+
+        return ops.perform_get(rest_path=rest_path, params=params)
+
+    def refresh_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Refresh an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=f"{index}/_refresh")
+        params = {"pretty": "true"}
+
+        return ops.perform_post(rest_path=rest_path, params=params)
     def create_snapshot(self, port: int, repo: str, snapshot_id: str) -> ops.RESTResponse:
         """
         Create a snapshot of the cluster into a repo by synchronously blocking on completion
