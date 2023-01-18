@@ -1,48 +1,50 @@
 from pathlib import Path
 import json
 from typing import Any
-import cluster_migration_core.core.versions_engine as ev
-import cluster_migration_core.clients as clients
+from cluster_migration_core.clients.rest_client_default import RESTClientDefault
+import os
 
-DEFAULT_TEMP_STORAGE = "/tmp/utf/robot_data.json"
+DEFAULT_TEMP_STORAGE_DIR = "/tmp/utf"
 
 
-class CouldNotRetreiveAttributeFromRESTResponse(Exception):
+class CouldNotRetrieveAttributeFromRESTResponseException(Exception):
     def __init__(self, key: str, response: dict):
         super().__init__(f"Could not find key '{key}' in the RESTResponse json: {response}")
 
 
 class OpenSearchRESTActions(object):
 
-    def __init__(self, host="localhost", port=9200, temp_storage_location=DEFAULT_TEMP_STORAGE):
-        #This is temporary, this will be provided by the executor
-        engine_version = ev.EngineVersion(ev.ENGINE_OPENSEARCH, 1, 3, 6)
-        rest_client = clients.get_rest_client(engine_version)
-        self._rest_client = rest_client
-        self._temp_storage_location = Path(temp_storage_location)
+    def __init__(self, host="localhost", port=9200, temp_storage_directory=DEFAULT_TEMP_STORAGE_DIR):
+        self._rest_client = RESTClientDefault()
+        self._temp_storage_directory = Path(temp_storage_directory)
+        self._temp_storage_location = Path(os.path.join(temp_storage_directory, 'robot_data.json'))
         self._port = port
 
     def create_index(self, index_name: str):
         self._rest_client.create_an_index(port=self._port, index=index_name)
 
+    def delete_index(self, index_name: str):
+        self._rest_client.delete_an_index(port=self._port, index=index_name)
+
     def create_document(self, index_name: str, document: dict):
         self._rest_client.post_doc_to_index(port=self._port, index=index_name, doc=document)
 
     def count_documents_in_index(self, index_name: str) -> int:
-        response = self._rest_client.count_doc_in_index(port=self._port, index=index_name).response_json
+        response = self._rest_client.count_docs_in_index(port=self._port, index=index_name).response_json
         count_key = "count"
         try:
             count = response[count_key]
-            return count
-        except CouldNotRetreiveAttributeFromRESTResponse(count_key, response):
-            print('Please enter a valid attribute from RESTResponse')
+        except KeyError:
+            raise CouldNotRetrieveAttributeFromRESTResponseException(count_key, response)
+
+        return count
 
     def refresh_index(self, index_name):
         self._rest_client.refresh_index(port=self._port, index=index_name)
-
     # Storing intermediate state needs to be thought through, this uses a
     # a file to store state for time being. "Any" is a bit generous of a type
     # for data -- what we really mean is any json-serializable type.
+
     def store_data_with_label(self, data: Any, label: str):
         if self._temp_storage_location.exists():
             with self._temp_storage_location.open('r') as file_pointer:
@@ -52,6 +54,9 @@ class OpenSearchRESTActions(object):
                     # This is most likely an empty file.
                     stored_data = {}
         else:
+            #This ensures the parent directory exists
+            if not os.path.exists(self._temp_directory):
+                os.makedirs(self._temp_directory)
             stored_data = {}
         stored_data[label] = data
         with self._temp_storage_location.open('w') as file_pointer:

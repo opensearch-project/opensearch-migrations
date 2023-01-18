@@ -48,10 +48,19 @@ class RESTClientDefault(RESTClientBase):
         """
         Creates an index
         """
-        rest_path = ops.RESTPath(port=port, suffix=f"{index}")
+        rest_path = ops.RESTPath(port=port, suffix=index)
         params = {"pretty": "true"}
 
         return ops.perform_post(rest_path=rest_path, params=params)
+
+    def delete_an_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Deletes an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=index)
+        params = {"pretty": "true"}
+
+        return ops.perform_delete(rest_path=rest_path, params=params)
 
     def post_doc_to_index(self, port: int, index: str, doc: dict) -> ops.RESTResponse:
         """
@@ -63,7 +72,7 @@ class RESTClientDefault(RESTClientBase):
 
         return ops.perform_post(rest_path=rest_path, data=json.dumps(doc), headers=headers, params=params)
 
-    def count_doc_in_index(self, port: int, index: str) -> ops.RESTResponse:
+    def count_docs_in_index(self, port: int, index: str) -> ops.RESTResponse:
         """
         Count documents in an index
         """

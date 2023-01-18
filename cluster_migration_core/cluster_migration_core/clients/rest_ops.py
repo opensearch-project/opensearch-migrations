@@ -87,6 +87,21 @@ def perform_post(rest_path: RESTPath = RESTPath(), data: str = "", params: dict 
     return rest_response
 
 
+def perform_delete(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {},
+                   auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
+    raw_reponse = requests.delete(
+        url=str(rest_path),
+        auth=auth,
+        data=data,
+        params=params,
+        headers=headers
+    )
+
+    rest_response = RESTResponse(raw_reponse)
+    logger.debug(f"REST DELETE Response : {rest_response}")
+    return rest_response
+
+
 def perform_put(rest_path: RESTPath = RESTPath(), data: str = "", params: dict = {}, headers: dict = {},
                 auth=HTTPBasicAuth("admin", "admin")) -> RESTResponse:
     raw_reponse = requests.put(
