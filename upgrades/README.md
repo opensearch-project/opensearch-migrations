@@ -141,9 +141,19 @@ Report:  /tmp/utf/test-results/pre-upgrade/report.html
 
 These files would be useful when a specific Test Action failed and the reason why isn't apparent from either the messaging to STDOUT or the UTF Run Log.  More information about what these files are can be found in [the Robot Framework's documentation](https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html#different-output-files).
 
+
 Robot tests, as tests that are written with the Robot Framework are often referred to as, are also capable of being run independently if needed by using the underlying Robot Framework. Note that
 Robot tests require a running cluster to be executed on:
 
 ```
 robot --include stage::pre-upgrade --variable engine_version:OS_1_3_6 --variable host:localhost --variable port:9200 --outputdir test_results upgrade_testing_framework/robot_test_defs
 ```
+
+#### Current State & Limitations
+
+The UTF is currently functional and runnable, but of limited utility. The following are areas where we expect to need to invest more time or investigation:
+- Adding more expectations to the knowledge base and corresponding test actions. There is a discussion in [PR #68](https://github.com/opensearch-project/opensearch-migrations/pull/68) regarding the format of expectations. Generally, the value of this project is directly correlated to the number and breadth of the expectations and tests, so this is a very important area of investment.
+- Expanding the functionality of the OpenSearchRESTActions library in `./upgrade_testing_framework/robot_lib`. This library contains code that makes various actions available to the robot framework (e.g. running specific api calls against the cluster).
+- These libraries are currently not distibuted in any way beyond this git repo. They could be packaged for PyPI and distributed as standalone tools.
+- Supporting alternate upgrade mechanisms in the `cluster_migration_core` library. Snapshot & restore is the only mechanism currently supported and it has limitations including being unable to do upgrades beyond version N+1. To simulate and test upgrades between more disparate versions, support needs to be added for either multi-step upgrades or different mechanisms.
+- Supporting additional version of Elasticsearch/OpenSearch. We currently have targeted ES 7.10.2 -> OS 1.3.6 and support that through the code. To add additional versions, some minor changes will likely be needed in `cluster_migration_core` and `upgrade_testing_framework` (more conditional branches, maybe changes in some configuration syntax). Additionally, a new Test Config will need to be created and added to `./test_configs` to encapsulate the new test type.
