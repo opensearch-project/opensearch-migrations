@@ -1,7 +1,8 @@
 from pathlib import Path
 import json
 from typing import Any
-from cluster_migration_core.clients.rest_client_default import RESTClientDefault
+import cluster_migration_core.core.versions_engine as ev
+import cluster_migration_core.clients as clients
 import os
 
 DEFAULT_TEMP_STORAGE_DIR = "/tmp/utf"
@@ -14,8 +15,9 @@ class CouldNotRetrieveAttributeFromRESTResponseException(Exception):
 
 class OpenSearchRESTActions(object):
 
-    def __init__(self, host="localhost", port=9200, temp_storage_directory=DEFAULT_TEMP_STORAGE_DIR):
-        self._rest_client = RESTClientDefault()
+    def __init__(self, engine_version: str, host="localhost", port=9200,
+                 temp_storage_directory=DEFAULT_TEMP_STORAGE_DIR):
+        self._rest_client = clients.get_rest_client(ev.get_version(engine_version))
         self._temp_storage_directory = Path(temp_storage_directory)
         self._temp_storage_location = Path(os.path.join(temp_storage_directory, 'robot_data.json'))
         self._port = port
@@ -55,8 +57,8 @@ class OpenSearchRESTActions(object):
                     stored_data = {}
         else:
             #This ensures the parent directory exists
-            if not os.path.exists(self._temp_directory):
-                os.makedirs(self._temp_directory)
+            if not os.path.exists(self._temp_storage_directory):
+                os.makedirs(self._temp_storage_directory)
             stored_data = {}
         stored_data[label] = data
         with self._temp_storage_location.open('w') as file_pointer:

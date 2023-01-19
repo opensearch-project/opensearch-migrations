@@ -113,7 +113,9 @@ def test_WHEN_load_knowledge_base_called_AND_valid_THEN_returns_it(valid_knowled
                       Expectation(TEST_EXPECTATION_WITH_VERSION),
                       Expectation(TEST_EXPECTATION_COMPLEX_VERSION)]
 
-    assert expected_value == actual_value
+    assert len(actual_value) == len(expected_value)
+    for e in expected_value:
+        assert e in actual_value
 
 
 def test_WHEN_load_knowledge_base_called_AND_non_readable_file_THEN_raises(valid_knowledge_base_dir):
