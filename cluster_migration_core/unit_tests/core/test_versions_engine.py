@@ -51,3 +51,8 @@ def test_WHEN_version_comparison_AND_same_engine_THEN_compares():
 def test_WHEN_version_comparison_AND_different_engine_THEN_compares():
     assert versions.get_version("ES_7_10_2") < versions.get_version("OS_1_0_0")
     assert versions.get_version("OS_2_4_0") >= versions.get_version("ES_3_5_0")
+
+
+def test_WHEN_version_to_str_THEN_returns():
+    assert str(versions.EngineVersion(versions.ENGINE_ELASTICSEARCH, 7, 10, 2)) == "ES_7_10_2"
+    assert str(versions.EngineVersion(versions.ENGINE_OPENSEARCH, 2, 1, 0)) == "OS_2_1_0"

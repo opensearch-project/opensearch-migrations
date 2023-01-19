@@ -18,6 +18,8 @@ class PerformPreUpgradeTest(FrameworkStep):
     def _run(self):
         # Get the state we need
         source_cluster = self.state.source_cluster
+        node = source_cluster.nodes[0]  # shouldn't matter which node we pick
+        engine_version = str(node.engine_version)
         port = source_cluster.rest_ports[0]
         eligible_expectations = self.state.eligible_expectations
         output_directory = f"{self.state.get_key('test_results_directory')}/{STAGE_TAG}"
@@ -31,7 +33,8 @@ class PerformPreUpgradeTest(FrameworkStep):
             port=port,
             actions_dir=path_to_actions,
             output_dir=path_to_outputs,
-            include_tags=included_tags
+            include_tags=included_tags,
+            engine_version=engine_version
         )
         
         pre_upgrade_executor.execute()

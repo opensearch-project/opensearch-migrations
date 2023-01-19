@@ -11,7 +11,7 @@ The UTF is based around the following concepts:
 * A "Runner" that takes a Workflow and executes the steps in it sequentially, while managing things like error handling, logging, and state
 * A shared "State" that exists in-memory of the process and enables the results of one step to be re-used by a later step
 * A "Test Config" JSON file that encapsulates the specific upgrade to be tested (e.g. snapshot/restore from ES 7.10.2 to OS 1.3.6).  This package will contain a collection of pre-canned Test Configs (`./test_configs/`) that should represent the limits of the UTF's knowledge about what is true about how Upgrades work.  In other words - if there isn't a Test Config file in the included collection that covers the specific cluster setup and upgrade type you're interested in, the UTF is not testing that setup/upgrade type.
-* A set of "Test Actions" that are performed at various points in a Workflow via an existing library called the [Robot Framework](https://robotframework.org/?tab=2#getting-started).  These currently at `./upgrade_testing_framework/robot_test_defs/`
+* A set of "Test Actions" that are performed at various points in a Workflow via an existing library called the [Robot Framework](https://robotframework.org/?tab=2#getting-started).  These are currently at `./upgrade_testing_framework/robot_test_defs/`
 * A set of "Expectations" that represent things we expect to be true about the upgrade specified in the Test Config file (number of documents should remain the same before/after).  Each Expectation has an Expectation ID that is used to track which Test Actions are associated with a given Expectation, and determine if the Expectation was true or not.  These Expectation IDs are associated with each Test Action as a tag that the UTF search for and enable selective invocation.
 * A "Knowledge Base" that represents all the Expectations we're currently tracking and (hopefully) testing, currently located at `../knowledge_base/`.
 
@@ -111,9 +111,11 @@ You can find the path to the file in the ending printout to STDOUT:
 [FrameworkRunner] Full run details logged to: /tmp/utf/logs/run.log.2023-01-05_15_44_42
 ```
 
-#### HTML Reports
+#### Robot Framework HTML Reports
 
-The Robot Framework used to execute our Test Actions produces logs and reports as well, and the paths to them are sent to STDOUT as part of a Workflow:
+The UTF uses Test Actions to perform cluster manipulation and test assertions as needed by the test suite. These Test Actions are executed in a step wise manner (i.e.
+`step_perform_pre_upgrade_test.py`, `step_perform_post_upgrade_test.py`) and can be included as part of a Workflow. Under the hood, Test Actions are built on and executed by the [Robot Framework](https://robotframework.org/) 
+in order to simplify writing upgrade/migration tests in a way that can be easily understood and reproduced, as can be seen in `./upgrade_testing_framework/robot_test_defs/`. The Robot Framework will produce logs and reports as well when ran, and the paths to them are sent to STDOUT as part of a Workflow:
 
 ```
 [FrameworkRunner] Step Succeeded: StartSourceCluster
@@ -124,7 +126,8 @@ Robot Test Defs
 Robot Test Defs.Common Upgrade Test
 ====================================================================================================
 Perform pre-upgrade setup of "consistent-document-count" expectation                        | PASS |
-----------------------------------------------------------------------------------------------------                                                                                  Robot Test Defs.Common Upgrade Test                                                         | PASS |
+----------------------------------------------------------------------------------------------------                                                                                  
+Robot Test Defs.Common Upgrade Test                                                         | PASS |
 1 test, 1 passed, 0 failed
 ====================================================================================================
 Robot Test Defs                                                                             | PASS |
@@ -137,3 +140,10 @@ Report:  /tmp/utf/test-results/pre-upgrade/report.html
 ```
 
 These files would be useful when a specific Test Action failed and the reason why isn't apparent from either the messaging to STDOUT or the UTF Run Log.  More information about what these files are can be found in [the Robot Framework's documentation](https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html#different-output-files).
+
+Robot tests, as tests that are written with the Robot Framework are often referred to as, are also capable of being run independently if needed by using the underlying Robot Framework. Note that
+Robot tests require a running cluster to be executed on:
+
+```
+robot --include stage::pre-upgrade --variable engine_version:OS_1_3_6 --variable host:localhost --variable port:9200 --outputdir test_results upgrade_testing_framework/robot_test_defs
+```

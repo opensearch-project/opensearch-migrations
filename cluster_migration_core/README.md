@@ -1,6 +1,6 @@
 # Cluster Migration Core
 
-Core library to assist with testing migrations/upgrades between versions of ElasticSearch and OpenSearch
+This core library assists with testing migrations/upgrades between versions of ElasticSearch and OpenSearch
 
 ## Running Unit Tests
 

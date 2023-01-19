@@ -1,5 +1,5 @@
 *** Settings ***
-Library    ../robot_lib/OpenSearchRESTActions.py  ${host}  ${port}
+Library    ../robot_lib/OpenSearchRESTActions.py  ${engine_version}  ${host}  ${port}
 
 *** Keywords ***
 #Create document
