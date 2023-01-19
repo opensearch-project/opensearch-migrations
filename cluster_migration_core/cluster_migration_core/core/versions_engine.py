@@ -3,6 +3,8 @@ from functools import total_ordering
 
 ENGINE_ELASTICSEARCH = "Elasticsearch"
 ENGINE_OPENSEARCH = "OpenSearch"
+ENGINE_ELASTICSEARCH_SHORT = "ES"
+ENGINE_OPENSEARCH_SHORT = "OS"
 
 
 class CouldNotParseEngineVersionException(Exception):
@@ -28,6 +30,10 @@ class EngineVersion:
         # otherwise, ES < OS
         return self.engine == ENGINE_ELASTICSEARCH and other.engine == ENGINE_OPENSEARCH
 
+    def __str__(self) -> str:
+        engine_short = ENGINE_ELASTICSEARCH_SHORT if self.engine == ENGINE_ELASTICSEARCH else ENGINE_OPENSEARCH_SHORT
+        return f"{engine_short}_{self.major}_{self.minor}_{self.patch}"
+
 
 def get_version(version_string: str) -> EngineVersion:
     # expected an input string like: "ES_7_10_2"
@@ -36,9 +42,9 @@ def get_version(version_string: str) -> EngineVersion:
     except:  # noqa: E722
         raise CouldNotParseEngineVersionException(version_string)
 
-    if "ES" == raw_engine:
+    if ENGINE_ELASTICSEARCH_SHORT == raw_engine:
         engine = ENGINE_ELASTICSEARCH
-    elif "OS" == raw_engine:
+    elif ENGINE_OPENSEARCH_SHORT == raw_engine:
         engine = ENGINE_OPENSEARCH
     else:
         raise CouldNotParseEngineVersionException(version_string)

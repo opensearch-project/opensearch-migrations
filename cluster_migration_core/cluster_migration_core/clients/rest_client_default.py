@@ -41,7 +41,26 @@ class RESTClientDefault(RESTClientBase):
         """
         rest_path = ops.RESTPath(port=port, suffix=f"{index}/_doc/{doc_id}")
         params = {"pretty": "true"}
+
         return ops.perform_get(rest_path=rest_path, params=params)
+
+    def create_an_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Creates an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=index)
+        params = {"pretty": "true"}
+
+        return ops.perform_post(rest_path=rest_path, params=params)
+
+    def delete_an_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Deletes an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=index)
+        params = {"pretty": "true"}
+
+        return ops.perform_delete(rest_path=rest_path, params=params)
 
     def post_doc_to_index(self, port: int, index: str, doc: dict) -> ops.RESTResponse:
         """
@@ -52,6 +71,24 @@ class RESTClientDefault(RESTClientBase):
         headers = {"Content-Type": "application/json"}
 
         return ops.perform_post(rest_path=rest_path, data=json.dumps(doc), headers=headers, params=params)
+
+    def count_docs_in_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Count documents in an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=f"{index}/_count")
+        params = {"pretty": "true"}
+
+        return ops.perform_get(rest_path=rest_path, params=params)
+
+    def refresh_index(self, port: int, index: str) -> ops.RESTResponse:
+        """
+        Refresh an index
+        """
+        rest_path = ops.RESTPath(port=port, suffix=f"{index}/_refresh")
+        params = {"pretty": "true"}
+
+        return ops.perform_post(rest_path=rest_path, params=params)
 
     def create_snapshot(self, port: int, repo: str, snapshot_id: str) -> ops.RESTResponse:
         """

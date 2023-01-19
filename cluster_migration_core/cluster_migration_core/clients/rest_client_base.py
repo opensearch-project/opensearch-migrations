@@ -27,7 +27,23 @@ class RESTClientBase(ABC):
         pass
 
     @abstractmethod
+    def create_an_index(self, port: int, index: str) -> ops.RESTResponse:
+        pass
+
+    @abstractmethod
+    def delete_an_index(self, port: int, index: str) -> ops.RESTResponse:
+        pass
+
+    @abstractmethod
     def post_doc_to_index(self, port: int, index: str, doc: dict) -> ops.RESTResponse:
+        pass
+
+    @abstractmethod
+    def count_docs_in_index(self, port: int, index: str) -> ops.RESTResponse:
+        pass
+
+    @abstractmethod
+    def refresh_index(self, port: int, index: str) -> ops.RESTResponse:
         pass
 
     # Snapshot operations
