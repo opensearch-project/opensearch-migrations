@@ -15,7 +15,8 @@ class CouldNotRetrieveAttributeFromRESTResponseException(Exception):
 
 class OpenSearchRESTActions(object):
 
-    def __init__(self, engine_version: str, host="localhost", port=9200, temp_storage_directory=DEFAULT_TEMP_STORAGE_DIR):
+    def __init__(self, engine_version: str, host="localhost", port=9200,
+                 temp_storage_directory=DEFAULT_TEMP_STORAGE_DIR):
         self._rest_client = clients.get_rest_client(ev.get_version(engine_version))
         self._temp_storage_directory = Path(temp_storage_directory)
         self._temp_storage_location = Path(os.path.join(temp_storage_directory, 'robot_data.json'))
