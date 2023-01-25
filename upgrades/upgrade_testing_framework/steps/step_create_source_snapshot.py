@@ -21,7 +21,7 @@ class CreateSourceSnapshot(FrameworkStep):
         rest_client = clients.get_rest_client(engine_version)
         repo_name, snapshot_id = ("noldor_repo", "test_snapshot")
 
-        rest_client.register_snapshot_dir(port, repo_name, shared_volume.mount_point)
+        rest_client.register_snapshot_dir(port, repo_name, shared_volume.container_mount_point)
         rest_client.create_snapshot(port, repo_name, snapshot_id)
 
         self.logger.info("Confirming snapshot of source cluster exists...")

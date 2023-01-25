@@ -75,3 +75,15 @@ def remove_ansi_escape_sequences(string_to_clean: str):
     # See: https://en.wikipedia.org/wiki/ANSI_escape_code
     ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
     return ansi_escape.sub('', string_to_clean)
+
+
+def louder_input(message: str, print_header: bool = True) -> str:
+    """
+    Prompts users with a message and returns their typed input; optional big banner so they notice.
+    """
+    if print_header:
+        logger.info("================================================================================")
+        logger.info("USER ACTION REQUIRED:")
+        logger.info("--------------------------------------------------------------------------------")
+    logger.debug(message)
+    return input(message)

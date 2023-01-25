@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import logging
 from typing import Dict, List, NamedTuple, Tuple
 
@@ -27,13 +28,21 @@ class DockerImageUnavailableException(Exception):
         super().__init__(f"The Docker {image} is not available either locally or in your remote repos")
 
 
-class DockerVolume(NamedTuple):
-    mount_point: str
-    volume: Volume
+@dataclass
+class DockerImage:
+    tag: str
+
+
+class DockerVolume:
+    def __init__(self, container_mount_point: str, volume: Volume, host_mount_point: str = None):
+        self.container_mount_point = container_mount_point
+        self.host_mount_point = host_mount_point
+        self.volume = volume
 
     def to_dict(self) -> dict:
         return {
-            "mount_point": self.mount_point,
+            "container_mount_point": self.container_mount_point,
+            "host_mount_point": self.host_mount_point,
             "volume": self.volume.attrs
         }
 
@@ -72,6 +81,17 @@ class DockerFrameworkClient:
             self._docker_client = DockerFrameworkClient._try_create_docker_client()
         else:
             self._docker_client = docker_client
+
+    def build_image(self, dir_path: str, tag: str) -> DockerImage:
+        """
+        dir_path: The path to the directory containing the Dockerfile
+        tag: The tag to set to the image after it's built
+        """
+        self._docker_client.images.build(
+            path=dir_path,
+            tag=tag
+        )
+        return DockerImage(tag)
 
     def is_image_available_locally(self, image: str) -> bool:
         try:
@@ -113,16 +133,35 @@ class DockerFrameworkClient:
         self.logger.debug(f"Removed volume {volume.name}")
 
     def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping],
-                         volumes: List[DockerVolume], ulimits: List[Ulimit], env_variables: Dict[str, str]
+                         volumes: List[DockerVolume], ulimits: List[Ulimit], env_variables: Dict[str, str] = None,
+                         extra_hosts: Dict[str, str] = None, detach: bool = True
                          ) -> Container:
 
         # TODO - need handle if container already exists (name collision)
         # TODO - need handle if we exceed the resource allocation for Docker
         # TODO - need handle port contention
 
+        # Initialize optional, mutable containers
+        if not env_variables:
+            env_variables = {}
+        if not extra_hosts:
+            extra_hosts = []
+
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
         port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
-        volume_mapping = {dv.volume.attrs["Name"]: {"bind": dv.mount_point, "mode": "rw"} for dv in volumes}
+        volume_mapping = {}
+        for dv in volumes:
+            # In this case, we have a directory on the host machine we want to make available to the container so the
+            # key is the path to that directory.  We make the mount type "Read Only" for safety, but this should
+            # ideally be configurable.
+            if dv.host_mount_point:
+                volume_mapping[dv.host_mount_point] = {"bind": dv.container_mount_point, "mode": "ro"}
+            
+            # In this case, the volume is entirely within Docker temporary filespace, so the key is the name of our
+            # volume.  We set this to be "Read-Write" so multiple containers can share the volume's files, but this
+            # should probably be configurable as well.
+            else:
+                volume_mapping[dv.volume.attrs["Name"]] = {"bind": dv.container_mount_point, "mode": "rw"}
 
         self.logger.debug(f"Creating container {container_name}...")
         container = self._docker_client.containers.run(
@@ -132,8 +171,9 @@ class DockerFrameworkClient:
             ports=port_mapping,
             volumes=volume_mapping,
             ulimits=ulimits,
-            detach=True,
-            environment=env_variables
+            detach=detach,
+            environment=env_variables,
+            extra_hosts=extra_hosts
         )
         self.logger.debug(f"Created container {container_name}")
         return container

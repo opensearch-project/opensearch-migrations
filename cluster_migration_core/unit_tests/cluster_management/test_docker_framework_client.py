@@ -24,6 +24,21 @@ def test_WHEN_create_docker_client_AND_docker_not_running_THEN_raises(mock_dock_
         dfc.DockerFrameworkClient()
 
 
+def test_WHEN_build_image_THEN_as_expected():
+    # Set up our test
+    mock_inner_client = mock.Mock()  # no exception thrown when we invoke docker_client.images.pull()
+
+    # Run our test
+    test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
+    image = test_client.build_image("/my/path", "tag")
+
+    # Check our results
+    assert "tag" == image.tag
+
+    expected_build_calls = [mock.call(path="/my/path", tag="tag")]
+    assert expected_build_calls == mock_inner_client.images.build.call_args_list
+
+
 def test_WHEN_is_image_available_locally_AND_is_available_THEN_true():
     # Set up our test
     mock_inner_client = mock.Mock()  # no exception thrown when we invoke docker_client.images.get()
@@ -144,11 +159,15 @@ def test_WHEN_create_container_called_THEN_executes_normally():
     mock_network = mock.Mock()
     mock_network.name = "network1"
     test_ports = [dfc.PortMapping(1, 1), dfc.PortMapping(2, 3)]
-    mock_volume = mock.Mock()
-    mock_volume.attrs = {"Name": "volume1"}
-    mock_docker_volume = dfc.DockerVolume("/mount/point", mock_volume)
+    mock_volume_1 = mock.Mock()
+    mock_volume_1.attrs = {"Name": "volume1"}
+    mock_docker_volume_1 = dfc.DockerVolume("/mount/point", mock_volume_1)
+    mock_volume_2 = mock.Mock()
+    mock_volume_2.attrs = {"Name": "volume2"}
+    mock_docker_volume_2 = dfc.DockerVolume("/mount/point2", mock_volume_2, host_mount_point="/host/")
     mock_ulimit = mock.Mock()
     test_env_vars = {"key": "value"}
+    test_extra_hosts = {"tag": "hostname"}
 
     # Run our test
     test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
@@ -157,9 +176,10 @@ def test_WHEN_create_container_called_THEN_executes_normally():
         test_container_name,
         mock_network,
         test_ports,
-        [mock_docker_volume],
+        [mock_docker_volume_1, mock_docker_volume_2],
         [mock_ulimit],
-        test_env_vars
+        test_env_vars,
+        extra_hosts=test_extra_hosts
     )
 
     # Check our results
@@ -169,10 +189,17 @@ def test_WHEN_create_container_called_THEN_executes_normally():
             name=test_container_name,
             network=mock_network.name,
             ports={str(pair.container_port): str(pair.host_port) for pair in test_ports},
-            volumes={mock_volume.attrs["Name"]: {"bind": mock_docker_volume.mount_point, "mode": "rw"}},
+            volumes={
+                mock_volume_1.attrs["Name"]: {"bind": mock_docker_volume_1.container_mount_point, "mode": "rw"},
+                mock_docker_volume_2.host_mount_point: {
+                    "bind": mock_docker_volume_2.container_mount_point,
+                    "mode": "ro"
+                }
+            },
             ulimits=[mock_ulimit],
             detach=True,
-            environment=test_env_vars
+            environment=test_env_vars,
+            extra_hosts=test_extra_hosts
         )
     ]
     assert expected_calls == mock_inner_client.containers.run.call_args_list
