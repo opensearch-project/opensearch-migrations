@@ -48,7 +48,7 @@ def main():
     rightXmlStr = get_xml_str(args.filenames[1])
 
     formatter = xmlformatting.DiffFormatter()
-    emit_edit_script(leftXmlStr, rightXmlStr, lambda l, r, diff: print(formatter.format(diff, l)))
+    emit_edit_script(leftXmlStr, rightXmlStr, lambda leftTree, rightTree, diff: print(formatter.format(diff, leftTree)))
 
 
 if __name__ == "__main__":

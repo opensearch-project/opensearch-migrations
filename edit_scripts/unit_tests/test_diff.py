@@ -3,7 +3,7 @@ import xmldiff
 from edit_scripts.calculate_edit_script.run_diff import emit_edit_script, get_xml_str_from_str
 
 
-def checkResultsSame(diff, l):
+def checkResultsSame(diff, leftTree):
     ldiff = list(diff)
     assert len(ldiff) == 0
 
@@ -24,10 +24,10 @@ def test_diff_on_same_is_empty():
     }"""
 
     emit_edit_script(get_xml_str_from_str(json1), get_xml_str_from_str(json1),
-                     lambda l, r, diff: checkResultsSame(diff, l))
+                     lambda leftTree, rightTree, diff: checkResultsSame(diff, leftTree))
 
 
-def checkResultsDiff(diff, l):
+def checkResultsDiff(diff, leftTree):
     ldiff = list(diff)
     assert len(ldiff) == 1
     assert ldiff[0].__class__ == xmldiff.actions.MoveNode
@@ -62,4 +62,4 @@ def test_easy_rotate_works():
     }"""
 
     emit_edit_script(get_xml_str_from_str(json1), get_xml_str_from_str(json2),
-                     lambda l, r, diff: checkResultsDiff(diff, l))
+                     lambda leftTree, rightTree, diff: checkResultsDiff(diff, leftTree))
