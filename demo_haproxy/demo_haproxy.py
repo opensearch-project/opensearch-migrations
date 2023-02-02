@@ -12,23 +12,49 @@ from cluster_migration_core.core.test_config_wrangling import ClusterConfig
 from cluster_migration_core.cluster_management.cluster import Cluster, ClusterNotStartedInTimeException
 
 
+HAPROXY_PORT = 80
+SPOA_LISTEN_PORT = 12345
+SPOA_LISTEN_URL = "127.0.0.1"
+
+
 # Standard tag used to specify the host running a container from inside that container
 TAG_DOCKER_HOST = "host.docker.internal"
 
 
-def generate_haproxy_config(primary_ports: List[int]) -> str:
+def generate_haproxy_config(primary_ports: List[int], shadow_ports: List[int]) -> str:
     # Taken from the HAProxy guide here: https://www.haproxy.com/blog/how-to-run-haproxy-with-docker/
+    # And here: https://www.haproxy.com/blog/haproxy-traffic-mirroring-for-real-world-testing/
 
+    # Configure the "backend" section for our primary cluster
     backend_server_lines = []
     for port in primary_ports:
         backend_server_lines.append(f"    server s{port} {TAG_DOCKER_HOST}:{port} check")
     backend_server_section = "\n".join(backend_server_lines)
 
+    # Construct the URL to send mirrored traffic to
+    shadow_url = f"http://{TAG_DOCKER_HOST}:{shadow_ports[0]}"
+
     return f"""
 global
+    # Make the statistics webform visible
     stats socket /var/run/api.sock user haproxy group haproxy mode 660 level admin expose-fd listeners
-    log 127.0.0.1:514 local0
-    log stdout format raw local0 debug
+
+    # Logging configuration
+    log 127.0.0.1:514 local0 # syslogd, facility local0
+    log stdout format raw local0 debug # stdout too
+
+    # Turn on Master/Worker mode.  Required to use SPOE Mirroring.  While hardly an expert, I've attempted to configure
+    # this so that the HAProxy container will exit if a process associated w/ the proxy mechanism runs into trouble.
+    # This will ensure problems are surfaced quickly/obviously, possibly at the expense of resilience at the container
+    # level.
+    #
+    # The premise of master/worker is that it sets up a main process which "is" HAProxy from the perspective of the
+    # rest of the system, and the actual work of HAProxy is done by subprocesses that can be killed/restarted at-will
+    # without changing the process id.  This provides better integration w/ systemd's process management system, and
+    # more logically bundles the various aspects of HAProxy under one process umbrella (the main process).
+    master-worker # not using no-exit-on-failure so container dies if any subprocess dies
+    mworker-max-reloads 3 # Limit subprocess reloads to 3 before SIGTERM is sent
+    hard-stop-after 15s # If a subprocess is still running 15s after reload signal, send SIGTERM
 
 defaults
     mode http
@@ -38,23 +64,50 @@ defaults
     timeout http-request 10s
     log global
 
+# Tells HAProxy to also start the mirroring SPOA as a daemon when it starts up
+program mirror
+    command spoa-mirror --runtime 0 --address {SPOA_LISTEN_URL} --port {SPOA_LISTEN_PORT} --mirror-url {shadow_url}
+
+# This section surfaces a web form at localhost:8404 with statistics for the HAProxy instance
 frontend stats
     bind *:8404
     stats enable
     stats uri /
     stats refresh 10s
 
+# This section outlines the "frontend" for this instance of HAProxy and specifies the rules by which it receives
+# traffic
 frontend myfrontend
-    bind :80
+    bind :{HAPROXY_PORT}
+
+    # Set up the logging for the req/res stream to the primary cluster
     declare capture request len 80000
     declare capture response len 80000
     http-request capture req.body id 0
     log-format Request-URI:\\ %[capture.req.uri]\\nRequest-Method:\\ %[capture.req.method]\\nRequest-Body:\\ %[capture.req.hdr(0)]\\nResponse-Body:\\ %[capture.res.hdr(0)]
-    default_backend webservers
+    
+    # Associate this frontend with the primary cluster
+    default_backend primary_cluster
 
-backend webservers
+    # Required for the mirror SPOA to have access to the request
+    option http-buffer-request
+
+    # Tell HAProxy to also send traffic to this frontend to the mirror agent too
+    filter spoe engine mirror config /usr/local/etc/haproxy/mirror.conf
+
+# These are the primary Cluster's Nodes; traffic will be sent to them synchronously.  The default round robin LB
+# pattern is in effect.
+backend primary_cluster
     http-response capture res.body id 0
 {backend_server_section}
+
+# Mirror agents
+backend mirroragents
+    mode tcp
+    balance roundrobin
+    timeout connect 5s
+    timeout server 5s
+    server agent1 {SPOA_LISTEN_URL}:{SPOA_LISTEN_PORT}
 
 """
 
@@ -88,29 +141,29 @@ def main():
         raise exception
     print(f"Cluster {primary_cluster.name} is active")
 
-    # # Set up the Shadow Cluster
-    # shadow_cluster_config = ClusterConfig(raw_config={
-    #     "engine_version": "ES_7_10_2",
-    #     "image": "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
-    #     "node_count": 2,
-    #     "additional_node_config": {
-    #         "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
-    #     }
-    # })
+    # Set up the Shadow Cluster
+    shadow_cluster_config = ClusterConfig(raw_config={
+        "engine_version": "ES_7_10_2",
+        "image": "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
+        "node_count": 2,
+        "additional_node_config": {
+            "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
+        }
+    })
 
-    # print("Creating shadow cluster...")
-    # starting_port = max(primary_cluster.rest_ports) + 1
-    # shadow_cluster = Cluster("shadow-cluster", shadow_cluster_config, docker_client, starting_port=starting_port)
-    # shadow_cluster.start()
+    print("Creating shadow cluster...")
+    starting_port = max(primary_cluster.rest_ports) + 1
+    shadow_cluster = Cluster("shadow-cluster", shadow_cluster_config, docker_client, starting_port=starting_port)
+    shadow_cluster.start()
 
-    # try:
-    #     max_wait_sec = 30
-    #     print(f"Waiting up to {max_wait_sec} sec for cluster to be active...")
-    #     shadow_cluster.wait_for_cluster_to_start_up(max_wait_time_sec=30)
-    # except ClusterNotStartedInTimeException as exception:
-    #     print("Cluster did not start within time limit")
-    #     raise exception
-    # print(f"Cluster {shadow_cluster.name} is active")
+    try:
+        max_wait_sec = 30
+        print(f"Waiting up to {max_wait_sec} sec for cluster to be active...")
+        shadow_cluster.wait_for_cluster_to_start_up(max_wait_time_sec=30)
+    except ClusterNotStartedInTimeException as exception:
+        print("Cluster did not start within time limit")
+        raise exception
+    print(f"Cluster {shadow_cluster.name} is active")
 
     # =================================================================================================================
     # Set up HAProxy
@@ -132,7 +185,7 @@ def main():
         shutil.copy2(os.path.join(docker_files_dir, file_name), workspace)
     
     # Write our HAProxy Config File to our workspace
-    haproxy_config_str = generate_haproxy_config(primary_cluster.rest_ports)
+    haproxy_config_str = generate_haproxy_config(primary_cluster.rest_ports, shadow_cluster.rest_ports)
     haproxy_config_path = os.path.join(workspace, "haproxy.cfg")
     with open(haproxy_config_path, "w") as haproxy_config_file:
         print(f"Writing HAProxy Config to: {haproxy_config_path}")
@@ -189,11 +242,11 @@ demo containers.
     print(f"Cleaning up underlying resources for cluster {primary_cluster.name}...")
     primary_cluster.clean_up()
 
-    # # Clean up the shadow cluster
-    # print(f"Stopping cluster {shadow_cluster.name}...")
-    # shadow_cluster.stop()
-    # print(f"Cleaning up underlying resources for cluster {shadow_cluster.name}...")
-    # shadow_cluster.clean_up()
+    # Clean up the shadow cluster
+    print(f"Stopping cluster {shadow_cluster.name}...")
+    shadow_cluster.stop()
+    print(f"Cleaning up underlying resources for cluster {shadow_cluster.name}...")
+    shadow_cluster.clean_up()
 
     # Clean up HAProxy stuff
     print("Cleaning up underlying resources for the HAProxy container...")
