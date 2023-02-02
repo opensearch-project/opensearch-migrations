@@ -12,7 +12,8 @@ from cluster_migration_core.core.test_config_wrangling import ClusterConfig
 from cluster_migration_core.cluster_management.cluster import Cluster, ClusterNotStartedInTimeException
 
 
-HAPROXY_PORT = 80
+HAPROXY_PRIMARY_PORT = 80
+HAPROXY_SHADOW_PORT = 81
 SPOA_LISTEN_PORT = 12345
 SPOA_LISTEN_URL = "127.0.0.1"
 
@@ -21,24 +22,30 @@ SPOA_LISTEN_URL = "127.0.0.1"
 TAG_DOCKER_HOST = "host.docker.internal"
 
 
-def generate_haproxy_config(primary_ports: List[int], shadow_ports: List[int]) -> str:
-    # Taken from the HAProxy guide here: https://www.haproxy.com/blog/how-to-run-haproxy-with-docker/
-    # And here: https://www.haproxy.com/blog/haproxy-traffic-mirroring-for-real-world-testing/
+def generate_haproxy_config(primary_ports: List[int], shadow_ports: List[int], primary: bool) -> str:
+    """
+    This jumble of code generates two different HAProxy config files.  If "primary" is True, it generates a config
+    file for the HAProxy instance between the client and the primary cluster and turn on traffic mirroring to the
+    shadow cluster.  If "primary" is False, it generates a config file for the HAProxy instance between the Primary
+    HAProxy instance and the shadow cluster without any mirroring configured.  The logging and other configuration are
+    the same for either config.
+
+    Taken from the HAProxy guide here: https://www.haproxy.com/blog/how-to-run-haproxy-with-docker/
+    And here: https://www.haproxy.com/blog/haproxy-traffic-mirroring-for-real-world-testing/
+    """
 
     # Configure the "backend" section for our primary cluster
     backend_server_lines = []
-    for port in primary_ports:
+    backend_ports = primary_ports if primary else shadow_ports
+    for port in backend_ports:
         backend_server_lines.append(f"    server s{port} {TAG_DOCKER_HOST}:{port} check")
     backend_server_section = "\n".join(backend_server_lines)
 
     # Construct the URL to send mirrored traffic to
-    shadow_url = f"http://{TAG_DOCKER_HOST}:{shadow_ports[0]}"
+    shadow_url = f"http://{TAG_DOCKER_HOST}:{HAPROXY_SHADOW_PORT}"
 
-    return f"""
+    base_config = f"""
 global
-    # Make the statistics webform visible
-    stats socket /var/run/api.sock user haproxy group haproxy mode 660 level admin expose-fd listeners
-
     # Logging configuration
     log 127.0.0.1:514 local0 # syslogd, facility local0
     log stdout format raw local0 debug # stdout too
@@ -64,21 +71,16 @@ defaults
     timeout http-request 10s
     log global
 
-# Tells HAProxy to also start the mirroring SPOA as a daemon when it starts up
-program mirror
-    command spoa-mirror --runtime 0 --address {SPOA_LISTEN_URL} --port {SPOA_LISTEN_PORT} --mirror-url {shadow_url}
-
-# This section surfaces a web form at localhost:8404 with statistics for the HAProxy instance
-frontend stats
-    bind *:8404
-    stats enable
-    stats uri /
-    stats refresh 10s
+# These are the primary Cluster's Nodes; traffic will be sent to them synchronously.  The default round robin LB
+# pattern is in effect.
+backend primary_cluster
+    http-response capture res.body id 0
+{backend_server_section}
 
 # This section outlines the "frontend" for this instance of HAProxy and specifies the rules by which it receives
 # traffic
 frontend myfrontend
-    bind :{HAPROXY_PORT}
+    bind :{HAPROXY_PRIMARY_PORT if primary else HAPROXY_SHADOW_PORT}
 
     # Set up the logging for the req/res stream to the primary cluster
     declare capture request len 80000
@@ -89,17 +91,18 @@ frontend myfrontend
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
 
+"""
+
+    mirror_config = f"""
     # Required for the mirror SPOA to have access to the request
     option http-buffer-request
 
     # Tell HAProxy to also send traffic to this frontend to the mirror agent too
     filter spoe engine mirror config /usr/local/etc/haproxy/mirror.conf
 
-# These are the primary Cluster's Nodes; traffic will be sent to them synchronously.  The default round robin LB
-# pattern is in effect.
-backend primary_cluster
-    http-response capture res.body id 0
-{backend_server_section}
+# Tells HAProxy to also start the mirroring SPOA as a daemon when it starts up
+program mirror
+    command spoa-mirror --runtime 0 --address {SPOA_LISTEN_URL} --port {SPOA_LISTEN_PORT} --mirror-url {shadow_url}
 
 # Mirror agents
 backend mirroragents
@@ -110,6 +113,9 @@ backend mirroragents
     server agent1 {SPOA_LISTEN_URL}:{SPOA_LISTEN_PORT}
 
 """
+
+    final_config = base_config if not primary else base_config + mirror_config
+    return final_config
 
 
 def main():
@@ -184,34 +190,62 @@ def main():
     for file_name in files:
         shutil.copy2(os.path.join(docker_files_dir, file_name), workspace)
     
-    # Write our HAProxy Config File to our workspace
-    haproxy_config_str = generate_haproxy_config(primary_cluster.rest_ports, shadow_cluster.rest_ports)
+    # Write our the base HAProxy Config File (no mirroring) to our workspace
+    haproxy_config_str = generate_haproxy_config(primary_cluster.rest_ports, shadow_cluster.rest_ports, False)
     haproxy_config_path = os.path.join(workspace, "haproxy.cfg")
     with open(haproxy_config_path, "w") as haproxy_config_file:
         print(f"Writing HAProxy Config to: {haproxy_config_path}")
-        haproxy_config_file.write(haproxy_config_str)    
+        haproxy_config_file.write(haproxy_config_str)
+
+    # Write our the t-split HAProxy Config File (with mirroring) to our workspace
+    haproxy_mirror_config_str = generate_haproxy_config(primary_cluster.rest_ports, shadow_cluster.rest_ports, True)
+    haproxy_mirror_config_path = os.path.join(workspace, "haproxy_w_mirror.cfg")
+    with open(haproxy_mirror_config_path, "w") as haproxy_config_file:
+        print(f"Writing HAProxy Config to: {haproxy_mirror_config_path}")
+        haproxy_config_file.write(haproxy_mirror_config_str)
 
     # Change directory again to the workspace then build our Docker image
     os.chdir(workspace)
 
-    image_tag = "haproxy-demo"
-    print("Building HAProxy Docker image...")
-    haproxy_image = docker_client.build_image(str(workspace), image_tag)
+    # Build the Docker images for the Shadow HAProxy and start the container
+    print("Building HAProxy Docker image for Shadow Cluster...")
+    haproxy_image_shadow = docker_client.build_image(str(workspace), "haproxy-demo-shadow", "haproxy-base")
 
-    # Start the HAProxy Container
-    haproxy_network = docker_client.create_network("haproxy-network")  # unnecessary but required by current Cluster API
-    haproxy_volume = dfc.DockerVolume(
+    haproxy_network_shadow = docker_client.create_network("haproxy-network-shadow")  # unnecessary but required by API
+    haproxy_volume_shadow = dfc.DockerVolume(
         container_mount_point="/usr/local/etc/haproxy",
         host_mount_point=workspace,
-        volume=docker_client.create_volume("haproxy-volume")
+        volume=docker_client.create_volume("haproxy-volume-shadow")
     )
-    print("Starting HAProxy container...")
-    haproxy_container = docker_client.create_container(
-        image=haproxy_image.tag,
-        container_name="haproxy",
-        network=haproxy_network,
-        ports=[dfc.PortMapping(80, 80), dfc.PortMapping(8404, 8404)],
-        volumes=[haproxy_volume],
+    print("Starting HAProxy container for Shadow Cluster...")
+    haproxy_container_shadow = docker_client.create_container(
+        image=haproxy_image_shadow.tag,
+        container_name="haproxy-shadow",
+        network=haproxy_network_shadow,
+        ports=[dfc.PortMapping(81, 81)],
+        volumes=[haproxy_volume_shadow],
+        ulimits=[Ulimit(name='memlock', soft=-1, hard=-1)],
+        extra_hosts={TAG_DOCKER_HOST: "host-gateway"}
+    )
+
+    # Build the Docker images for the Primary HAProxy
+    print("Building HAProxy Docker image for Primary Cluster...")
+    haproxy_image_primary = docker_client.build_image(str(workspace), "haproxy-demo-primary", "haproxy-mirror")
+
+    # Start the HAProxy Container
+    haproxy_network_primary = docker_client.create_network("haproxy-network-primary")  # unnecessary but required by API
+    haproxy_volume_primary = dfc.DockerVolume(
+        container_mount_point="/usr/local/etc/haproxy",
+        host_mount_point=workspace,
+        volume=docker_client.create_volume("haproxy-volume-primary")
+    )
+    print("Starting HAProxy container for Primary Cluster...")
+    haproxy_container_primary = docker_client.create_container(
+        image=haproxy_image_primary.tag,
+        container_name="haproxy-primary",
+        network=haproxy_network_primary,
+        ports=[dfc.PortMapping(80, 80)],
+        volumes=[haproxy_volume_primary],
         ulimits=[Ulimit(name='memlock', soft=-1, hard=-1)],
         extra_hosts={TAG_DOCKER_HOST: "host-gateway"}
     )
@@ -222,11 +256,14 @@ def main():
     prompt = """
 HAProxy is currently running in a Docker container, available at 127.0.0.1:80, and configured to pass traffic to an
 ES 7.10.2 cluster of two nodes (each running in their own Docker containers).  The requests/responses passed to the
-cluster via the HAProxy container will be logged to the container at /var/log/haproxy-traffic.log.
+cluster via the HAProxy container will be logged to the container at /var/log/haproxy-traffic.log.  The requests are
+mirrored to an identical shadow cluster.
 
 Some example commands you can run to demonstrate the behavior are:
 curl -X GET 'localhost:80'
 curl -X GET 'localhost:80/_cat/nodes?v=true&pretty'
+curl -X PUT 'localhost:80/noldor/_doc/1' -H 'Content-Type: application/json' -d'{"name": "Finwe"}'
+curl -X GET 'localhost:80/noldor/_doc/1'
 
 When you are done playing with the setup, hit the RETURN key in this terminal window to shut down and clean up the
 demo containers.
@@ -249,11 +286,17 @@ demo containers.
     shadow_cluster.clean_up()
 
     # Clean up HAProxy stuff
-    print("Cleaning up underlying resources for the HAProxy container...")
-    docker_client.stop_container(haproxy_container)
-    docker_client.remove_container(haproxy_container)
-    docker_client.remove_network(haproxy_network)
-    docker_client.remove_volume(haproxy_volume.volume)
+    print("Cleaning up underlying resources for the Primary HAProxy container...")
+    docker_client.stop_container(haproxy_container_primary)
+    docker_client.remove_container(haproxy_container_primary)
+    docker_client.remove_network(haproxy_network_primary)
+    docker_client.remove_volume(haproxy_volume_primary.volume)
+
+    print("Cleaning up underlying resources for the Shadow HAProxy container...")
+    docker_client.stop_container(haproxy_container_shadow)
+    docker_client.remove_container(haproxy_container_shadow)
+    docker_client.remove_network(haproxy_network_shadow)
+    docker_client.remove_volume(haproxy_volume_shadow.volume)
 
 
 if __name__ == "__main__":

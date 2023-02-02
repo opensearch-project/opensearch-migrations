@@ -39,6 +39,21 @@ def test_WHEN_build_image_THEN_as_expected():
     assert expected_build_calls == mock_inner_client.images.build.call_args_list
 
 
+def test_WHEN_build_image_w_target_THEN_as_expected():
+    # Set up our test
+    mock_inner_client = mock.Mock()  # no exception thrown when we invoke docker_client.images.pull()
+
+    # Run our test
+    test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
+    image = test_client.build_image("/my/path", "tag", "target")
+
+    # Check our results
+    assert "tag" == image.tag
+
+    expected_build_calls = [mock.call(path="/my/path", tag="tag", target="target")]
+    assert expected_build_calls == mock_inner_client.images.build.call_args_list
+
+
 def test_WHEN_is_image_available_locally_AND_is_available_THEN_true():
     # Set up our test
     mock_inner_client = mock.Mock()  # no exception thrown when we invoke docker_client.images.get()

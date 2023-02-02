@@ -82,14 +82,22 @@ class DockerFrameworkClient:
         else:
             self._docker_client = docker_client
 
-    def build_image(self, dir_path: str, tag: str) -> DockerImage:
+    def build_image(self, dir_path: str, tag: str, target: str = None) -> DockerImage:
         """
         dir_path: The path to the directory containing the Dockerfile
         tag: The tag to set to the image after it's built
+        target: The build target/stage in a multi-stage Dockerfile to generate the image for
         """
+        kwargs = {
+            "path": dir_path,
+            "tag": tag
+        }
+
+        if target:
+            kwargs["target"] = target
+
         self._docker_client.images.build(
-            path=dir_path,
-            tag=tag
+            **kwargs
         )
         return DockerImage(tag)
 
