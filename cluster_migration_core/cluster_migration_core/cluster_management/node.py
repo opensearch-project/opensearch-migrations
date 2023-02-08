@@ -86,7 +86,7 @@ class Node:
 
         # make sure the engine has permissions on the the volume mount points
         for volume in self._container_config.volumes:
-            self._docker_client.set_ownership_of_directory(self._container, self._node_config.user, 
+            self._docker_client.set_ownership_of_directory(self._container, self._node_config.user,
                                                            volume.container_mount_point)
 
         self._node_state = STATE_RUNNING
