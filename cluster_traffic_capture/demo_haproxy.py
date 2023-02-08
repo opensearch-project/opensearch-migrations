@@ -72,7 +72,7 @@ def main():
     # =================================================================================================================
     # Set up HAProxy
     # =================================================================================================================
-    # Set Python's working directory to something predictable (this file's directory) 
+    # Set Python's working directory to something predictable (this file's directory)
     demo_dir = os.path.dirname(__file__)
     os.chdir(demo_dir)
     

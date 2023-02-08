@@ -20,7 +20,7 @@ FILENAME_W_MIRROR = "haproxy_w_mirror.cfg"
 
 def get_command_line_args():
     parser = argparse.ArgumentParser(
-        description="Script to invoke the Upgrade Testing Framework."
+        description="Script to build the Primary/Shadow HAProxy Docker images (see README)"
     )
 
     primary_image_help = ("The name (tag) that will be assigned to the built Docker image for the Primary HAProxy"
@@ -110,7 +110,7 @@ def main():
     haproxy_internal_port = args.internal_port
 
     # =================================================================================================================
-    # Set up HAProxy
+    # Build the Docker Images
     # =================================================================================================================
     docker_client = dfc.DockerFrameworkClient()
     
@@ -155,7 +155,7 @@ def main():
     haproxy_image_primary = docker_client.build_image(str(workspace), primary_image, "haproxy-w-mirror")
     print(f"Primary HAProxy image available locally w/ tag: {haproxy_image_primary.tag}")
 
-    # Build the Docker images for the Shadow HAProxy and start the container
+    # Build the Docker images for the Shadow HAProxy
     print("Building HAProxy Docker image for Shadow Cluster...")
     haproxy_image_shadow = docker_client.build_image(str(workspace), shadow_image, "haproxy-no-mirror")
     print(f"Shadow HAProxy image available locally w/ tag: {haproxy_image_shadow.tag}")
