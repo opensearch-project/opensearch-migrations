@@ -10,11 +10,23 @@ RUN apt-get install -y --no-install-recommends vim
 RUN apt-get install -y --no-install-recommends rsyslog
 COPY rsyslog.conf /etc/rsyslog.d/haproxy.conf
 
+# ====== Leverage Multi-Stage Docker Builds to re-use the base HAProxy image ======
+FROM haproxy-base AS haproxy-no-mirror
+
+# Copy our configuration over
+# COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY haproxy_no_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg
 
 # ====== Leverage Multi-Stage Docker Builds to re-use the base HAProxy image ======
-FROM haproxy-base AS haproxy-mirror
+FROM haproxy-base AS haproxy-w-mirror
+
+# Copy our configuration over
+# COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY haproxy_w_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
+COPY mirror.conf /usr/local/etc/haproxy/mirror.conf
 
 # Install the traffic mirroring SPOE Agent
 # See: https://www.haproxy.com/blog/haproxy-traffic-mirroring-for-real-world-testing/
@@ -27,4 +39,4 @@ RUN cd spoa-mirror && \
     cp ./src/spoa-mirror /usr/local/bin/
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy_w_mirror.cfg
+CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg

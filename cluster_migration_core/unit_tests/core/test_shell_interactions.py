@@ -92,6 +92,28 @@ def test_WHEN_call_shell_command_called_THEN_returns_expected_values(mock_pexpec
 
 
 @mock.patch('cluster_migration_core.core.shell_interactions.pexpect')
+def test_WHEN_call_shell_command_called_AND_special_logger_THEN_uses_it(mock_pexpect):
+    # Set up our mock
+    mock_process = MockPexpectProcess(before_values=[b'Feanor\n', b'Fingolfin\n', b'Finarfin'], expect_values=[0, 0, 1])
+    mock_pexpect.spawn.return_value = mock_process
+    mock_logger = mock.Mock()
+
+    # Run our test
+    actual_exit_code, actual_std_out = shell.call_shell_command('test command', output_logger=mock_logger)
+
+    # Check our results
+    expected_exit_code = 0
+    expected_std_out = ['Feanor', 'Fingolfin', 'Finarfin']
+
+    assert expected_exit_code == actual_exit_code
+    assert expected_std_out == actual_std_out
+    assert mock_process.close.called
+
+    expected_logger_call_args = [mock.call('Feanor'), mock.call('Fingolfin'), mock.call('Finarfin')]
+    assert expected_logger_call_args == mock_logger.call_args_list
+
+
+@mock.patch('cluster_migration_core.core.shell_interactions.pexpect')
 def test_WHEN_call_shell_command_called_AND_request_response_pairs_provided_THEN_returns_expected_values_AND_sends_values(  # noqa E501
         mock_pexpect):
     # Test values
