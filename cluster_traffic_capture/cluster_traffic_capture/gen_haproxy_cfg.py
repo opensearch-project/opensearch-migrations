@@ -71,7 +71,7 @@ frontend haproxy
     declare capture request len 80000
     declare capture response len 80000
     http-request capture req.body id 0
-    log-format Request-URI:\\ %[capture.req.uri]\\nRequest-Method:\\ %[capture.req.method]\\nRequest-Body:\\ %[capture.req.hdr(0)]\\nResponse-Body:\\ %[capture.res.hdr(0)]
+    log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]", "headers": "%hr" }}, "response":  {{"response_time_ms":%Tr, "headers":"%hs", "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}'
     
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
