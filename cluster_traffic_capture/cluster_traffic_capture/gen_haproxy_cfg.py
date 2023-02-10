@@ -73,6 +73,7 @@ frontend haproxy
     http-request capture req.body id 0
     http-request capture req.hdrs len 512
     log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]", "headers": "%hr" }}, "response":  {{"response_time_ms":%Tr, "headers":"%hs", "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}'
+
     
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
