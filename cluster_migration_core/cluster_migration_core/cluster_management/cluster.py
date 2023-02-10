@@ -124,7 +124,7 @@ class Cluster:
             node_name = self._generate_node_name(node_num)
             node_env_config = self._cluster_config.additional_node_config
             if self._shared_volume is not None:  # enables snapshot sharing between clusters
-                node_env_config["path.repo"] = self._shared_volume.mount_point
+                node_env_config["path.repo"] = self._shared_volume.container_mount_point
             node_config = NodeConfiguration(engine_version, node_name, self.name, starting_master_nodes,
                                             starting_seed_hosts, node_env_config)
 

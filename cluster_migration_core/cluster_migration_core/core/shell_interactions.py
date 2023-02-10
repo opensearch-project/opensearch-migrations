@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 import pexpect
 
@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 
 def call_shell_command(command: str, cwd: str = None, env: str = None,
-                       request_response_pairs: List[Tuple[str, str]] = [], suppress_stdout: bool = False):
+                       request_response_pairs: List[Tuple[str, str]] = [], suppress_stdout: bool = False,
+                       output_logger: Callable = None):
     """
     Execute a command in a child shell process.  By default, stdout from the child process is logged at the DEBUG
     level.
@@ -24,6 +25,9 @@ def call_shell_command(command: str, cwd: str = None, env: str = None,
     pipe through the response "yes" if it finds it.  Any number of pairs can be supplied, and the method will continue
     searching the output and piping through responses until none of the pair match.
     """
+    if not output_logger:
+        output_logger = logger.debug
+
     logger.debug("Running command: {}".format(command))
     if cwd:
         logger.debug("Running command in directory: {}".format(cwd))
@@ -44,7 +48,7 @@ def call_shell_command(command: str, cwd: str = None, env: str = None,
             logger.debug("Found Match: {}".format(match_number))
             process_handle.sendline(responses[match_number])
 
-        _store_and_print_output(process_handle.before, std_out, suppress_stdout)
+        _store_and_print_output(process_handle.before, output_logger, std_out, suppress_stdout)
 
         if match_number == len(expectations) - 1:  # EOF, i.e. the end of the output
             break
@@ -53,13 +57,13 @@ def call_shell_command(command: str, cwd: str = None, env: str = None,
     return (process_handle.exitstatus, std_out)
 
 
-def _store_and_print_output(output, container, suppress):
+def _store_and_print_output(output, output_logger, container, suppress):
     if output:
         unicode_output = output.decode().strip()
         container.append(unicode_output)
         if not suppress:
             no_ansi_codes = _remove_ansi_codes(unicode_output)
-            logger.debug(no_ansi_codes)
+            output_logger(no_ansi_codes)
 
 
 def _remove_ansi_codes(text: str):
@@ -75,3 +79,15 @@ def remove_ansi_escape_sequences(string_to_clean: str):
     # See: https://en.wikipedia.org/wiki/ANSI_escape_code
     ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
     return ansi_escape.sub('', string_to_clean)
+
+
+def louder_input(message: str, print_header: bool = True) -> str:
+    """
+    Prompts users with a message and returns their typed input; optional big banner so they notice.
+    """
+    if print_header:
+        logger.info("================================================================================")
+        logger.info("USER ACTION REQUIRED:")
+        logger.info("--------------------------------------------------------------------------------")
+    logger.debug(message)
+    return input(message)

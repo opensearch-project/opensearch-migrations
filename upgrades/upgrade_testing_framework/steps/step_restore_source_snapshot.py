@@ -20,7 +20,7 @@ class RestoreSourceSnapshot(FrameworkStep):
         engine_version = node.engine_version
         rest_client = clients.get_rest_client(engine_version)
 
-        rest_client.register_snapshot_dir(port, snapshot.repo_name, shared_volume.mount_point)
+        rest_client.register_snapshot_dir(port, snapshot.repo_name, shared_volume.container_mount_point)
         response_all_snapshots = rest_client.get_snapshots_all(port, snapshot.repo_name)
 
         if snapshot.snapshot_id in response_all_snapshots.response_text:
