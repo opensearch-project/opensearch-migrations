@@ -14,7 +14,6 @@ COPY rsyslog.conf /etc/rsyslog.d/haproxy.conf
 FROM haproxy-base AS haproxy-no-mirror
 
 # Copy our configuration over
-# COPY docker-entrypoint.sh /docker-entrypoint.sh
 COPY haproxy_no_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
@@ -24,7 +23,6 @@ CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg
 FROM haproxy-base AS haproxy-w-mirror
 
 # Copy our configuration over
-# COPY docker-entrypoint.sh /docker-entrypoint.sh
 COPY haproxy_w_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
 COPY mirror.conf /usr/local/etc/haproxy/mirror.conf
 

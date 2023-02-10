@@ -119,7 +119,7 @@ def main():
         extra_hosts={TAG_DOCKER_HOST: "host-gateway"}
     )
 
-    # Create/Run the Shadow HAProxy Container
+    # Create/Run the Primary HAProxy Container
     haproxy_network_primary = docker_client.create_network("haproxy-network-primary")  # unnecessary but required by API
     print("Starting HAProxy container for Primary Cluster...")
     haproxy_container_primary = docker_client.create_container(
