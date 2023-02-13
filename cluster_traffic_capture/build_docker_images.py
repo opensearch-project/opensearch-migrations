@@ -13,7 +13,7 @@ DEFAULT_IMAGE_PRIMARY = "haproxy-primary"
 DEFAULT_IMAGE_SHADOW = "haproxy-shadow"
 DEFAULT_INTERNAL_PORT = 9200
 DEFAULT_WORKSPACE = "/tmp/cluster_traffic_capture/"
-DOCKERFILES_DIR = "./docker_config"
+DOCKERFILES_DIR = "./docker_config_capture"
 FILENAME_NO_MIRROR = "haproxy_no_mirror.cfg"
 FILENAME_W_MIRROR = "haproxy_w_mirror.cfg"
 
