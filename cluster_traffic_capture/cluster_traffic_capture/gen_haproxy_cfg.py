@@ -15,7 +15,7 @@ class HostAddress:
     def from_str(cls, address_str: str):
         try:
             host, port = address_str.split(":")
-            return cls(host, port)
+            return cls(host, int(port))
         except (IndexError, ValueError):
             raise ValueError(f"Invalid host:port combination: {address_str}")
 
@@ -28,7 +28,7 @@ def _gen_global_config() -> str:
     return """
 global
     # Logging configuration
-    log 127.0.0.1:514 local0 # syslogd, facility local0
+    log 127.0.0.1:514 len 65535 local0 # syslogd, facility local0
     log stdout format raw local0 debug # stdout too
 
     # Turn on Master/Worker mode.  Required to use SPOE Mirroring.  While hardly an expert, I've attempted to configure

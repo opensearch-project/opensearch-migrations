@@ -8,6 +8,9 @@ RUN apt-get install -y --no-install-recommends vim
 
 # Install/Configure syslog.  Need a more sophisticated logging facility than just "Cloud Native" stdout/stderr.
 RUN apt-get install -y --no-install-recommends rsyslog
+# Set the max line length to 64k characters.
+# This can't be in the rsyslog.conf, it needs to be a the beginning of the main conf file.
+RUN sed -i '1s/^/$MaxMessageSize 64k\n/' /etc/rsyslog.conf
 COPY rsyslog.conf /etc/rsyslog.d/haproxy.conf
 
 # ====== Leverage Multi-Stage Docker Builds to re-use the base HAProxy image ======
