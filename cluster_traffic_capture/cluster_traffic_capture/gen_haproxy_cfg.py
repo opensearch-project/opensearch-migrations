@@ -76,8 +76,9 @@ frontend haproxy
     #The current format will log the body as part of the headers, as it was the only way I found to
     #log all headers. A task to fix that has been created
     #https://opensearch.atlassian.net/browse/MIGRATIONS-992
-    log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]", "headers": "%hr" }}, "response":  {{"response_time_ms":%Tr, "headers":"%hs", "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}'    # Associate this frontend with the primary cluster
-    
+
+    log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]", "headers": "%hr" }}, "response":  {{"response_time_ms":%Tr, "headers":"%hs", "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}' 
+
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
 
