@@ -1,4 +1,4 @@
-FROM haproxytech/haproxy-ubuntu:2.8 AS haproxy-base
+FROM haproxytech/haproxy-ubuntu:2.7 AS haproxy-base
 
 # Ensure we have the latest package listing (doesn't inherit from base image's invocation)
 RUN apt-get update
@@ -25,10 +25,6 @@ CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg
 # ====== Leverage Multi-Stage Docker Builds to re-use the base HAProxy image ======
 FROM haproxy-base AS haproxy-w-mirror
 
-# Copy our configuration over
-COPY haproxy_w_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
-COPY mirror.conf /usr/local/etc/haproxy/mirror.conf
-
 # Install the traffic mirroring SPOE Agent
 # See: https://www.haproxy.com/blog/haproxy-traffic-mirroring-for-real-world-testing/
 RUN apt install -y autoconf automake build-essential git libcurl4-openssl-dev libev-dev libpthread-stubs0-dev pkg-config
@@ -38,6 +34,10 @@ RUN cd spoa-mirror && \
     ./configure && \
     make all && \
     cp ./src/spoa-mirror /usr/local/bin/
+
+# Copy our configuration over.  Do this after SPOA installation to prevent rebuilding that layer when config changes.
+COPY mirror.conf /usr/local/etc/haproxy/mirror.conf
+COPY haproxy_w_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg
