@@ -73,11 +73,16 @@ frontend haproxy
     http-request capture req.body id 0
 
     http-request capture req.hdrs len 1048576
-    #The current format will log the body as part of the headers, as it was the only way I found to
-    #log all headers. A task to fix that has been created
+    #An issue that occured was that the format will log the body as part of the headers,
+    #which was the only way log all headers. A task to separate the two that has been created
     #https://opensearch.atlassian.net/browse/MIGRATIONS-992
+    #As of this moment, the headers cannot be json-escaped, which can cause an issue in reading the data
+    #So only the body will be part of the logs for now until a way to json-escape the headers
+    #and log all headers at the same time is found
+    #Task Created for JSON-escaping the headers
+    #https://opensearch.atlassian.net/browse/MIGRATIONS-993
 
-    log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]", "headers": "%hr" }}, "response":  {{"response_time_ms":%Tr, "headers":"%hs", "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}' 
+    log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]" }}, "response":  {{"response_time_ms":%Tr, "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}' 
 
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
