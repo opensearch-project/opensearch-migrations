@@ -31,7 +31,13 @@ global
     log 127.0.0.1:514 len 65535 local0 # syslogd, facility local0
     log stdout format raw local0 debug # stdout too
 
-    # Increase the buffer size to allow both logging and spoa to forward large requests
+    # Request bodies over ~16Kb were being dropped, seemingly due to the buffer size.
+    # See: https://github.com/haproxytech/spoa-mirror/issues/17#issuecomment-683848851
+    # The largest content-length headers were saw in testing were about 700Kb, so the buffer
+    # sizes here were selected to give us a buffer around that size.
+    # According to https://cbonte.github.io/haproxy-dconv/2.2/configuration.html#3.2-tune.bufsize,
+    # the buffer size can impact performance and the maxconn setting should be decreased fairly proportionally.
+    # This is a 16x reduction from the default value.
     tune.bufsize 1048576
     tune.h2.max-frame-size 1048576
     maxconn 65536
