@@ -44,8 +44,8 @@ def emit_edit_script(jsonStr1: str, jsonStr2: str, callback):
 
 def main():
     args = get_command_line_args()
-    leftXmlStr = get_xml_str(args.filenames[0])
-    rightXmlStr = get_xml_str(args.filenames[1])
+    leftXmlStr = get_xml_str_from_file(args.filenames[0])
+    rightXmlStr = get_xml_str_from_file(args.filenames[1])
 
     formatter = xmlformatting.DiffFormatter()
     emit_edit_script(leftXmlStr, rightXmlStr, lambda leftTree, rightTree, diff: print(formatter.format(diff, leftTree)))
