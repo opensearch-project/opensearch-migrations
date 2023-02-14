@@ -8,10 +8,10 @@ RUN apt-get update && \
 
 # In my testing, running all four of these took ~1.5 minutes on my Mac
 CMD echo "Running opensearch-benchmark w/ 'geonames' workload..." && \
-    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes && \
+    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "bulk_size=100,target_throughput=5" && \
     echo "Running opensearch-benchmark w/ 'http_logs' workload..." && \
-    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=http_logs --pipeline=benchmark-only --test-mode --kill-running-processes && \
+    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=http_logs --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "bulk_size=100,target_throughput=5" && \
     echo "Running opensearch-benchmark w/ 'nested' workload..." && \
-    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=nested --pipeline=benchmark-only --test-mode --kill-running-processes && \
+    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=nested --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "bulk_size=100,target_throughput=5" && \
     echo "Running opensearch-benchmark w/ 'nyc_taxis' workload..." && \
-    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes
+    opensearch-benchmark execute_test --distribution-version=1.0.0 --target-host=host.docker.internal:80 --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "bulk_size=100,target_throughput=5"

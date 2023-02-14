@@ -68,11 +68,13 @@ frontend haproxy
     bind :{haproxy_port}
 
     # Set up the logging for the req/res stream to the primary cluster
-    declare capture request len 80000
-    declare capture response len 80000
-    http-request capture req.body id 0
-    log-format Request-URI:\\ %[capture.req.uri]\\nRequest-Method:\\ %[capture.req.method]\\nRequest-Body:\\ %[capture.req.hdr(0)]\\nResponse-Body:\\ %[capture.res.hdr(0)]
-    
+    declare capture request len 1048576
+    declare capture request len 1048576
+    declare capture response len 1048576
+    declare capture response len 1048576
+    http-request capture req.hdrs id 0
+    http-request capture req.body id 1
+    log-format '%{{+Q}}o {{"request": {{"timestamp":%Ts, "uri":%[capture.req.uri,json('utf8ps')], "method":%[capture.req.method], "headers":%[capture.req.hdr(0),json('utf8ps')], "body":%[capture.req.hdr(1),json('utf8ps')]}}, "response":  {{"response_time_ms":%Tr, "body":%[capture.res.hdr(1),json('utf8ps')], "headers":%[capture.req.hdr(0),json('utf8ps')], "status_code": %ST}}}}'
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
 
@@ -111,7 +113,8 @@ def _gen_be_config_cluster(cluster_nodes: List[HostAddress]) -> str:
 # These are the primary Cluster's Nodes; traffic will be sent to them synchronously.  The default round robin LB
 # pattern is in effect.
 backend primary_cluster
-    http-response capture res.body id 0
+    http-response capture res.hdrs id 0
+    http-response capture res.body id 1
 {backend_server_section}
 """
     return config
