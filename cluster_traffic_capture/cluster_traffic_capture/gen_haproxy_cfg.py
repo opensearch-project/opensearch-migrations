@@ -68,11 +68,22 @@ frontend haproxy
     bind :{haproxy_port}
 
     # Set up the logging for the req/res stream to the primary cluster
-    declare capture request len 80000
-    declare capture response len 80000
+    declare capture request len 1048576
+    declare capture response len 1048576
     http-request capture req.body id 0
-    log-format Request-URI:\\ %[capture.req.uri]\\nRequest-Method:\\ %[capture.req.method]\\nRequest-Body:\\ %[capture.req.hdr(0)]\\nResponse-Body:\\ %[capture.res.hdr(0)]
-    
+
+    http-request capture req.hdrs len 1048576
+    #An issue that occured was that the format will log the body as part of the headers,
+    #which was the only way log all headers. A task to separate the two that has been created
+    #https://opensearch.atlassian.net/browse/MIGRATIONS-992
+    #As of this moment, the headers cannot be json-escaped, which can cause an issue in reading the data
+    #So only the body will be part of the logs for now until a way to json-escape the headers
+    #and log all headers at the same time is found
+    #Task Created for JSON-escaping the headers
+    #https://opensearch.atlassian.net/browse/MIGRATIONS-993
+
+    log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]" }}, "response":  {{"response_time_ms":%Tr, "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}' 
+
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
 
