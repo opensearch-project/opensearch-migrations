@@ -31,6 +31,11 @@ global
     log 127.0.0.1:514 len 65535 local0 # syslogd, facility local0
     log stdout format raw local0 debug # stdout too
 
+    # Increase the buffer size to allow both logging and spoa to forward large requests
+    tune.bufsize 1048576
+    tune.h2.max-frame-size 1048576
+    maxconn 65536
+
     # Turn on Master/Worker mode.  Required to use SPOE Mirroring.  While hardly an expert, I've attempted to configure
     # this so that the HAProxy container will exit if a process associated w/ the proxy mechanism runs into trouble.
     # This will ensure problems are surfaced quickly/obviously, possibly at the expense of resilience at the container
