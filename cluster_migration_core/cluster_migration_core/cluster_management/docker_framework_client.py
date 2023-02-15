@@ -9,6 +9,7 @@ from docker.models.containers import Container
 from docker.models.volumes import Volume
 from docker.types import Ulimit
 
+import cluster_migration_core.cluster_management.docker_command_gen as dcg
 import cluster_migration_core.core.shell_interactions as shell
 
 
@@ -153,7 +154,7 @@ class DockerFrameworkClient:
         if not env_variables:
             env_variables = {}
         if not extra_hosts:
-            extra_hosts = []
+            extra_hosts = {}
 
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
         port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
@@ -172,6 +173,19 @@ class DockerFrameworkClient:
                 volume_mapping[dv.volume.attrs["Name"]] = {"bind": dv.container_mount_point, "mode": "rw"}
 
         self.logger.debug(f"Creating container {container_name}...")
+        run_command = dcg.gen_docker_run(
+            image,
+            name=container_name,
+            network=network.name,
+            ports=port_mapping,
+            volumes=volume_mapping,
+            ulimits=ulimits,
+            detach=detach,
+            environment=env_variables,
+            extra_hosts=extra_hosts
+        )
+        self.logger.debug(f"{run_command}")
+
         container = self._docker_client.containers.run(
             image,
             name=container_name,
