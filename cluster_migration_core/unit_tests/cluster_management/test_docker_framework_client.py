@@ -200,7 +200,7 @@ def test_WHEN_create_container_called_THEN_executes_normally():
     # Check our results
     expected_calls = [
         mock.call(
-            test_image,
+            image=test_image,
             name=test_container_name,
             network=mock_network.name,
             ports={str(pair.container_port): str(pair.host_port) for pair in test_ports},

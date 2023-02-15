@@ -72,6 +72,8 @@ def _get_fe_config_haproxy(haproxy_port: int, mirror: bool) -> str:
     mirror argument is set to True, the generated configuration will also support mirroring.
     """
 
+    log_format = """%{+Q}o {"request": {"timestamp":%Ts, "uri":%[capture.req.uri,json('utf8ps')], "method":%[capture.req.method], "headers":%[capture.req.hdr(0),json('utf8ps')], "body":%[capture.req.hdr(1),json('utf8ps')]}, "response":  {"response_time_ms":%Tr, "body":%[capture.res.hdr(1),json('utf8ps')], "headers":%[capture.res.hdr(0),json('utf8ps')], "status_code": %ST}}"""  # noqa: E501
+
     config = f"""
 # This section outlines the "frontend" for this instance of HAProxy and specifies the rules by which it receives
 # traffic
@@ -85,7 +87,7 @@ frontend haproxy
     declare capture response len 1048576
     http-request capture req.hdrs id 0
     http-request capture req.body id 1
-    log-format '%{{+Q}}o {{"request": {{"timestamp":%Ts, "uri":%[capture.req.uri,json('utf8ps')], "method":%[capture.req.method], "headers":%[capture.req.hdr(0),json('utf8ps')], "body":%[capture.req.hdr(1),json('utf8ps')]}}, "response":  {{"response_time_ms":%Tr, "body":%[capture.res.hdr(1),json('utf8ps')], "headers":%[capture.res.hdr(0),json('utf8ps')], "status_code": %ST}}}}'
+    log-format '{log_format}'
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import argparse
+import logging
 import os
 
 from docker.types import Ulimit
@@ -16,7 +18,35 @@ HAPROXY_SHADOW_PORT = 81
 TAG_DOCKER_HOST = "host.docker.internal"
 
 
+def get_command_line_args():
+    parser = argparse.ArgumentParser(
+        description="Script to build the Primary/Shadow HAProxy Docker images (see README)"
+    )
+
+    parser.add_argument('-v', '--verbose',
+                        action='store_true',
+                        help="Turns on DEBUG-level logging",
+                        dest="verbose",
+                        default=False
+                        )
+
+    return parser.parse_args()
+
+
 def main():
+    # =================================================================================================================
+    # Parse/validate args
+    # =================================================================================================================
+    args = get_command_line_args()
+    verbose = args.verbose
+
+    # =================================================================================================================
+    # Configure Logging
+    # =================================================================================================================
+    logging.basicConfig()
+    if verbose:
+        logging.root.setLevel(logging.DEBUG)
+
     # =================================================================================================================
     # Setup Clusters
     # =================================================================================================================
