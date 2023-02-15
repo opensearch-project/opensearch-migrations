@@ -1,7 +1,7 @@
 FROM docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
 
 COPY loggable-transport-netty4-7.10.2-SNAPSHOT.zip /root
-RUN mkdir /httpTraceLogs ; chown elasticsearch httpTraceLogs
+RUN mkdir /httpTraceLogs ; chown elasticsearch /httpTraceLogs
 RUN /usr/share/elasticsearch/bin/elasticsearch-plugin install file:/root/loggable-transport-netty4-7.10.2-SNAPSHOT.zip
 COPY elasticsearch.yml /usr/share/elasticsearch/config/
 COPY log4j2.properties /usr/share/elasticsearch/config/
