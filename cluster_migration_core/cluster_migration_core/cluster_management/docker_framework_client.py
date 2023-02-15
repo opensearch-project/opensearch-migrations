@@ -173,21 +173,8 @@ class DockerFrameworkClient:
                 volume_mapping[dv.volume.attrs["Name"]] = {"bind": dv.container_mount_point, "mode": "rw"}
 
         self.logger.debug(f"Creating container {container_name}...")
-        run_command = dcg.gen_docker_run(
-            image,
-            name=container_name,
-            network=network.name,
-            ports=port_mapping,
-            volumes=volume_mapping,
-            ulimits=ulimits,
-            detach=detach,
-            environment=env_variables,
-            extra_hosts=extra_hosts
-        )
-        self.logger.debug(f"{run_command}")
-
-        container = self._docker_client.containers.run(
-            image,
+        container = self._log_and_execute_command_run(
+            image=image,
             name=container_name,
             network=network.name,
             ports=port_mapping,
@@ -198,6 +185,19 @@ class DockerFrameworkClient:
             extra_hosts=extra_hosts
         )
         self.logger.debug(f"Created container {container_name}")
+        return container
+
+    def _log_and_execute_command_run(self, image: str, name: str, network: str, ports: Dict[str, str],
+                                     volumes: Dict[str, Dict[str, str]], ulimits: List[Ulimit], detach: bool,
+                                     environment: Dict[str, str], extra_hosts: Dict[str, str]) -> Container:
+
+        args = {"image": image, "name": name, "network": network, "ports": ports, "volumes": volumes,
+                "ulimits": ulimits, "detach": detach, "environment": environment, "extra_hosts": extra_hosts}
+
+        run_command = dcg.gen_docker_run(**args)
+        self.logger.debug(f"{run_command}")
+
+        container = self._docker_client.containers.run(**args)
         return container
 
     def stop_container(self, container: Container):
