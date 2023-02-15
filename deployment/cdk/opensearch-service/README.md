@@ -1,92 +1,122 @@
-# opensearch-service-domain-cdk
+# OpenSearch Service Domain CDK
+
+### Getting Started
+
+If this is your first time using CDK in this region, will need to `cdk bootstrap` to setup required CDK resources for deployment
+
+Also ensure you have configured the desired [AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites), as these will dictate the region and account used for deployment
+
+A `CDK_DEPLOYMENT_STAGE` environment variable should also be set to assist in naming resources and preventing collisions. Typically, this would be set to values such as `dev`, `gamma`, or `PROD` and will be used to distinguish AWS resources for a given region and deployment stage. For example the CloudFormation stack may be named like `OpenSearchServiceDomain-dev-us-east-1`
+
+### Deploying your Domain Stack
+Before deploying your Domain stack you should fill in any desired context parameters that will dictate the composition of your OpenSearch Service Domain
+
+This can be accomplished by providing these options in a `cdk.context.json` file
+
+As well as by passing the context options you want to change as options in the CDK CLI
+```
+cdk deploy --c domainName='cdk-os-service-domain' --c engineVersion="OS_1_3_6" --c dataNodeType="r6g.large.search" --c dataNodeCount=1
+```
+* Note that these context parameters can also be passed to `cdk synth` and `cdk bootstrap` commands to simulate similar scenarios
+
+Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values placed in the `cdk.context.json` having the most importance
+1. Created `cdk.context.json` in the same directory as this README
+2. CDK CLI passed context values
+3. Existing `default-values.json` in the same directory as this README
 
 
+### Configuration Options
 
-## Getting started
+The available configuration options are listed below. The vast majority of these options do not need to be provided, with only `domainName` and `engineVersion` being required. All non-required options can be provided as an empty string `""` or simply not included, and in each of these cases the option will be allocated with the CDK Domain default value
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Users are encouraged to customize the deployment by changing the CDK TypeScript as needed. The configuration-by-context option that is depicted here is primarily provided for testing/development purposes, and users may find it easier to adjust the TS here rather than say wrangling a complex JSON object through a context option
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Additional context on some of these options, can also be found in the Domain construct [documentation](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_opensearchservice.Domain.html)
 
-## Add your files
+**It should be noted that limited testing has been conducted solely in the us-east-1 region, and some items like instance-type might be biased**
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+| Name                                      | Required | Type         | Example                                                                                                                                                                                                                      | Description                                                                                                                                                                                                          |
+|-------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| engineVersion                             | true     | string       | "OS_1.3"                                                                                                                                                                                                                     |                                                                                                                                                                                                                      |
+| domainName                                | true     | string       | "cdk-os-service-domain"                                                                                                                                                                                                      | Name to use for the OpenSearch Service Domain                                                                                                                                                                        |
+| dataNodeType                              | false    | string       | "r6g.large.search"                                                                                                                                                                                                           |                                                                                                                                                                                                                      |
+| dataNodeCount                             | false    | number       | 1                                                                                                                                                                                                                            |                                                                                                                                                                                                                      |
+| dedicatedManagerNodeType                  | false    | string       | "r6g.large.search"                                                                                                                                                                                                           |                                                                                                                                                                                                                      |
+| dedicatedManagerNodeCount                 | false    | number       | 3                                                                                                                                                                                                                            |                                                                                                                                                                                                                      |
+| warmNodeType                              | false    | string       | "ultrawarm1.medium.search"                                                                                                                                                                                                   |                                                                                                                                                                                                                      |
+| warmNodeCount                             | false    | number       | 3                                                                                                                                                                                                                            |                                                                                                                                                                                                                      |
+| accessPolicies                            | false    | JSON         | {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789123:user/test-user"},"Action":"es:ESHttp*","Resource":"arn:aws:es:us-east-1:123456789123:domain/cdk-os-service-domain/*"}]} |                                                                                                                                                                                                                      |
+| useUnsignedBasicAuth                      | false    | boolean      | false                                                                                                                                                                                                                        |                                                                                                                                                                                                                      |
+| fineGrainedManagerUserARN                 | false    | string       | "arn:aws:iam::123456789123:user/test-user"                                                                                                                                                                                   | Fine grained access control also requires nodeToNodeEncryptionEnabled and encryptionAtRestEnabled to be enabled. <br/> Either fineGrainedMasterUserARN or fineGrainedMasterUserName should be enabled, but not both. |
+| fineGrainedManagerUserName                | false    | string       | "admin"                                                                                                                                                                                                                      |                                                                                                                                                                                                                      |
+| fineGrainedManagerUserSecretManagerKeyARN | false    | string       | "arn:aws:secretsmanager:us-east-1:123456789123:secret:master-user-os-pass-123abc"                                                                                                                                            |                                                                                                                                                                                                                      |
+| enforceHTTPS                              | false    | boolean      | true                                                                                                                                                                                                                         |                                                                                                                                                                                                                      |
+| tlsSecurityPolicy                         | false    | string       | "TLS_1_2"                                                                                                                                                                                                                    |                                                                                                                                                                                                                      |
+| ebsEnabled                                | false    | boolean      | true                                                                                                                                                                                                                         | Some instance types (i.e. r6gd) require that EBS be disabled                                                                                                                                                         |
+| ebsIops                                   | false    | number       | 4000                                                                                                                                                                                                                         |                                                                                                                                                                                                                      |
+| ebsVolumeSize                             | false    | number       | 15                                                                                                                                                                                                                           |                                                                                                                                                                                                                      |
+| ebsVolumeType                             | false    | string       | "GP3"                                                                                                                                                                                                                        |                                                                                                                                                                                                                      |
+| encryptionAtRestEnabled                   | false    | boolean      | true                                                                                                                                                                                                                         |                                                                                                                                                                                                                      |
+| encryptionAtRestKmsKeyARN                 | false    | string       | "arn:aws:kms:us-east-1:123456789123:key/abc123de-4888-4fa7-a508-3811e2d49fc3"                                                                                                                                                | If encryptionAtRestEnabled is enabled and this value is not provided, the default KMS key for OpenSearch Service will be used                                                                                        |
+| loggingAppLogEnabled                      | false    | boolean      | true                                                                                                                                                                                                                         |                                                                                                                                                                                                                      |
+| loggingAppLogGroupARN                     | false    | string       | "arn:aws:logs:us-east-1:123456789123:log-group:test-log-group:*"                                                                                                                                                             | If not provided and logs are enabled, a CloudWatch log group will be created                                                                                                                                         |
+| nodeToNodeEncryptionEnabled               | false    | boolean      | true                                                                                                                                                                                                                         |                                                                                                                                                                                                                      |
+| vpcId                                     | false    | string       | "vpc-123456789abcdefgh"                                                                                                                                                                                                      |                                                                                                                                                                                                                      |
+| domainRemovalPolicy                       | false    | string       | "RETAIN"                                                                                                                                                                                                                     |                                                                                                                                                                                                                      |
+
+
+A template `cdk.context.json` to be used to fill in these values is below:
+```
+{
+  "engineVersion": "",
+  "domainName": "",
+  "dataNodeType": "",
+  "dataNodeCount": "",
+  "dedicatedManagerNodeType": "",
+  "dedicatedManagerNodeCount": "",
+  "warmNodeType": "",
+  "warmNodeCount": "",
+  "accessPolicies": "",
+  "useUnsignedBasicAuth": "",
+  "fineGrainedManagerUserARN": "",
+  "fineGrainedManagerUserName": "",
+  "fineGrainedManagerUserSecretManagerKeyARN": "",
+  "enforceHTTPS": "",
+  "tlsSecurityPolicy": "",
+  "ebsEnabled": "",
+  "ebsIops": "",
+  "ebsVolumeSize": "",
+  "ebsVolumeType": "",
+  "encryptionAtRestEnabled": "",
+  "encryptionAtRestKmsKeyARN": "",
+  "loggingAppLogEnabled": "",
+  "loggingAppLogGroupARN": "",
+  "nodeToNodeEncryptionEnabled": "",
+  "vpcId": "",
+  "domainRemovalPolicy": ""
+}
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.aws.dev/lewijacn/opensearch-service-domain-cdk.git
-git branch -M main
-git push -uf origin main
+Some configuration options available in other solutions (listed below) which enable/disable specific features do not exist in the current native CDK Domain construct. These options are inferred based on the presence or absence of related fields (i.e. if dedicatedMasterNodeCount is set to 1 it is inferred that dedicated master nodes should be enabled). These options are normally disabled by default, allowing for this inference.
+```
+"dedicatedMasterNodeEnabled": "X",
+"warmNodeEnabled": "X",
+"fineGrainedAccessControlEnabled": "X",
+"internalUserDatabaseEnabled": "X"
 ```
 
-## Integrate with your tools
+### Tearing down CDK Stack
+To remove the stack which gets created during deployment, which contains our created resources like our Domain and any other resources created from enabled features (such as a CloudWatch log group), we can execute
+```
+cdk destroy
+```
+Note that the default retention policy for the OpenSearch Domain is to RETAIN this resource when the stack is deleted, and in order to delete the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `DESTROY`. Otherwise, the Domain can be manually deleted through the AWS console or through other means such as the AWS CLI.
 
-- [ ] [Set up project integrations](https://gitlab.aws.dev/lewijacn/opensearch-service-domain-cdk/-/settings/integrations)
+### Useful CDK commands
 
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+* `npm run build`   compile typescript to js
+* `npm run watch`   watch for changes and compile
+* `npm run test`    perform the jest unit tests
+* `cdk deploy`      deploy this stack to your default AWS account/region
+* `cdk diff`        compare deployed stack with current state
+* `cdk synth`       emits the synthesized CloudFormation template
