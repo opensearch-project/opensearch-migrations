@@ -195,7 +195,7 @@ class DockerFrameworkClient:
                 "ulimits": ulimits, "detach": detach, "environment": environment, "extra_hosts": extra_hosts}
 
         run_command = dcg.gen_docker_run(**args)
-        self.logger.debug(f"{run_command}")
+        self.logger.debug(f"Predicted command being run by the Docker SDK: {run_command}")
 
         container = self._docker_client.containers.run(**args)
         return container
