@@ -31,6 +31,17 @@ global
     log 127.0.0.1:514 len 65535 local0 # syslogd, facility local0
     log stdout format raw local0 debug # stdout too
 
+    # Request bodies over ~16Kb were being dropped, seemingly due to the buffer size.
+    # See: https://github.com/haproxytech/spoa-mirror/issues/17#issuecomment-683848851
+    # The largest content-length headers were saw in testing were about 700Kb, so the buffer
+    # sizes here were selected to give us a buffer around that size.
+    # According to https://cbonte.github.io/haproxy-dconv/2.2/configuration.html#3.2-tune.bufsize,
+    # the buffer size can impact performance and the maxconn setting should be decreased fairly proportionally.
+    # This is a 16x reduction from the default value.
+    tune.bufsize 1048576
+    tune.h2.max-frame-size 1048576
+    maxconn 65536
+
     # Turn on Master/Worker mode.  Required to use SPOE Mirroring.  While hardly an expert, I've attempted to configure
     # this so that the HAProxy container will exit if a process associated w/ the proxy mechanism runs into trouble.
     # This will ensure problems are surfaced quickly/obviously, possibly at the expense of resilience at the container
@@ -69,21 +80,12 @@ frontend haproxy
 
     # Set up the logging for the req/res stream to the primary cluster
     declare capture request len 1048576
+    declare capture request len 1048576
     declare capture response len 1048576
-    http-request capture req.body id 0
-
-    http-request capture req.hdrs len 1048576
-    #An issue that occured was that the format will log the body as part of the headers,
-    #which was the only way log all headers. A task to separate the two that has been created
-    #https://opensearch.atlassian.net/browse/MIGRATIONS-992
-    #As of this moment, the headers cannot be json-escaped, which can cause an issue in reading the data
-    #So only the body will be part of the logs for now until a way to json-escape the headers
-    #and log all headers at the same time is found
-    #Task Created for JSON-escaping the headers
-    #https://opensearch.atlassian.net/browse/MIGRATIONS-993
-
-    log-format '{{ "request": {{ "timestamp":%Ts, "uri":"%[capture.req.uri,json('utf8ps')]", "method":"%[capture.req.method,json('utf8ps')]", "body":"%[capture.req.hdr(0),json('utf8ps')]" }}, "response":  {{"response_time_ms":%Tr, "body":"%[capture.res.hdr(0),json('utf8ps')]", "status_code": %ST }} }}' 
-
+    declare capture response len 1048576
+    http-request capture req.hdrs id 0
+    http-request capture req.body id 1
+    log-format '%{{+Q}}o {{"request": {{"timestamp":%Ts, "uri":%[capture.req.uri,json('utf8ps')], "method":%[capture.req.method], "headers":%[capture.req.hdr(0),json('utf8ps')], "body":%[capture.req.hdr(1),json('utf8ps')]}}, "response":  {{"response_time_ms":%Tr, "body":%[capture.res.hdr(1),json('utf8ps')], "headers":%[capture.res.hdr(0),json('utf8ps')], "status_code": %ST}}}}'
     # Associate this frontend with the primary cluster
     default_backend primary_cluster
 
@@ -122,7 +124,8 @@ def _gen_be_config_cluster(cluster_nodes: List[HostAddress]) -> str:
 # These are the primary Cluster's Nodes; traffic will be sent to them synchronously.  The default round robin LB
 # pattern is in effect.
 backend primary_cluster
-    http-response capture res.body id 0
+    http-response capture res.hdrs id 0
+    http-response capture res.body id 1
 {backend_server_section}
 """
     return config
