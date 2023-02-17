@@ -18,10 +18,10 @@ def test_WHEN_gen_run_command_THEN_as_expected():
             Ulimit(name='limit', soft=1, hard=2)
         ],
         "detach": True,
-        "environment": {
-            "a": "b",
-            "c": "d"
-        },
+        "environment": [
+            "a=b",
+            "c"
+        ],
         "extra_hosts": {
             "name": "host"
         }
@@ -32,8 +32,8 @@ def test_WHEN_gen_run_command_THEN_as_expected():
 
     # Check our results
     expected_command = ("docker run --name container_name --network network_name --publish 80:9200 --publish 42:6160"
-                        " --volume /mydir1:/path:ro --volume volume1:/path2:rw --ulimit limit=1:2 --env a='b'"
-                        " --env c='d' --add-host name:host --detach image")
+                        " --volume /mydir1:/path:ro --volume volume1:/path2:rw --ulimit limit=1:2 --env a=b"
+                        " --env c --add-host name:host --detach image")
     assert expected_command == generated_command
 
 
@@ -49,10 +49,10 @@ def test_WHEN_gen_run_command_2_THEN_as_expected():
             Ulimit(name='limit', soft=1, hard=2)
         ],
         "detach": False,
-        "environment": {
-            "a": "b",
-            "c": "d"
-        },
+        "environment": [
+            "a=b",
+            "c"
+        ],
         "extra_hosts": {}
     }
 
@@ -61,5 +61,5 @@ def test_WHEN_gen_run_command_2_THEN_as_expected():
 
     # Check our results
     expected_command = ("docker run --name container_name --network network_name --publish 80:9200 --publish 42:6160"
-                        " --ulimit limit=1:2 --env a='b' --env c='d' image")
+                        " --ulimit limit=1:2 --env a=b --env c image")
     assert expected_command == generated_command

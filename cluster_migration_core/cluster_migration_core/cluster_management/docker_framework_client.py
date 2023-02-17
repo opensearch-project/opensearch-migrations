@@ -142,19 +142,43 @@ class DockerFrameworkClient:
         self.logger.debug(f"Removed volume {volume.name}")
 
     def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping],
-                         volumes: List[DockerVolume], ulimits: List[Ulimit], env_variables: Dict[str, str] = None,
-                         extra_hosts: Dict[str, str] = None, detach: bool = True
+                         volumes: List[DockerVolume], ulimits: List[Ulimit], env_kv: Dict[str, str] = None,
+                         env_passthrough: List[str] = None, extra_hosts: Dict[str, str] = None, detach: bool = True
                          ) -> Container:
+        """
+        image: the name of the Docker image to spin up
+        container_name: the name/tag you want assigned to the created container
+        network: the Docker network to connect the container to
+        ports: list of port mappings you want configured between the container and the local host (e.g. --publish)
+        volumes: list of Docker volumes you want mounted into the container
+        ulimits: list of resource constraints to apply to the container
+        env_kv: dict of key/value pairs of ENV variables that should be present in the container
+        env_passthrough: list of export'd ENV variable names to pipe through from the invoking context to the container
+        extra_hosts: dict of hostname mappings to add to the container (e.g. --add-host)
+        detach: whether to detach the container from the current process
+        """
 
         # TODO - need handle if container already exists (name collision)
         # TODO - need handle if we exceed the resource allocation for Docker
         # TODO - need handle port contention
 
         # Initialize optional, mutable containers
-        if not env_variables:
-            env_variables = {}
+        if not env_kv:
+            env_kv = {}
+        if not env_passthrough:
+            env_passthrough = []
         if not extra_hosts:
             extra_hosts = {}
+
+        # Environment variables can be specified to a Docker container in few ways.  One is to provide explicit key/val
+        # pairs as part of the "run" command; another is to provide just the key name of an existing environment
+        # variable in the user's shell context (e.g. passthrough).  Assuming the passthrough variable has been export'd
+        # then Docker will pipe it through to the container.  This is useful for things like security credentials.
+        # However, we need to assemble a single list of variables to pass to the Docker SDK, which is what this code
+        # is doing.
+        environment_combined = []
+        environment_combined.extend([f"{k}={v}" for k, v in env_kv.items()])
+        environment_combined.extend(env_passthrough)
 
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
         port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
@@ -181,7 +205,7 @@ class DockerFrameworkClient:
             volumes=volume_mapping,
             ulimits=ulimits,
             detach=detach,
-            environment=env_variables,
+            environment=environment_combined,
             extra_hosts=extra_hosts
         )
         self.logger.debug(f"Created container {container_name}")
@@ -189,7 +213,7 @@ class DockerFrameworkClient:
 
     def _log_and_execute_command_run(self, image: str, name: str, network: str, ports: Dict[str, str],
                                      volumes: Dict[str, Dict[str, str]], ulimits: List[Ulimit], detach: bool,
-                                     environment: Dict[str, str], extra_hosts: Dict[str, str]) -> Container:
+                                     environment: List[str], extra_hosts: Dict[str, str]) -> Container:
 
         args = {"image": image, "name": name, "network": network, "ports": ports, "volumes": volumes,
                 "ulimits": ulimits, "detach": detach, "environment": environment, "extra_hosts": extra_hosts}

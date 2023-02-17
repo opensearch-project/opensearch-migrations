@@ -48,6 +48,38 @@ def main():
         logging.root.setLevel(logging.DEBUG)
 
     # =================================================================================================================
+    # Pull Necessary State
+    # =================================================================================================================
+    print("Pulling AWS credentials from ENV variables...")
+
+    print("Pulling ENV variable: AWS_ACCESS_KEY_ID")
+    aws_access_key_id = os.environ.get("AWS_ACCESS_KEY_ID")
+    if not aws_access_key_id:
+        print("ENV variable 'AWS_ACCESS_KEY_ID' not available; please make sure it is exported.")
+
+    print("Pulling ENV variable: AWS_SECRET_ACCESS_KEY")
+    aws_secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    if not aws_secret_access_key:
+        print("ENV variable 'AWS_SECRET_ACCESS_KEY' not available; please make sure it is exported.")
+
+    print("Pulling ENV variable: AWS_SESSION_TOKEN")
+    aws_session_token = os.environ.get("AWS_SESSION_TOKEN")
+    if not aws_session_token:
+        print("ENV variable 'AWS_SESSION_TOKEN' not available; this will cause problems if using temporary creds")
+
+    if not aws_access_key_id or not aws_secret_access_key:
+        message = ("The AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required for the demo containers to function"
+                   " properly.  Please ensure they are correct and exported in your current shell evnironment.")
+        raise RuntimeError(message)
+
+    print("Pulling the AWS Region from the ENV variable...")
+    aws_region = os.environ.get("AWS_REGION")
+    if not aws_region:
+        message = ("The AWS_REGION ENV variable is required for the demo containers to function properly.  Please"
+                   " ensure it is correct and exported in your current shell evnironment.")
+        raise RuntimeError(message)
+
+    # =================================================================================================================
     # Setup Clusters
     # =================================================================================================================
     docker_client = dfc.DockerFrameworkClient()
@@ -159,6 +191,12 @@ def main():
         ports=[dfc.PortMapping(HAPROXY_INTERNAL_PORT, HAPROXY_PRIMARY_PORT)],
         volumes=[],
         ulimits=[Ulimit(name='memlock', soft=-1, hard=-1)],
+        env_kv={
+            "AWS_REGION": aws_region,
+            "AWS_ACCESS_KEY_ID": aws_access_key_id,
+            "AWS_SECRET_ACCESS_KEY": aws_secret_access_key,
+            "AWS_SESSION_TOKEN": aws_session_token
+        },
         extra_hosts={TAG_DOCKER_HOST: "host-gateway"}
     )
 

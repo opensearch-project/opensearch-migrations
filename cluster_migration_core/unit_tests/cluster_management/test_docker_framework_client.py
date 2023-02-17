@@ -181,19 +181,21 @@ def test_WHEN_create_container_called_THEN_executes_normally():
     mock_volume_2.attrs = {"Name": "volume2"}
     mock_docker_volume_2 = dfc.DockerVolume("/mount/point2", mock_volume_2, host_mount_point="/host/")
     mock_ulimit = mock.Mock()
-    test_env_vars = {"key": "value"}
+    test_env_vars = {"env1": "value"}
+    test_env_passthrough = ["env2"]
     test_extra_hosts = {"tag": "hostname"}
 
     # Run our test
     test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
     test_client.create_container(
-        test_image,
-        test_container_name,
-        mock_network,
-        test_ports,
-        [mock_docker_volume_1, mock_docker_volume_2],
-        [mock_ulimit],
-        test_env_vars,
+        image=test_image,
+        container_name=test_container_name,
+        network=mock_network,
+        ports=test_ports,
+        volumes=[mock_docker_volume_1, mock_docker_volume_2],
+        ulimits=[mock_ulimit],
+        env_kv=test_env_vars,
+        env_passthrough=test_env_passthrough,
         extra_hosts=test_extra_hosts
     )
 
@@ -213,7 +215,7 @@ def test_WHEN_create_container_called_THEN_executes_normally():
             },
             ulimits=[mock_ulimit],
             detach=True,
-            environment=test_env_vars,
+            environment=["env1=value", "env2"],
             extra_hosts=test_extra_hosts
         )
     ]
