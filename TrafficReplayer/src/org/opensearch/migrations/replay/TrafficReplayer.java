@@ -1,9 +1,12 @@
 package org.opensearch.migrations.replay;
 
+import com.google.common.primitives.Bytes;
 import org.apache.http.HttpException;
+import org.apache.http.impl.client.BasicResponseHandler;
 import org.apache.http.impl.conn.DefaultHttpResponseParser;
 import org.apache.http.impl.io.HttpTransportMetricsImpl;
 import org.apache.http.impl.io.SessionInputBufferImpl;
+import org.opensearch.migrations.replay.netty.NettyScanningHttpProxy;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -11,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Socket;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -21,6 +25,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -37,16 +42,22 @@ public class TrafficReplayer {
     final static int CHANNEL_ID_GROUP    = 4;
     final static int OPERATION_GROUP     = 6;
     final static int SIZE_GROUP          = 8;
-    public static final String READ_OPERATION = "READ";
-    public static final String WRITE_OPERATION = "WRITE";
-    public static final String UNREGISTERED_OPERATION = "UNREGISTERED";
+    public static final String READ_OPERATION     = "READ";
+    public static final String WRITE_OPERATION    = "WRITE";
+    public static final String FINISHED_OPERATION = "READ COMPLETE";
+
+    private final NettyScanningHttpProxy scanningHttpProxy;
+
+    public TrafficReplayer() {
+        scanningHttpProxy = new NettyScanningHttpProxy(25000);
+    }
 
     private static void exitWithUsageAndCode(int statusCode) {
         System.err.println("Usage: <log directory> <destination_url>");
         System.exit(statusCode);
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         if (args.length != 2) {
             exitWithUsageAndCode(1);
         }
@@ -66,59 +77,68 @@ public class TrafficReplayer {
             return;
         }
         var tr = new TrafficReplayer();
-        ReplayEngine replayEngine = new ReplayEngine(b->
-                System.out.println("done gathering"));
-                //writeToSocketAndClose(uri, b));
-        tr.runReplay(directoryPath, replayEngine);
+        ReplayEngine replayEngine = new ReplayEngine(rp->tr.writeToSocketAndClose(rp));
+        tr.runReplay(directoryPath, uri, replayEngine);
     }
 
-
-    public TrafficReplayer() {
+    private static String aggregateByteStreamToString(Stream<byte[]> bStream) {
+        return new String(Bytes.concat(bStream.toArray(byte[][]::new)), Charset.defaultCharset());
     }
 
-    private static void writeToSocketAndClose(URI serverUri, Stream<byte[]> byteArrays) {
+    private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair) {
         try {
-            var socket = new Socket(serverUri.getHost(), serverUri.getPort());
-            var socketOutput = socket.getOutputStream();
-            var socketInput = socket.getInputStream();
-            byteArrays.forEach(b-> {
-                try {
-                    socketOutput.write(b);
-                    socketOutput.flush();
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+            log("Assembled request/response - starting to write to socket");
+            var packetHandler = new NettyPacketToHttpHandler(scanningHttpProxy.getProxyPort());
+            for (var packetData : requestResponsePacketPair.requestData) {
+                packetHandler.consumeBytes(packetData);
+            }
+            AtomicBoolean waiter = new AtomicBoolean(true);
+            packetHandler.finalizeRequest(summary->{
+                System.err.println("Summary="+summary);
+                synchronized (waiter) {
+                    waiter.set(false);
+                    waiter.notify();
                 }
             });
-
-            // pull in the apache http client library to parse through the response so that we can consume
-            // it and move on
-            SessionInputBufferImpl wrappedResponseStream =
-                    new SessionInputBufferImpl(new HttpTransportMetricsImpl(), 1024*1024);
-            wrappedResponseStream.bind(socketInput);
-            DefaultHttpResponseParser responseParser = new DefaultHttpResponseParser(wrappedResponseStream);
-            responseParser.parse();
-            socket.close();
-        } catch (IOException | HttpException e) {
+            synchronized (waiter) {
+                if (waiter.get()) {
+                    waiter.wait(20 * 1000);
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } catch (IPacketToHttpHandler.InvalidHttpStateException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public void runReplay(Path directory, ReplayEngine replayEngine) throws IOException {
-        try (var dirStream = Files.newDirectoryStream(directory)) {
-            var sortedDirStream = StreamSupport.stream(dirStream.spliterator(), false)
-                    .sorted(Comparator.comparing(Path::toString));
-            sortedDirStream.forEach(filePath -> {
-                try {
-                    consumeLogLinesForFile(filePath, replayEngine);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            });
+    private void log(String s) {
+        System.err.println(s);
+    }
+
+    public void runReplay(Path directory, URI targetServerUri, ReplayEngine replayEngine) throws IOException, InterruptedException {
+        scanningHttpProxy.start(targetServerUri.getHost(), targetServerUri.getPort());
+        try {
+            try (var dirStream = Files.newDirectoryStream(directory)) {
+                var sortedDirStream = StreamSupport.stream(dirStream.spliterator(), false)
+                        .sorted(Comparator.comparing(Path::toString));
+                sortedDirStream.forEach(filePath -> {
+                    try {
+                        consumeLogLinesForFile(filePath, replayEngine);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+            }
+        } finally {
+            scanningHttpProxy.stop();
         }
     }
 
     private enum Operation {
-        Read, Close
+        Read, Write, Close
     }
 
     public static class ReplayEntry {
@@ -137,11 +157,45 @@ public class TrafficReplayer {
         }
     }
 
-    public static class ReplayEngine implements Consumer<ReplayEntry> {
-        private final Map<String, ArrayList<byte[]>> liveStreams;
-        private final Consumer<Stream<byte[]>> fullDataHandler;
+    public static class RequestResponsePacketPair {
+        final ArrayList<byte[]> requestData;
+        final ArrayList<byte[]> responseData;
 
-        public ReplayEngine(Consumer<Stream<byte[]>> fullDataHandler) {
+        private Operation lastOperation;
+
+        public RequestResponsePacketPair() {
+            this.requestData = new ArrayList<>();
+            this.responseData = new ArrayList<>();
+            this.lastOperation = Operation.Close;
+        }
+
+        public Operation getLastOperation() {
+            return lastOperation;
+        }
+
+        public void addRequestData(byte[] data) {
+            requestData.add(data);
+            this.lastOperation = Operation.Read;
+        }
+        public void addResponseData(byte[] data) {
+            responseData.add(data);
+            this.lastOperation = Operation.Write;
+        }
+
+        public Stream<byte[]> getRequestDataStream() {
+            return requestData.stream();
+        }
+
+        public Stream<byte[]> getResponseDataStream() {
+            return responseData.stream();
+        }
+    }
+
+    public static class ReplayEngine implements Consumer<ReplayEntry> {
+        private final Map<String, RequestResponsePacketPair> liveStreams;
+        private final Consumer<RequestResponsePacketPair> fullDataHandler;
+
+        public ReplayEngine(Consumer<RequestResponsePacketPair> fullDataHandler) {
             liveStreams = new HashMap<>();
             this.fullDataHandler = fullDataHandler;
         }
@@ -149,15 +203,32 @@ public class TrafficReplayer {
         @Override
         public void accept(ReplayEntry e) {
             if (e.operation.equals(Operation.Close)) {
+                publishAndClear(e.id);
+            } else if (e.operation.equals(Operation.Write)) {
                 var priorBuffers = liveStreams.get(e.id);
-                if (priorBuffers != null) {
-                    fullDataHandler.accept(priorBuffers.stream());
-                    liveStreams.remove(e.id);
+                if (priorBuffers == null) {
+                    throw new RuntimeException("Apparent out of order exception - " +
+                            "found a purported write to a socket before a read!");
                 }
+                priorBuffers.addResponseData(e.data);
             } else if (e.operation.equals(Operation.Read)) {
-                var runningList = liveStreams.putIfAbsent(e.id, new ArrayList<>());
-                if (runningList==null) { runningList = liveStreams.get(e.id); }
-                runningList.add(e.data);
+                var runningList = liveStreams.putIfAbsent(e.id, new RequestResponsePacketPair());
+                if (runningList==null) {
+                    runningList = liveStreams.get(e.id);
+                } else if (runningList.lastOperation == Operation.Write) {
+                    publishAndClear(e.id);
+                    accept(e);
+                    return;
+                }
+                runningList.addRequestData(e.data);
+            }
+        }
+
+        private void publishAndClear(String id) {
+            var priorBuffers = liveStreams.get(id);
+            if (priorBuffers != null) {
+                fullDataHandler.accept(priorBuffers);
+                liveStreams.remove(id);
             }
         }
     }
@@ -177,7 +248,7 @@ public class TrafficReplayer {
             String line = lineReader.readLine();
             if (line == null) { break; }
             var m = LINE_MATCHER.matcher(line);
-            System.out.println("line="+line);
+            System.err.println("line="+line);
             if (!m.matches()) {
                 continue;
             }
@@ -188,11 +259,12 @@ public class TrafficReplayer {
 
             if (operation != null) {
                 if (operation.equals(READ_OPERATION)) {
-                    byte[] packetData = readPacketData(lineReader, charsToRead);
+                    var packetData = readPacketData(lineReader, charsToRead);
                     replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Read, packetData));
                 } else if (operation.equals(WRITE_OPERATION)) {
-                    readPacketData(lineReader, charsToRead); // just advance the reader
-                } else if (operation.equals(UNREGISTERED_OPERATION)) {
+                    var packetData = readPacketData(lineReader, charsToRead); // advance the log reader
+                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Write, packetData));
+                } else if (operation.equals(FINISHED_OPERATION)) {
                     replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Close, null));
                 }
             }
@@ -200,7 +272,10 @@ public class TrafficReplayer {
     }
 
     private byte[] readPacketData(BufferedReader lineReader, int sizeRemaining) throws IOException {
+        if (sizeRemaining == 0) { return new byte[0]; }
         String nextLine = lineReader.readLine();
-        return Base64.getDecoder().decode(nextLine);
+        var packetData = Base64.getDecoder().decode(nextLine);
+        System.err.println("packetData: "+new String(packetData, Charset.defaultCharset()));
+        return packetData;
     }
 }

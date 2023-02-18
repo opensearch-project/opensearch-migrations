@@ -28,5 +28,7 @@
       </library>
     </orderEntry>
     <orderEntry type="library" name="apache.httpcomponents.httpclient" level="project" />
+    <orderEntry type="library" name="google.guava" level="project" />
+    <orderEntry type="library" name="io.netty.all" level="project" />
   </component>
 </module>
