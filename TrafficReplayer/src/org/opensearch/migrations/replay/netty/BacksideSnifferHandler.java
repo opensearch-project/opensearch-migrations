@@ -42,6 +42,5 @@ public class BacksideSnifferHandler extends ChannelDuplexHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         cause.printStackTrace();
-        FrontsideHandler.closeAndFlush(ctx.channel());
     }
 }
