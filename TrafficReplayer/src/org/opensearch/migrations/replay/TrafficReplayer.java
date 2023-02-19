@@ -1,12 +1,6 @@
 package org.opensearch.migrations.replay;
 
 import com.google.common.primitives.Bytes;
-import org.apache.http.HttpException;
-import org.apache.http.impl.client.BasicResponseHandler;
-import org.apache.http.impl.conn.DefaultHttpResponseParser;
-import org.apache.http.impl.io.HttpTransportMetricsImpl;
-import org.apache.http.impl.io.SessionInputBufferImpl;
-import org.opensearch.migrations.replay.netty.NettyScanningHttpProxy;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -46,10 +40,11 @@ public class TrafficReplayer {
     public static final String WRITE_OPERATION    = "WRITE";
     public static final String FINISHED_OPERATION = "READ COMPLETE";
 
-    private final NettyScanningHttpProxy scanningHttpProxy;
+    private final NettyPacketToHttpHandlerFactory packetHandlerFactory;
 
-    public TrafficReplayer() {
-        scanningHttpProxy = new NettyScanningHttpProxy(25000);
+    public TrafficReplayer(URI serverUri)
+    {
+        packetHandlerFactory = new NettyPacketToHttpHandlerFactory(serverUri);
     }
 
     private static void exitWithUsageAndCode(int statusCode) {
@@ -76,9 +71,9 @@ public class TrafficReplayer {
             exitWithUsageAndCode(3);
             return;
         }
-        var tr = new TrafficReplayer();
+        var tr = new TrafficReplayer(uri);
         ReplayEngine replayEngine = new ReplayEngine(rp->tr.writeToSocketAndClose(rp));
-        tr.runReplay(directoryPath, uri, replayEngine);
+        tr.runReplay(directoryPath, replayEngine);
     }
 
     private static String aggregateByteStreamToString(Stream<byte[]> bStream) {
@@ -88,7 +83,7 @@ public class TrafficReplayer {
     private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair) {
         try {
             log("Assembled request/response - starting to write to socket");
-            var packetHandler = new NettyPacketToHttpHandler(scanningHttpProxy.getProxyPort());
+            var packetHandler = packetHandlerFactory.create();
             for (var packetData : requestResponsePacketPair.requestData) {
                 packetHandler.consumeBytes(packetData);
             }
@@ -118,8 +113,7 @@ public class TrafficReplayer {
         System.err.println(s);
     }
 
-    public void runReplay(Path directory, URI targetServerUri, ReplayEngine replayEngine) throws IOException, InterruptedException {
-        scanningHttpProxy.start(targetServerUri.getHost(), targetServerUri.getPort());
+    public void runReplay(Path directory, ReplayEngine replayEngine) throws IOException, InterruptedException {
         try {
             try (var dirStream = Files.newDirectoryStream(directory)) {
                 var sortedDirStream = StreamSupport.stream(dirStream.spliterator(), false)
@@ -133,7 +127,7 @@ public class TrafficReplayer {
                 });
             }
         } finally {
-            scanningHttpProxy.stop();
+            packetHandlerFactory.stopGroup();
         }
     }
 
