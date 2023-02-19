@@ -20,7 +20,7 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
     @Override
     protected void initChannel(SocketChannel ch) {
         ch.pipeline().addLast(
-                new LoggingHandler(LogLevel.INFO),
+                new LoggingHandler(LogLevel.ERROR),
                 new FrontsideHandler(host, port));
     }
 }

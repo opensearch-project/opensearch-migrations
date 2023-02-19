@@ -3,18 +3,14 @@ package org.opensearch.migrations.replay.netty;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 public class FrontsideHandler extends ChannelInboundHandlerAdapter {
 
@@ -38,9 +34,10 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
         final Channel inboundChannel = ctx.channel();
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
+        var responseBuilder = AggregatedRawResponse.builder();
         b.group(inboundChannel.eventLoop())
                 .channel(ctx.channel().getClass())
-                .handler(new BacksideHandler(inboundChannel))
+                .handler(new BacksideSnifferHandler(responseBuilder))
                 .option(ChannelOption.AUTO_READ, false);
         System.err.println("Active - setting up backend connection");
         var f = b.connect(host, port);
@@ -52,7 +49,10 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                     // connection complete start to read first data
                     System.err.println("Done setting up backend channel & it was successful");
                     var pipeline = future.channel().pipeline();
-                    pipeline.addFirst(new LoggingHandler(LogLevel.WARN));
+                    pipeline.addFirst(new LoggingHandler(LogLevel.INFO));
+                    pipeline.addLast(new LoggingHandler(LogLevel.WARN));
+                    pipeline.addLast(new BacksideHttpWatcherHandler(inboundChannel, responseBuilder));
+                    pipeline.addLast(new LoggingHandler(LogLevel.ERROR));
                     inboundChannel.read();
                 } else {
                     // Close the connection if the connection attempt has failed.

@@ -1,18 +1,8 @@
 package org.opensearch.migrations.replay;
 
-import org.apache.http.HttpException;
-import org.apache.http.impl.client.BasicResponseHandler;
-import org.apache.http.impl.conn.DefaultHttpResponseParser;
-import org.apache.http.impl.io.HttpTransportMetricsImpl;
-import org.apache.http.impl.io.SessionInputBufferImpl;
-import org.opensearch.migrations.replay.netty.NettyScanningHttpProxy;
-
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.net.Socket;
-import java.time.Duration;
 import java.util.function.Consumer;
 
 public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
@@ -37,7 +27,7 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
     }
 
     @Override
-    public void finalizeRequest(Consumer<IResponseSummary> onResponseFinishedCallback)
+    public void finalizeRequest(Consumer<AggregatedRawResponse> onResponseFinishedCallback)
             throws InvalidHttpStateException {
         assert !socket.isClosed();
         System.err.println("finalizeRequest begun");
@@ -45,7 +35,7 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
             assert !socket.isClosed();
             try (var socketInput = socket.getInputStream()) {
                 try (var objectStream = new ObjectInputStream(socketInput)) {
-                    onResponseFinishedCallback.accept((IResponseSummary)objectStream.readObject());
+                    onResponseFinishedCallback.accept((AggregatedRawResponse)objectStream.readObject());
                 }
             }
         } catch (IOException | ClassNotFoundException e) {
