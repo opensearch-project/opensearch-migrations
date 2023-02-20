@@ -1,18 +1,9 @@
 package org.opensearch.migrations.replay.netty;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.IPacketToHttpHandler;
-
-import java.io.ByteArrayOutputStream;
-import java.io.ObjectOutputStream;
-import java.time.Duration;
 
 public class BacksideSnifferHandler extends ChannelDuplexHandler {
 

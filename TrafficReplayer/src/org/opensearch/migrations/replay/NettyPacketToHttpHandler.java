@@ -10,6 +10,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
@@ -24,7 +25,7 @@ import java.util.function.Consumer;
 
 public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
 
-    Channel outboundChannel;
+    ChannelFuture outboundChannelFuture;
     AggregatedRawResponse.Builder responseBuilder;
     BacksideHttpWatcherHandler responseWatchHandler;
 
@@ -37,18 +38,21 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
                 .handler(new BacksideSnifferHandler(responseBuilder))
                 .option(ChannelOption.AUTO_READ, false);
         System.err.println("Active - setting up backend connection");
-        var f = b.connect(serverUri.getHost(), serverUri.getPort());
-        outboundChannel = f.channel();
+        outboundChannelFuture = b.connect(serverUri.getHost(), serverUri.getPort());
+        //outboundChannel = outboundChannelFuture.channel();
         responseWatchHandler = new BacksideHttpWatcherHandler(responseBuilder);
 
-        f.addListener((ChannelFutureListener) future -> {
+        outboundChannelFuture.addListener((ChannelFutureListener) future -> {
             if (future.isSuccess()) {
                 // connection complete start to read first data
                 System.err.println("Done setting up backend channel & it was successful");
                 var pipeline = future.channel().pipeline();
                 pipeline.addFirst(new LoggingHandler(LogLevel.INFO));
+                pipeline.addLast(new HttpResponseDecoder());
                 pipeline.addLast(new LoggingHandler(LogLevel.WARN));
-                pipeline.addLast(new HttpServerCodec());
+                // TODO - switch this out to use less memory.
+                // We only need to know when the response has been fully received, not the contents
+                // since we're already logging those in the sniffer earlier in the pipeline.
                 pipeline.addLast(new HttpObjectAggregator(1024*1024));
                 pipeline.addLast(responseWatchHandler);
                 pipeline.addLast(new LoggingHandler(LogLevel.ERROR));
@@ -63,18 +67,26 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
     public void consumeBytes(byte[] packetData) throws InvalidHttpStateException {
         System.err.println("Writing packetData="+packetData);
         var packet = Unpooled.wrappedBuffer(packetData);
-        if (outboundChannel.isActive()) {
+        if (outboundChannelFuture.isDone()) {
+            Channel channel = outboundChannelFuture.channel();
+            if (!channel.isActive()) {
+                System.err.println("Channel is not active - future packets for this connection will be dropped.");
+                System.err.println("Need to do more sophisticated tracking of progress and retry further up the stack");
+                return;
+            }
             System.err.println("Writing data to backside handler");
-            outboundChannel.writeAndFlush(packet)
+            channel.writeAndFlush(packet)
                     .addListener((ChannelFutureListener) future -> {
                         if (future.isSuccess()) {
-                            System.out.println("packet write was successful: "+packetData);
+                            System.err.println("packet write was successful: "+packetData);
                         } else {
-                            System.err.println("closing outbound channel because WRITE future was not successful");
+                            System.err.println("closing outbound channel because WRITE future was not successful "+future.cause());
                             future.channel().close(); // close the backside
                         }
                     });
-        } // if the outbound channel has died, so be it... let this frontside finish with it's caller naturally
+        } else {
+            outboundChannelFuture.addListener(f->consumeBytes(packetData));
+        }
     }
 
     @Override

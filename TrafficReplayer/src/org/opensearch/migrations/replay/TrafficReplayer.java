@@ -1,11 +1,16 @@
 package org.opensearch.migrations.replay;
 
+import com.google.common.io.CharSource;
 import com.google.common.primitives.Bytes;
+import org.apache.commons.codec.binary.Base64InputStream;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.StringReader;
 import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.Charset;
@@ -29,16 +34,18 @@ public class TrafficReplayer {
     final static int LOG_PREAMBLE_SIZE = 75;
     // current log fmt: [%d{ISO8601}][%-5p][%-25c{1.}] [%node_name]%marker %m%n
     final static Pattern LINE_MATCHER =
-            Pattern.compile("^\\[(.*),(.[0-9]*)\\]\\[.*\\]\\[.*\\] \\[(.*)\\] \\[id: 0x([0-9a-f]*), .*\\] (([A-Z ]+))( ([0-9]+))?$");
-    final static int TIMESTAMP_GROUP     = 1;
-    final static int TIMESTAMP_MS_GROUP  = 2;
-    final static int CLUSTER_GROUP       = 3;
-    final static int CHANNEL_ID_GROUP    = 4;
-    final static int OPERATION_GROUP     = 6;
-    final static int SIZE_GROUP          = 8;
+            Pattern.compile("^\\[(.*),(.[0-9]*)\\]\\[.*\\]\\[.*\\] \\[(.*)\\] \\[id: 0x([0-9a-f]*), .*\\] " +
+                    "(ACTIVE|FLUSH|INACTIVE|READ COMPLETE|REGISTERED|UNREGISTERED|WRITABILITY|((READ|WRITE)( ([0-9]+):(.*))))");
+    final static int TIMESTAMP_GROUP        = 1;
+    final static int CLUSTER_GROUP          = 3;
+    final static int CHANNEL_ID_GROUP       = 4;
+    final static int SIMPLE_OPERATION_GROUP = 5;
+    final static int RW_OPERATION_GROUP     = 7;
+    final static int SIZE_GROUP             = 9;
+    final static int PAYLOAD_GROUP          = 10;
     public static final String READ_OPERATION     = "READ";
     public static final String WRITE_OPERATION    = "WRITE";
-    public static final String FINISHED_OPERATION = "READ COMPLETE";
+    public static final String FINISHED_OPERATION = "UNREGISTERED";
 
     private final NettyPacketToHttpHandlerFactory packetHandlerFactory;
 
@@ -80,6 +87,7 @@ public class TrafficReplayer {
         return new String(Bytes.concat(bStream.toArray(byte[][]::new)), Charset.defaultCharset());
     }
 
+    static int nReceived = 0;
     private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair) {
         try {
             log("Assembled request/response - starting to write to socket");
@@ -89,7 +97,7 @@ public class TrafficReplayer {
             }
             AtomicBoolean waiter = new AtomicBoolean(true);
             packetHandler.finalizeRequest(summary->{
-                System.err.println("Summary="+summary);
+                System.err.println("Summary(#"+(nReceived++)+")="+summary);
                 synchronized (waiter) {
                     waiter.set(false);
                     waiter.notify();
@@ -237,39 +245,47 @@ public class TrafficReplayer {
         }
     }
 
+    // as per https://github.com/google/guava/issues/5376.  Yuck
+    public static InputStream readerToStream(Reader reader, Charset charset) throws IOException {
+        return new CharSource() {
+            @Override
+            public Reader openStream() {
+                return reader;
+            }
+        }.asByteSource(charset).openStream();
+    }
+
     public void consumeLinesForReader(BufferedReader lineReader, Consumer<ReplayEntry> replayEntryConsumer) throws IOException {
         while (true) {
             String line = lineReader.readLine();
             if (line == null) { break; }
             var m = LINE_MATCHER.matcher(line);
-            System.err.println("line="+line);
             if (!m.matches()) {
                 continue;
             }
+
             String uniqueConnectionKey = m.group(CLUSTER_GROUP) + "," + m.group(CHANNEL_ID_GROUP);
-            int charsToRead = Optional.ofNullable(m.group(SIZE_GROUP)).map(s->Integer.parseInt(s)).orElse(0);
-            String operation = m.group(OPERATION_GROUP);
+            String simpleOperation = m.group(SIMPLE_OPERATION_GROUP);
             String timestampStr = m.group(TIMESTAMP_GROUP);
 
-            if (operation != null) {
-                if (operation.equals(READ_OPERATION)) {
-                    var packetData = readPacketData(lineReader, charsToRead);
-                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Read, packetData));
-                } else if (operation.equals(WRITE_OPERATION)) {
-                    var packetData = readPacketData(lineReader, charsToRead); // advance the log reader
-                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Write, packetData));
-                } else if (operation.equals(FINISHED_OPERATION)) {
-                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Close, null));
+            if (simpleOperation != null) {
+                var rwOperation = m.group(RW_OPERATION_GROUP);
+                int packetDataSize = Optional.ofNullable(m.group(SIZE_GROUP)).map(s->Integer.parseInt(s)).orElse(0);
+                System.err.println("read op="+rwOperation+" size="+packetDataSize);
+                if (rwOperation != null) {
+                    var packetData = Base64.getDecoder().decode(m.group(10));
+                    if (rwOperation.equals(READ_OPERATION)) {
+                        replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Read, packetData));
+                    } else if (rwOperation.equals(WRITE_OPERATION)) {
+                        replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Write, packetData));
+                    }
+                } else {
+                    System.err.println("read op="+simpleOperation);
+                    if (simpleOperation.equals(FINISHED_OPERATION)) {
+                        replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Close, null));
+                    }
                 }
             }
         }
-    }
-
-    private byte[] readPacketData(BufferedReader lineReader, int sizeRemaining) throws IOException {
-        if (sizeRemaining == 0) { return new byte[0]; }
-        String nextLine = lineReader.readLine();
-        var packetData = Base64.getDecoder().decode(nextLine);
-        System.err.println("packetData: "+new String(packetData, Charset.defaultCharset()));
-        return packetData;
     }
 }
