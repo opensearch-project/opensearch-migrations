@@ -57,10 +57,9 @@ public class WireLoggingHandler extends LoggingHandler {
                 buf.append(chStr).append(' ').append(eventName).append(" 0");
                 return buf.toString();
             } else {
-                int outputLength = chStr.length() + 1 + eventName.length() + 2 + 10 + 3 + contentLength * 2 + 1;
+                int outputLength = chStr.length() + 1 + eventName.length() + 2 + 10 + 3 + contentLength * 3 + 1;
                 StringBuilder buf = new StringBuilder(outputLength);
-                buf.append(chStr).append(' ').append(eventName).append(' ')
-                    .append(contentLength).append("\n");
+                buf.append(chStr).append(' ').append(eventName).append(' ').append(contentLength).append(':');
                 content.markReaderIndex();
                 // this will be MUCH more efficient if we're able to write directly to an output stream
                 // rather than going through all of the string/char trasnformations
