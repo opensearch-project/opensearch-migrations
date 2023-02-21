@@ -24,7 +24,11 @@ def test_WHEN_gen_run_command_THEN_as_expected():
         ],
         "extra_hosts": {
             "name": "host"
-        }
+        },
+        "entrypoint": [
+            "cmd 1",
+            "cmd 2"
+        ]
     }
 
     # Run our test
@@ -33,7 +37,7 @@ def test_WHEN_gen_run_command_THEN_as_expected():
     # Check our results
     expected_command = ("docker run --name container_name --network network_name --publish 80:9200 --publish 42:6160"
                         " --volume /mydir1:/path:ro --volume volume1:/path2:rw --ulimit limit=1:2 --env a=b"
-                        " --env c --add-host name:host --detach image")
+                        " --env c --add-host name:host --entrypoint cmd 1 --entrypoint cmd 2 --detach image")
     assert expected_command == generated_command
 
 
@@ -53,7 +57,8 @@ def test_WHEN_gen_run_command_2_THEN_as_expected():
             "a=b",
             "c"
         ],
-        "extra_hosts": {}
+        "extra_hosts": {},
+        "entrypoint": []
     }
 
     # Run our test

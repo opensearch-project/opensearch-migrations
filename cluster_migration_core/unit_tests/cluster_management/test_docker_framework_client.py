@@ -184,6 +184,7 @@ def test_WHEN_create_container_called_THEN_executes_normally():
     test_env_vars = {"env1": "value"}
     test_env_passthrough = ["env2"]
     test_extra_hosts = {"tag": "hostname"}
+    test_entrypoint = ["cmd 1", "cmd 2"]
 
     # Run our test
     test_client = dfc.DockerFrameworkClient(docker_client=mock_inner_client)
@@ -196,7 +197,8 @@ def test_WHEN_create_container_called_THEN_executes_normally():
         ulimits=[mock_ulimit],
         env_kv=test_env_vars,
         env_passthrough=test_env_passthrough,
-        extra_hosts=test_extra_hosts
+        extra_hosts=test_extra_hosts,
+        entrypoint=test_entrypoint
     )
 
     # Check our results
@@ -216,7 +218,8 @@ def test_WHEN_create_container_called_THEN_executes_normally():
             ulimits=[mock_ulimit],
             detach=True,
             environment=["env1=value", "env2"],
-            extra_hosts=test_extra_hosts
+            extra_hosts=test_extra_hosts,
+            entrypoint=test_entrypoint
         )
     ]
     assert expected_calls == mock_inner_client.containers.run.call_args_list

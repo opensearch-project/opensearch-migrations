@@ -72,7 +72,7 @@ def main():
                    " properly.  Please ensure they are correct and exported in your current shell evnironment.")
         raise RuntimeError(message)
 
-    print("Pulling the AWS Region from the ENV variable...")
+    print("Pulling the AWS Region from the ENV variable AWS_REGION...")
     aws_region = os.environ.get("AWS_REGION")
     if not aws_region:
         message = ("The AWS_REGION ENV variable is required for the demo containers to function properly.  Please"
@@ -137,6 +137,27 @@ def main():
     # Set Python's working directory to something predictable (this file's directory)
     demo_dir = os.path.dirname(__file__)
     os.chdir(demo_dir)
+
+    # We need to construct an AWS Config file in order to execute the demo.  This is required because the CloudWatch
+    # Agent checks to see whether it is running in ECS or On-Prem when it starts up.  The On-Prem path requires
+    # this file to supply the AWS Creds and AWS Region to post to.  Spoofing the check and getting it to think it's
+    # running in ECS is possible but requires faking the local metadata service.  For our purposes, making and
+    # installing the configuration file is easier to get the demo working on a laptop than faking the metadata service
+    # and can be done in a way to keep the Docker image(s) we're generating generic to On-Prem vs. ECS.
+    #
+    # There are a number of approaches we can take to make this configuration file available inside the container.
+    # Unfortunately, the easy routes either require writing a real file to disk and mounting it, which presents risks,
+    # or embedding it into the Dockerfile, which violates the boundary between the demo and "production" code.
+    # Therefore, we instead do it in a bit of a janky way by passing the credentials into the container using ENV
+    # variables and using an ENTRYPOINT script override to read them in-container and write the AWS Config file during
+    # launch.
+    #
+    # Why aren't we writing the Config to a Python temporary file we mount into the container?  Good question!  Two
+    # problems with them.  First, reading from them is wonky and their behavior is platform-specific.  Second, we still
+    # have to handle cleanup and certain situations will still result in the file not getting cleaned up (SIGKILL).
+    demo_config_dir_host = os.path.join(demo_dir, "docker_config_demo")
+    demo_config_dir_container = "/docker_config_demo"
+    demo_entrypoint = os.path.join(demo_config_dir_container, "demo_entrypoint.sh")
     
     # Build the Docker images for the Primary and Shadow HAProxy containers
     print("Building HAProxy Docker images for Primary and Shadow HAProxy containers...")
@@ -189,7 +210,7 @@ def main():
         container_name=primary_image,
         network=haproxy_network_primary,
         ports=[dfc.PortMapping(HAPROXY_INTERNAL_PORT, HAPROXY_PRIMARY_PORT)],
-        volumes=[],
+        volumes=[dfc.DockerVolume(demo_config_dir_container, None, demo_config_dir_host)],
         ulimits=[Ulimit(name='memlock', soft=-1, hard=-1)],
         env_kv={
             "AWS_REGION": aws_region,
@@ -197,7 +218,8 @@ def main():
             "AWS_SECRET_ACCESS_KEY": aws_secret_access_key,
             "AWS_SESSION_TOKEN": aws_session_token
         },
-        extra_hosts={TAG_DOCKER_HOST: "host-gateway"}
+        extra_hosts={TAG_DOCKER_HOST: "host-gateway"},
+        entrypoint=[demo_entrypoint]
     )
 
     # =================================================================================================================
