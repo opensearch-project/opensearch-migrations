@@ -152,7 +152,7 @@ def main():
 
     # Build the Docker images for the Primary HAProxy
     print("Building HAProxy Docker image for Primary Cluster...")
-    haproxy_image_primary = docker_client.build_image(str(workspace), primary_image, "haproxy-w-mirror")
+    haproxy_image_primary = docker_client.build_image(str(workspace), primary_image, "haproxy-w-mirror-aws")
     print(f"Primary HAProxy image available locally w/ tag: {haproxy_image_primary.tag}")
 
     # Build the Docker images for the Shadow HAProxy

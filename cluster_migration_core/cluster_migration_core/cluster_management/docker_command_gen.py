@@ -14,8 +14,8 @@ use.
 
 
 def gen_docker_run(image: str, name: str, network: str, ports: Dict[str, str], volumes: Dict[str, Dict[str, str]],
-                   ulimits: List[Ulimit], detach: bool, environment: Dict[str, str],
-                   extra_hosts: Dict[str, str]) -> str:
+                   ulimits: List[Ulimit], detach: bool, environment: List[str],
+                   extra_hosts: Dict[str, str], entrypoint: List[str]) -> str:
     prefix = "docker run"
     name_section = f"--name {name}"
     network_section = f"--network {network}"
@@ -23,8 +23,9 @@ def gen_docker_run(image: str, name: str, network: str, ports: Dict[str, str], v
     publish_section = " ".join(publish_strs)
     volumes_section = " ".join([f"--volume {k}:{v['bind']}:{v['mode']}" for k, v in volumes.items()])
     ulimits_section = " ".join([f"--ulimit {u.name}={u.soft}:{u.hard}" for u in ulimits])
-    environment_section = " ".join([f"--env {k}='{v}'" for k, v in environment.items()])
+    environment_section = " ".join([f"--env {entry}" for entry in environment])
     extra_hosts_section = " ".join([f"--add-host {k}:{v}" for k, v in extra_hosts.items()])
+    entrypoint_section = " ".join([f"--entrypoint {cmd}" for cmd in entrypoint])
     detach_section = "--detach" if detach else ""
     image_section = image
 
@@ -37,6 +38,7 @@ def gen_docker_run(image: str, name: str, network: str, ports: Dict[str, str], v
         ulimits_section,
         environment_section,
         extra_hosts_section,
+        entrypoint_section,
         detach_section,
         image_section  # Needs to be last
     ]

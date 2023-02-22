@@ -95,7 +95,31 @@ rm -rf .venv
 
 Learn more about venv [here](https://docs.python.org/3/library/venv.html).
 
-### Step 2 - Start the demo
+#### Step 2 - Set up AWS credentials
+
+This demo offloads captured from the HAProxy Primary container to AWS CloudWatch using the CloudWatch Agent.  CloudWatch Agent is not the only implementation of offload, but just one approach.
+
+In order to use the Agent, we need to get access to AWS Credentials.  This can be done a numer of ways, including [setting up a dedicated IAM User (not recommended)](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_users_create.html) or [using the AWS CLI STS Commands to assume a Role](https://aws.amazon.com/premiumsupport/knowledge-center/iam-assume-role-cli/).  Whichever way you choose to create AWS Credentials, they should have read/write permissions to CloudWatch Logs.
+
+Export the credentials in your terminal session like so:
+```
+export AWS_ACCESS_KEY_ID=<access key ID> \
+    && export AWS_SECRET_ACCESS_KEY=<secret access key>
+```
+
+If you assumed a Role, you'll have a session token as well which you need to export:
+```
+export AWS_SESSION_TOKEN=<session token>
+```
+
+Finally, export the AWS Region ID you want the captured logs to be exported to:
+```
+export AWS_REGION=us-east-2
+```
+
+The demo script uses these ENV variables to safely construct an AWS credential file inside the HAProxy Primary container.  This file's lifespan is tied to the container's lifespan and should be terminated when the container is.
+
+#### Step 3 - Start the demo
 
 You should now be able to invoke the demo script, like so:
 
@@ -147,7 +171,7 @@ c198216efc27   docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2   "/tini
 c688ef30cd52   docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2   "/tini -- /usr/local…"   51 seconds ago   Up 50 seconds   0.0.0.0:9200->9200/tcp, 9300/tcp   primary-cluster-node-1
 ```
 
-### Step 3 - Test the setup with traffic
+#### Step 4 - Test the setup with traffic
 
 Now, you can send traffic to the HAProxy Primary on localhost:80 and see it replicated to the Shadow Cluster.
 
@@ -233,7 +257,7 @@ Feb 10 19:04:20 localhost haproxy[23]: message repeated 4 times: [ Request-URI: 
 Feb 10 19:04:22 localhost haproxy[23]: Request-URI: /nyc_taxis/_search#012Request-Method: GET#012Request-Body: -#012Response-Body: -
 ```
 
-### Step 4 - Clean up the demo setup
+#### Step 5 - Clean up the demo setup
 
 As the terminal output suggestion, you can spin down the demo setup and clean up all created resources by hitting RETURN in the original terminal:
 

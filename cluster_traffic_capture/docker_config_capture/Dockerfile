@@ -19,8 +19,7 @@ FROM haproxy-base AS haproxy-no-mirror
 # Copy our configuration over
 COPY haproxy_no_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg
+CMD ["/bin/bash", "-c", "service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg"]
 
 # ====== Leverage Multi-Stage Docker Builds to re-use the base HAProxy image ======
 FROM haproxy-base AS haproxy-w-mirror
@@ -39,5 +38,18 @@ RUN cd spoa-mirror && \
 COPY mirror.conf /usr/local/etc/haproxy/mirror.conf
 COPY haproxy_w_mirror.cfg /usr/local/etc/haproxy/haproxy.cfg
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg
+CMD ["/bin/bash", "-c", "service rsyslog start && haproxy -f /usr/local/etc/haproxy/haproxy.cfg"]
+
+# ====== Create an AWS-Specific implementation layer for offload of captured traffic ======
+FROM haproxy-w-mirror AS haproxy-w-mirror-aws
+
+# Install the CloudWatch Agent, which is used for offload of captured traffic to CloudWatch Logs
+ENV RUN_IN_CONTAINER=True
+RUN apt-get install -y wget \
+    && wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb \
+    && dpkg -i -E ./amazon-cloudwatch-agent.deb
+COPY amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/bin/default_linux_config.json
+
+# Kick off rsyslog, CloudWatch Agent as a background process, and HAProxy.  All three should be managed by HAProxy
+# using the "program" directive in the config file but that's a follow-up item
+CMD ["/bin/bash", "-c", "service rsyslog start && /opt/aws/amazon-cloudwatch-agent/bin/start-amazon-cloudwatch-agent & && haproxy -f /usr/local/etc/haproxy/haproxy.cfg"]
