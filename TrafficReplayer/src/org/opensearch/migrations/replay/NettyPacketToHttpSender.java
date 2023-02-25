@@ -19,13 +19,13 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.function.Consumer;
 
-public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
+public class NettyPacketToHttpSender implements IPacketToHttpHandler {
 
     ChannelFuture outboundChannelFuture;
     AggregatedRawResponse.Builder responseBuilder;
     BacksideHttpWatcherHandler responseWatchHandler;
 
-    NettyPacketToHttpHandler(NioEventLoopGroup eventLoopGroup, URI serverUri) throws IOException {
+    NettyPacketToHttpSender(NioEventLoopGroup eventLoopGroup, URI serverUri) throws IOException {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         responseBuilder = AggregatedRawResponse.builder();
