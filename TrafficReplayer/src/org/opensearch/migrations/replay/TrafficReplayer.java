@@ -17,6 +17,9 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -37,6 +40,7 @@ public class TrafficReplayer {
             Pattern.compile("^\\[(.*),(.[0-9]*)\\]\\[.*\\]\\[.*\\] \\[(.*)\\] \\[id: 0x([0-9a-f]*), .*\\] " +
                     "(ACTIVE|FLUSH|INACTIVE|READ COMPLETE|REGISTERED|UNREGISTERED|WRITABILITY|((READ|WRITE)( ([0-9]+):(.*))))");
     final static int TIMESTAMP_GROUP        = 1;
+    final static int TIMESTAMP_MS_GROUP     = 2;
     final static int CLUSTER_GROUP          = 3;
     final static int CHANNEL_ID_GROUP       = 4;
     final static int SIMPLE_OPERATION_GROUP = 5;
@@ -88,7 +92,7 @@ public class TrafficReplayer {
     }
 
     static int nReceived = 0;
-    private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair) {
+    public void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair) {
         try {
             log("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
@@ -147,40 +151,48 @@ public class TrafficReplayer {
         public final String id;
         public final Operation operation;
         public final byte[] data;
-        public final Date timestamp;
+        public final Instant timestamp;
 
         public ReplayEntry(String id, String timestampStr, Operation operation, byte[] data) {
             this.id = id;
             this.operation = operation;
-//          var d = DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse(timestampStr);
-//          this.timestamp = Date.from(Instant.from(d));
-            this.timestamp = null;
+            this.timestamp = Instant.parse(timestampStr);
             this.data = data;
         }
     }
 
     public static class RequestResponsePacketPair {
+        final Instant firstTimeStamp;
+
         final ArrayList<byte[]> requestData;
         final ArrayList<byte[]> responseData;
 
+        private Instant lastTimeStamp;
+
         private Operation lastOperation;
 
-        public RequestResponsePacketPair() {
+        public Duration getTotalDuration() {
+            return Duration.between(firstTimeStamp, lastTimeStamp);
+        }
+
+        public RequestResponsePacketPair(Instant requestStartTime) {
             this.requestData = new ArrayList<>();
             this.responseData = new ArrayList<>();
             this.lastOperation = Operation.Close;
+            this.firstTimeStamp = requestStartTime;
         }
 
         public Operation getLastOperation() {
             return lastOperation;
         }
 
-        public void addRequestData(byte[] data) {
+        public void addRequestData(Instant packetTimeStamp, byte[] data) {
             requestData.add(data);
             this.lastOperation = Operation.Read;
         }
-        public void addResponseData(byte[] data) {
+        public void addResponseData(Instant packetTimeStamp, byte[] data) {
             responseData.add(data);
+            lastTimeStamp = packetTimeStamp;
             this.lastOperation = Operation.Write;
         }
 
@@ -212,9 +224,10 @@ public class TrafficReplayer {
                     throw new RuntimeException("Apparent out of order exception - " +
                             "found a purported write to a socket before a read!");
                 }
-                priorBuffers.addResponseData(e.data);
+                priorBuffers.addResponseData(e.timestamp, e.data);
             } else if (e.operation.equals(Operation.Read)) {
-                var runningList = liveStreams.putIfAbsent(e.id, new RequestResponsePacketPair());
+                var runningList =
+                        liveStreams.putIfAbsent(e.id, new RequestResponsePacketPair(e.timestamp));
                 if (runningList==null) {
                     runningList = liveStreams.get(e.id);
                 } else if (runningList.lastOperation == Operation.Write) {
@@ -222,7 +235,7 @@ public class TrafficReplayer {
                     accept(e);
                     return;
                 }
-                runningList.addRequestData(e.data);
+                runningList.addRequestData(e.timestamp, e.data);
             }
         }
 
@@ -266,7 +279,7 @@ public class TrafficReplayer {
 
             String uniqueConnectionKey = m.group(CLUSTER_GROUP) + "," + m.group(CHANNEL_ID_GROUP);
             String simpleOperation = m.group(SIMPLE_OPERATION_GROUP);
-            String timestampStr = m.group(TIMESTAMP_GROUP);
+            String timestampStr = m.group(TIMESTAMP_GROUP) + "." + m.group(TIMESTAMP_MS_GROUP) + "Z";
 
             if (simpleOperation != null) {
                 var rwOperation = m.group(RW_OPERATION_GROUP);
