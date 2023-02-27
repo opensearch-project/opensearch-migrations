@@ -1,9 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import java.io.Serializable;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Date;
 import java.util.function.Consumer;
 
 public interface IPacketToHttpHandler {
