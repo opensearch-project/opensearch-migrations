@@ -17,6 +17,7 @@ import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Instant;
 import java.util.function.Consumer;
 
 public class NettyPacketToHttpSender implements IPacketToHttpHandler {
@@ -28,7 +29,7 @@ public class NettyPacketToHttpSender implements IPacketToHttpHandler {
     NettyPacketToHttpSender(NioEventLoopGroup eventLoopGroup, URI serverUri) throws IOException {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
-        responseBuilder = AggregatedRawResponse.builder();
+        responseBuilder = AggregatedRawResponse.builder(Instant.now());
         b.group(eventLoopGroup)
                 .channel(NioSocketChannel.class)
                 .handler(new BacksideSnifferHandler(responseBuilder))
