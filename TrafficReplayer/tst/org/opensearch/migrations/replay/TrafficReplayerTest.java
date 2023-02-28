@@ -6,9 +6,10 @@ import org.junit.jupiter.api.Test;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.StringReader;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 class TrafficReplayerTest {
@@ -30,17 +31,22 @@ class TrafficReplayerTest {
         Assertions.assertTrue(TrafficReplayer.LINE_MATCHER.matcher(testReadEventStr).matches());
     }
 
-//    @Test
-//    public void testReader() throws IOException {
-//        var tr = new TrafficReplayer();
-//        List<List<byte[]>> byteArrays = new ArrayList<>();
-//        TrafficReplayer.ReplayEngine re = new TrafficReplayer.ReplayEngine(b -> byteArrays.add(b.collect(Collectors.toList())));
-//        try (var sr = new StringReader(SampleFile.contents)) {
-//            try (var br = new BufferedReader(sr)) {
-//                tr.consumeLinesForReader(br, re);
-//            }
-//        }
-//        Assertions.assertEquals(1, byteArrays.size());
-//        Assertions.assertEquals(2, byteArrays.get(0).size());
-//    }
+    @Test
+    public void testReader() throws IOException, URISyntaxException {
+        var tr = new TrafficReplayer(new URI("http://localhost:9200"));
+        List<List<byte[]>> byteArrays = new ArrayList<>();
+        TrafficReplayer.ReplayEngine re = new TrafficReplayer.ReplayEngine(rrpp -> {
+            byteArrays.add(rrpp.getRequestDataStream().collect(Collectors.toList()));
+            var ms = rrpp.getTotalDuration().toMillis();
+            Assertions.assertTrue(ms > 0);
+
+        });
+        try (var sr = new StringReader(SampleFile.contents)) {
+            try (var br = new BufferedReader(sr)) {
+                tr.consumeLinesForReader(br, re);
+            }
+        }
+        Assertions.assertEquals(1, byteArrays.size());
+        Assertions.assertEquals(2, byteArrays.get(0).size());
+    }
 }

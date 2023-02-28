@@ -22,10 +22,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +45,7 @@ public class TrafficReplayer {
             Pattern.compile("^\\[(.*),(.[0-9]*)\\]\\[.*\\]\\[.*\\] \\[(.*)\\] \\[id: 0x([0-9a-f]*), .*\\] " +
                     "(ACTIVE|FLUSH|INACTIVE|READ COMPLETE|REGISTERED|UNREGISTERED|WRITABILITY|((READ|WRITE)( ([0-9]+):(.*))))");
     final static int TIMESTAMP_GROUP        = 1;
+    final static int TIMESTAMP_MS_GROUP     = 2;
     final static int CLUSTER_GROUP          = 3;
     final static int CHANNEL_ID_GROUP       = 4;
     final static int SIMPLE_OPERATION_GROUP = 5;
@@ -55,11 +56,11 @@ public class TrafficReplayer {
     public static final String WRITE_OPERATION    = "WRITE";
     public static final String FINISHED_OPERATION = "UNREGISTERED";
 
-    private final NettyPacketToHttpHandlerFactory packetHandlerFactory;
+    private final org.opensearch.migrations.replay.NettyPacketToHttpHandlerFactory packetHandlerFactory;
 
     public TrafficReplayer(URI serverUri)
     {
-        packetHandlerFactory = new NettyPacketToHttpHandlerFactory(serverUri);
+        packetHandlerFactory = new org.opensearch.migrations.replay.NettyPacketToHttpHandlerFactory(serverUri);
     }
 
     private static void exitWithUsageAndCode(int statusCode) {
@@ -141,7 +142,7 @@ public class TrafficReplayer {
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
-        } catch (IPacketToHttpHandler.InvalidHttpStateException e) {
+        } catch (org.opensearch.migrations.replay.IPacketToHttpHandler.InvalidHttpStateException e) {
             throw new RuntimeException(e);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
@@ -178,40 +179,48 @@ public class TrafficReplayer {
         public final String id;
         public final Operation operation;
         public final byte[] data;
-        public final Date timestamp;
+        public final Instant timestamp;
 
         public ReplayEntry(String id, String timestampStr, Operation operation, byte[] data) {
             this.id = id;
             this.operation = operation;
-//          var d = DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse(timestampStr);
-//          this.timestamp = Date.from(Instant.from(d));
-            this.timestamp = null;
+            this.timestamp = Instant.parse(timestampStr);
             this.data = data;
         }
     }
 
     public static class RequestResponsePacketPair {
+        final Instant firstTimeStamp;
+
         final ArrayList<byte[]> requestData;
         final ArrayList<byte[]> responseData;
 
+        private Instant lastTimeStamp;
+
         private Operation lastOperation;
 
-        public RequestResponsePacketPair() {
+        public Duration getTotalDuration() {
+            return Duration.between(firstTimeStamp, lastTimeStamp);
+        }
+
+        public RequestResponsePacketPair(Instant requestStartTime) {
             this.requestData = new ArrayList<>();
             this.responseData = new ArrayList<>();
             this.lastOperation = Operation.Close;
+            this.firstTimeStamp = requestStartTime;
         }
 
         public Operation getLastOperation() {
             return lastOperation;
         }
 
-        public void addRequestData(byte[] data) {
+        public void addRequestData(Instant packetTimeStamp, byte[] data) {
             requestData.add(data);
             this.lastOperation = Operation.Read;
         }
-        public void addResponseData(byte[] data) {
+        public void addResponseData(Instant packetTimeStamp, byte[] data) {
             responseData.add(data);
+            lastTimeStamp = packetTimeStamp;
             this.lastOperation = Operation.Write;
         }
 
@@ -251,7 +260,8 @@ public class TrafficReplayer {
 
         public RequestResponseResponseJSONTriple(RequestResponsePacketPair primaryData) throws IOException {
             requestData = jsonFromHttpData(primaryData.requestData);
-            primaryResponseData = jsonFromHttpData(primaryData.responseData);
+            primaryResponseData = jsonFromHttpData(primaryData.responseData,
+                    Duration.between(primaryData.firstTimeStamp, primaryData.lastTimeStamp));
         }
 
         public void addShadowResponse(List<byte[]> data, Duration responseDuration) throws IOException {
@@ -279,9 +289,10 @@ public class TrafficReplayer {
                     throw new RuntimeException("Apparent out of order exception - " +
                             "found a purported write to a socket before a read!");
                 }
-                priorBuffers.addResponseData(e.data);
+                priorBuffers.addResponseData(e.timestamp, e.data);
             } else if (e.operation.equals(Operation.Read)) {
-                var runningList = liveStreams.putIfAbsent(e.id, new RequestResponsePacketPair());
+                var runningList =
+                        liveStreams.putIfAbsent(e.id, new RequestResponsePacketPair(e.timestamp));
                 if (runningList==null) {
                     runningList = liveStreams.get(e.id);
                 } else if (runningList.lastOperation == Operation.Write) {
@@ -289,7 +300,7 @@ public class TrafficReplayer {
                     accept(e);
                     return;
                 }
-                runningList.addRequestData(e.data);
+                runningList.addRequestData(e.timestamp, e.data);
             }
         }
 
@@ -371,7 +382,7 @@ public class TrafficReplayer {
 
             String uniqueConnectionKey = m.group(CLUSTER_GROUP) + "," + m.group(CHANNEL_ID_GROUP);
             String simpleOperation = m.group(SIMPLE_OPERATION_GROUP);
-            String timestampStr = m.group(TIMESTAMP_GROUP);
+            String timestampStr = m.group(TIMESTAMP_GROUP) + "." + m.group(TIMESTAMP_MS_GROUP) + "Z";
 
             if (simpleOperation != null) {
                 var rwOperation = m.group(RW_OPERATION_GROUP);

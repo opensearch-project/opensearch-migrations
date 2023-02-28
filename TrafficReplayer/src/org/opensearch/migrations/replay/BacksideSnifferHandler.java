@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.netty;
+package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
