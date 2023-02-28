@@ -12,15 +12,13 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
-import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
-import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
 import java.util.function.Consumer;
 
-public class NettyPacketToHttpSender implements IPacketToHttpHandler {
+public class NettyPacketToHttpSender implements org.opensearch.migrations.replay.IPacketToHttpHandler {
 
     ChannelFuture outboundChannelFuture;
     AggregatedRawResponse.Builder responseBuilder;

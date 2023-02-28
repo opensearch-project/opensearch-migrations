@@ -23,11 +23,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,11 +56,11 @@ public class TrafficReplayer {
     public static final String WRITE_OPERATION    = "WRITE";
     public static final String FINISHED_OPERATION = "UNREGISTERED";
 
-    private final NettyPacketToHttpHandlerFactory packetHandlerFactory;
+    private final org.opensearch.migrations.replay.NettyPacketToHttpHandlerFactory packetHandlerFactory;
 
     public TrafficReplayer(URI serverUri)
     {
-        packetHandlerFactory = new NettyPacketToHttpHandlerFactory(serverUri);
+        packetHandlerFactory = new org.opensearch.migrations.replay.NettyPacketToHttpHandlerFactory(serverUri);
     }
 
     private static void exitWithUsageAndCode(int statusCode) {
@@ -144,7 +142,7 @@ public class TrafficReplayer {
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
-        } catch (IPacketToHttpHandler.InvalidHttpStateException e) {
+        } catch (org.opensearch.migrations.replay.IPacketToHttpHandler.InvalidHttpStateException e) {
             throw new RuntimeException(e);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
@@ -262,7 +260,8 @@ public class TrafficReplayer {
 
         public RequestResponseResponseJSONTriple(RequestResponsePacketPair primaryData) throws IOException {
             requestData = jsonFromHttpData(primaryData.requestData);
-            primaryResponseData = jsonFromHttpData(primaryData.responseData);
+            primaryResponseData = jsonFromHttpData(primaryData.responseData,
+                    Duration.between(primaryData.firstTimeStamp, primaryData.lastTimeStamp));
         }
 
         public void addShadowResponse(List<byte[]> data, Duration responseDuration) throws IOException {
