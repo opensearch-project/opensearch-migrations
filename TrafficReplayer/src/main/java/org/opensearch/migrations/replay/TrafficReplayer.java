@@ -2,9 +2,12 @@ package org.opensearch.migrations.replay;
 
 import com.google.common.io.CharSource;
 import com.google.common.primitives.Bytes;
+import org.json.HTTP;
+import org.json.JSONObject;
 
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -18,16 +21,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -89,11 +95,12 @@ public class TrafficReplayer {
         }
 
         var tr = new TrafficReplayer(uri);
-        TripleToFileWriter tripleWriter = new TripleToFileWriter(outputPath);
-        ReplayEngine replayEngine = new ReplayEngine(rp->tr.writeToSocketAndClose(rp,(triple) -> tripleWriter.write(triple)));
-        tr.runReplay(directoryPath, replayEngine);
-
-        tripleWriter.close();
+        try (var tripleWriter = new TripleToFileWriter(outputPath)){
+            ReplayEngine replayEngine = new ReplayEngine(
+                    rp -> tr.writeToSocketAndClose(rp, (triple) -> tripleWriter.write(triple))
+            );
+            tr.runReplay(directoryPath, replayEngine);
+        }
     }
 
     private static String aggregateByteStreamToString(Stream<byte[]> bStream) {
@@ -102,7 +109,7 @@ public class TrafficReplayer {
 
     static int nReceived = 0;
     private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
-                                       Consumer<RequestResponseResponsePacketTriple> onResponseReceivedCallback) {
+                                       Consumer<RequestResponseResponseJSONTriple> onResponseReceivedCallback) {
         try {
             log("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
@@ -110,11 +117,14 @@ public class TrafficReplayer {
                 packetHandler.consumeBytes(packetData);
             }
             AtomicBoolean waiter = new AtomicBoolean(true);
-            var requestResponseTriple = new RequestResponseResponsePacketTriple(requestResponsePacketPair);
-            packetHandler.finalizeRequest(summary->{
+            var requestResponseTriple = new RequestResponseResponseJSONTriple(requestResponsePacketPair);
+            packetHandler.finalizeRequest(summary-> {
                 System.err.println("Summary(#"+(nReceived++)+")="+summary);
-                for (var receiptTimeAndPacketData : summary.getReceiptTimeAndResponsePackets().toList()) {
-                    requestResponseTriple.addShadowResponseData(receiptTimeAndPacketData.getValue());
+                try {
+                    requestResponseTriple.addShadowResponse(summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                            summary.getResponseDuration());
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
                 onResponseReceivedCallback.accept(requestResponseTriple);
                 log(requestResponseTriple.shadowResponseData.toString());
@@ -214,20 +224,40 @@ public class TrafficReplayer {
         }
     }
 
-    public static class RequestResponseResponsePacketTriple {
-        final ArrayList<byte[]> requestData;
-        final ArrayList<byte[]> primaryResponseData;
-        final ArrayList<byte[]> shadowResponseData;
+    public static class RequestResponseResponseJSONTriple {
+        final JSONObject requestData;
+        final JSONObject primaryResponseData;
+        JSONObject shadowResponseData;
 
-        public RequestResponseResponsePacketTriple(RequestResponsePacketPair primaryData) {
-            this.requestData = primaryData.requestData;
-            this.primaryResponseData = primaryData.responseData;
-            this.shadowResponseData = new ArrayList<>();
+        private JSONObject jsonFromHttpData(List<byte[]> data) throws IOException {
+            ByteArrayOutputStream requestStream = new ByteArrayOutputStream();
+            for(var d: data) {
+                requestStream.write(d);
+            }
+            String[] splitMessage = requestStream.toString(Charset.defaultCharset()).split("\r\n\r\n", 2);
+            JSONObject message = HTTP.toJSONObject(splitMessage[0].replaceAll("\r\n", "\n"));
+            if (splitMessage.length > 1) {
+                message.put("body", splitMessage[1]);
+            } else {
+                message.put("body", "");
+            }
+            return message;
+        }
+        private JSONObject jsonFromHttpData(List<byte[]> data, Duration duration) throws IOException {
+            JSONObject message = jsonFromHttpData(data);
+            message.put("response_time_ms", duration.toMillis());
+            return message;
         }
 
-        public void addShadowResponseData(byte[] data) {
-            shadowResponseData.add(data);
+        public RequestResponseResponseJSONTriple(RequestResponsePacketPair primaryData) throws IOException {
+            requestData = jsonFromHttpData(primaryData.requestData);
+            primaryResponseData = jsonFromHttpData(primaryData.responseData);
         }
+
+        public void addShadowResponse(List<byte[]> data, Duration responseDuration) throws IOException {
+            shadowResponseData = jsonFromHttpData(data, responseDuration);
+        }
+
     }
 
     public static class ReplayEngine implements Consumer<ReplayEntry> {
@@ -291,7 +321,7 @@ public class TrafficReplayer {
         return prefix + "[" + size + "]:" + Base64.getEncoder().encodeToString(packetsByteBuf.array());
     }
 
-    public static class TripleToFileWriter {
+    public static class TripleToFileWriter implements AutoCloseable{
         FileOutputStream fileOutputStream;
         BufferedOutputStream bufferedOutputStream;
 
@@ -300,18 +330,15 @@ public class TrafficReplayer {
             bufferedOutputStream = new BufferedOutputStream(fileOutputStream);
         }
 
-        public void write(RequestResponseResponsePacketTriple triple) {
-            String requestString = formatPacketsAsBase64String("request", triple.requestData);
-            String primaryResponseString = formatPacketsAsBase64String("primary", triple.primaryResponseData);
-            String shadowResponseString = formatPacketsAsBase64String("shadow", triple.shadowResponseData);
-            byte[] newline = "\n".getBytes(StandardCharsets.UTF_8);
+        public void write(RequestResponseResponseJSONTriple triple) {
+            JSONObject meta = new JSONObject();
+            meta.put("request", triple.requestData);
+            meta.put("primaryResponse", triple.primaryResponseData);
+            meta.put("shadowResponse", triple.shadowResponseData);
+
             try {
-                bufferedOutputStream.write(requestString.getBytes(StandardCharsets.UTF_8));
-                bufferedOutputStream.write(newline);
-                bufferedOutputStream.write(primaryResponseString.getBytes(StandardCharsets.UTF_8));
-                bufferedOutputStream.write(newline);
-                bufferedOutputStream.write(shadowResponseString.getBytes(StandardCharsets.UTF_8));
-                bufferedOutputStream.write(newline);
+                bufferedOutputStream.write(meta.toString().getBytes(StandardCharsets.UTF_8));
+                bufferedOutputStream.write("\n".getBytes(StandardCharsets.UTF_8));
             } catch (IOException e) {
                 e.printStackTrace();
             }
