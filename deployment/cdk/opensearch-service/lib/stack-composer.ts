@@ -136,8 +136,18 @@ export class StackComposer {
         function parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
             let accessPolicies: PolicyStatement[] = []
             const statements = jsonObject['Statement']
-            for (let i = 0; i < statements.length; i++) {
-                const statement = PolicyStatement.fromJson(statements[i])
+            if (!statements || statements.length < 1) {
+                throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
+            }
+            // Access policies can provide a single Statement block or an array of Statement blocks
+            if (Array.isArray(statements)) {
+                for (let i = 0; i < statements.length; i++) {
+                    const statement = PolicyStatement.fromJson(statements[i])
+                    accessPolicies.push(statement)
+                }
+            }
+            else {
+                const statement = PolicyStatement.fromJson(statements)
                 accessPolicies.push(statement)
             }
             return accessPolicies
