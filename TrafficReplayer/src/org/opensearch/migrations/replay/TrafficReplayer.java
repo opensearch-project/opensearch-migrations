@@ -89,22 +89,21 @@ public class TrafficReplayer {
         }
 
         var tr = new TrafficReplayer(uri);
-        try (var fileTriplesStream = new FileOutputStream(outputPath.toFile(), true)) {
-            try (var bufferedTriplesStream = new BufferedOutputStream(fileTriplesStream)) {
-                var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedTriplesStream);
-                ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
-                        triple -> {
-                            try {
-                                tripleWriter.writeJSON(triple);
-                            } catch (IOException e) {
-                                System.err.println("Caught an IOException while writing triples to file.");
-                                e.printStackTrace();
-                            }
+        try (var fileTriplesStream = new FileOutputStream(outputPath.toFile(), true);
+             var bufferedTriplesStream = new BufferedOutputStream(fileTriplesStream)) {
+            var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedTriplesStream);
+            ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
+                    triple -> {
+                        try {
+                            tripleWriter.writeJSON(triple);
+                        } catch (IOException e) {
+                            System.err.println("Caught an IOException while writing triples to file.");
+                            e.printStackTrace();
                         }
-                )
-                );
-                tr.runReplay(directoryPath, replayEngine);
-            }
+                    }
+            )
+            );
+            tr.runReplay(directoryPath, replayEngine);
         }
     }
 
