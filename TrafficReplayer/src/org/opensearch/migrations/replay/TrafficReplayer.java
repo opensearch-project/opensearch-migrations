@@ -3,8 +3,10 @@ package org.opensearch.migrations.replay;
 import com.google.common.io.CharSource;
 import com.google.common.primitives.Bytes;
 
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -87,19 +89,22 @@ public class TrafficReplayer {
         }
 
         var tr = new TrafficReplayer(uri);
-        try (var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(outputPath)) {
-            ReplayEngine replayEngine = new ReplayEngine(
-                    rp -> tr.writeToSocketAndClose(rp,
-                            triple -> {
-                                try {
-                                    tripleWriter.writeJSON(triple);
-                                } catch (IOException e) {
-                                    System.err.println("Caught an IOException while writing triples to file.");
-                                    e.printStackTrace();
-                                }
-                            })
-            );
-            tr.runReplay(directoryPath, replayEngine);
+        try (var fileTriplesStream = new FileOutputStream(outputPath.toFile(), true)) {
+            try (var bufferedTriplesStream = new BufferedOutputStream(fileTriplesStream)) {
+                var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedTriplesStream);
+                ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
+                        triple -> {
+                            try {
+                                tripleWriter.writeJSON(triple);
+                            } catch (IOException e) {
+                                System.err.println("Caught an IOException while writing triples to file.");
+                                e.printStackTrace();
+                            }
+                        }
+                )
+                );
+                tr.runReplay(directoryPath, replayEngine);
+            }
         }
     }
 
