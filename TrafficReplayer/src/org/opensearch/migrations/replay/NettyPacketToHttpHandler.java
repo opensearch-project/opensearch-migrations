@@ -12,19 +12,22 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
+import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
 import java.util.function.Consumer;
 
-public class NettyPacketToHttpSender implements org.opensearch.migrations.replay.IPacketToHttpHandler {
+
+public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
 
     ChannelFuture outboundChannelFuture;
     AggregatedRawResponse.Builder responseBuilder;
     BacksideHttpWatcherHandler responseWatchHandler;
 
-    NettyPacketToHttpSender(NioEventLoopGroup eventLoopGroup, URI serverUri) throws IOException {
+    NettyPacketToHttpHandler(NioEventLoopGroup eventLoopGroup, URI serverUri) throws IOException {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         responseBuilder = AggregatedRawResponse.builder(Instant.now());

@@ -14,8 +14,8 @@ public class NettyPacketToHttpHandlerFactory {
         this.serverUri = serverUri;
     }
 
-    public NettyPacketToHttpSender create() throws IOException {
-        return new NettyPacketToHttpSender(eventLoopGroup, serverUri);
+    public NettyPacketToHttpHandler create() throws IOException {
+        return new NettyPacketToHttpHandler(eventLoopGroup, serverUri);
     }
 
     public void stopGroup() {
