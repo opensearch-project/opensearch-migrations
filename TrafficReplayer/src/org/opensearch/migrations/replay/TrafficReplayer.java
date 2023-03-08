@@ -2,16 +2,15 @@ package org.opensearch.migrations.replay;
 
 import com.google.common.io.CharSource;
 import com.google.common.primitives.Bytes;
-import org.apache.commons.codec.binary.Base64InputStream;
 
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.io.StringReader;
-import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -19,17 +18,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -64,7 +62,7 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        if (args.length != 2) {
+        if (args.length != 3) {
             exitWithUsageAndCode(1);
         }
 
@@ -82,9 +80,31 @@ public class TrafficReplayer {
             exitWithUsageAndCode(3);
             return;
         }
+        Path outputPath;
+        try {
+            outputPath = Paths.get(args[2]);
+        } catch (Exception e) {
+            exitWithUsageAndCode(4);
+            return;
+        }
+
         var tr = new TrafficReplayer(uri);
-        ReplayEngine replayEngine = new ReplayEngine(rp->tr.writeToSocketAndClose(rp));
-        tr.runReplay(directoryPath, replayEngine);
+        try (var fileTriplesStream = new FileOutputStream(outputPath.toFile(), true);
+             var bufferedTriplesStream = new BufferedOutputStream(fileTriplesStream)) {
+            var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedTriplesStream);
+            ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
+                    triple -> {
+                        try {
+                            tripleWriter.writeJSON(triple);
+                        } catch (IOException e) {
+                            System.err.println("Caught an IOException while writing triples to file.");
+                            e.printStackTrace();
+                        }
+                    }
+            )
+            );
+            tr.runReplay(directoryPath, replayEngine);
+        }
     }
 
     private static String aggregateByteStreamToString(Stream<byte[]> bStream) {
@@ -92,7 +112,8 @@ public class TrafficReplayer {
     }
 
     static int nReceived = 0;
-    public void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair) {
+    private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
+                                       Consumer<RequestResponseResponseTriple> onResponseReceivedCallback) {
         try {
             log("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
@@ -100,8 +121,15 @@ public class TrafficReplayer {
                 packetHandler.consumeBytes(packetData);
             }
             AtomicBoolean waiter = new AtomicBoolean(true);
-            packetHandler.finalizeRequest(summary->{
+            packetHandler.finalizeRequest(summary-> {
                 System.err.println("Summary(#"+(nReceived++)+")="+summary);
+                RequestResponseResponseTriple requestResponseTriple = new RequestResponseResponseTriple(requestResponsePacketPair,
+                        summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                        summary.getResponseDuration()
+                );
+
+                onResponseReceivedCallback.accept(requestResponseTriple);
+
                 synchronized (waiter) {
                     waiter.set(false);
                     waiter.notify();
