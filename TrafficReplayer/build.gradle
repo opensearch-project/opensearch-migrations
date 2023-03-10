@@ -6,7 +6,12 @@ buildscript {
 
 plugins {
     id 'java'
+    id "com.github.spotbugs" version "4.7.2"
     id 'checkstyle'
+}
+
+spotbugs {
+    includeFilter = file('config/spotbugs/spotbugs-include.xml')
 }
 
 checkstyle {
