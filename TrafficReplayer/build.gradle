@@ -63,3 +63,9 @@ tasks.assemble.dependsOn {
         task.name.startsWith('checkstyleMain')
     }
 }
+
+tasks.assemble.dependsOn {
+    project.tasks.findAll { task ->
+        task.name.startsWith('spotbugsMain')
+    }
+}
