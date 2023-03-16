@@ -1,6 +1,6 @@
-import { Construct } from 'constructs';
-import {EbsDeviceVolumeType, IVpc, Vpc} from "aws-cdk-lib/aws-ec2";
-import {Domain, EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
+import {Construct} from 'constructs';
+import {EbsDeviceVolumeType, ISecurityGroup, IVpc, SubnetSelection} from "aws-cdk-lib/aws-ec2";
+import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
 import {RemovalPolicy, SecretValue, Stack, StackProps} from "aws-cdk-lib";
 import {IKey, Key} from "aws-cdk-lib/aws-kms";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
@@ -33,12 +33,17 @@ export interface opensearchServiceDomainCdkProps extends StackProps{
   readonly appLogEnabled?: boolean,
   readonly appLogGroup?: string,
   readonly nodeToNodeEncryptionEnabled?: boolean,
-  readonly vpcId?: string,
+  readonly vpc?: IVpc,
+  readonly vpcSubnets?: SubnetSelection[],
+  readonly vpcSecurityGroups?: ISecurityGroup[],
+  readonly availabilityZoneCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy
 }
 
 
 export class OpensearchServiceDomainCdkStack extends Stack {
+  public readonly domainEndpoint: string;
+
   constructor(scope: Construct, id: string, props: opensearchServiceDomainCdkProps) {
     super(scope, id, props);
 
@@ -54,9 +59,9 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
-    const vpc: IVpc|undefined = props.vpcId ?
-        Vpc.fromLookup(this, "domainVPC", {vpcId: props.vpcId}) : undefined
-
+    // Map objects from props
+    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
+        {enabled: true, availabilityZoneCount: props.availabilityZoneCount} : undefined
 
     const domain = new Domain(this, 'Domain', {
       version: props.version,
@@ -93,8 +98,13 @@ export class OpensearchServiceDomainCdkStack extends Stack {
         appLogEnabled: props.appLogEnabled,
         appLogGroup: appLG
       },
-      vpc: vpc,
+      vpc: props.vpc,
+      vpcSubnets: props.vpcSubnets,
+      securityGroups: props.vpcSecurityGroups,
+      zoneAwareness: zoneAwarenessConfig,
       removalPolicy: props.domainRemovalPolicy
     });
+
+    this.domainEndpoint = domain.domainEndpoint
   }
 }
