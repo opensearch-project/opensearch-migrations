@@ -36,6 +36,7 @@ checkstyle {
 repositories {
     mavenCentral()
 }
+
 dependencies {
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.json', name: 'json', version: '20220924'
@@ -44,6 +45,8 @@ dependencies {
     implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
     annotationProcessor 'org.projectlombok:lombok:1.18.10'
 
 }
@@ -51,38 +54,17 @@ dependencies {
 sourceSets {
     main {
         java {
-            srcDirs = ['src/org/opensearch/migrations/replay','src/org/opensearch/migrations/replay/netty']
+            srcDirs = ['src']
         }
     }
 
-    unitTests {
+    test {
         java {
-            compileClasspath += main.output + test.output
-            runtimeClasspath += main.output + test.output
-            resources.srcDir file('tst/org/opensearch/migrations/replay')
+            srcDir file('tst')
         }
     }
 }
 
-task unitTests(type: Test) {
-    testClassesDirs = sourceSets.unitTests.output.classesDirs
-    classpath = sourceSets.unitTests.runtimeClasspath
-}
-
-tasks.assemble.dependsOn {
-    project.tasks.findAll { task ->
-        task.name.startsWith('unitTests')
-    }
-}
-
-tasks.assemble.dependsOn {
-    project.tasks.findAll { task ->
-        task.name.startsWith('checkstyleMain')
-    }
-}
-
-tasks.assemble.dependsOn {
-    project.tasks.findAll { task ->
-        task.name.startsWith('spotbugsMain')
-    }
+tasks.named('test') {
+    useJUnitPlatform()
 }
