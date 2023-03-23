@@ -42,6 +42,7 @@ export class NetworkStack extends Stack {
         // Create new VPC
         else {
             this.vpc = new Vpc(this, 'domainVPC', {
+                // IP space should be customized for use cases that have specific IP range needs
                 ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
                 maxAzs: props.availabilityZoneCount ? props.availabilityZoneCount : 1,
                 subnetConfiguration: [
