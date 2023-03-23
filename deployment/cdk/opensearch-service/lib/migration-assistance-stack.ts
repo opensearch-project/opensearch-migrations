@@ -41,16 +41,16 @@ export class MigrationAssistanceStack extends Stack {
         // Create IAM Role for Fargate Container to read from CW log group
         const cwAccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            actions: ["logs:filterLogEvents", "logs:getLogEvents", "logs:describeLogGroups", 'logs:describeLogStreams'],
-            resources: [props.sourceCWLogGroupARN]
+            actions: ["logs:FilterLogEvents", "logs:GetLogEvents", "logs:DescribeLogGroups", 'logs:DescribeLogStreams'],
+            // Clean up
+            resources: [props.sourceCWLogGroupARN + ":*"]
         })
         const cwAccessDoc = new PolicyDocument({
             statements: [cwAccessPolicy]
         })
 
         const cwRole = new Role(this, 'CWReadAccessRole', {
-            // Check if this is correct
-            assumedBy: new ServicePrincipal('ecs.amazonaws.com'),
+            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
             description: 'Allow Fargate container to access CW log group',
             inlinePolicies: {
                 ReadCWLogGroup: cwAccessDoc,
@@ -74,7 +74,7 @@ export class MigrationAssistanceStack extends Stack {
             taskImageOptions: {
                 taskRole: cwRole,
                 image: ContainerImage.fromDockerImageAsset(image),
-                environment: {"MIGRATION_ENDPOINT": "https://" + props.targetEndpoint}
+                environment: {"MIGRATION_ENDPOINT": "https://" + props.targetEndpoint, "SOURCE_CW_LG_ARN": props.sourceCWLogGroupARN}
                 //containerPort: 8080,
             },
             //taskImageOptions: { image: ContainerImage.fromRegistry("amazon/amazon-ecs-sample") },
