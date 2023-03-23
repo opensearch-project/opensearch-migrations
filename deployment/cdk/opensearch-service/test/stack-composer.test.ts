@@ -36,6 +36,7 @@ test('Test invalid engine version format throws error', () => {
 
     const app = new App({
         context: {
+            // Should be OS_1.3
             engineVersion: "OpenSearch_1.3"
         }
     })
@@ -47,7 +48,7 @@ test('Test invalid engine version format throws error', () => {
     expect(createStackFunc).toThrowError()
 })
 
-test('Test ES engine version format is parsed', () => {
+test('Test ES 7.10 engine version format is parsed', () => {
 
     const app = new App({
         context: {
@@ -64,7 +65,7 @@ test('Test ES engine version format is parsed', () => {
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
 
-test('Test OS engine version format is parsed', () => {
+test('Test OS 1.3 engine version format is parsed', () => {
 
     const app = new App({
         context: {
