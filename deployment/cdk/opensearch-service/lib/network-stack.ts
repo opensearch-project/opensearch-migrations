@@ -63,6 +63,8 @@ export class NetworkStack extends Stack {
             });
         }
 
+        // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
+        // to the Domain as it has existing behavior to select private subnets from a given VPC
         if (props.vpcSubnetIds) {
             const selectSubnets = this.vpc.selectSubnets({
                 subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]
