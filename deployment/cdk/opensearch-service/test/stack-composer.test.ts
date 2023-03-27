@@ -1,6 +1,7 @@
 import {App} from "aws-cdk-lib";
 import {StackComposer} from "../lib/stack-composer";
 import {Template} from "aws-cdk-lib/assertions";
+import {OpensearchServiceDomainCdkStack} from "../lib/opensearch-service-domain-cdk-stack";
 
 test('Test missing domain name throws error', () => {
 
@@ -36,6 +37,7 @@ test('Test invalid engine version format throws error', () => {
 
     const app = new App({
         context: {
+            // Should be OS_1.3
             engineVersion: "OpenSearch_1.3"
         }
     })
@@ -47,7 +49,7 @@ test('Test invalid engine version format throws error', () => {
     expect(createStackFunc).toThrowError()
 })
 
-test('Test ES engine version format is parsed', () => {
+test('Test ES 7.10 engine version format is parsed', () => {
 
     const app = new App({
         context: {
@@ -59,12 +61,12 @@ test('Test ES engine version format is parsed', () => {
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
 
-test('Test OS engine version format is parsed', () => {
+test('Test OS 1.3 engine version format is parsed', () => {
 
     const app = new App({
         context: {
@@ -76,7 +78,7 @@ test('Test OS engine version format is parsed', () => {
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
@@ -85,8 +87,23 @@ test('Test access policy is parsed for proper array format', () => {
 
     const app = new App({
         context: {
-            accessPolicies: {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789123:user/test-user"},"Action":"es:ESHttp*","Resource":"arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"},
-                    {"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789123:user/test-user2"},"Action":"es:ESHttp*","Resource":"arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"}]}
+            accessPolicies:
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                        "Effect": "Allow",
+                        "Principal": {"AWS": "arn:aws:iam::123456789123:user/test-user"},
+                        "Action": "es:ESHttp*",
+                        "Resource": "arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"AWS": "arn:aws:iam::123456789123:user/test-user2"},
+                            "Action": "es:ESHttp*",
+                            "Resource": "arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"
+                        }]
+                }
         }
     })
 
@@ -94,7 +111,7 @@ test('Test access policy is parsed for proper array format', () => {
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     // Check that accessPolicies policy is created
     domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)
@@ -104,7 +121,16 @@ test('Test access policy is parsed for proper block format', () => {
 
     const app = new App({
         context: {
-            accessPolicies: {"Version":"2012-10-17","Statement":{"Effect":"Allow","Principal":{"AWS":"*"},"Action":"es:ESHttp*","Resource":"arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"}}
+            accessPolicies:
+                {
+                    "Version": "2012-10-17",
+                    "Statement": {
+                        "Effect": "Allow",
+                        "Principal": {"AWS": "*"},
+                        "Action": "es:ESHttp*",
+                        "Resource": "arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"
+                    }
+                }
         }
     })
 
@@ -112,7 +138,7 @@ test('Test access policy is parsed for proper block format', () => {
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     // Check that accessPolicies policy is created
     domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)

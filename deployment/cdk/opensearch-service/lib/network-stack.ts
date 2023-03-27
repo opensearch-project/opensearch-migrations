@@ -42,6 +42,7 @@ export class NetworkStack extends Stack {
         // Create new VPC
         else {
             this.vpc = new Vpc(this, 'domainVPC', {
+                // IP space should be customized for use cases that have specific IP range needs
                 ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
                 maxAzs: props.availabilityZoneCount ? props.availabilityZoneCount : 1,
                 subnetConfiguration: [
@@ -62,6 +63,8 @@ export class NetworkStack extends Stack {
             });
         }
 
+        // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
+        // to the Domain as it has existing behavior to select private subnets from a given VPC
         if (props.vpcSubnetIds) {
             const selectSubnets = this.vpc.selectSubnets({
                 subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]

@@ -1,4 +1,4 @@
 {
   "engineVersion": "OS_1.0",
-  "domainName": "default-test-domain"
+  "domainName": "sample-cdk-unit-test-domain"
 }
