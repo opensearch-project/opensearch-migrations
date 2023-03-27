@@ -2,6 +2,8 @@ import {App} from 'aws-cdk-lib';
 import {Template} from 'aws-cdk-lib/assertions';
 import {StackComposer} from "../lib/stack-composer";
 import * as testDefaultValues from "./default-values-test.json";
+import {OpensearchServiceDomainCdkStack} from "../lib/opensearch-service-domain-cdk-stack";
+import {NetworkStack} from "../lib/network-stack";
 
 test('Test primary context options are mapped with standard data type', () => {
     // The cdk.context.json and default-values.json files allow multiple data types
@@ -36,7 +38,11 @@ test('Test primary context options are mapped with standard data type', () => {
             loggingAppLogEnabled: true,
             loggingAppLogGroupARN: "arn:aws:logs:us-east-1:123456789123:log-group:test-log-group:*",
             nodeToNodeEncryptionEnabled: true,
+            vpcEnabled: true,
             vpcId: "vpc-123456789abcdefgh",
+            vpcSubnetIds: ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"],
+            vpcSecurityGroupIds: ["sg-123456789abcdefgh", "sg-223456789abcdefgh"],
+            availabilityZoneCount: 3,
             domainRemovalPolicy: "DESTROY"
         }
     })
@@ -45,9 +51,14 @@ test('Test primary context options are mapped with standard data type', () => {
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
+    const networkStack = openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]
+    const networkTemplate = Template.fromStack(networkStack)
     assertPrimaryDomainStackTemplate(domainTemplate)
+    // When existing resources are provided the network stack creates no resources
+    const resources = networkTemplate.toJSON().Resources;
+    expect(resources === undefined)
 })
 
 test('Test primary context options are mapped with only string data type', () => {
@@ -75,7 +86,11 @@ test('Test primary context options are mapped with only string data type', () =>
             loggingAppLogEnabled: "true",
             loggingAppLogGroupARN: "arn:aws:logs:us-east-1:123456789123:log-group:test-log-group:*",
             nodeToNodeEncryptionEnabled: "true",
+            vpcEnabled: "true",
             vpcId: "vpc-123456789abcdefgh",
+            vpcSubnetIds: "[\"subnet-123456789abcdefgh\", \"subnet-223456789abcdefgh\"]",
+            vpcSecurityGroupIds: "[\"sg-123456789abcdefgh\", \"sg-223456789abcdefgh\"]",
+            availabilityZoneCount: "3",
             domainRemovalPolicy: "DESTROY"
         }
     })
@@ -84,9 +99,14 @@ test('Test primary context options are mapped with only string data type', () =>
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
+    const networkStack = openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]
+    const networkTemplate = Template.fromStack(networkStack)
     assertPrimaryDomainStackTemplate(domainTemplate)
+    // When existing resources are provided the network stack creates no resources
+    const resources = networkTemplate.toJSON().Resources;
+    expect(resources === undefined)
 })
 
 test('Test alternate context options are mapped with standard data type', () => {
@@ -107,13 +127,13 @@ test('Test alternate context options are mapped with standard data type', () => 
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     assertAlternateDomainStackTemplate(domainTemplate)
 })
 
 test('Test alternate context options are mapped with only string data type', () => {
-    // The cdk.context.json and default-values.json files allow multiple data types
+    // CDK CLI commands pass all context values as strings
     const app = new App({
         context: {
             useUnsignedBasicAuth: "true",
@@ -130,9 +150,63 @@ test('Test alternate context options are mapped with only string data type', () 
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     assertAlternateDomainStackTemplate(domainTemplate)
+})
+
+test('Test openAccessPolicy setting creates access policy when enabled', () => {
+    const app = new App({
+        context: {
+            openAccessPolicyEnabled: true
+        }
+    })
+
+    const openSearchStacks = new StackComposer(app, {
+        env: {account: "test-account", region: "us-east-1"}
+    })
+
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainTemplate = Template.fromStack(domainStack)
+    // Check that openAccessPolicy is created
+    domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)
+
+})
+
+test('Test openAccessPolicy setting does not create access policy when disabled', () => {
+    const app = new App({
+        context: {
+            openAccessPolicyEnabled: false
+        }
+    })
+
+    const openSearchStacks = new StackComposer(app, {
+        env: {account: "test-account", region: "us-east-1"}
+    })
+
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainTemplate = Template.fromStack(domainStack)
+    // Check that openAccessPolicy is not created
+    domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 0)
+
+})
+
+test('Test openAccessPolicy setting is mapped with string data type', () => {
+    const app = new App({
+        context: {
+            openAccessPolicyEnabled: "true"
+        }
+    })
+
+    const openSearchStacks = new StackComposer(app, {
+        env: {account: "test-account", region: "us-east-1"}
+    })
+
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainTemplate = Template.fromStack(domainStack)
+    // Check that openAccessPolicy is created
+    domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)
+
 })
 
 test( 'Test default stack is created with default values when no context options are provided', () => {
@@ -145,7 +219,7 @@ test( 'Test default stack is created with default values when no context options
     })
 
     const defaultValues: { [x: string]: (string); } = testDefaultValues
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
     domainTemplate.hasResourceProperties("AWS::OpenSearchService::Domain", {
@@ -178,7 +252,12 @@ test( 'Test default stack is created when empty context options are provided for
             loggingAppLogEnabled: "",
             loggingAppLogGroupARN: "",
             nodeToNodeEncryptionEnabled: "",
+            vpcEnabled: "",
             vpcId: "",
+            vpcSubnetIds: "",
+            vpcSecurityGroupIds: "",
+            availabilityZoneCount: "",
+            openAccessPolicyEnabled: "",
             domainRemovalPolicy: ""
         }
     })
@@ -187,7 +266,7 @@ test( 'Test default stack is created when empty context options are provided for
         env: {account: "test-account", region: "us-east-1"}
     })
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s.stackName === "opensearchDomainStack")[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
@@ -217,7 +296,11 @@ function assertPrimaryDomainStackTemplate(template: Template) {
             InstanceCount: 5,
             InstanceType: "r6.large.search",
             WarmCount: 2,
-            WarmType: "ultrawarm1.medium.search"
+            WarmType: "ultrawarm1.medium.search",
+            ZoneAwarenessConfig: {
+                AvailabilityZoneCount: 3
+            },
+            ZoneAwarenessEnabled: true
         },
         DomainEndpointOptions: {
             EnforceHTTPS: true,
