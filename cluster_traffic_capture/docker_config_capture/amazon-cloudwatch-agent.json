@@ -1,0 +1,26 @@
+{
+    "agent": {
+        "logfile": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log"
+    },
+    "logs": {
+        "logs_collected": {
+            "files": {
+                "collect_list": [
+                    {
+                        "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                        "log_group_name": "amazon-cloudwatch-agent.log",
+                        "log_stream_name": "amazon-cloudwatch-agent.log",
+                        "timezone": "UTC"
+                    },
+                    {
+                        "file_path": "/var/log/haproxy-traffic.log",
+                        "log_group_name": "demo_haproxy",
+                        "log_stream_name": "haproxy-traffic.log",
+                        "timezone": "UTC"
+                    }
+                ]
+            }
+        },
+        "force_flush_interval" : 5
+    }
+}

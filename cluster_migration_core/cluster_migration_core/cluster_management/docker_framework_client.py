@@ -9,6 +9,7 @@ from docker.models.containers import Container
 from docker.models.volumes import Volume
 from docker.types import Ulimit
 
+import cluster_migration_core.cluster_management.docker_command_gen as dcg
 import cluster_migration_core.core.shell_interactions as shell
 
 
@@ -141,19 +142,46 @@ class DockerFrameworkClient:
         self.logger.debug(f"Removed volume {volume.name}")
 
     def create_container(self, image: str, container_name: str, network: Network, ports: List[PortMapping],
-                         volumes: List[DockerVolume], ulimits: List[Ulimit], env_variables: Dict[str, str] = None,
-                         extra_hosts: Dict[str, str] = None, detach: bool = True
-                         ) -> Container:
+                         volumes: List[DockerVolume], ulimits: List[Ulimit], env_kv: Dict[str, str] = None,
+                         env_passthrough: List[str] = None, extra_hosts: Dict[str, str] = None, detach: bool = True,
+                         entrypoint: List[str] = None) -> Container:
+        """
+        image: the name of the Docker image to spin up
+        container_name: the name/tag you want assigned to the created container
+        network: the Docker network to connect the container to
+        ports: list of port mappings you want configured between the container and the local host (e.g. --publish)
+        volumes: list of Docker volumes you want mounted into the container
+        ulimits: list of resource constraints to apply to the container
+        env_kv: dict of key/value pairs of ENV variables that should be present in the container
+        env_passthrough: list of export'd ENV variable names to pipe through from the invoking context to the container
+        extra_hosts: dict of hostname mappings to add to the container (e.g. --add-host)
+        detach: whether to detach the container from the current process
+        entrypoints: list of strings to supply during the run as entrypoint commands; overrides default in Dockerfile
+        """
 
         # TODO - need handle if container already exists (name collision)
         # TODO - need handle if we exceed the resource allocation for Docker
         # TODO - need handle port contention
 
         # Initialize optional, mutable containers
-        if not env_variables:
-            env_variables = {}
+        if not entrypoint:
+            entrypoint = []
+        if not env_kv:
+            env_kv = {}
+        if not env_passthrough:
+            env_passthrough = []
         if not extra_hosts:
-            extra_hosts = []
+            extra_hosts = {}
+
+        # Environment variables can be specified to a Docker container in few ways.  One is to provide explicit key/val
+        # pairs as part of the "run" command; another is to provide just the key name of an existing environment
+        # variable in the user's shell context (e.g. passthrough).  Assuming the passthrough variable has been export'd
+        # then Docker will pipe it through to the container.  This is useful for things like security credentials.
+        # However, we need to assemble a single list of variables to pass to the Docker SDK, which is what this code
+        # is doing.
+        environment_combined = []
+        environment_combined.extend([f"{k}={v}" for k, v in env_kv.items()])
+        environment_combined.extend(env_passthrough)
 
         # It doesn't appear you can just pass in a list of Volumes to the client, so we have to make this wonky mapping
         port_mapping = {str(pair.container_port): str(pair.host_port) for pair in ports}
@@ -172,18 +200,39 @@ class DockerFrameworkClient:
                 volume_mapping[dv.volume.attrs["Name"]] = {"bind": dv.container_mount_point, "mode": "rw"}
 
         self.logger.debug(f"Creating container {container_name}...")
-        container = self._docker_client.containers.run(
-            image,
+        container = self._log_and_execute_command_run(
+            image=image,
             name=container_name,
             network=network.name,
             ports=port_mapping,
             volumes=volume_mapping,
             ulimits=ulimits,
             detach=detach,
-            environment=env_variables,
-            extra_hosts=extra_hosts
+            environment=environment_combined,
+            extra_hosts=extra_hosts,
+            entrypoint=entrypoint
         )
         self.logger.debug(f"Created container {container_name}")
+        return container
+
+    def _log_and_execute_command_run(self, image: str, name: str, network: str, ports: Dict[str, str],
+                                     volumes: Dict[str, Dict[str, str]], ulimits: List[Ulimit], detach: bool,
+                                     environment: List[str], extra_hosts: Dict[str, str],
+                                     entrypoint: List[str]) -> Container:
+
+        args = {"image": image, "name": name, "network": network, "ports": ports, "volumes": volumes,
+                "ulimits": ulimits, "detach": detach, "environment": environment, "extra_hosts": extra_hosts,
+                "entrypoint": entrypoint}
+
+        run_command = dcg.gen_docker_run(**args)
+        self.logger.debug(f"Predicted command being run by the Docker SDK: {run_command}")
+        
+        # Annoyingly, the Docker SDK breaks if you pass in an empty list, so we have to manually look for and handle
+        # this case.
+        if not ("entrypoint" in args.keys() and args.get("entrypoint")):  # We don't actually have entrypoint cmds
+            args.pop("entrypoint", None)
+        
+        container = self._docker_client.containers.run(**args)
         return container
 
     def stop_container(self, container: Container):
