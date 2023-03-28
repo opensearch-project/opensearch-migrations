@@ -3,10 +3,12 @@ package org.opensearch.migrations.replay.netty;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
+import lombok.extern.log4j.Log4j2;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
 
+@Log4j2
 public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<FullHttpResponse> {
 
     private final AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
@@ -38,7 +40,7 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        System.err.println("inactive channel - closing");
+        log.trace("inactive channel - closing");
         super.channelInactive(ctx);
     }
 

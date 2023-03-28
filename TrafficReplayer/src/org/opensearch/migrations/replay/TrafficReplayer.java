@@ -1,7 +1,11 @@
 package org.opensearch.migrations.replay;
 
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 import com.google.common.io.CharSource;
 import com.google.common.primitives.Bytes;
+import lombok.extern.log4j.Log4j2;
 
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
@@ -10,27 +14,27 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.Reader;
 import java.net.URI;
 import java.nio.charset.Charset;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
+@Log4j2
 public class TrafficReplayer {
     final static int LOG_PREAMBLE_SIZE = 75;
     // current log fmt: [%d{ISO8601}][%-5p][%-25c{1.}] [%node_name]%marker %m%n
@@ -56,55 +60,104 @@ public class TrafficReplayer {
         packetHandlerFactory = new NettyPacketToHttpHandlerFactory(serverUri);
     }
 
-    private static void exitWithUsageAndCode(int statusCode) {
-        System.err.println("Usage: <log directory> <destination_url>");
-        System.exit(statusCode);
+
+    static class Parameters {
+        @Parameter(required = true,
+                arity = 1,
+                description = "URI of the target cluster/domain")
+        String targetUriString;
+        @Parameter(required = false,
+                names = {"-o", "--output"},
+                arity=1,
+                description = "output file to hold the request/response traces for the source and target cluster")
+        String outputFilename;
+        @Parameter(required = false,
+                names = {"-i", "--input"},
+                arity=1,
+                description = "input file to read the request/response traces for the source cluster")
+        String inputFilename;
+    }
+
+    public static Parameters parseArgs(String[] args) {
+        Parameters p = new Parameters();
+        JCommander jCommander = new JCommander(p);
+        try {
+            jCommander.parse(args);
+            return p;
+        } catch (ParameterException e) {
+            System.err.println(e.getMessage());
+            System.err.println("Got args: "+ String.join("; ", args));
+            jCommander.usage();
+            return null;
+        }
+    }
+
+    public static CloseableStringStreamWrapper getLogLineStreamFromInputStream(InputStream is) throws IOException {
+        InputStreamReader isr = new InputStreamReader(is);
+        try {
+            BufferedReader br = new BufferedReader(isr);
+            return CloseableStringStreamWrapper.generateStreamFromBufferedReader(br);
+        } catch (Exception e) {
+            isr.close();
+            throw e;
+        }
+    }
+
+    public static CloseableStringStreamWrapper getLogLineStreamFromFile(String filename) throws IOException {
+        FileInputStream fis = new FileInputStream(filename);
+        try {
+            return getLogLineStreamFromInputStream(fis);
+        } catch (Exception e) {
+            fis.close();
+            throw e;
+        }
+    }
+
+    public static CloseableStringStreamWrapper getLogLineStreamFromFileOrStdin(String filename) throws IOException {
+        return filename == null ? getLogLineStreamFromInputStream(System.in) :
+                getLogLineStreamFromFile(filename);
     }
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        if (args.length != 3) {
-            exitWithUsageAndCode(1);
-        }
+        var params = parseArgs(args);
 
         URI uri;
         try {
-            uri = new URI(args[1]);
+            uri = new URI(params.targetUriString);
         } catch (Exception e) {
-            exitWithUsageAndCode(2);
-            return;
-        }
-        Path directoryPath;
-        try {
-            directoryPath = Paths.get(args[0]);
-        } catch (Exception e) {
-            exitWithUsageAndCode(3);
-            return;
-        }
-        Path outputPath;
-        try {
-            outputPath = Paths.get(args[2]);
-        } catch (Exception e) {
-            exitWithUsageAndCode(4);
+            System.err.println("Exception parsing "+params.targetUriString);
+            System.err.println(e.getMessage());
+            System.exit(2);
             return;
         }
 
         var tr = new TrafficReplayer(uri);
-        try (var fileTriplesStream = new FileOutputStream(outputPath.toFile(), true);
-             var bufferedTriplesStream = new BufferedOutputStream(fileTriplesStream)) {
-            var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedTriplesStream);
-            ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
-                    triple -> {
-                        try {
-                            tripleWriter.writeJSON(triple);
-                        } catch (IOException e) {
-                            System.err.println("Caught an IOException while writing triples to file.");
-                            e.printStackTrace();
-                        }
-                    }
-            )
-            );
-            tr.runReplay(directoryPath, replayEngine);
+        try (OutputStream outputStream = params.outputFilename == null ? System.out :
+                new FileOutputStream(params.outputFilename, true)) {
+            try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
+                try (CloseableStringStreamWrapper css = getLogLineStreamFromFileOrStdin(params.inputFilename)) {
+                    runReplayWithIOStreams(tr, css, bufferedOutputStream);
+                }
+            }
         }
+    }
+
+    private static void runReplayWithIOStreams(TrafficReplayer tr, CloseableStringStreamWrapper stringInputSequence,
+                                               BufferedOutputStream bufferedOutputStream)
+            throws IOException, InterruptedException {
+        var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedOutputStream);
+        ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
+                triple -> {
+                    try {
+                        tripleWriter.writeJSON(triple);
+                    } catch (IOException e) {
+                        log.error("Caught an IOException while writing triples output.");
+                        e.printStackTrace();
+                    }
+                }
+        )
+        );
+        tr.runReplay(stringInputSequence.stream(), replayEngine);
     }
 
     private static String aggregateByteStreamToString(Stream<byte[]> bStream) {
@@ -115,14 +168,14 @@ public class TrafficReplayer {
     private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
                                        Consumer<RequestResponseResponseTriple> onResponseReceivedCallback) {
         try {
-            log("Assembled request/response - starting to write to socket");
+            log.debug("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
             for (var packetData : requestResponsePacketPair.requestData) {
                 packetHandler.consumeBytes(packetData);
             }
             AtomicBoolean waiter = new AtomicBoolean(true);
             packetHandler.finalizeRequest(summary-> {
-                System.err.println("Summary(#"+(nReceived++)+")="+summary);
+                log.info("Summary(#"+(nReceived++)+")="+summary);
                 RequestResponseResponseTriple requestResponseTriple = new RequestResponseResponseTriple(requestResponsePacketPair,
                         summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
                         summary.getResponseDuration()
@@ -149,23 +202,9 @@ public class TrafficReplayer {
         }
     }
 
-    private void log(String s) {
-        System.err.println(s);
-    }
-
-    public void runReplay(Path directory, ReplayEngine replayEngine) throws IOException, InterruptedException {
+    public void runReplay(Stream<String> logLinesStream, ReplayEngine replayEngine) throws IOException, InterruptedException {
         try {
-            try (var dirStream = Files.newDirectoryStream(directory)) {
-                var sortedDirStream = StreamSupport.stream(dirStream.spliterator(), false)
-                        .sorted(Comparator.comparing(Path::toString));
-                sortedDirStream.forEach(filePath -> {
-                    try {
-                        consumeLogLinesForFile(filePath, replayEngine);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-            }
+            logLinesStream.forEach(s->parseAndConsumeLine(replayEngine, s));
         } finally {
             packetHandlerFactory.stopGroup();
         }
@@ -215,10 +254,13 @@ public class TrafficReplayer {
         }
 
         public void addRequestData(Instant packetTimeStamp, byte[] data) {
+            log.trace(()->(this+" Adding request data: "+new String(data, Charset.defaultCharset())));
             requestData.add(data);
             this.lastOperation = Operation.Read;
         }
         public void addResponseData(Instant packetTimeStamp, byte[] data) {
+            log.trace(()->(this+" Adding response data (len="+responseData.size()+"): "+
+                    new String(data, Charset.defaultCharset())));
             responseData.add(data);
             lastTimeStamp = packetTimeStamp;
             this.lastOperation = Operation.Write;
@@ -276,16 +318,6 @@ public class TrafficReplayer {
         }
     }
 
-    public void consumeLogLinesForFile(Path p, Consumer<ReplayEntry> replayEntryConsumer) throws IOException {
-        try (FileInputStream fis = new FileInputStream(p.toString())) {
-            try (InputStreamReader r = new InputStreamReader(fis)) {
-                try (BufferedReader br = new BufferedReader(r)) {
-                    consumeLinesForReader(br, replayEntryConsumer);
-                }
-            }
-        }
-    }
-
     // as per https://github.com/google/guava/issues/5376.  Yuck
     public static InputStream readerToStream(Reader reader, Charset charset) throws IOException {
         return new CharSource() {
@@ -296,35 +328,33 @@ public class TrafficReplayer {
         }.asByteSource(charset).openStream();
     }
 
-    public void consumeLinesForReader(BufferedReader lineReader, Consumer<ReplayEntry> replayEntryConsumer) throws IOException {
-        while (true) {
-            String line = lineReader.readLine();
-            if (line == null) { break; }
-            var m = LINE_MATCHER.matcher(line);
-            if (!m.matches()) {
-                continue;
-            }
+    private void parseAndConsumeLine(Consumer<ReplayEntry> replayEntryConsumer, String line) {
+        var m = LINE_MATCHER.matcher(line);
+        if (!m.matches()) {
+            return;
+        }
 
-            String uniqueConnectionKey = m.group(CLUSTER_GROUP) + "," + m.group(CHANNEL_ID_GROUP);
-            String simpleOperation = m.group(SIMPLE_OPERATION_GROUP);
-            String timestampStr = m.group(TIMESTAMP_GROUP) + "." + m.group(TIMESTAMP_MS_GROUP) + "Z";
+        String uniqueConnectionKey = m.group(CLUSTER_GROUP) + "," + m.group(CHANNEL_ID_GROUP);
+        String simpleOperation = m.group(SIMPLE_OPERATION_GROUP);
+        String timestampStr = m.group(TIMESTAMP_GROUP) + "." + m.group(TIMESTAMP_MS_GROUP) + "Z";
 
-            if (simpleOperation != null) {
-                var rwOperation = m.group(RW_OPERATION_GROUP);
-                int packetDataSize = Optional.ofNullable(m.group(SIZE_GROUP)).map(s->Integer.parseInt(s)).orElse(0);
-                System.err.println("read op="+rwOperation+" size="+packetDataSize);
-                if (rwOperation != null) {
-                    var packetData = Base64.getDecoder().decode(m.group(10));
-                    if (rwOperation.equals(READ_OPERATION)) {
-                        replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Read, packetData));
-                    } else if (rwOperation.equals(WRITE_OPERATION)) {
-                        replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Write, packetData));
-                    }
-                } else {
-                    System.err.println("read op="+simpleOperation);
-                    if (simpleOperation.equals(FINISHED_OPERATION)) {
-                        replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Close, null));
-                    }
+        if (simpleOperation != null) {
+            var rwOperation = m.group(RW_OPERATION_GROUP);
+            int packetDataSize = Optional.ofNullable(m.group(SIZE_GROUP)).map(s->Integer.parseInt(s)).orElse(0);
+            log.trace("read op="+rwOperation+" size="+packetDataSize);
+            if (rwOperation != null) {
+                var packetData = Base64.getDecoder().decode(m.group(10));
+                log.trace(()->"line="+line);
+                log.trace(()->"packetData="+new String(packetData, Charset.defaultCharset()));
+                if (rwOperation.equals(READ_OPERATION)) {
+                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Read, packetData));
+                } else if (rwOperation.equals(WRITE_OPERATION)) {
+                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Write, packetData));
+                }
+            } else {
+                log.trace("read op="+simpleOperation);
+                if (simpleOperation.equals(FINISHED_OPERATION)) {
+                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Close, null));
                 }
             }
         }
