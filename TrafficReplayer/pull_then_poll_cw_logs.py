@@ -9,7 +9,6 @@ TRAFFIC_LOG_GROUP = os.environ["CW_LOG_GROUP_NAME"]
 TRAFFIC_LOG_STREAM = os.environ["CW_LOG_STREAM_NAME"]
 
 
-
 def main():
     # This is intended to assume the IAM role of the fargate container.
     logs_client = boto3.client('logs')
