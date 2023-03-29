@@ -93,7 +93,7 @@ public class TrafficReplayer {
     }
 
     public static CloseableStringStreamWrapper getLogLineStreamFromInputStream(InputStream is) throws IOException {
-        InputStreamReader isr = new InputStreamReader(is);
+        InputStreamReader isr = new InputStreamReader(is, Charset.forName("UTF-8"));
         try {
             BufferedReader br = new BufferedReader(isr);
             return CloseableStringStreamWrapper.generateStreamFromBufferedReader(br);
