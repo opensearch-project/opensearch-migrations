@@ -32,7 +32,7 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testReader() throws IOException, URISyntaxException {
+    public void testReader() throws IOException, URISyntaxException, InterruptedException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"));
         List<List<byte[]>> byteArrays = new ArrayList<>();
         TrafficReplayer.ReplayEngine re = new TrafficReplayer.ReplayEngine(rrpp -> {
@@ -41,9 +41,12 @@ class TrafficReplayerTest {
             Assertions.assertTrue(ms > 0);
 
         });
+        
         try (var sr = new StringReader(SampleFile.contents)) {
             try (var br = new BufferedReader(sr)) {
-                tr.consumeLinesForReader(br, re);
+                try (var cssw = CloseableStringStreamWrapper.generateStreamFromBufferedReader(br)) {
+                    tr.runReplay(cssw.stream(), re);
+                }
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
