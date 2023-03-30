@@ -14,7 +14,7 @@ wrapper {
 
 buildscript {
     ext {
-        version_es = "7.10.2"
+        version_es = "7.15.0"
     }
 
     repositories {
