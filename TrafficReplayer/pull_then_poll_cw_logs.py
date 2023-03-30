@@ -28,36 +28,18 @@ def main():
                                                startFromHead=True, nextToken=current_token)
     next_token = next_response["nextForwardToken"]
 
-    while current_token != next_token:
-        print("More events to pull...", file=sys.stderr)
-        current_response = next_response
-        current_events_raw = current_response["events"]
-
-        #messages.extend([event["message"] for event in current_events_raw])
-
-        for event in current_events_raw:
-            print(event["message"])
-
-        current_token = current_response["nextForwardToken"]
-
-        next_response = logs_client.get_log_events(logGroupName=TRAFFIC_LOG_GROUP,
-                                                   logStreamName=TRAFFIC_LOG_STREAM,
-                                                   startFromHead=True, nextToken=current_token)
-        next_token = next_response["nextForwardToken"]
-
-    print("Pulled new events", file=sys.stderr)
-
-    # Now that all currently available CloudWatch events were logged.
-    # We start checking for new events every now and then, and append new ones to already existing file, if available
+    # Now that the first CW log event was logged.
+    # We start checking for new events every now and then, and print new ones, if available.
 
     while True:
-
         next_response = logs_client.get_log_events(logGroupName=TRAFFIC_LOG_GROUP,
                                                    logStreamName=TRAFFIC_LOG_STREAM,
                                                    startFromHead=False, nextToken=current_token)
         next_token = next_response["nextForwardToken"]
 
         if current_token != next_token:
+
+            print("Found new events", file=sys.stderr)
             current_response = next_response
             current_events_raw = current_response["events"]
             for event in current_events_raw:
@@ -69,7 +51,7 @@ def main():
                                                        startFromHead=False, nextToken=current_token)
             next_token = next_response["nextForwardToken"]
 
-            print("Sleeping for 10 seconds then checking if any additional events are available", file=sys.stdout)
+            print("Sleeping for 10 seconds then checking if any additional events are available", file=sys.stderr)
 
         time.sleep(10)
 
