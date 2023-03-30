@@ -18,6 +18,7 @@ buildscript {
 
 plugins {
     id 'java'
+    id 'application'
     id "com.github.spotbugs" version "4.7.3"
     id 'checkstyle'
 }
@@ -63,6 +64,28 @@ sourceSets {
             srcDir file('tst')
         }
     }
+}
+
+application {
+    mainClass = 'org.opensearch.migrations.replay.TrafficReplayer'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': application.mainClass
+    }
+}
+
+task uberJar(type: Jar) {
+    manifest {
+        attributes 'Main-Class': application.mainClass
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    archiveBaseName = project.name + "-uber"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    with jar
 }
 
 tasks.named('test') {
