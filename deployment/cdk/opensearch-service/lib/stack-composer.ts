@@ -9,6 +9,7 @@ import {EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
 import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
+import {MigrationAssistanceStack} from "./migration-assistance-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string
@@ -53,6 +54,8 @@ export class StackComposer {
         const vpcSubnetIds = getContextForType('vpcSubnetIds', 'object')
         const openAccessPolicyEnabled = getContextForType('openAccessPolicyEnabled', 'boolean')
         const availabilityZoneCount = getContextForType('availabilityZoneCount', 'number')
+        const migrationAssistanceEnabled = getContextForType('migrationAssistanceEnabled', 'boolean')
+        const sourceCWLogStreamARN = getContextForType('sourceCWLogStreamARN', 'string')
 
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
@@ -152,6 +155,21 @@ export class StackComposer {
             opensearchStack.addDependency(networkStack)
         }
         this.stacks.push(opensearchStack)
+
+        if (migrationAssistanceEnabled) {
+            const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
+                vpc: networkStack ? networkStack.vpc : undefined,
+                sourceCWLogStreamARN: sourceCWLogStreamARN,
+                targetEndpoint: opensearchStack.domainEndpoint,
+                stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
+                description: "This stack contains resources to assist migrating an OpenSearch Service domain",
+                ...props,
+            })
+
+            migrationStack.addDependency(opensearchStack)
+            this.stacks.push(migrationStack)
+        }
+
 
         function getContextForType(optionName: string, expectedType: string): any {
             const option = scope.node.tryGetContext(optionName)
