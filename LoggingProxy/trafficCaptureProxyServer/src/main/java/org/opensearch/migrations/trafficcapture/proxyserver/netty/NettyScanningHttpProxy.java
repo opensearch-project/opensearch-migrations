@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.netty;
+package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;

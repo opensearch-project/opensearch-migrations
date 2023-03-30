@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.netty;
+package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.Unpooled;
@@ -15,7 +15,9 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class FrontsideHandler extends ChannelInboundHandlerAdapter {
 
     private Channel outboundChannel;
@@ -42,7 +44,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                 .channel(ctx.channel().getClass())
                 .handler(new BacksideHandler(inboundChannel))
                 .option(ChannelOption.AUTO_READ, false);
-        System.err.println("Active - setting up backend connection");
+        log.debug("Active - setting up backend connection");
         var f = b.connect(host, port);
         outboundChannel = f.channel();
         f.addListener(new ChannelFutureListener() {
@@ -50,13 +52,13 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
             public void operationComplete(ChannelFuture future) {
                 if (future.isSuccess()) {
                     // connection complete start to read first data
-                    System.err.println("Done setting up backend channel & it was successful");
+                    log.debug("Done setting up backend channel & it was successful");
                     var pipeline = future.channel().pipeline();
-                    pipeline.addFirst(new LoggingHandler(LogLevel.WARN));
+                    //pipeline.addFirst(new LoggingHandler(LogLevel.DEBUG));
                     inboundChannel.read();
                 } else {
                     // Close the connection if the connection attempt has failed.
-                    System.err.println("closing outbound channel because CONNECT future was not successful");
+                    log.debug("closing outbound channel because CONNECT future was not successful");
                     inboundChannel.close();
                 }
             }
@@ -65,15 +67,15 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(final ChannelHandlerContext ctx, Object msg) {
-        System.err.println("frontend handler read: "+msg);
+        log.debug("frontend handler read: "+msg);
         if (outboundChannel.isActive()) {
-            System.err.println("Writing data to backside handler");
+            log.debug("Writing data to backside handler");
             outboundChannel.writeAndFlush(msg)
                     .addListener((ChannelFutureListener) future -> {
                         if (future.isSuccess()) {
                             ctx.channel().read(); // kickoff another read for the frontside
                         } else {
-                            System.err.println("closing outbound channel because WRITE future was not successful");
+                            log.debug("closing outbound channel because WRITE future was not successful");
                             future.channel().close(); // close the backside
                         }
                     });
@@ -81,7 +83,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
     }
 
     public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-        System.err.println("channelRead COMPLETE");
+        log.debug("channelRead COMPLETE");
         ctx.fireChannelReadComplete();
     }
 

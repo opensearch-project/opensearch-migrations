@@ -3,10 +3,25 @@
  */
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
-import org.apache.commons.text.WordUtils;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 
 public class Main {
-    public static void main(String[] args) {
-        System.out.println(WordUtils.capitalize("Hi World"));
+    public static void main(String[] args) throws InterruptedException {
+        System.out.println("Hi World");
+        var proxy = new NettyScanningHttpProxy(80);
+        proxy.start("localhost", 9200);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                System.err.println("Received shutdown signal.  Trying to shutdown cleanly");
+                proxy.stop();
+                System.err.println("Done stopping the proxy.");
+            } catch (InterruptedException e) {
+                System.err.println("Caught exception while shutting down: "+e);
+                throw new RuntimeException(e);
+            }
+        }));
+        while (true) {
+            Thread.sleep(60*1000);
+        }
     }
 }

@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.netty;
+package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
@@ -20,7 +20,7 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
     @Override
     protected void initChannel(SocketChannel ch) {
         ch.pipeline().addLast(
-                new LoggingHandler(LogLevel.INFO),
+                //new LoggingHandler(LogLevel.INFO),
                 new FrontsideHandler(host, port));
     }
 }

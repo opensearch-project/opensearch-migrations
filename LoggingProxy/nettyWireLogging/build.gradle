@@ -7,5 +7,6 @@ plugins {
 }
 
 dependencies {
-    api project(':kafkaCaptureOffloader')
+    implementation project(':kafkaCaptureOffloader')
+    api group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
 }

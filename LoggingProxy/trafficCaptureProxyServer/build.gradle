@@ -7,8 +7,17 @@ plugins {
 }
 
 dependencies {
-    implementation 'org.apache.commons:commons-text'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+
     implementation project(':nettyWireLogging')
+    implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
+    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+    implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
+//    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
+//    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
+    annotationProcessor 'org.projectlombok:lombok:1.18.26'
 }
 
 application {
