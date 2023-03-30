@@ -45,7 +45,7 @@ def main():
                                                    startFromHead=True, nextToken=current_token)
         next_token = next_response["nextForwardToken"]
 
-    print(f"Pulled new events", file=sys.stderr)
+    print("Pulled new events", file=sys.stderr)
 
     # Now that all currently available CloudWatch events were logged.
     # We start checking for new events every now and then, and append new ones to already existing file, if available
