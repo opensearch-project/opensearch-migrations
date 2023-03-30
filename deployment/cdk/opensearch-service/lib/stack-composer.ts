@@ -55,7 +55,7 @@ export class StackComposer {
         const openAccessPolicyEnabled = getContextForType('openAccessPolicyEnabled', 'boolean')
         const availabilityZoneCount = getContextForType('availabilityZoneCount', 'number')
         const migrationAssistanceEnabled = getContextForType('migrationAssistanceEnabled', 'boolean')
-        const sourceCWLogGroupARN = getContextForType('sourceCWLogGroupARN', 'string')
+        const sourceCWLogStreamARN = getContextForType('sourceCWLogStreamARN', 'string')
 
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
@@ -159,7 +159,7 @@ export class StackComposer {
         if (migrationAssistanceEnabled) {
             const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
                 vpc: networkStack ? networkStack.vpc : undefined,
-                sourceCWLogGroupARN: sourceCWLogGroupARN,
+                sourceCWLogStreamARN: sourceCWLogStreamARN,
                 targetEndpoint: opensearchStack.domainEndpoint,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
