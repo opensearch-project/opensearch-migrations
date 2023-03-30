@@ -39,7 +39,7 @@ import java.util.function.Supplier;
  * to log HTTP requests and responses.
  *
  * To use this enhanced trace logging, install this plugin and set the <code>http.type</code> in the
- * <code>opensearch.yml</code> configuration to "http.type: logging_netty".  That will enable logging
+ * <code>elasticsearch.yml</code> configuration to "http.type: logging_netty".  That will enable logging
  * requests through the server's log facilities.
  *
  * To configure the logging to go to a separate file, a configuration such as the following
