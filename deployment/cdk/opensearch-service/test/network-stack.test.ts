@@ -11,7 +11,7 @@ test('Test vpcEnabled setting that is disabled does not create stack', () => {
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     openSearchStacks.stacks.forEach(function(stack) {
@@ -30,7 +30,7 @@ test('Test vpcEnabled setting that is enabled without existing resources creates
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const networkStack: NetworkStack = (openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]) as NetworkStack

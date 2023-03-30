@@ -27,10 +27,10 @@ Depending on your use-case, you may choose to provide options from both the `cdk
 3. Existing `default-values.json` in the same directory as this README
 
 ### Stack Breakdown
-This CDK has been structured to allow multiple stacks to be deployed natively, which allows an easy entrance door for user stacks to be added. At a minimum the Domain stack will be deployed, with further explanation of the possible native stacks below
+This CDK has been structured to allow multiple stacks to be deployed out-of-the-box, which allows an easy entrance door for users to get started and add additional stacks as they need. Each of these stacks are deployed independently in CloudFormation, with only the Domain stack being required.
 
 #### Domain Stack (OSServiceDomainCDKStack-STAGE-REGION)
-This is the core stack of this CDK which is responsible for deploying the OpenSearch Service Domain and associated resources such as CloudWatch log groups for Domain logging.
+This is the core required stack of this CDK which is responsible for deploying the OpenSearch Service Domain and associated resources such as CloudWatch log groups for Domain logging.
 
 #### Network Stack (OSServiceNetworkCDKStack-STAGE-REGION)
 This is an additional stack that will be used when the Domain is configured to be placed inside a VPC and will contain resources related to the networking of this VPC such as Security Groups and Subnets.
