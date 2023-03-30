@@ -48,7 +48,7 @@ test('Test primary context options are mapped with standard data type', () => {
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -96,7 +96,7 @@ test('Test primary context options are mapped with only string data type', () =>
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -124,7 +124,7 @@ test('Test alternate context options are mapped with standard data type', () => 
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -147,7 +147,7 @@ test('Test alternate context options are mapped with only string data type', () 
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -163,7 +163,7 @@ test('Test openAccessPolicy setting creates access policy when enabled', () => {
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -181,7 +181,7 @@ test('Test openAccessPolicy setting does not create access policy when disabled'
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -199,7 +199,7 @@ test('Test openAccessPolicy setting is mapped with string data type', () => {
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -215,7 +215,7 @@ test( 'Test default stack is created with default values when no context options
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const defaultValues: { [x: string]: (string); } = testDefaultValues
@@ -263,7 +263,7 @@ test( 'Test default stack is created when empty context options are provided for
     })
 
     const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
     })
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]

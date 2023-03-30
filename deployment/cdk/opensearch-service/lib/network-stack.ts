@@ -15,8 +15,9 @@ import {
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
+import {StackPropsExt} from "./stack-composer";
 
-export interface networkStackProps extends StackProps {
+export interface networkStackProps extends StackPropsExt {
     readonly vpcId?: string
     readonly vpcSubnetIds?: string[]
     readonly vpcSecurityGroupIds?: string[]

@@ -9,9 +9,10 @@ import {IKey, Key} from "aws-cdk-lib/aws-kms";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {Secret} from "aws-cdk-lib/aws-secretsmanager";
+import {StackPropsExt} from "./stack-composer";
 
 
-export interface opensearchServiceDomainCdkProps extends StackProps{
+export interface opensearchServiceDomainCdkProps extends StackPropsExt {
   readonly version: EngineVersion,
   readonly domainName: string,
   readonly dataNodeInstanceType?: string,
