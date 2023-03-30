@@ -1,18 +1,31 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: MIT-0
+
 import {Construct} from "constructs";
 import {RemovalPolicy, Stack, StackProps} from "aws-cdk-lib";
 import {OpensearchServiceDomainCdkStack} from "./opensearch-service-domain-cdk-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import {EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
-import {PolicyStatement} from "aws-cdk-lib/aws-iam";
+import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import * as defaultValuesJson from "../default-values.json"
+import {NetworkStack} from "./network-stack";
+
+export interface StackPropsExt extends StackProps {
+    readonly stage: string
+}
 
 export class StackComposer {
     public stacks: Stack[] = [];
 
-    constructor(scope: Construct, props: StackProps) {
+    constructor(scope: Construct, props: StackPropsExt) {
+
+        let networkStack: NetworkStack|undefined
+        const stage = props.stage
+        const account = props.env?.account
+        const region = props.env?.region
 
         let version: EngineVersion
-
+        let accessPolicies: PolicyStatement[]|undefined
         const defaultValues: { [x: string]: (string); } = defaultValuesJson
         const domainName = getContextForType('domainName', 'string')
         const dataNodeType = getContextForType('dataNodeType', 'string')
@@ -35,6 +48,11 @@ export class StackComposer {
         const loggingAppLogGroupARN = getContextForType('loggingAppLogGroupARN', 'string')
         const noneToNodeEncryptionEnabled = getContextForType('nodeToNodeEncryptionEnabled', 'boolean')
         const vpcId = getContextForType('vpcId', 'string')
+        const vpcEnabled = getContextForType('vpcEnabled', 'boolean')
+        const vpcSecurityGroupIds = getContextForType('vpcSecurityGroupIds', 'object')
+        const vpcSubnetIds = getContextForType('vpcSubnetIds', 'object')
+        const openAccessPolicyEnabled = getContextForType('openAccessPolicyEnabled', 'boolean')
+        const availabilityZoneCount = getContextForType('availabilityZoneCount', 'number')
 
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
@@ -44,16 +62,24 @@ export class StackComposer {
         if (engineVersion && engineVersion.startsWith("OS_")) {
             // Will accept a period delimited version string (i.e. 1.3) and return a proper EngineVersion
             version = EngineVersion.openSearch(engineVersion.substring(3))
-        }
-        else if (engineVersion && engineVersion.startsWith("ES_")) {
+        } else if (engineVersion && engineVersion.startsWith("ES_")) {
             version = EngineVersion.elasticsearch(engineVersion.substring(3))
-        }
-        else {
+        } else {
             throw new Error("Engine version is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9")
         }
 
-        const accessPolicyJson = getContextForType('accessPolicies', 'object')
-        const accessPolicies = accessPolicyJson ? parseAccessPolicies(accessPolicyJson) : undefined
+        if (openAccessPolicyEnabled) {
+            const openPolicy = new PolicyStatement({
+                effect: Effect.ALLOW,
+                principals: [new AnyPrincipal()],
+                actions: ["es:*"],
+                resources: [`arn:aws:es:${region}:${account}:domain/${domainName}/*`]
+            })
+            accessPolicies = [openPolicy]
+        } else {
+            const accessPolicyJson = getContextForType('accessPolicies', 'object')
+            accessPolicies = accessPolicyJson ? parseAccessPolicies(accessPolicyJson) : undefined
+        }
 
         const tlsSecurityPolicyName = getContextForType('tlsSecurityPolicy', 'string')
         const tlsSecurityPolicy: TLSSecurityPolicy|undefined = tlsSecurityPolicyName ? TLSSecurityPolicy[tlsSecurityPolicyName as keyof typeof TLSSecurityPolicy] : undefined
@@ -71,6 +97,20 @@ export class StackComposer {
         const domainRemovalPolicy = domainRemovalPolicyName ? RemovalPolicy[domainRemovalPolicyName as keyof typeof RemovalPolicy] : undefined
         if (domainRemovalPolicyName && !domainRemovalPolicy) {
             throw new Error("Provided domainRemovalPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html")
+        }
+
+        // If enabled re-use existing VPC and/or associated resources or create new
+        if (vpcEnabled) {
+            networkStack = new NetworkStack(scope, 'networkStack', {
+                vpcId: vpcId,
+                vpcSubnetIds: vpcSubnetIds,
+                vpcSecurityGroupIds: vpcSecurityGroupIds,
+                availabilityZoneCount: availabilityZoneCount,
+                stackName: `OSServiceNetworkCDKStack-${stage}-${region}`,
+                description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
+                ...props,
+            })
+            this.stacks.push(networkStack)
         }
 
         const opensearchStack = new OpensearchServiceDomainCdkStack(scope, 'opensearchDomainStack', {
@@ -98,11 +138,19 @@ export class StackComposer {
             appLogEnabled: loggingAppLogEnabled,
             appLogGroup: loggingAppLogGroupARN,
             nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
-            vpcId: vpcId,
+            vpc: networkStack ? networkStack.vpc : undefined,
+            vpcSubnets: networkStack ? networkStack.domainSubnets : undefined,
+            vpcSecurityGroups: networkStack ? networkStack.domainSecurityGroups : undefined,
+            availabilityZoneCount: availabilityZoneCount,
             domainRemovalPolicy: domainRemovalPolicy,
+            stackName: `OSServiceDomainCDKStack-${stage}-${region}`,
+            description: "This stack contains resources to create/manage an OpenSearch Service domain",
             ...props,
         });
 
+        if (networkStack) {
+            opensearchStack.addDependency(networkStack)
+        }
         this.stacks.push(opensearchStack)
 
         function getContextForType(optionName: string, expectedType: string): any {
