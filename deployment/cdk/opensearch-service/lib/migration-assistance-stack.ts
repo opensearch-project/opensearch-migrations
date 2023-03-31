@@ -4,7 +4,14 @@
 import {Stack, StackProps} from "aws-cdk-lib";
 import {IVpc} from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
-import {Cluster, Compatibility, ContainerImage, FargateTaskDefinition, TaskDefinition} from "aws-cdk-lib/aws-ecs";
+import {
+    Cluster,
+    Compatibility,
+    ContainerImage,
+    FargateService,
+    FargateTaskDefinition, LogDrivers,
+    TaskDefinition
+} from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {join} from "path";
 import {
@@ -65,7 +72,9 @@ export class MigrationAssistanceStack extends Stack {
             image: ContainerImage.fromDockerImageAsset(cwPullerImage),
             // Add in region and stage
             containerName: "cw-puller",
-            environment: {}
+            environment: {"CW_LOG_GROUP_NAME": "cw-feeder-lg", "CW_LOG_STREAM_NAME": "cw-feeder-stream"},
+            portMappings: [{containerPort: 9210}],
+            logging: LogDrivers.awsLogs({ streamPrefix: 'cw-puller-container-lg', logRetention: 30 })
         });
 
         // Create Traffic Replayer Container
@@ -76,7 +85,15 @@ export class MigrationAssistanceStack extends Stack {
             image: ContainerImage.fromDockerImageAsset(trafficReplayerImage),
             // Add in region and stage
             containerName: "traffic-replayer",
-            environment: {}
+            environment: {"TARGET_CLUSTER_ENDPOINT": "https://" + props.targetEndpoint},
+            logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-replayer-container-lg', logRetention: 30 })
+        });
+
+        // Create Fargate Service
+        const migrationFargateService = new FargateService(this, "migrationFargateService", {
+            cluster: ecsCluster,
+            taskDefinition: migrationFargateTask,
+            desiredCount: 1
         });
 
         // Create EC2 instance for analysis of cluster in VPC
