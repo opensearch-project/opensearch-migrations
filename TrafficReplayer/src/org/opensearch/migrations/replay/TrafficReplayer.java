@@ -341,18 +341,18 @@ public class TrafficReplayer {
         if (simpleOperation != null) {
             var rwOperation = m.group(RW_OPERATION_GROUP);
             int packetDataSize = Optional.ofNullable(m.group(SIZE_GROUP)).map(s->Integer.parseInt(s)).orElse(0);
-            log.trace("read op="+rwOperation+" size="+packetDataSize);
+            log.error("read op="+rwOperation+" size="+packetDataSize);
             if (rwOperation != null) {
                 var packetData = Base64.getDecoder().decode(m.group(10));
-                log.trace(()->"line="+line);
-                log.trace(()->"packetData="+new String(packetData, Charset.defaultCharset()));
+                log.error(()->"line="+line);
+                log.error(()->"packetData="+new String(packetData, Charset.defaultCharset()));
                 if (rwOperation.equals(READ_OPERATION)) {
                     replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Read, packetData));
                 } else if (rwOperation.equals(WRITE_OPERATION)) {
                     replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Write, packetData));
                 }
             } else {
-                log.trace("read op="+simpleOperation);
+                log.error("read op="+simpleOperation);
                 if (simpleOperation.equals(FINISHED_OPERATION)) {
                     replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Close, null));
                 }
