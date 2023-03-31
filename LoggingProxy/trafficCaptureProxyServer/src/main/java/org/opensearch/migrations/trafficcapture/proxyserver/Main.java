@@ -3,13 +3,59 @@
  */
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
+import org.opensearch.security.ssl.DefaultSecurityKeyStore;
+import org.opensearch.security.ssl.util.SSLConfigConstants;
+
+import javax.net.ssl.SSLException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Optional;
 
 public class Main {
-    public static void main(String[] args) throws InterruptedException {
-        System.out.println("Hi World");
-        var proxy = new NettyScanningHttpProxy(80);
-        proxy.start("localhost", 9200);
+
+    private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
+
+    private static Settings getSettings(String configFile) throws IOException {
+        var builder = Settings.builder();
+        try (var lines = Files.lines(Paths.get(configFile))) {
+            lines
+                    .map(line->Optional.of(line.indexOf('#')).filter(i->i>=0).map(i->line.substring(0, i)).orElse(line))
+                    .filter(line->line.startsWith(HTTPS_CONFIG_PREFIX) && line.contains(":"))
+                    .forEach(line->{
+                        var parts = line.split(": *", 2);
+                        builder.put(parts[0], parts[1]);
+                    });
+        }
+        builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
+        return builder.build();
+    }
+
+    public static void main(String[] args) throws InterruptedException, IOException {
+        var proxy = new NettyScanningHttpProxy(443);
+
+        Settings settings = getSettings(args[0]);
+        DefaultSecurityKeyStore sks = new DefaultSecurityKeyStore(settings,
+                args.length >= 2 ? Paths.get(args[1]) : null);
+        sks.initHttpSSLConfig();
+
+        try {
+            proxy.start("localhost", 9200, () -> {
+                try {
+                    var sslEngine = sks.createHTTPSSLEngine();
+                    return sslEngine;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        } catch (Exception e) {
+            System.err.println(e);
+            e.printStackTrace();
+            throw e;
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 System.err.println("Received shutdown signal.  Trying to shutdown cleanly");
@@ -24,4 +70,5 @@ public class Main {
             Thread.sleep(60*1000);
         }
     }
+
 }
