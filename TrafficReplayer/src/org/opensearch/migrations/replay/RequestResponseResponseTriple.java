@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import com.google.common.primitives.Bytes;
+import lombok.extern.log4j.Log4j2;
 import org.json.HTTP;
 import org.json.JSONObject;
 import org.opensearch.migrations.replay.TrafficReplayer.RequestResponsePacketPair;
@@ -12,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 
+@Log4j2
 public class RequestResponseResponseTriple {
     private RequestResponsePacketPair sourcePair;
     private List<byte[]> shadowResponseData;
@@ -104,6 +106,7 @@ public class RequestResponseResponseTriple {
 
             outputStream.write(jsonObject.toString().getBytes(StandardCharsets.UTF_8));
             outputStream.write("\n".getBytes(StandardCharsets.UTF_8));
+            outputStream.flush();
         }
     }
 }
