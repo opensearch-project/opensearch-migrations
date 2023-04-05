@@ -156,9 +156,10 @@ export class StackComposer {
         }
         this.stacks.push(opensearchStack)
 
-        if (migrationAssistanceEnabled) {
+        // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
+        if (migrationAssistanceEnabled && networkStack) {
             const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
-                vpc: networkStack ? networkStack.vpc : undefined,
+                vpc: networkStack.vpc,
                 sourceCWLogStreamARN: sourceCWLogStreamARN,
                 targetEndpoint: opensearchStack.domainEndpoint,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,

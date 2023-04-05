@@ -2,30 +2,24 @@
 // SPDX-License-Identifier: MIT-0
 
 import {Stack, StackProps} from "aws-cdk-lib";
-import {IVpc} from "aws-cdk-lib/aws-ec2";
-import {Construct} from "constructs";
 import {
-    Cluster,
-    Compatibility,
-    ContainerImage,
-    FargateService,
-    FargateTaskDefinition, LogDrivers,
-    TaskDefinition
-} from "aws-cdk-lib/aws-ecs";
+    Instance,
+    InstanceClass,
+    InstanceSize,
+    InstanceType,
+    IVpc,
+    MachineImage, Peer, Port,
+    SecurityGroup,
+    SubnetType
+} from "aws-cdk-lib/aws-ec2";
+import {Construct} from "constructs";
+import {Cluster, ContainerImage, FargateService, FargateTaskDefinition, LogDrivers} from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {join} from "path";
-import {
-    AnyPrincipal,
-    Effect,
-    ManagedPolicy,
-    PolicyDocument,
-    PolicyStatement,
-    Role,
-    ServicePrincipal
-} from "aws-cdk-lib/aws-iam";
+import {Effect, PolicyDocument, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 
 export interface migrationStackProps extends StackProps {
-    readonly vpc?: IVpc,
+    readonly vpc: IVpc,
     readonly sourceCWLogStreamARN: string,
     readonly targetEndpoint: string
 }
@@ -68,11 +62,13 @@ export class MigrationAssistanceStack extends Stack {
         const cwPullerImage = new DockerImageAsset(this, "CWPullerImage", {
             directory: join(__dirname, "..", "docker-cw-puller")
         });
+        const clearIdentifierString = props.sourceCWLogStreamARN.split(":log-group:")[1]
+        const[logGroupName, logStreamName] = clearIdentifierString.split(":log-stream:")
         const cwPullerContainer = migrationFargateTask.addContainer("CWPullerContainer", {
             image: ContainerImage.fromDockerImageAsset(cwPullerImage),
             // Add in region and stage
             containerName: "cw-puller",
-            environment: {"CW_LOG_GROUP_NAME": "cw-feeder-lg", "CW_LOG_STREAM_NAME": "cw-feeder-stream"},
+            environment: {"CW_LOG_GROUP_NAME": logGroupName, "CW_LOG_STREAM_NAME": logStreamName},
             portMappings: [{containerPort: 9210}],
             logging: LogDrivers.awsLogs({ streamPrefix: 'cw-puller-container-lg', logRetention: 30 })
         });
@@ -85,7 +81,7 @@ export class MigrationAssistanceStack extends Stack {
             image: ContainerImage.fromDockerImageAsset(trafficReplayerImage),
             // Add in region and stage
             containerName: "traffic-replayer",
-            environment: {"TARGET_CLUSTER_ENDPOINT": "https://" + props.targetEndpoint},
+            environment: {"TARGET_CLUSTER_ENDPOINT": "https://" + props.targetEndpoint + ":80"},
             logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-replayer-container-lg', logRetention: 30 })
         });
 
@@ -96,6 +92,22 @@ export class MigrationAssistanceStack extends Stack {
             desiredCount: 1
         });
 
+        // Creates a security group with open access via ssh
+        const oinoSecurityGroup = new SecurityGroup(this, 'orchestratorSecurityGroup', {
+            vpc: props.vpc,
+            allowAllOutbound: true,
+        });
+        oinoSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.tcp(22));
+
         // Create EC2 instance for analysis of cluster in VPC
+        const oino = new Instance(this, "orchestratorEC2Instance", {
+            vpc: props.vpc,
+            vpcSubnets: { subnetType: SubnetType.PUBLIC },
+            instanceType: InstanceType.of(InstanceClass.T2, InstanceSize.MICRO),
+            machineImage: MachineImage.latestAmazonLinux(),
+            securityGroup: oinoSecurityGroup,
+            // Manually created for now, to be automated soon
+            keyName: "es-node-key"
+        });
     }
 }

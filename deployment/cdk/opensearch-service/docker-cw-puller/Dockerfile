@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y git
 
 WORKDIR /app
 
-RUN git clone https://github.com/okhasawn/opensearch-migrations.git && cd opensearch-migrations && git checkout PullCW
+RUN git clone https://github.com/opensearch-project/opensearch-migrations.git
 
 FROM python:3.8-slim-buster
 RUN apt-get update && apt-get install -y netcat
