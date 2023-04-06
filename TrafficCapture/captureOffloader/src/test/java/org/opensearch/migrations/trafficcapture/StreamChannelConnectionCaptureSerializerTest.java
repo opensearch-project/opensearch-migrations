@@ -17,15 +17,15 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 
 class StreamChannelConnectionCaptureSerializerTest {
     private final static String FAKE_READ_PACKET_DATA = "";//I am a fake packet to read2";
     public static final String TEST_TRAFFIC_STREAM_ID_STRING = "Test";
 
-    private static TrafficStream makeEmptyTrafficStreamBytes(Instant t) {
-        return TrafficStream.newBuilder().setId(TEST_TRAFFIC_STREAM_ID_STRING)
+    private static TrafficStream makeEmptyTrafficStream(Instant t) {
+        return TrafficStream.newBuilder()
+                .setId(TEST_TRAFFIC_STREAM_ID_STRING)
                 .setNumberOfThisLastChunk(1)
                 .addSubStream(TrafficObservation.newBuilder()
                         .setTs(Timestamp.newBuilder()
@@ -52,22 +52,10 @@ class StreamChannelConnectionCaptureSerializerTest {
     public void testThatReadCanBeDeserialized() throws IOException {
         var referenceTimestamp = Instant.now(Clock.systemUTC());
         // these are only here as a debugging aid
-        var groundTruth = makeEmptyTrafficStreamBytes(referenceTimestamp);
-        var groundTruthBytes = groundTruth.toByteArray();
-        String tmp = Base64.getEncoder().encodeToString(groundTruthBytes);
-        // base64 -d | protoc --decode_raw
-        //CgRUZXN0EiQKBAgIEAFCHAoaSSBhbSBhIGZha2UgcGFja2V0IHRvIHJlYWQgAQ==
-        //1: "Test"
-        //2 {
-        //  1 {
-        //    1: 8
-        //    2: 1
-        //  }
-        //  8 {
-        //    1: "I am a fake packet to read"
-        //  }
-        //}
-        //4: 1
+        var groundTruth = makeEmptyTrafficStream(referenceTimestamp);
+        //System.err.println("groundTruth: "+groundTruth);
+        // Pasting this into `base64 -d | protoc --decode_raw` will also show the structure
+        //String tmp = Base64.getEncoder().encodeToString(groundTruth.toByteArray());
 
 
         var startingTimeMillis = System.currentTimeMillis();

@@ -8,6 +8,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.JdkLoggerFactory;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 
 import javax.net.ssl.SSLEngine;
 import java.util.function.Supplier;
@@ -26,7 +27,8 @@ public class NettyScanningHttpProxy {
         return proxyPort;
     }
 
-    public void start(String backsideHost, int backsidePort, Supplier<SSLEngine> sslEngineSupplier)
+    public void start(String backsideHost, int backsidePort, Supplier<SSLEngine> sslEngineSupplier,
+                      IConnectionCaptureFactory connectionCaptureFactory)
             throws InterruptedException {
         InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE);
         bossGroup = new NioEventLoopGroup(1);
@@ -37,7 +39,8 @@ public class NettyScanningHttpProxy {
                     .channel(NioServerSocketChannel.class)
                     //.handler(new LoggingHandler(LogLevel.INFO))
                     //.childHandler(new HexDumpProxyInitializer(backsideHost, backsidePort))
-                    .childHandler(new ProxyChannelInitializer(backsideHost, backsidePort, sslEngineSupplier))
+                    .childHandler(new ProxyChannelInitializer(backsideHost, backsidePort, sslEngineSupplier,
+                            connectionCaptureFactory))
                     .childOption(ChannelOption.AUTO_READ, false)
                     .bind(proxyPort).sync().channel();
         } catch (Exception e) {

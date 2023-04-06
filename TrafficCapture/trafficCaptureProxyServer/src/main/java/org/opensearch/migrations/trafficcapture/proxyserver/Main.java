@@ -3,23 +3,29 @@
  */
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import lombok.SneakyThrows;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
+import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 public class Main {
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
 
-    private static Settings getSettings(String configFile) throws IOException {
+    @SneakyThrows
+    private static Settings getSettings(String configFile) {
         var builder = Settings.builder();
         try (var lines = Files.lines(Paths.get(configFile))) {
             lines
@@ -34,23 +40,28 @@ public class Main {
         return builder.build();
     }
 
-    public static void main(String[] args) throws InterruptedException, IOException {
-        var proxy = new NettyScanningHttpProxy(443);
+    private static IConnectionCaptureFactory getConnectionCaptureFactory() {
+        return new FileConnectionCaptureFactory("tracelogs");
+    }
 
-        Settings settings = getSettings(args[0]);
-        DefaultSecurityKeyStore sks = new DefaultSecurityKeyStore(settings,
-                args.length >= 2 ? Paths.get(args[1]) : null);
-        sks.initHttpSSLConfig();
+    public static void main(String[] args) throws InterruptedException, IOException {
+
+        var sksOp = Optional.ofNullable(args.length == 0 ? null : Optional.class)
+                .map(o->new DefaultSecurityKeyStore(getSettings(args[0]),
+                        args.length > 1 ? Paths.get(args[1]) : null));
+        sksOp.ifPresent(x->x.initHttpSSLConfig());
+        var proxy = new NettyScanningHttpProxy(sksOp.isPresent() ? 443 : 80);
 
         try {
-            proxy.start("localhost", 9200, () -> {
-                try {
-                    var sslEngine = sks.createHTTPSSLEngine();
-                    return sslEngine;
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            proxy.start("localhost", 9200,
+                    sksOp.map(sks-> (Supplier<SSLEngine>) () -> {
+                        try {
+                            var sslEngine = sks.createHTTPSSLEngine();
+                            return sslEngine;
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }).orElse(null), getConnectionCaptureFactory());
         } catch (Exception e) {
             System.err.println(e);
             e.printStackTrace();

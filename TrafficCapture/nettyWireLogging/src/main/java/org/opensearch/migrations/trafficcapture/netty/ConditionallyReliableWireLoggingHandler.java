@@ -1,63 +1,60 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.http.HttpHeaders;
-import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureOffloader;
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
 import java.net.SocketAddress;
+import java.time.Instant;
 import java.util.function.Predicate;
 
 public class ConditionallyReliableWireLoggingHandler extends ChannelDuplexHandler {
 
     private final Predicate<HttpHeaders> shouldBlockPredicate;
-    private final IChannelConnectionCaptureOffloader trafficOffloader;
+    private final IChannelConnectionCaptureSerializer trafficOffloader;
 
     public ConditionallyReliableWireLoggingHandler(Predicate<HttpHeaders> headerPredicateForWhenToBlock,
-                                                   IChannelConnectionCaptureOffloader trafficOffloader) {
+                                                   IChannelConnectionCaptureSerializer trafficOffloader) {
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
         this.trafficOffloader = trafficOffloader;
     }
 
     @Override
     public void bind(ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) throws Exception {
-        trafficOffloader.addBindEvent(localAddress);
+        trafficOffloader.addBindEvent(Instant.now(), localAddress);
         super.bind(ctx, localAddress, promise);
     }
 
     @Override
     public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) throws Exception {
-        trafficOffloader.addConnectEvent(remoteAddress, localAddress);
+        trafficOffloader.addConnectEvent(Instant.now(), remoteAddress, localAddress);
         super.connect(ctx, remoteAddress, localAddress, promise);
     }
 
     @Override
     public void disconnect(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
-        trafficOffloader.addDisconnectEvent();
+        trafficOffloader.addDisconnectEvent(Instant.now());
         super.disconnect(ctx, promise);
     }
 
     @Override
     public void close(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
-        trafficOffloader.addCloseEvent();
+        trafficOffloader.addCloseEvent(Instant.now());
         super.close(ctx, promise);
     }
 
     @Override
     public void deregister(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
-        trafficOffloader.addDeregisterEvent();
+        trafficOffloader.addDeregisterEvent(Instant.now());
         super.deregister(ctx, promise);
     }
 
     @Override
-    public void read(ChannelHandlerContext ctx) throws Exception {
-        //trafficOffloader.addReadEvent(ctx.channel().);
-        super.read(ctx);
-    }
-
-    @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        trafficOffloader.addWriteEvent(Instant.now(), (ByteBuf) msg);
         super.write(ctx, msg, promise);
     }
 
@@ -88,6 +85,7 @@ public class ConditionallyReliableWireLoggingHandler extends ChannelDuplexHandle
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        trafficOffloader.addReadEvent(Instant.now(), (ByteBuf) msg);
         super.channelRead(ctx, msg);
     }
 

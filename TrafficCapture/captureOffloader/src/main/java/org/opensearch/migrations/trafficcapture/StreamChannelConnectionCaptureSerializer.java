@@ -19,7 +19,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public class StreamChannelConnectionCaptureSerializer implements
-        IChannelConnectionCaptureOffloader, Closeable {
+        IChannelConnectionCaptureSerializer, Closeable {
 
     private final static int MAX_ID_SIZE = 32;
 
@@ -102,7 +102,8 @@ public class StreamChannelConnectionCaptureSerializer implements
         }
     }
 
-    private void flush(boolean isFinal) throws IOException {
+    @Override
+    public void flush(boolean isFinal) throws IOException {
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
         currentCodedOutputStream.writeInt32(fieldNum, ++numFlushesSoFar);
         flushHandler.accept(currentCodedOutputStream);
@@ -125,17 +126,17 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     @Override
-    public void addBindEvent(SocketAddress addr) throws IOException {
+    public void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {
         //beginWritingObservationToCurrentStream(0);
     }
 
     @Override
-    public void addConnectEvent(SocketAddress remote, SocketAddress local) throws IOException {
+    public void addConnectEvent(Instant timestamp, SocketAddress remote, SocketAddress local) throws IOException {
         //beginWritingObservationToCurrentStream(0);
     }
 
     @Override
-    public void addDisconnectEvent() throws IOException {
+    public void addDisconnectEvent(Instant timestamp) throws IOException {
         //beginWritingObservationToCurrentStream(0);
     }
 
@@ -145,7 +146,7 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     @Override
-    public void addDeregisterEvent() throws IOException {
+    public void addDeregisterEvent(Instant timestamp) throws IOException {
         //beginWritingObservationToCurrentStream(0);
     }
 
@@ -178,52 +179,52 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     @Override
-    public void addWriteEvent(Instant timestamp, ByteBuf buffer) {
+    public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
 
     }
 
     @Override
-    public void addFlushEvent() {
+    public void addFlushEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addChannelRegisteredEvent() {
+    public void addChannelRegisteredEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addChannelUnregisteredEvent() {
+    public void addChannelUnregisteredEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addChannelActiveEvent() {
+    public void addChannelActiveEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addChannelInactiveEvent() {
+    public void addChannelInactiveEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addChannelReadEvent() {
+    public void addChannelReadEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addChannelReadCompleteEvent() {
+    public void addChannelReadCompleteEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addUserEventTriggeredEvent() {
+    public void addUserEventTriggeredEvent(Instant timestamp) throws IOException {
 
     }
 
     @Override
-    public void addChannelWritabilityChangedEvent() {
+    public void addChannelWritabilityChangedEvent(Instant timestamp) throws IOException {
 
     }
 
