@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -55,34 +56,32 @@ public class StreamChannelConnectionCaptureSerializer implements
         currentCodedOutputStream.writeString(TrafficStream.ID_FIELD_NUMBER, id);
     }
 
-    private void beginWritingObservationToCurrentStream(int tag, int bodySize) throws IOException {
+    private void beginWritingObservationToCurrentStream(Instant timestamp, int tag, int bodySize) throws IOException {
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
         long millis = System.currentTimeMillis();
-        currentCodedOutputStream.writeUInt32NoTag(getSizeOfTimestamp(millis) +
+        currentCodedOutputStream.writeUInt32NoTag(getSizeOfTimestamp(timestamp) +
                 CodedOutputStream.computeTagSize(TrafficObservation.TS_FIELD_NUMBER) +
                 CodedOutputStream.computeTagSize(tag) +
                 bodySize);
-        writeTimestampForNowToCurrentStream(millis);
+        writeTimestampForNowToCurrentStream(timestamp);
         writeObservationTag(tag);
     }
 
-    private int getSizeOfTimestamp(long millis) throws IOException {
-        int seconds = (int) (millis / 1000);
-        int nanos = (int) ((millis % 1000) * 1000000);
+    private int getSizeOfTimestamp(Instant t) throws IOException {
+        long seconds = t.getEpochSecond();
+        int nanos = t.getNano();
         var secSize = CodedOutputStream.computeInt64Size(Timestamp.SECONDS_FIELD_NUMBER, seconds);
         var nanoSize = nanos == 0 ? 0 : CodedOutputStream.computeInt32Size(Timestamp.NANOS_FIELD_NUMBER, nanos);
         return secSize + nanoSize;
     }
 
-    private void writeTimestampForNowToCurrentStream(long millis) throws IOException {
+    private void writeTimestampForNowToCurrentStream(Instant timestamp) throws IOException {
         writeObservationTag(TrafficObservation.TS_FIELD_NUMBER);
-        currentCodedOutputStream.writeUInt32NoTag(getSizeOfTimestamp(millis));
-        int seconds = (int) (millis / 1000);
-        int nanos = (int) ((millis % 1000) * 1000000);
+        currentCodedOutputStream.writeUInt32NoTag(getSizeOfTimestamp(timestamp));
 
-        currentCodedOutputStream.writeInt64(Timestamp.SECONDS_FIELD_NUMBER, seconds);
-        if (nanos != 0) {
-            currentCodedOutputStream.writeInt32(Timestamp.NANOS_FIELD_NUMBER, nanos);
+        currentCodedOutputStream.writeInt64(Timestamp.SECONDS_FIELD_NUMBER, timestamp.getEpochSecond());
+        if (timestamp.getNano() != 0) {
+            currentCodedOutputStream.writeInt32(Timestamp.NANOS_FIELD_NUMBER, timestamp.getNano());
         }
     }
 
@@ -109,6 +108,10 @@ public class StreamChannelConnectionCaptureSerializer implements
         flushHandler.accept(currentCodedOutputStream);
     }
 
+    /**
+     * Override the Closeable interface - not addCloseEvent
+     * @throws IOException
+     */
     @Override
     public void close() throws IOException {
         if (currentCodedOutputStream.getTotalBytesWritten() > 0) {
@@ -137,7 +140,7 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     @Override
-    public void addCloseEvent() throws IOException {
+    public void addCloseEvent(Instant timestamp) throws IOException {
         //beginWritingObservationToCurrentStream(0);
     }
 
@@ -167,15 +170,15 @@ public class StreamChannelConnectionCaptureSerializer implements
 //    }
 
     @Override
-    public void addReadEvent(ByteBuf buffer) throws IOException {
+    public void addReadEvent(Instant timestamp, ByteBuf buffer) throws IOException {
         var byteBuffer = buffer.nioBuffer();
         var dataSize = CodedOutputStream.computeByteBufferSize(Read.DATA_FIELD_NUMBER, byteBuffer);
-        beginWritingObservationToCurrentStream(TrafficObservation.READ_FIELD_NUMBER, dataSize);
+        beginWritingObservationToCurrentStream(timestamp, TrafficObservation.READ_FIELD_NUMBER, dataSize);
         writeByteBufferToCurrentStream(Read.DATA_FIELD_NUMBER, byteBuffer);
     }
 
     @Override
-    public void addWriteEvent(ByteBuf buffer) {
+    public void addWriteEvent(Instant timestamp, ByteBuf buffer) {
 
     }
 
@@ -225,10 +228,11 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     @Override
-    public void addExceptionCaughtEvent(Throwable t) throws IOException {
+    public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {
         String exceptionMessage = t.getMessage();
-        var exceptionObjectSize = CodedOutputStream.computeStringSize(Exception.MESSAGE_FIELD_NUMBER, exceptionMessage);
-        beginWritingObservationToCurrentStream(TrafficObservation.EXCEPTION_FIELD_NUMBER, exceptionObjectSize);
+        var exceptionObjectSize =
+                CodedOutputStream.computeStringSize(Exception.MESSAGE_FIELD_NUMBER, exceptionMessage);
+        beginWritingObservationToCurrentStream(timestamp, TrafficObservation.EXCEPTION_FIELD_NUMBER, exceptionObjectSize);
         writeByteStringToCurrentStream(Exception.MESSAGE_FIELD_NUMBER, exceptionMessage);
     }
 }

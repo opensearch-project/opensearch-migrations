@@ -14,8 +14,9 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -23,17 +24,23 @@ class StreamChannelConnectionCaptureSerializerTest {
     private final static String FAKE_READ_PACKET_DATA = "";//I am a fake packet to read2";
     public static final String TEST_TRAFFIC_STREAM_ID_STRING = "Test";
 
-    private static TrafficStream makeEmptyTrafficStreamBytes() {
+    private static TrafficStream makeEmptyTrafficStreamBytes(Instant t) {
         return TrafficStream.newBuilder().setId(TEST_TRAFFIC_STREAM_ID_STRING)
                 .setNumberOfThisLastChunk(1)
                 .addSubStream(TrafficObservation.newBuilder()
-                        .setTs(Timestamp.newBuilder().setSeconds(8).setNanos(0).build())
+                        .setTs(Timestamp.newBuilder()
+                                .setSeconds(t.getEpochSecond())
+                                .setNanos(t.getNano())
+                                .build())
                         .setRead(Read.newBuilder()
                                 .setData(ByteString.copyFrom(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8)))
                                 .build())
                         .build())
                 .addSubStream(TrafficObservation.newBuilder()
-                        .setTs(Timestamp.newBuilder().setSeconds(8).setNanos(0).build())
+                        .setTs(Timestamp.newBuilder()
+                                .setSeconds(t.getEpochSecond())
+                                .setNanos(t.getNano())
+                                .build())
                         .setException(Exception.newBuilder()
                                 .setMessage(FAKE_READ_PACKET_DATA)
                                 .build())
@@ -43,8 +50,9 @@ class StreamChannelConnectionCaptureSerializerTest {
 
     @Test
     public void testThatReadCanBeDeserialized() throws IOException {
+        var referenceTimestamp = Instant.now(Clock.systemUTC());
         // these are only here as a debugging aid
-        var groundTruth = makeEmptyTrafficStreamBytes();
+        var groundTruth = makeEmptyTrafficStreamBytes(referenceTimestamp);
         var groundTruthBytes = groundTruth.toByteArray();
         String tmp = Base64.getEncoder().encodeToString(groundTruthBytes);
         // base64 -d | protoc --decode_raw
@@ -81,39 +89,38 @@ class StreamChannelConnectionCaptureSerializerTest {
                     }
                 });
         var bb = Unpooled.wrappedBuffer(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8));
-        serializer.addReadEvent(bb);
-        serializer.addExceptionCaughtEvent(new RuntimeException(FAKE_READ_PACKET_DATA));
+        serializer.addReadEvent(referenceTimestamp, bb);
+        serializer.addExceptionCaughtEvent(referenceTimestamp, new RuntimeException(FAKE_READ_PACKET_DATA));
         var endingTimeMillis = System.currentTimeMillis();
         serializer.close();
         bb.release();
         Assertions.assertEquals(1, outputBuffersCreated.size());
         var onlyBuffer = outputBuffersCreated.get(0);
-        var trafficStream = TrafficStream.parseFrom(onlyBuffer);
-        Assertions.assertEquals(TEST_TRAFFIC_STREAM_ID_STRING, trafficStream.getId());
-        Assertions.assertEquals(2, trafficStream.getSubStreamCount());
-        Assertions.assertEquals(1, trafficStream.getNumberOfThisLastChunk());
-        Assertions.assertFalse(trafficStream.hasNumber());
+        var reconstitutedTrafficStream = TrafficStream.parseFrom(onlyBuffer);
+        Assertions.assertEquals(TEST_TRAFFIC_STREAM_ID_STRING, reconstitutedTrafficStream.getId());
+        Assertions.assertEquals(2, reconstitutedTrafficStream.getSubStreamCount());
+        Assertions.assertEquals(1, reconstitutedTrafficStream.getNumberOfThisLastChunk());
+        Assertions.assertFalse(reconstitutedTrafficStream.hasNumber());
         {
-            TrafficObservation observation = trafficStream.getSubStream(0);
+            TrafficObservation observation = reconstitutedTrafficStream.getSubStream(0);
             Assertions.assertTrue(observation.hasTs());
             var ts = observation.getTs();
-            var timestampMillis = (1000 * ts.getSeconds()) + (ts.getNanos() / 1000000);
-            Assertions.assertTrue(timestampMillis >= startingTimeMillis);
-            Assertions.assertTrue(timestampMillis <= endingTimeMillis);
+            Assertions.assertEquals(referenceTimestamp.getEpochSecond(), ts.getSeconds());
+            Assertions.assertEquals(referenceTimestamp.getNano(), ts.getNanos());
             Assertions.assertTrue(observation.hasRead());
             Assertions.assertFalse(observation.hasException());
             Assertions.assertEquals(FAKE_READ_PACKET_DATA, observation.getRead().getData().toStringUtf8());
         }
         {
-            TrafficObservation observation = trafficStream.getSubStream(1);
+            TrafficObservation observation = reconstitutedTrafficStream.getSubStream(1);
             Assertions.assertTrue(observation.hasTs());
             var ts = observation.getTs();
-            var timestampMillis = (1000 * ts.getSeconds()) + (ts.getNanos() / 1000000);
-            Assertions.assertTrue(timestampMillis >= startingTimeMillis);
-            Assertions.assertTrue(timestampMillis <= endingTimeMillis);
+            Assertions.assertEquals(referenceTimestamp.getEpochSecond(), ts.getSeconds());
+            Assertions.assertEquals(referenceTimestamp.getNano(), ts.getNanos());
             Assertions.assertFalse(observation.hasRead());
             Assertions.assertTrue(observation.hasException());
             Assertions.assertEquals(FAKE_READ_PACKET_DATA, observation.getException().getMessage());
         }
+        Assertions.assertEquals(groundTruth, reconstitutedTrafficStream);
     }
 }
