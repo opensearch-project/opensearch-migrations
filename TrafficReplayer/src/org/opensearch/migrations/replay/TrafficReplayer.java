@@ -149,6 +149,7 @@ public class TrafficReplayer {
         ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
                 triple -> {
                     try {
+                        System.err.println("Time to write JSON");
                         tripleWriter.writeJSON(triple);
                     } catch (IOException e) {
                         log.error("Caught an IOException while writing triples output.");
