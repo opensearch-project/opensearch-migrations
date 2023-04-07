@@ -121,7 +121,7 @@ public class TrafficReplayer {
     public static void main(String[] args) throws IOException, InterruptedException {
         var params = parseArgs(args);
         URI uri;
-        log.error("Starting Traffic Replayer");
+        System.err.println("Starting Traffic Replayer");
         try {
             uri = new URI(params.targetUriString);
         } catch (Exception e) {
@@ -149,7 +149,6 @@ public class TrafficReplayer {
         ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
                 triple -> {
                     try {
-                        log.error("I want to print triple");
                         tripleWriter.writeJSON(triple);
                     } catch (IOException e) {
                         log.error("Caught an IOException while writing triples output.");
@@ -287,7 +286,7 @@ public class TrafficReplayer {
 
         @Override
         public void accept(ReplayEntry e) {
-            log.error("Current active request/response streams: " + liveStreams.size());
+            System.err.println("Current active request/response streams: " + liveStreams.size());
             if (e.operation.equals(Operation.Close)) {
                 publishAndClear(e.id);
             } else if (e.operation.equals(Operation.Write)) {
