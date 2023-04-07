@@ -1,9 +1,15 @@
 #!/bin/bash
 
-nc -l -p 9220 | trafficcomparator -v stream | trafficcomparator stream-report
-
 # IF the user cares about the diffs.log file, then another command to save it somewhere can be inserted here.
 # AND, the user can use the "--export-reports DiffReport" option of the trafficcomparator
+
+while true
+do
+  nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -v stream | trafficcomparator stream-report
+  >&2 echo "Command has encountered error. Restarting now ..."
+  sleep 1
+done
+
 
 # Next steps: Save the diffs.log somewhere. (Again, if the user needs them)
 # In this case, we will need to add the part of the command mentioned above to save the diff logs e.g

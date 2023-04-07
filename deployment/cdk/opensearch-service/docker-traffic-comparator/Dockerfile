@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y netcat
 COPY traffic_comparator ./traffic_comparator
 COPY cli.py .
 COPY setup.py .
-COPY ./run_app.sh .
+COPY run_app.sh .
 
 RUN pip3 install --editable .
 

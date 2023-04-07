@@ -69,8 +69,21 @@ export class MigrationAssistanceStack extends Stack {
             // Add in region and stage
             containerName: "cw-puller",
             environment: {"CW_LOG_GROUP_NAME": logGroupName, "CW_LOG_STREAM_NAME": logStreamName},
-            portMappings: [{containerPort: 9210}],
+            // portMappings: [{containerPort: 9210}],
             logging: LogDrivers.awsLogs({ streamPrefix: 'cw-puller-container-lg', logRetention: 30 })
+        });
+
+        // Create Traffic Comparator Container
+        const trafficComparatorImage = new DockerImageAsset(this, "TrafficComparatorImage", {
+            directory: join(__dirname, "..", "docker-traffic-comparator")
+        });
+        const trafficComparatorContainer = migrationFargateTask.addContainer("TrafficComparatorContainer", {
+            image: ContainerImage.fromDockerImageAsset(trafficComparatorImage),
+            // Add in region and stage
+            containerName: "traffic-comparator",
+            environment: {},
+            // portMappings: [{containerPort: 9220}],
+            logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-comparator-container-lg', logRetention: 30 })
         });
 
         // Create Traffic Replayer Container
