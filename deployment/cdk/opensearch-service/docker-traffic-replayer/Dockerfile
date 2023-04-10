@@ -4,6 +4,7 @@ FROM openjdk:17-jdk-slim AS builder
 
 RUN apt-get update && apt-get install -y git
 
+# Be weary that this layer can be cached and not capture recent commits. Run docker build --no-cache to avoid this
 RUN git clone https://github.com/lewijacn/opensearch-migrations.git && cd opensearch-migrations && git checkout add-gradle-task
 
 WORKDIR /opensearch-migrations/TrafficReplayer
