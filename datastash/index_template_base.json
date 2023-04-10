@@ -1,0 +1,8 @@
+{
+    "_meta": {
+        "description": "Created by datastash"
+    },
+    "version": 1,
+    "priority": 500,
+    "index_patterns": ["<index-name>"]
+}
