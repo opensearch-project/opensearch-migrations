@@ -33,35 +33,6 @@ public class RequestResponseResponseTriple {
     public static class TripleToFileWriter {
         OutputStream outputStream;
 
-        private List<byte[]> extractBodyBytesAfterHeader(List<byte[]> data, int header_length) {
-            // This method essentially iterates through data, discarding the first `header_length` bytes
-            // and then returns the rest in the form of a new List<>, which is a sublist of the input List,
-            // with a potentially modified first element (to discard header bytes).
-            int currently_seen_length = 0;
-            int index = 0;
-            for (byte[] packet : data) {
-                if (currently_seen_length + packet.length < header_length) {
-                    currently_seen_length += packet.length;
-                    index++;
-                    continue;
-                }
-                if (currently_seen_length + packet.length == header_length) {
-                    break;
-                }
-                byte[] new_first_array;
-                if (header_length - currently_seen_length == packet.length) {
-                    new_first_array = packet;
-                } else {
-                    new_first_array = Arrays.copyOfRange(packet, header_length - currently_seen_length, packet.length);
-                }
-                List<byte[]> newList = data.subList(++index, data.size());
-                newList.add(0, new_first_array);
-                return newList;
-            }
-            // If we make it out of this method, the header was the full data, return an empty list.
-            return new ArrayList<byte[]>();
-        }
-
         private JSONObject jsonFromHttpData(List<byte[]> data) throws IOException {
 
             SequenceInputStream collatedStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).toList()));
@@ -69,8 +40,9 @@ public class RequestResponseResponseTriple {
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
             String head = scanner.next();
             int header_length = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
-            List<byte[]> body = extractBodyBytesAfterHeader(data, header_length);
-            SequenceInputStream bodyStream = new SequenceInputStream(Collections.enumeration(body.stream().map(b -> new ByteArrayInputStream(b)).toList()));
+            // SequenceInputStreams cannot be reset, so it's recreated from the original data.
+            SequenceInputStream bodyStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).toList()));
+            bodyStream.skipNBytes(header_length);
 
             // There are several limitations introduced by using the HTTP.toJSONObject call.
             // 1. We need to replace "\r\n" with "\n" which could mask differences in the responses.
@@ -84,13 +56,13 @@ public class RequestResponseResponseTriple {
             return message;
         }
 
-        private JSONObject jsonFromHttpData(List<byte[]> data, Duration latency) {
+        private JSONObject jsonFromHttpData(List<byte[]> data, Duration latency) throws IOException {
             JSONObject message = jsonFromHttpData(data);
             message.put("response_time_ms", latency.toMillis());
             return message;
         }
 
-        private JSONObject toJSONObject(RequestResponseResponseTriple triple) {
+        private JSONObject toJSONObject(RequestResponseResponseTriple triple) throws IOException {
             JSONObject meta = new JSONObject();
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData));
             meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData, triple.sourcePair.getTotalDuration()));
