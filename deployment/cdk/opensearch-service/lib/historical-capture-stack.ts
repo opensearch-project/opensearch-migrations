@@ -38,7 +38,6 @@ export class HistorialCaptureStack extends Stack {
         logstashConfigData = logstashConfigData.replace("<TARGET_CLUSTER_HOST>", props.targetEndpoint + ":80")
         // Temporary measure to allow multi-line env variable
         logstashConfigData = logstashConfigData.replace(/(\n)/g, "PUT_LINE")
-        console.log(logstashConfigData)
         // Create Historical Capture Container
         const historicalCaptureImage = new DockerImageAsset(this, "historicalCaptureImage", {
             directory: join(__dirname, "..", "docker/logstash-setup")
