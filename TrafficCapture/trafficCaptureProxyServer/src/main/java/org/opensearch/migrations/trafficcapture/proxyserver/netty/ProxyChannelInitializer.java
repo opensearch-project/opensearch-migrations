@@ -8,6 +8,7 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslHandler;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableWireLoggingHandler;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.HttpRequestScannerHandler;
 import org.opensearch.transport.WireLoggingHandler;
 
 import javax.net.ssl.SSLEngine;
@@ -37,8 +38,10 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         }
 
         var offloader = connectionCaptureFactory.createOffloader(ch.id().asShortText());
+        ch.pipeline().addLast(new LoggingHandler("PRE", LogLevel.WARN));
+        ch.pipeline().addLast(new HttpRequestScannerHandler());
         ch.pipeline().addLast(new ConditionallyReliableWireLoggingHandler(h->true, offloader));
-        ch.pipeline().addLast(new LoggingHandler());
+        ch.pipeline().addLast(new LoggingHandler("POST", LogLevel.WARN));
         ch.pipeline().addLast(new FrontsideHandler(host, port));
     }
 }

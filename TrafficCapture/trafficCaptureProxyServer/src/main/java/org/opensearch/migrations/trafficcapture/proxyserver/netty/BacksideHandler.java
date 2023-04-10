@@ -25,25 +25,11 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
         writeBackChannel.writeAndFlush(msg);
     }
 
-//    @Override
-//    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-//        try (var baos = new ByteArrayOutputStream()) {
-//            try (var responseWriter = new OutputStreamWriter(baos)) {
-//                responseWriter.write("response");
-//                responseWriter.flush();
-//                var bb = Unpooled.wrappedBuffer(baos.toByteArray());
-//                writeBackChannel.writeAndFlush(bb)
-//                        .addListener((ChannelFutureListener)future -> {
-//                            if (!future.isSuccess()) {
-//                                log.debug("Failed writeback: "+future.cause());
-//                                future.channel().close();
-//                            }
-//                });
-//                log.debug("Wrote data to writeback channel");
-//            }
-//        }
-//        super.channelReadComplete(ctx);
-//    }
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+        ctx.read();
+        super.channelReadComplete(ctx);
+    }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {

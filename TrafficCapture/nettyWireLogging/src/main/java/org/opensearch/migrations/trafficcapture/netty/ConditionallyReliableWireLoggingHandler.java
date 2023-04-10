@@ -70,6 +70,7 @@ public class ConditionallyReliableWireLoggingHandler extends ChannelDuplexHandle
 
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        trafficOffloader.flush(true);
         super.channelUnregistered(ctx);
     }
 

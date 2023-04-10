@@ -1,0 +1,120 @@
+package org.opensearch.migrations.trafficcapture.proxyserver.netty;
+
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+import lombok.SneakyThrows;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+import org.opensearch.common.collect.Tuple;
+import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+import static java.lang.Math.abs;
+
+class NettyScanningHttpProxyTest {
+    private static final int MAX_PORT_TRIES = 100;
+    private static final Random random = new Random();
+    public static final String LOCALHOST = "localhost";
+    public static final String UPSTREAM_SERVER_RESPONSE_BODY = "Hello tester!\n";
+
+    private static int retryWithNewPortUntilNoThrow(Consumer<Integer> r) {
+        int numTries = 0;
+        while (true) {
+            try {
+                int port = (abs(random.nextInt()) % (2 ^ 16 - 1025)) + 1025;
+                r.accept(new Integer(port));
+                return port;
+            } catch (Exception e) {
+                System.err.println("Exception: "+e);
+                e.printStackTrace();
+                Assumptions.assumeTrue(++numTries <= MAX_PORT_TRIES);
+            }
+        }
+    }
+
+    @Test
+    public void testRoundTrip() throws IOException, InterruptedException {
+        var captureFactory = new InMemoryConnectionCaptureFactory();
+        var servers = startServers(captureFactory);
+
+        var nettyEndpoint = URI.create("http://localhost:" + servers.v1().getProxyPort() + "/");
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest
+                .newBuilder()
+                .uri(nettyEndpoint)
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+        HttpResponse<String> send = client.send(request, HttpResponse.BodyHandlers.ofString());
+        String responseBody = send.body();
+
+        Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
+        var recordedStreams = captureFactory.getRecordedStreams();
+        Assertions.assertEquals(1, recordedStreams.size());
+        var recordedTrafficStreams =
+                recordedStreams.stream()
+                        .map(rts-> {
+                            try {
+                                return TrafficStream.parseFrom(rts.data);
+                            } catch (InvalidProtocolBufferException e) {
+                                throw new RuntimeException(e);
+                            }
+                        })
+                        .toArray();
+        Assertions.assertEquals(1, recordedTrafficStreams.length);
+
+    }
+
+    private static Tuple<NettyScanningHttpProxy, HttpServer>
+    startServers(IConnectionCaptureFactory connectionCaptureFactory) throws InterruptedException {
+        AtomicReference<NettyScanningHttpProxy> nshp = new AtomicReference<>();
+        AtomicReference<HttpServer> upstreamTestServer = new AtomicReference<>();
+        retryWithNewPortUntilNoThrow(port -> {
+            upstreamTestServer.set(createAndStartTestServer(port.intValue()));
+        });
+        var underlyingPort = upstreamTestServer.get().getAddress().getPort();
+        System.out.println("underlying port = "+underlyingPort);
+
+        retryWithNewPortUntilNoThrow(port -> {
+            nshp.set(new NettyScanningHttpProxy(port.intValue()));
+            try {
+                nshp.get().start(LOCALHOST, upstreamTestServer.get().getAddress().getPort(), null,
+                        connectionCaptureFactory);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        });
+        return new Tuple<>(nshp.get(), upstreamTestServer.get());
+    }
+
+    @SneakyThrows
+    private static HttpServer createAndStartTestServer(int port) {
+        HttpServer server = HttpServer.create(new InetSocketAddress(LOCALHOST, port), 0);
+        server.createContext("/", new HttpHandler() {
+            @Override
+            public void handle(HttpExchange httpExchange) throws IOException {
+                var response = UPSTREAM_SERVER_RESPONSE_BODY;
+                httpExchange.sendResponseHeaders(200, 0);
+                httpExchange.getResponseBody().write(response.getBytes());
+                httpExchange.getResponseBody().close();
+                httpExchange.close();
+            }
+        });
+        server.start();
+        return server;
+    }
+}

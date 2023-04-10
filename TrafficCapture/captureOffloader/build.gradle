@@ -17,15 +17,11 @@ sourceSets {
             srcDirs 'src/main/java'
         }
     }
-    test {
-        java {
-        }
-    }
 }
 dependencies {
     api group: 'io.netty', name: 'netty-buffer', version: '4.1.89.Final'
     implementation "com.google.protobuf:protobuf-java:3.22.2"
-    implementation 'org.projectlombok:lombok:1.18.22'
+    implementation 'org.projectlombok:lombok:1.18.26'
 }
 
 protobuf {
