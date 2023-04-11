@@ -30,12 +30,19 @@ message WriteSegment {
   int32 count = 1;
   bytes data = 2;
 }
-message EndOfRequest {}
 message Close {}
 message Disconnect {}
 message Exception {
   string message = 1;
 }
+message EndOfLineIndicator {
+  int32 characterIndex = 1;
+}
+message EndOfHeadersIndicator {
+  int32 characterIndex = 1;
+}
+message EndOfMessageIndicator {}
+
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
   oneof Capture {
@@ -46,9 +53,13 @@ message TrafficObservation {
     WriteSegment writeSegment = 17;
     Bind bind = 10;
     Connect connect = 11;
-    EndOfRequest endOfRequestMarker = 12;
-    Disconnect disconnect = 13;
-    Close close = 14;
+    Disconnect disconnect = 12;
+    Close close = 13;
+
+    EndOfLineIndicator endOfLine = 3;
+    EndOfHeadersIndicator endOfHeaders = 4;
+    EndOfMessageIndicator endOfMessageIndicator = 5;
+
   }
 }
 message TrafficStream {

@@ -26,5 +26,9 @@ public interface IChannelConnectionCaptureListener {
     default void addChannelWritabilityChangedEvent(Instant timestamp) throws IOException {}
     default void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {}
 
+    default void addEndOfFirstLineIndicator(Instant timestamp, int characterIndex) throws IOException {}
+    default void addEndOfHeadersIndicator(Instant timestamp, int characterIndex) throws IOException {}
+    default void addEndOfHttpMessageIndicator(Instant timestamp) throws IOException {}
+
     default void flush(boolean isFinal) throws IOException {}
 }

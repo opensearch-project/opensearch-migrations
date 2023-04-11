@@ -4,6 +4,7 @@ import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.Exception;
 import org.opensearch.migrations.trafficcapture.protos.Read;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+@Slf4j
 public class StreamChannelConnectionCaptureSerializer implements
         IChannelConnectionCaptureSerializer, Closeable {
 
@@ -106,6 +108,7 @@ public class StreamChannelConnectionCaptureSerializer implements
     public void flush(boolean isFinal) throws IOException {
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
         currentCodedOutputStream.writeInt32(fieldNum, ++numFlushesSoFar);
+        currentCodedOutputStream.flush();
         flushHandler.accept(currentCodedOutputStream);
     }
 
@@ -176,6 +179,8 @@ public class StreamChannelConnectionCaptureSerializer implements
         var dataSize = CodedOutputStream.computeByteBufferSize(Read.DATA_FIELD_NUMBER, byteBuffer);
         beginWritingObservationToCurrentStream(timestamp, TrafficObservation.READ_FIELD_NUMBER, dataSize);
         writeByteBufferToCurrentStream(Read.DATA_FIELD_NUMBER, byteBuffer);
+        log.warn("Flushing read because the upstream callers don't know when to flush yet");
+        //flush(false);
     }
 
     @Override
@@ -235,5 +240,20 @@ public class StreamChannelConnectionCaptureSerializer implements
                 CodedOutputStream.computeStringSize(Exception.MESSAGE_FIELD_NUMBER, exceptionMessage);
         beginWritingObservationToCurrentStream(timestamp, TrafficObservation.EXCEPTION_FIELD_NUMBER, exceptionObjectSize);
         writeByteStringToCurrentStream(Exception.MESSAGE_FIELD_NUMBER, exceptionMessage);
+    }
+
+    @Override
+    public void addEndOfFirstLineIndicator(Instant timestamp, int characterIndex) throws IOException {
+        beginWritingObservationToCurrentStream(timestamp, TrafficObservation.ENDOFLINE_FIELD_NUMBER, 0);
+    }
+
+    @Override
+    public void addEndOfHeadersIndicator(Instant timestamp, int characterIndex) throws IOException {
+        beginWritingObservationToCurrentStream(timestamp, TrafficObservation.ENDOFHEADERS_FIELD_NUMBER, 0);
+    }
+
+    @Override
+    public void addEndOfHttpMessageIndicator(Instant timestamp) throws IOException {
+        beginWritingObservationToCurrentStream(timestamp, TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER, 0);
     }
 }
