@@ -104,6 +104,7 @@ public class RequestResponseResponseTriple {
 
             outputStream.write(jsonObject.toString().getBytes(StandardCharsets.UTF_8));
             outputStream.write("\n".getBytes(StandardCharsets.UTF_8));
+            outputStream.flush();
         }
     }
 }

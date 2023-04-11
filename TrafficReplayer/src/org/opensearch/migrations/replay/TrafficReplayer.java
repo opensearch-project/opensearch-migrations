@@ -120,8 +120,8 @@ public class TrafficReplayer {
 
     public static void main(String[] args) throws IOException, InterruptedException {
         var params = parseArgs(args);
-
         URI uri;
+        System.err.println("Starting Traffic Replayer");
         try {
             uri = new URI(params.targetUriString);
         } catch (Exception e) {
