@@ -6,6 +6,7 @@ import com.google.protobuf.Timestamp;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndicator;
 import org.opensearch.migrations.trafficcapture.protos.Exception;
 import org.opensearch.migrations.trafficcapture.protos.Read;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -17,10 +18,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 class StreamChannelConnectionCaptureSerializerTest {
-    private final static String FAKE_READ_PACKET_DATA = "";//I am a fake packet to read2";
+    private final static String FAKE_EXCEPTION_DATA = "abcdefghijklmnop";
+    private final static String FAKE_READ_PACKET_DATA = "ABCDEFGHIJKLMNOP";
     public static final String TEST_TRAFFIC_STREAM_ID_STRING = "Test";
 
     private static TrafficStream makeEmptyTrafficStream(Instant t) {
@@ -41,8 +44,34 @@ class StreamChannelConnectionCaptureSerializerTest {
                                 .setSeconds(t.getEpochSecond())
                                 .setNanos(t.getNano())
                                 .build())
+                        .setRead(Read.newBuilder()
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder()
+                        .setTs(Timestamp.newBuilder()
+                                .setSeconds(t.getEpochSecond())
+                                .setNanos(t.getNano())
+                                .build())
                         .setException(Exception.newBuilder()
-                                .setMessage(FAKE_READ_PACKET_DATA)
+                                .setMessage(FAKE_EXCEPTION_DATA)
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder()
+                        .setTs(Timestamp.newBuilder()
+                                .setSeconds(t.getEpochSecond())
+                                .setNanos(t.getNano())
+                                .build())
+                        .setException(Exception.newBuilder()
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder()
+                        .setTs(Timestamp.newBuilder()
+                                .setSeconds(t.getEpochSecond())
+                                .setNanos(t.getNano())
+                                .build())
+                        .setEndOfMessageIndicator(EndOfMessageIndicator.newBuilder()
+                                .setFirstLineByteLength(17)
+                                .setHeadersByteLength(72)
                                 .build())
                         .build())
                 .build();
@@ -50,15 +79,14 @@ class StreamChannelConnectionCaptureSerializerTest {
 
     @Test
     public void testThatReadCanBeDeserialized() throws IOException {
-        var referenceTimestamp = Instant.now(Clock.systemUTC());
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
         // these are only here as a debugging aid
         var groundTruth = makeEmptyTrafficStream(referenceTimestamp);
-        //System.err.println("groundTruth: "+groundTruth);
+        System.err.println("groundTruth: "+groundTruth);
         // Pasting this into `base64 -d | protoc --decode_raw` will also show the structure
-        //String tmp = Base64.getEncoder().encodeToString(groundTruth.toByteArray());
+        var groundTruthBytes = groundTruth.toByteArray();
+        System.err.println("groundTruth Bytes: "+Base64.getEncoder().encodeToString(groundTruthBytes));
 
-
-        var startingTimeMillis = System.currentTimeMillis();
         List<ByteBuffer> outputBuffersCreated = new ArrayList<>();
         var serializer = new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING,
                 () -> {
@@ -78,37 +106,22 @@ class StreamChannelConnectionCaptureSerializerTest {
                 });
         var bb = Unpooled.wrappedBuffer(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8));
         serializer.addReadEvent(referenceTimestamp, bb);
-        serializer.addExceptionCaughtEvent(referenceTimestamp, new RuntimeException(FAKE_READ_PACKET_DATA));
-        var endingTimeMillis = System.currentTimeMillis();
-        serializer.close();
+        bb.clear();
+        serializer.addReadEvent(referenceTimestamp, bb);
+        serializer.addExceptionCaughtEvent(referenceTimestamp, new RuntimeException(FAKE_EXCEPTION_DATA));
+        serializer.addExceptionCaughtEvent(referenceTimestamp, new RuntimeException(""));
+        serializer.addEndOfFirstLineIndicator(17);
+        serializer.addEndOfHeadersIndicator(72);
+        serializer.addEndOfHttpMessageIndicator(referenceTimestamp);
         bb.release();
         Assertions.assertEquals(1, outputBuffersCreated.size());
         var onlyBuffer = outputBuffersCreated.get(0);
         var reconstitutedTrafficStream = TrafficStream.parseFrom(onlyBuffer);
         Assertions.assertEquals(TEST_TRAFFIC_STREAM_ID_STRING, reconstitutedTrafficStream.getId());
-        Assertions.assertEquals(2, reconstitutedTrafficStream.getSubStreamCount());
+        Assertions.assertEquals(5, reconstitutedTrafficStream.getSubStreamCount());
         Assertions.assertEquals(1, reconstitutedTrafficStream.getNumberOfThisLastChunk());
         Assertions.assertFalse(reconstitutedTrafficStream.hasNumber());
-        {
-            TrafficObservation observation = reconstitutedTrafficStream.getSubStream(0);
-            Assertions.assertTrue(observation.hasTs());
-            var ts = observation.getTs();
-            Assertions.assertEquals(referenceTimestamp.getEpochSecond(), ts.getSeconds());
-            Assertions.assertEquals(referenceTimestamp.getNano(), ts.getNanos());
-            Assertions.assertTrue(observation.hasRead());
-            Assertions.assertFalse(observation.hasException());
-            Assertions.assertEquals(FAKE_READ_PACKET_DATA, observation.getRead().getData().toStringUtf8());
-        }
-        {
-            TrafficObservation observation = reconstitutedTrafficStream.getSubStream(1);
-            Assertions.assertTrue(observation.hasTs());
-            var ts = observation.getTs();
-            Assertions.assertEquals(referenceTimestamp.getEpochSecond(), ts.getSeconds());
-            Assertions.assertEquals(referenceTimestamp.getNano(), ts.getNanos());
-            Assertions.assertFalse(observation.hasRead());
-            Assertions.assertTrue(observation.hasException());
-            Assertions.assertEquals(FAKE_READ_PACKET_DATA, observation.getException().getMessage());
-        }
+
         Assertions.assertEquals(groundTruth, reconstitutedTrafficStream);
     }
 }

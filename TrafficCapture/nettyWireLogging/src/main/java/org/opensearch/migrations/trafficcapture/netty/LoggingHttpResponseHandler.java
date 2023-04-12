@@ -55,7 +55,7 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     }
 
     public void onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
-        HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
+        HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(decoder, trafficOffloader, parsedMsgs);
     }
 
     public void parseHttpMessageParts(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
@@ -113,6 +113,7 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
         super.exceptionCaught(ctx, cause);
     }
 

@@ -35,13 +35,11 @@ message Disconnect {}
 message Exception {
   string message = 1;
 }
-message EndOfLineIndicator {
-  int32 characterIndex = 1;
+message EndOfSegments {}
+message EndOfMessageIndicator {
+  optional int32 firstLineByteLength = 1;
+  optional int32 headersByteLength = 2;
 }
-message EndOfHeadersIndicator {
-  int32 characterIndex = 1;
-}
-message EndOfMessageIndicator {}
 
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
@@ -56,12 +54,11 @@ message TrafficObservation {
     Disconnect disconnect = 12;
     Close close = 13;
 
-    EndOfLineIndicator endOfLine = 3;
-    EndOfHeadersIndicator endOfHeaders = 4;
-    EndOfMessageIndicator endOfMessageIndicator = 5;
-
+    EndOfSegments segmentEnd = 4;
+    EndOfMessageIndicator endOfMessageIndicator = 3;
   }
 }
+
 message TrafficStream {
   string id = 1; // persistent identifier for all stream objects within a single connection
   repeated TrafficObservation subStream = 2;

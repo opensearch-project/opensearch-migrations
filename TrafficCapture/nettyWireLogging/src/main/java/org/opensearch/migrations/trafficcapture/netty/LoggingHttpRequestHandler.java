@@ -52,7 +52,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
     }
 
     protected void onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
-        HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
+        HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(decoder, trafficOffloader, parsedMsgs);
     }
 
     private void parseHttpMessageParts(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
@@ -74,7 +74,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-        trafficOffloader.flush(true);
+        trafficOffloader.flushCommitAndResetStream(true);
         super.channelUnregistered(ctx);
     }
 
@@ -112,6 +112,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
         super.exceptionCaught(ctx, cause);
     }
 

@@ -3,10 +3,22 @@ package org.opensearch.migrations.trafficcapture.netty;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaders;
 
+import java.util.Set;
+import java.util.TreeSet;
+
 public class PassThruHttpHeaders extends DefaultHttpHeaders {
 
+    private static DefaultHttpHeaders HEADERS_TO_PRESERVE = makeHeadersToPreserve();
+    private static DefaultHttpHeaders makeHeadersToPreserve() {
+        var h = new DefaultHttpHeaders(false);
+        h.add(Names.CONTENT_LENGTH, "");
+        h.add(Names.CONTENT_TRANSFER_ENCODING, "");
+        h.add(Names.TRAILER, "");
+        return h;
+    }
+
     private static boolean headerNameShouldBeTracked(CharSequence name) {
-        return name.equals(Names.CONTENT_LENGTH);
+        return HEADERS_TO_PRESERVE.contains(name);
     }
 
     @Override
