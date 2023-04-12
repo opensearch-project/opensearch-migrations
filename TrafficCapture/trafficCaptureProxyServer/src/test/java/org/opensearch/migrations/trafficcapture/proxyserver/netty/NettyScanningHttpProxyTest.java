@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -54,10 +55,14 @@ class NettyScanningHttpProxyTest {
 
         var nettyEndpoint = URI.create("http://localhost:" + servers.v1().getProxyPort() + "/");
         var client = HttpClient.newHttpClient();
-        var request = HttpRequest
+        var requestBuilder = HttpRequest
                 .newBuilder()
                 .uri(nettyEndpoint)
-                .version(HttpClient.Version.HTTP_1_1)
+                .version(HttpClient.Version.HTTP_1_1);
+        for (int i=0; i<20; i++) {
+            requestBuilder.setHeader("DumbAndLongHeaderValue-"+i, ""+i);
+        }
+        var request = requestBuilder
                 .build();
         HttpResponse<String> send = client.send(request, HttpResponse.BodyHandlers.ofString());
         String responseBody = send.body();
@@ -76,7 +81,6 @@ class NettyScanningHttpProxyTest {
                         })
                         .toArray();
         Assertions.assertEquals(1, recordedTrafficStreams.length);
-
     }
 
     private static Tuple<NettyScanningHttpProxy, HttpServer>
@@ -107,9 +111,16 @@ class NettyScanningHttpProxyTest {
         server.createContext("/", new HttpHandler() {
             @Override
             public void handle(HttpExchange httpExchange) throws IOException {
-                var response = UPSTREAM_SERVER_RESPONSE_BODY;
+                var headers = httpExchange.getResponseHeaders();
+                headers.set("Content-Type", "text/plain");
+                headers.set("Funtime", "checkIt!");
+                headers.set("Content-Transfer-Encoding", "chunked");
                 httpExchange.sendResponseHeaders(200, 0);
-                httpExchange.getResponseBody().write(response.getBytes());
+                var response = UPSTREAM_SERVER_RESPONSE_BODY;
+                for (int i=0; i<1; ++i) {
+                    httpExchange.getResponseBody().write(response.getBytes());
+                    httpExchange.getResponseBody().flush();
+                }
                 httpExchange.getResponseBody().close();
                 httpExchange.close();
             }

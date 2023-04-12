@@ -37,7 +37,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
         Bootstrap b = new Bootstrap();
         b.group(inboundChannel.eventLoop())
                 .channel(ctx.channel().getClass())
-                .handler(new LoggingHandler(LogLevel.WARN))
+                .handler(new LoggingHandler(LogLevel.ERROR))
                 .option(ChannelOption.AUTO_READ, false);
         log.debug("Active - setting up backend connection");
         var f = b.connect(host, port);
