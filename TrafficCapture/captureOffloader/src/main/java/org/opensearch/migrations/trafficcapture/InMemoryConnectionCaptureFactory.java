@@ -13,6 +13,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.WeakHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
@@ -33,21 +34,21 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
         AtomicInteger supplierCallCounter = new AtomicInteger();
-        WeakHashMap<CodedOutputStream,ByteArrayOutputStream> codedStreamToFileStreamMap = new WeakHashMap<>();
+        WeakHashMap<CodedOutputStream, ByteArrayOutputStream> codedStreamToFileStreamMap = new WeakHashMap<>();
         return new StreamChannelConnectionCaptureSerializer(connectionId, () -> {
-                    var baos = new ByteArrayOutputStream();
-                    var cos = CodedOutputStream.newInstance(baos);
-                    codedStreamToFileStreamMap.put(cos, baos);
-                    return cos;
-                }, (stream) -> {
-                    try {
-                        ByteArrayOutputStream baos = codedStreamToFileStreamMap.get(stream);
-                        baos.close();
-                        recordedStreams.add(new RecordedTrafficStream(baos.toByteArray()));
-                        codedStreamToFileStreamMap.remove(stream);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+            var baos = new ByteArrayOutputStream();
+            var cos = CodedOutputStream.newInstance(baos);
+            codedStreamToFileStreamMap.put(cos, baos);
+            return cos;
+        }, (stream) -> CompletableFuture.runAsync(() -> {
+            try {
+                ByteArrayOutputStream baos = codedStreamToFileStreamMap.get(stream);
+                baos.close();
+                recordedStreams.add(new RecordedTrafficStream(baos.toByteArray()));
+                codedStreamToFileStreamMap.remove(stream);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }));
     }
 }

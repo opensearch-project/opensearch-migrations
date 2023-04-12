@@ -2,7 +2,6 @@ package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.http.DefaultHttpResponse;
@@ -54,8 +53,8 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
         decoder = new SimpleHttpResponseDecoder();
     }
 
-    public void onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
-        HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(decoder, trafficOffloader, parsedMsgs);
+    public HttpCaptureSerializerUtil.HttpProcessedState onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
+        return HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
     }
 
     public void parseHttpMessageParts(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
@@ -66,7 +65,10 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
         var parsedMsgs = new ArrayList<>(4);
         decoder.decode(ctx, bb, parsedMsgs);
         bb.resetReaderIndex();
-        onHttpObjectsDecoded(parsedMsgs);
+        var httpProcessedState = onHttpObjectsDecoded(parsedMsgs);
+        if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
+            trafficOffloader.flushCommitAndResetStream(false);
+        }
     }
 
     @Override

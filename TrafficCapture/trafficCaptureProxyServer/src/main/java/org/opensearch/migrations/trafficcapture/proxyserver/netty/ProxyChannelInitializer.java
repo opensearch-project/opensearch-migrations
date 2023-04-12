@@ -2,6 +2,9 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.http.DefaultHttpRequest;
+import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpObjectDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslHandler;
@@ -29,6 +32,13 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         this.connectionCaptureFactory = connectionCaptureFactory;
     }
 
+    public boolean shouldGuaranteeMessageOffloading(DefaultHttpRequest httpRequest) {
+        return (httpRequest != null &&
+                (httpRequest.method().equals(HttpMethod.POST) ||
+                        httpRequest.method().equals(HttpMethod.PUT) ||
+                        httpRequest.method().equals(HttpMethod.DELETE)));
+    }
+
     @Override
     protected void initChannel(SocketChannel ch) throws IOException {
         var sslContext = sslEngineProvider != null ? sslEngineProvider.get() : null;
@@ -39,7 +49,8 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         var offloader = connectionCaptureFactory.createOffloader(ch.id().asShortText());
         ch.pipeline().addLast(new LoggingHandler("PRE", LogLevel.WARN));
         ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader, x->true));
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader,
+                this::shouldGuaranteeMessageOffloading));
         //ch.pipeline().addLast(new ConditionallyReliableWireLoggingHandler(x->true, offloader));
         //ch.pipeline().addLast(new LoggingHandler("POST", LogLevel.ERROR));
         ch.pipeline().addLast(new FrontsideHandler(host, port));

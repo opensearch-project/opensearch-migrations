@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBuf;
 import java.io.IOException;
 import java.net.SocketAddress;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 
 public interface IChannelConnectionCaptureListener {
     default void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {}
@@ -28,7 +29,16 @@ public interface IChannelConnectionCaptureListener {
 
     default void addEndOfFirstLineIndicator(int characterIndex) throws IOException {}
     default void addEndOfHeadersIndicator(int characterIndex) throws IOException {}
-    default void addEndOfHttpMessageIndicator(Instant timestamp) throws IOException {}
 
-    default void flushCommitAndResetStream(boolean isFinal) throws IOException {}
+    /**
+     * Adds an end-of-record indicator and resets the index values in preparation of any new
+     * messages that may come across the channel.
+     * @param timestamp
+     * @throws IOException
+     */
+    default void commitEndOfHttpMessageIndicator(Instant timestamp) throws IOException {}
+
+    default CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
+        return CompletableFuture.completedFuture(null);
+    }
 }

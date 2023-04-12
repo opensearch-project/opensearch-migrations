@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
 
 import java.util.Set;
@@ -11,9 +12,9 @@ public class PassThruHttpHeaders extends DefaultHttpHeaders {
     private static DefaultHttpHeaders HEADERS_TO_PRESERVE = makeHeadersToPreserve();
     private static DefaultHttpHeaders makeHeadersToPreserve() {
         var h = new DefaultHttpHeaders(false);
-        h.add(Names.CONTENT_LENGTH, "");
-        h.add(Names.CONTENT_TRANSFER_ENCODING, "");
-        h.add(Names.TRAILER, "");
+        h.add(HttpHeaderNames.CONTENT_LENGTH, "");
+        h.add(HttpHeaderNames.CONTENT_TRANSFER_ENCODING, "");
+        h.add(HttpHeaderNames.TRAILER, "");
         return h;
     }
 

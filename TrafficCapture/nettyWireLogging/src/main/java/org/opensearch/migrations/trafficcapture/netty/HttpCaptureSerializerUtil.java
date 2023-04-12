@@ -4,7 +4,6 @@ import io.netty.handler.codec.DecoderResult;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpMessageDecoderResult;
-import io.netty.handler.codec.http.HttpObjectDecoder;
 import io.netty.handler.codec.http.LastHttpContent;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
@@ -29,14 +28,13 @@ public class HttpCaptureSerializerUtil
         }
     }
 
-        public static HttpProcessedState addHttpMessageIndicatorEvents(
-            HttpObjectDecoder decoder,
+    public static HttpProcessedState addHttpMessageIndicatorEvents(
             IChannelConnectionCaptureSerializer trafficOffloader,
             List<Object> parsedMsgs) throws IOException {
         Instant timestamp = Instant.now();
         for (var obj : parsedMsgs) {
             if (obj instanceof LastHttpContent) {
-                trafficOffloader.addEndOfHttpMessageIndicator(timestamp);
+                trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
                 return HttpProcessedState.FULL_MESSAGE;
             }
             var decoderResultLoose = getDecoderResult(obj);

@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.WeakHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
@@ -45,7 +46,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
                     var cos = CodedOutputStream.newInstance(fs);
                     codedStreamToFileStreamMap.put(cos, fs);
                     return cos;
-                }, (stream) -> {
+                }, (stream) -> CompletableFuture.runAsync(() -> {
                     try {
                         var fs = codedStreamToFileStreamMap.get(stream);
                         fs.flush();
@@ -54,6 +55,6 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
-                });
+                }));
     }
 }

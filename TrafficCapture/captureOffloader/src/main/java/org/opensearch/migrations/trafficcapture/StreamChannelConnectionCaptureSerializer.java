@@ -18,7 +18,9 @@ import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -28,7 +30,7 @@ public class StreamChannelConnectionCaptureSerializer implements
     private final static int MAX_ID_SIZE = 32;
 
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
-    private final Consumer<CodedOutputStream> closeHandler;
+    private final Function<CodedOutputStream, CompletableFuture> closeHandler;
     private final String idString;
     private CodedOutputStream currentCodedOutputStreamOrNull;
     private int numFlushesSoFar;
@@ -37,7 +39,7 @@ public class StreamChannelConnectionCaptureSerializer implements
 
     public StreamChannelConnectionCaptureSerializer(String id,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
-                                                    Consumer<CodedOutputStream> closeHandler) throws IOException {
+                                                    Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
         assert(id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
@@ -116,22 +118,32 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
     
     @Override
-    public void flushCommitAndResetStream(boolean isFinal) throws IOException {
+    public CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
+        if (currentCodedOutputStreamOrNull == null && !isFinal) {
+            return closeHandler.apply(null);
+        }
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
         currentCodedOutputStream().writeInt32(fieldNum, ++numFlushesSoFar);
         currentCodedOutputStream().flush();
-        closeHandler.accept(currentCodedOutputStream());
+        var future = closeHandler.apply(currentCodedOutputStream());
+        //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
         currentCodedOutputStreamOrNull = null;
+        return future;
     }
 
     /**
-     * Override the Closeable interface - not addCloseEvent
+     * This call is BLOCKING.  Override the Closeable interface - not addCloseEvent.
+     *
      * @throws IOException
      */
     @Override
     public void close() throws IOException {
-        if (currentCodedOutputStream().getTotalBytesWritten() > 0) {
-            flushCommitAndResetStream(true);
+        try {
+            flushCommitAndResetStream(true).get();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -291,9 +303,15 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     @Override
-    public void addEndOfHttpMessageIndicator(Instant timestamp)
+    public void commitEndOfHttpMessageIndicator(Instant timestamp)
             throws IOException
     {
+        writeEndOfHttpMessage(timestamp);
+        this.firstLineByteLength = -1;
+        this.headersByteLength = -1;
+    }
+
+    private void writeEndOfHttpMessage(Instant timestamp) throws IOException {
         int eomPairSize = CodedOutputStream.computeInt32Size(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength) +
                 CodedOutputStream.computeInt32Size(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
         int eomDataSize = eomPairSize + CodedOutputStream.computeInt32SizeNoTag(eomPairSize);
@@ -301,6 +319,5 @@ public class StreamChannelConnectionCaptureSerializer implements
         currentCodedOutputStream().writeUInt32NoTag(eomPairSize);
         currentCodedOutputStream().writeInt32(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
         currentCodedOutputStream().writeInt32(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
-        flushCommitAndResetStream(true);
     }
 }

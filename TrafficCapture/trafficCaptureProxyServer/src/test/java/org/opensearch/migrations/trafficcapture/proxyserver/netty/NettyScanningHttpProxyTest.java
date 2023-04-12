@@ -6,6 +6,10 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import lombok.SneakyThrows;
+import org.apache.http.ProtocolVersion;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -18,9 +22,6 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -53,21 +54,20 @@ class NettyScanningHttpProxyTest {
         var captureFactory = new InMemoryConnectionCaptureFactory();
         var servers = startServers(captureFactory);
 
-        var nettyEndpoint = URI.create("http://localhost:" + servers.v1().getProxyPort() + "/");
-        var client = HttpClient.newHttpClient();
-        var requestBuilder = HttpRequest
-                .newBuilder()
-                .uri(nettyEndpoint)
-                .version(HttpClient.Version.HTTP_1_1);
-        for (int i=0; i<20; i++) {
-            requestBuilder.setHeader("DumbAndLongHeaderValue-"+i, ""+i);
+        String responseBody;
+        try (var client = HttpClientBuilder.create().build()) {
+            var nettyEndpoint = URI.create("http://localhost:" + servers.v1().getProxyPort() + "/");
+            var request = new HttpGet(nettyEndpoint);
+            request.setProtocolVersion(new ProtocolVersion("HTTP", 1, 1));
+            for (int i = 0; i < 20; i++) {
+                request.setHeader("DumbAndLongHeaderValue-" + i, "" + i);
+            }
+            var response = client.execute(request);
+            responseBody = new String(response.getEntity().getContent().readAllBytes());
         }
-        var request = requestBuilder
-                .build();
-        HttpResponse<String> send = client.send(request, HttpResponse.BodyHandlers.ofString());
-        String responseBody = send.body();
 
         Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
+        Thread.sleep(1000*10);
         var recordedStreams = captureFactory.getRecordedStreams();
         Assertions.assertEquals(1, recordedStreams.size());
         var recordedTrafficStreams =
@@ -81,6 +81,7 @@ class NettyScanningHttpProxyTest {
                         })
                         .toArray();
         Assertions.assertEquals(1, recordedTrafficStreams.length);
+        System.out.println(recordedTrafficStreams[0]);
     }
 
     private static Tuple<NettyScanningHttpProxy, HttpServer>
@@ -98,6 +99,7 @@ class NettyScanningHttpProxyTest {
             try {
                 nshp.get().start(LOCALHOST, upstreamTestServer.get().getAddress().getPort(), null,
                         connectionCaptureFactory);
+                System.out.println("proxy port = "+port.intValue());
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }

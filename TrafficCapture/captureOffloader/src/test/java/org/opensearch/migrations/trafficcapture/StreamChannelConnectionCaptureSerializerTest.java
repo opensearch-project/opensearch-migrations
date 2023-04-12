@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 class StreamChannelConnectionCaptureSerializerTest {
     private final static String FAKE_EXCEPTION_DATA = "abcdefghijklmnop";
@@ -94,7 +95,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     outputBuffersCreated.add(bytes);
                     return CodedOutputStream.newInstance(bytes);
                 },
-                cos-> {
+                cos-> CompletableFuture.runAsync(() -> {
                     try {
                         cos.flush();
                         var bb = outputBuffersCreated.get(0);
@@ -103,7 +104,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
-                });
+                }));
         var bb = Unpooled.wrappedBuffer(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8));
         serializer.addReadEvent(referenceTimestamp, bb);
         bb.clear();
@@ -112,7 +113,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         serializer.addExceptionCaughtEvent(referenceTimestamp, new RuntimeException(""));
         serializer.addEndOfFirstLineIndicator(17);
         serializer.addEndOfHeadersIndicator(72);
-        serializer.addEndOfHttpMessageIndicator(referenceTimestamp);
+        serializer.commitEndOfHttpMessageIndicator(referenceTimestamp);
         bb.release();
         Assertions.assertEquals(1, outputBuffersCreated.size());
         var onlyBuffer = outputBuffersCreated.get(0);
