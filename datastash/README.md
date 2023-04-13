@@ -17,43 +17,24 @@ Edit the `logstash.conf` configuration file to point to your source and target `
 
 ### 2. Configure index templates on the target cluster
 
-To ensure that the settings and mappings are correctly configured for the indices being migrated, perform the following steps _for each index being migrated_:
+By default, the `logstash.conf` configuration file used by Datastash creates an index on the target cluster with the _same name_ as the source cluster. To ensure that index settings and mappings are correctly configured, perform the following steps _for each index that will be migrated_:
 
-1. In the `index_template_base.json` file, update the `index_patterns` array with the name of the index being migrated:
-```
-...
-    "index_patterns": ["myIndex"]
-}
-```
-
-2. Fetch the settings for the index by executing the following command, replacing `<index-name>` with the name of the index being migrated:
+1. Form the index template by running the following command, replacing `<index-name>` with the name of the index being migrated:
 
 ```
-curl -s <source>:<port>/<index-name>/_settings | jq '.<index-name>.settings | del(.index.creation_date, .index.uuid, .index.provided_name, .index.version.created) | {template: {settings: .}}' > /tmp/settings.json
+indexName=<index-name>; curl -s http://ec2-18-236-163-55.us-west-2.compute.amazonaws.com:8443/$indexName | jq --arg INDEXNAME "$indexName" '{index_patterns: [$INDEXNAME], priority: 500, template: {settings: .[$INDEXNAME].settings, mappings: .[$INDEXNAME].mappings}} | del(.template.settings.index.creation_date, .template.settings.index.uuid, .template.settings.index.provided_name, .template.settings.index.version)' > /tmp/datastash_template.json
 ```
 
-3. Fetch the mappings for the index by executing the following command, replacing `<index-name>` with the name of the index being migrated:
+2. Update the target cluster with the index template, replacing `<index-name>` with the name of the index being migrated:
 
 ```
-curl -s <source>:<port>/<index-name>/_mappings | jq '{template: {mappings: .<index-name>.mappings}}' > /tmp/mappings.json
+indexName=<index-name>; curl -XPUT -H 'Content-Type: application/json' "<target>:<port>/_index_template/datastash_template_$indexName?pretty" -d @/tmp/datastash_template.json
 ```
 
-4. Combine the JSON files to form the index template:
+3. Finally, clean up the temporary file we created:
 
 ```
-jq -s '.[0] * .[1] * .[2]' index_template_base.json /tmp/settings.json /tmp/mappings.json > /tmp/datastash_template.json
-```
-
-5. Update the target cluster with the index template, replacing `<index-name>` with the name of the index being migrated:
-
-```
-curl -XPUT -H 'Content-Type: application/json' "<target>:<port>/_index_template/datastash_template_<index-name>?pretty" -d @/tmp/datastash_template.json
-```
-
-6. Finally, clean up the temporary files we created:
-
-```
-rm /tmp/settings.json /tmp/mappings.json /tmp/datastash_template.json
+rm /tmp/datastash_template.json
 ```
 
 ### 3. Run the migration
