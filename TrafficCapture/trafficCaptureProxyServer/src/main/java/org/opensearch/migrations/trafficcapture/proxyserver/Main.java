@@ -5,6 +5,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import lombok.SneakyThrows;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.env.Environment;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
@@ -37,18 +38,21 @@ public class Main {
                     });
         }
         builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
+        builder.put("path.home", configFile);
         return builder.build();
     }
 
-    private static IConnectionCaptureFactory getConnectionCaptureFactory() {
-        return new FileConnectionCaptureFactory("tracelogs");
+    private static IConnectionCaptureFactory getConnectionCaptureFactory(String traceLogsDirectory) {
+        return new FileConnectionCaptureFactory(traceLogsDirectory);
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
 
-        var sksOp = Optional.ofNullable(args.length == 0 ? null : Optional.class)
-                .map(o->new DefaultSecurityKeyStore(getSettings(args[0]),
-                        args.length > 1 ? Paths.get(args[1]) : null));
+        String traceLogsDirectory = args[0];
+        var sksOp = Optional.ofNullable(args.length <= 1 ? null : Optional.class)
+                .map(o->new DefaultSecurityKeyStore(getSettings(args[1]),
+                        args.length > 1 ? Paths.get(args[2]) : null));
+
         sksOp.ifPresent(x->x.initHttpSSLConfig());
         var proxy = new NettyScanningHttpProxy(sksOp.isPresent() ? 443 : 80);
 
@@ -61,7 +65,7 @@ public class Main {
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
-                    }).orElse(null), getConnectionCaptureFactory());
+                    }).orElse(null), getConnectionCaptureFactory(traceLogsDirectory));
         } catch (Exception e) {
             System.err.println(e);
             e.printStackTrace();
