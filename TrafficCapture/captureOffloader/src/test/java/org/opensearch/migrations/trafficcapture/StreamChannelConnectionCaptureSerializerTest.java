@@ -20,7 +20,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 class StreamChannelConnectionCaptureSerializerTest {
     private final static String FAKE_EXCEPTION_DATA = "abcdefghijklmnop";
@@ -79,7 +81,7 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     @Test
-    public void testThatReadCanBeDeserialized() throws IOException {
+    public void testThatReadCanBeDeserialized() throws IOException, ExecutionException, InterruptedException {
         final var referenceTimestamp = Instant.now(Clock.systemUTC());
         // these are only here as a debugging aid
         var groundTruth = makeEmptyTrafficStream(referenceTimestamp);
@@ -89,18 +91,22 @@ class StreamChannelConnectionCaptureSerializerTest {
         System.err.println("groundTruth Bytes: "+Base64.getEncoder().encodeToString(groundTruthBytes));
 
         List<ByteBuffer> outputBuffersCreated = new ArrayList<>();
+        WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBuffersMap = new WeakHashMap<>();
         var serializer = new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING,
                 () -> {
                     ByteBuffer bytes = ByteBuffer.allocate(1024*1024);
-                    outputBuffersCreated.add(bytes);
-                    return CodedOutputStream.newInstance(bytes);
+                    var rval = CodedOutputStream.newInstance(bytes);
+                    codedStreamToByteBuffersMap.put(rval, bytes);
+                    return rval;
                 },
                 cos-> CompletableFuture.runAsync(() -> {
                     try {
                         cos.flush();
-                        var bb = outputBuffersCreated.get(0);
+                        var bb = codedStreamToByteBuffersMap.get(cos);
                         bb.position(0);
-                        bb.limit(cos.getTotalBytesWritten());
+                        var bytesWritten = cos.getTotalBytesWritten();
+                        bb.limit(bytesWritten);
+                        outputBuffersCreated.add(bb);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -114,6 +120,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         serializer.addEndOfFirstLineIndicator(17);
         serializer.addEndOfHeadersIndicator(72);
         serializer.commitEndOfHttpMessageIndicator(referenceTimestamp);
+        serializer.flushCommitAndResetStream(true).get();
         bb.release();
         Assertions.assertEquals(1, outputBuffersCreated.size());
         var onlyBuffer = outputBuffersCreated.get(0);
