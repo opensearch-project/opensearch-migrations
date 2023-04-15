@@ -23,6 +23,9 @@ message ReadSegment {
   int32 count = 1;
   bytes data = 2;
 }
+message ProxyFinishesForwardingRequest {
+  bool timedOut = 1;
+}
 message Write {
   bytes data = 1;
 }
@@ -44,18 +47,22 @@ message EndOfMessageIndicator {
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
   oneof Capture {
-    Exception exception = 2;
-    Read read = 8;
-    ReadSegment readSegment = 9;
-    Write write = 16;
-    WriteSegment writeSegment = 17;
-    Bind bind = 10;
-    Connect connect = 11;
-    Disconnect disconnect = 12;
-    Close close = 13;
+    Bind bind = 2;
+    Connect connect = 3;
+    Read read = 4;
+    ReadSegment readSegment = 5;
+    ProxyFinishesForwardingRequest requestReleasedDownstream = 6;
+    Write write = 8;
+    WriteSegment writeSegment = 9;
+    Disconnect disconnect = 10;
+    Close close = 11;
+    Exception exception = 12;
 
-    EndOfSegments segmentEnd = 4;
-    EndOfMessageIndicator endOfMessageIndicator = 3;
+    // This seems a bit easier than adding a count of the number of segments that will be needed,
+    // especially since the first segment might be smaller due to other observations already
+    // having been committed to the stream.
+    EndOfSegments segmentEnd = 14;
+    EndOfMessageIndicator endOfMessageIndicator = 15;
   }
 }
 
