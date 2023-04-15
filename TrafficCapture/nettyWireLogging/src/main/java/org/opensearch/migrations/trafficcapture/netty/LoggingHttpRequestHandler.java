@@ -69,7 +69,6 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
         var bb = msg;
-        bb.retain();
         bb.markReaderIndex();
         // todo - move this into a pool
         var parsedMsgs = new ArrayList<>(4);

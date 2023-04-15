@@ -59,7 +59,6 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
 
     public void parseHttpMessageParts(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         var bb = (ByteBuf) msg;
-        bb.retain();
         bb.markReaderIndex();
         // todo - move this into a pool
         var parsedMsgs = new ArrayList<>(4);
