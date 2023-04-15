@@ -16,6 +16,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Scanner;
+import java.util.stream.Collectors;
 
 public class RequestResponseResponseTriple {
     private RequestResponsePacketPair sourcePair;
@@ -35,14 +36,14 @@ public class RequestResponseResponseTriple {
 
         private JSONObject jsonFromHttpData(List<byte[]> data) throws IOException {
 
-            SequenceInputStream collatedStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).toList()));
+            SequenceInputStream collatedStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).collect(Collectors.toList())));
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
             String head = scanner.next();
             int header_length = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
             // SequenceInputStreams cannot be reset, so it's recreated from the original data.
-            SequenceInputStream bodyStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).toList()));
-            bodyStream.skipNBytes(header_length);
+            SequenceInputStream bodyStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).collect(Collectors.toList())));
+            bodyStream.skip(header_length);
 
             // There are several limitations introduced by using the HTTP.toJSONObject call.
             // 1. We need to replace "\r\n" with "\n" which could mask differences in the responses.
