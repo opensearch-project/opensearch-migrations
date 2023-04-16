@@ -6,20 +6,21 @@ import com.beust.jcommander.ParameterException;
 import com.google.common.io.CharSource;
 import com.google.common.primitives.Bytes;
 import lombok.extern.log4j.Log4j2;
+import org.opensearch.migrations.trafficcapture.protos.Read;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
+import javax.annotation.Nullable;
 import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
+import java.io.DataInputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.Reader;
 import java.net.URI;
 import java.nio.charset.Charset;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,7 +29,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -36,22 +37,6 @@ import java.util.stream.Stream;
 
 @Log4j2
 public class TrafficReplayer {
-    final static int LOG_PREAMBLE_SIZE = 75;
-    // current log fmt: [%d{ISO8601}][%-5p][%-25c{1.}] [%node_name]%marker %m%n
-    final static Pattern LINE_MATCHER =
-            Pattern.compile("^\\[(.*),(.[0-9]*)\\]\\[.*\\]\\[.*\\] \\[(.*)\\] \\[id: 0x([0-9a-f]*), .*\\] " +
-                    "(ACTIVE|FLUSH|INACTIVE|READ COMPLETE|REGISTERED|UNREGISTERED|WRITABILITY|((READ|WRITE)( ([0-9]+):(.*))))");
-    final static int TIMESTAMP_GROUP        = 1;
-    final static int TIMESTAMP_MS_GROUP     = 2;
-    final static int CLUSTER_GROUP          = 3;
-    final static int CHANNEL_ID_GROUP       = 4;
-    final static int SIMPLE_OPERATION_GROUP = 5;
-    final static int RW_OPERATION_GROUP     = 7;
-    final static int SIZE_GROUP             = 9;
-    final static int PAYLOAD_GROUP          = 10;
-    public static final String READ_OPERATION     = "READ";
-    public static final String WRITE_OPERATION    = "WRITE";
-    public static final String FINISHED_OPERATION = "UNREGISTERED";
 
     private final NettyPacketToHttpHandlerFactory packetHandlerFactory;
 
@@ -92,30 +77,23 @@ public class TrafficReplayer {
         }
     }
 
-    public static CloseableStringStreamWrapper getLogLineStreamFromInputStream(InputStream is) throws IOException {
-        InputStreamReader isr = new InputStreamReader(is, Charset.forName("UTF-8"));
-        try {
-            BufferedReader br = new BufferedReader(isr);
-            return CloseableStringStreamWrapper.generateStreamFromBufferedReader(br);
-        } catch (Exception e) {
-            isr.close();
-            throw e;
-        }
+    public static CloseableTrafficStreamWrapper getLogEntriesFromInputStream(InputStream is) throws IOException {
+        return CloseableTrafficStreamWrapper.generateTrafficStreamFromInputStream(is);
     }
 
-    public static CloseableStringStreamWrapper getLogLineStreamFromFile(String filename) throws IOException {
+    public static CloseableTrafficStreamWrapper getLogEntriesFromFile(String filename) throws IOException {
         FileInputStream fis = new FileInputStream(filename);
         try {
-            return getLogLineStreamFromInputStream(fis);
+            return getLogEntriesFromInputStream(fis);
         } catch (Exception e) {
             fis.close();
             throw e;
         }
     }
 
-    public static CloseableStringStreamWrapper getLogLineStreamFromFileOrStdin(String filename) throws IOException {
-        return filename == null ? getLogLineStreamFromInputStream(System.in) :
-                getLogLineStreamFromFile(filename);
+    public static CloseableTrafficStreamWrapper getLogEntriesFromFileOrStdin(String filename) throws IOException {
+        return filename == null ? getLogEntriesFromInputStream(System.in) :
+                getLogEntriesFromFile(filename);
     }
 
     public static void main(String[] args) throws IOException, InterruptedException {
@@ -135,14 +113,14 @@ public class TrafficReplayer {
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (CloseableStringStreamWrapper css = getLogLineStreamFromFileOrStdin(params.inputFilename)) {
-                    runReplayWithIOStreams(tr, css, bufferedOutputStream);
+                try (var closeableStream = getLogEntriesFromFileOrStdin(params.inputFilename)) {
+                    runReplayWithIOStreams(tr, closeableStream.stream(), bufferedOutputStream);
                 }
             }
         }
     }
 
-    private static void runReplayWithIOStreams(TrafficReplayer tr, CloseableStringStreamWrapper stringInputSequence,
+    private static void runReplayWithIOStreams(TrafficReplayer tr, Stream<TrafficStream> trafficChunkStream,
                                                BufferedOutputStream bufferedOutputStream)
             throws IOException, InterruptedException {
         var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedOutputStream);
@@ -157,7 +135,7 @@ public class TrafficReplayer {
                 }
         )
         );
-        tr.runReplay(stringInputSequence.stream(), replayEngine);
+        tr.runReplay(trafficChunkStream, replayEngine);
     }
 
     private static String aggregateByteStreamToString(Stream<byte[]> bStream) {
@@ -202,68 +180,50 @@ public class TrafficReplayer {
         }
     }
 
-    public void runReplay(Stream<String> logLinesStream, ReplayEngine replayEngine) throws IOException, InterruptedException {
+    public void runReplay(Stream<TrafficStream> trafficChunkStream, ReplayEngine replayEngine) throws IOException, InterruptedException {
         try {
-            logLinesStream.forEach(s->parseAndConsumeLine(replayEngine, s));
+            trafficChunkStream
+                    .forEach(ts->ts.getSubStreamList().stream()
+                            .forEach(o->replayEngine.accept(ts.getId(), o)));
         } finally {
             packetHandlerFactory.stopGroup();
         }
     }
 
-    private enum Operation {
-        Read, Write, Close
-    }
-
-    public static class ReplayEntry {
-        public final String id;
-        public final Operation operation;
-        public final byte[] data;
-        public final Instant timestamp;
-
-        public ReplayEntry(String id, String timestampStr, Operation operation, byte[] data) {
-            this.id = id;
-            this.operation = operation;
-            this.timestamp = Instant.parse(timestampStr);
-            this.data = data;
-        }
-    }
-
     public static class RequestResponsePacketPair {
-        final Instant firstTimeStamp;
+        Instant firstTimeStampForRequest;
+        Instant lastTimeStampForRequest;
+        Instant firstTimeStampForResponse;
+        Instant lastTimeStampForResponse;
 
         final ArrayList<byte[]> requestData;
         final ArrayList<byte[]> responseData;
 
-        private Instant lastTimeStamp;
-
-        private Operation lastOperation;
-
-        public Duration getTotalDuration() {
-            return Duration.between(firstTimeStamp, lastTimeStamp);
+        public Duration getTotalRequestDuration() {
+            return Duration.between(firstTimeStampForRequest, lastTimeStampForRequest);
+        }
+        public Duration getTotalResponseDuration() {
+            return Duration.between(firstTimeStampForResponse, lastTimeStampForResponse);
         }
 
-        public RequestResponsePacketPair(Instant requestStartTime) {
+        public RequestResponsePacketPair() {
             this.requestData = new ArrayList<>();
             this.responseData = new ArrayList<>();
-            this.lastOperation = Operation.Close;
-            this.firstTimeStamp = requestStartTime;
-        }
-
-        public Operation getLastOperation() {
-            return lastOperation;
         }
 
         public void addRequestData(Instant packetTimeStamp, byte[] data) {
             log.trace(()->(this+" Adding request data: "+new String(data, Charset.defaultCharset())));
             requestData.add(data);
-            this.lastOperation = Operation.Read;
+            if (firstTimeStampForRequest == null) {
+                firstTimeStampForRequest = packetTimeStamp;
+            }
+            lastTimeStampForRequest = packetTimeStamp;
         }
         public void addResponseData(Instant packetTimeStamp, byte[] data) {
             log.trace(()->(this+" Adding response data (len="+responseData.size()+"): "+
                     new String(data, Charset.defaultCharset())));
             responseData.add(data);
-            lastTimeStamp = packetTimeStamp;
-            this.lastOperation = Operation.Write;
+            lastTimeStampForResponse = packetTimeStamp;
         }
 
         public Stream<byte[]> getRequestDataStream() {
@@ -275,7 +235,7 @@ public class TrafficReplayer {
         }
     }
 
-    public static class ReplayEngine implements Consumer<ReplayEntry> {
+    public static class ReplayEngine implements BiConsumer<String, TrafficObservation> {
         private final Map<String, RequestResponsePacketPair> liveStreams;
         private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
@@ -285,27 +245,41 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void accept(ReplayEntry e) {
-            if (e.operation.equals(Operation.Close)) {
-                publishAndClear(e.id);
-            } else if (e.operation.equals(Operation.Write)) {
-                var priorBuffers = liveStreams.get(e.id);
-                if (priorBuffers == null) {
+        public void accept(String id, TrafficObservation observation) {
+            boolean updateFirstResponseTimestamp = false;
+            RequestResponsePacketPair runningList = null;
+            var pbts = observation.getTs();
+            var timestamp = Instant.ofEpochSecond(pbts.getSeconds(), pbts.getNanos());
+            if (observation.hasEndOfMessageIndicator()) {
+                publishAndClear(id);
+            } else if (observation.hasRead()) {
+                runningList =
+                        liveStreams.putIfAbsent(id, new RequestResponsePacketPair());
+                if (runningList==null) {
+                    runningList = liveStreams.get(id);
+                    // TODO - eliminate the byte[] and use the underlying nio buffer
+                    runningList.addRequestData(timestamp, observation.getRead().getData().toByteArray());
+                }
+            } else if (observation.hasReadSegment()) {
+                throw new RuntimeException("Not implemented yet.");
+            } else if (observation.hasWrite()) {
+                updateFirstResponseTimestamp = true;
+                runningList = liveStreams.get(id);
+                if (runningList == null) {
                     throw new RuntimeException("Apparent out of order exception - " +
                             "found a purported write to a socket before a read!");
                 }
-                priorBuffers.addResponseData(e.timestamp, e.data);
-            } else if (e.operation.equals(Operation.Read)) {
-                var runningList =
-                        liveStreams.putIfAbsent(e.id, new RequestResponsePacketPair(e.timestamp));
-                if (runningList==null) {
-                    runningList = liveStreams.get(e.id);
-                } else if (runningList.lastOperation == Operation.Write) {
-                    publishAndClear(e.id);
-                    accept(e);
-                    return;
+                runningList.addResponseData(timestamp, observation.getWrite().toByteArray());
+            } else if (observation.hasWriteSegment()) {
+                updateFirstResponseTimestamp = true;
+                throw new RuntimeException("Not implemented yet.");
+            } else if (observation.hasRequestReleasedDownstream()) {
+                updateFirstResponseTimestamp = true;
+            }
+            if (updateFirstResponseTimestamp && runningList != null) {
+                if (runningList.firstTimeStampForResponse == null) {
+                    runningList.firstTimeStampForResponse = timestamp;
                 }
-                runningList.addRequestData(e.timestamp, e.data);
             }
         }
 
@@ -314,48 +288,6 @@ public class TrafficReplayer {
             if (priorBuffers != null) {
                 fullDataHandler.accept(priorBuffers);
                 liveStreams.remove(id);
-            }
-        }
-    }
-
-    // as per https://github.com/google/guava/issues/5376.  Yuck
-    public static InputStream readerToStream(Reader reader, Charset charset) throws IOException {
-        return new CharSource() {
-            @Override
-            public Reader openStream() {
-                return reader;
-            }
-        }.asByteSource(charset).openStream();
-    }
-
-    private void parseAndConsumeLine(Consumer<ReplayEntry> replayEntryConsumer, String line) {
-        var m = LINE_MATCHER.matcher(line);
-        if (!m.matches()) {
-            return;
-        }
-
-        String uniqueConnectionKey = m.group(CLUSTER_GROUP) + "," + m.group(CHANNEL_ID_GROUP);
-        String simpleOperation = m.group(SIMPLE_OPERATION_GROUP);
-        String timestampStr = m.group(TIMESTAMP_GROUP) + "." + m.group(TIMESTAMP_MS_GROUP) + "Z";
-
-        if (simpleOperation != null) {
-            var rwOperation = m.group(RW_OPERATION_GROUP);
-            int packetDataSize = Optional.ofNullable(m.group(SIZE_GROUP)).map(s->Integer.parseInt(s)).orElse(0);
-            log.trace("read op="+rwOperation+" size="+packetDataSize);
-            if (rwOperation != null) {
-                var packetData = Base64.getDecoder().decode(m.group(10));
-                log.trace(()->"line="+line);
-                log.trace(()->"packetData="+new String(packetData, Charset.defaultCharset()));
-                if (rwOperation.equals(READ_OPERATION)) {
-                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Read, packetData));
-                } else if (rwOperation.equals(WRITE_OPERATION)) {
-                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Write, packetData));
-                }
-            } else {
-                log.trace("read op="+simpleOperation);
-                if (simpleOperation.equals(FINISHED_OPERATION)) {
-                    replayEntryConsumer.accept(new ReplayEntry(uniqueConnectionKey, timestampStr, Operation.Close, null));
-                }
             }
         }
     }

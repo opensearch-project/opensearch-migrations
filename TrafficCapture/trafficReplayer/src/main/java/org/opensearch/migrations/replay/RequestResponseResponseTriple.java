@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import lombok.extern.slf4j.Slf4j;
 import org.json.HTTP;
 import org.json.JSONObject;
 import org.opensearch.migrations.replay.TrafficReplayer.RequestResponsePacketPair;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Scanner;
 import java.util.stream.Collectors;
 
+@Slf4j
 public class RequestResponseResponseTriple {
     private RequestResponsePacketPair sourcePair;
     private List<byte[]> shadowResponseData;
@@ -66,8 +68,11 @@ public class RequestResponseResponseTriple {
         private JSONObject toJSONObject(RequestResponseResponseTriple triple) throws IOException {
             JSONObject meta = new JSONObject();
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData));
-            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData, triple.sourcePair.getTotalDuration()));
-            meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData, triple.shadowResponseDuration));
+            log.warn("TODO: These durations are not measuring the same values!");
+            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData,
+                    triple.sourcePair.getTotalResponseDuration()));
+            meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
+                    triple.shadowResponseDuration));
 
             return meta;
         }

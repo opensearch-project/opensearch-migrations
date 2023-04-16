@@ -39,17 +39,21 @@ repositories {
 }
 
 dependencies {
-    implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
-    implementation group: 'org.json', name: 'json', version: '20220924'
-    implementation group: 'org.junit.jupiter', name: 'junit-jupiter', version: '5.8.1'
-    implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
-    implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
+    implementation project(':captureProtobufs')
+
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+    implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
+    implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
-    annotationProcessor 'org.projectlombok:lombok:1.18.26'
+    implementation group: 'org.json', name: 'json', version: '20220924'
+    implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter', version: '5.9.2'
+
+    annotationProcessor 'org.projectlombok:lombok:1.18.26'
 }
 
 application {
