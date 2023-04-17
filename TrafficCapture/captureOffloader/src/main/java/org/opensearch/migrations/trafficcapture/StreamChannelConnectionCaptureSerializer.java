@@ -42,7 +42,7 @@ public class StreamChannelConnectionCaptureSerializer implements
                                                     Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
-        assert(id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
+        assert (id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
         this.idString = id;
     }
 
@@ -75,7 +75,7 @@ public class StreamChannelConnectionCaptureSerializer implements
         final var tsSize = getSizeOfTimestamp(timestamp);
         final var observationTagSize = CodedOutputStream.computeTagSize(tag);
         currentCodedOutputStream().writeUInt32NoTag(tsSize +
-                        CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsSize) +
+                CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsSize) +
                 observationTagSize +
                 bodySize);
         writeTimestampForNowToCurrentStream(timestamp);
@@ -116,7 +116,7 @@ public class StreamChannelConnectionCaptureSerializer implements
             currentCodedOutputStream().writeUInt32NoTag(0);
         }
     }
-    
+
     @Override
     public CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
         if (currentCodedOutputStreamOrNull == null && !isFinal) {
@@ -146,7 +146,6 @@ public class StreamChannelConnectionCaptureSerializer implements
             throw new RuntimeException(e);
         }
     }
-
 
 
     private TrafficObservation.Builder getTrafficObservationBuilder() {
@@ -199,7 +198,7 @@ public class StreamChannelConnectionCaptureSerializer implements
 //    }
 
     private void addStringMessage(int observationFieldNumber, int dataFieldNumber,
-                                Instant timestamp, String str) throws IOException {
+                                  Instant timestamp, String str) throws IOException {
         int dataSize = 0;
         int lengthSize = 1;
         if (str.length() > 0) {
@@ -207,7 +206,7 @@ public class StreamChannelConnectionCaptureSerializer implements
             lengthSize = currentCodedOutputStream().computeInt32SizeNoTag(dataSize);
         }
         beginWritingObservationToCurrentStream(timestamp, observationFieldNumber,
-                dataSize+lengthSize);
+                dataSize + lengthSize);
         if (dataSize > 0) {
             currentCodedOutputStream().writeInt32NoTag(dataSize);
         }
@@ -224,7 +223,7 @@ public class StreamChannelConnectionCaptureSerializer implements
             lengthSize = currentCodedOutputStream().computeInt32SizeNoTag(dataSize);
         }
         beginWritingObservationToCurrentStream(timestamp, observationFieldNumber,
-                dataSize+lengthSize);
+                dataSize + lengthSize);
         if (dataSize > 0) {
             currentCodedOutputStream().writeInt32NoTag(dataSize);
         }
@@ -304,8 +303,7 @@ public class StreamChannelConnectionCaptureSerializer implements
 
     @Override
     public void commitEndOfHttpMessageIndicator(Instant timestamp)
-            throws IOException
-    {
+            throws IOException {
         writeEndOfHttpMessage(timestamp);
         this.firstLineByteLength = -1;
         this.headersByteLength = -1;
