@@ -21,9 +21,10 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
     public static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
          * Override to broaden the visibility.
-         * @param ctx           the {@link ChannelHandlerContext} which this {@link ByteToMessageDecoder} belongs to
-         * @param buffer            the {@link ByteBuf} from which to read data
-         * @param out           the {@link List} to which decoded messages should be added
+         *
+         * @param ctx    the {@link ChannelHandlerContext} which this {@link ByteToMessageDecoder} belongs to
+         * @param buffer the {@link ByteBuf} from which to read data
+         * @param out    the {@link List} to which decoded messages should be added
          * @throws Exception
          */
         @Override
@@ -38,7 +39,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
         @Override
         public HttpMessage createMessage(String[] initialLine) throws Exception {
-             return new DefaultHttpRequest(HttpVersion.valueOf(initialLine[2]),
+            return new DefaultHttpRequest(HttpVersion.valueOf(initialLine[2]),
                     HttpMethod.valueOf(initialLine[0]), initialLine[1]
                     , new PassThruHttpHeaders()
             );
@@ -60,10 +61,10 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
     protected HttpCaptureSerializerUtil.HttpProcessedState
     onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
         parsedMsgs.stream()
-                .filter(o->o instanceof DefaultHttpRequest)
-                .map(o->(DefaultHttpRequest)o)
+                .filter(o -> o instanceof DefaultHttpRequest)
+                .map(o -> (DefaultHttpRequest) o)
                 .findAny()
-                .ifPresent(req->this.currentHttpRequest =req);
+                .ifPresent(req -> this.currentHttpRequest = req);
         return HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
     }
 
@@ -86,7 +87,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
-                log.warn("Got error: "+t.getMessage());
+                log.warn("Got error: " + t.getMessage());
                 ctx.close();
             } else {
                 try {

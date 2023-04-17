@@ -3,6 +3,9 @@ package org.opensearch.migrations.trafficcapture;
 import com.google.protobuf.CodedOutputStream;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;

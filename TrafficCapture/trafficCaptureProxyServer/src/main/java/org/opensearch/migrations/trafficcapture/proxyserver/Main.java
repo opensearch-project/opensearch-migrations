@@ -3,6 +3,7 @@
  */
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import lombok.NonNull;
 import lombok.SneakyThrows;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.env.Environment;
@@ -26,7 +27,7 @@ public class Main {
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
 
     @SneakyThrows
-    private static Settings getSettings(String configFile) {
+    private static Settings getSettings(@NonNull String configFile) {
         var builder = Settings.builder();
         try (var lines = Files.lines(Paths.get(configFile))) {
             lines
