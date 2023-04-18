@@ -3,11 +3,13 @@ from lark import Lark
 from lark import Transformer
 
 class LogstashTransformer(Transformer):
-    def stringValue(self, s):
+    def var_name(self, s):
         return s.value
+
     def string_literal(self, s):
         (s,) = s
         return s[1:-1]
+
     def number(self, n):
         (n,) = n
         return float(n)
@@ -18,19 +20,22 @@ class LogstashTransformer(Transformer):
     list = list
     param = tuple
     plugin = tuple
-    STRING = stringValue
-    PLUGIN_TYPE = stringValue
+    STRING = var_name
+    PLUGIN_TYPE = var_name
 
     true = lambda self, _: True
     false = lambda self, _: False
 
+
 logstash_parser = Lark.open("logstash.lark", rel_to=__file__, parser="lalr", transformer=LogstashTransformer())
 
-def parse(logstash_file):
+
+def parse(logstash_file:str) -> dict:
     conf_file = open(logstash_file, "r")
     res = logstash_parser.parse(conf_file.read())
     conf_file.close()
     return res
+
 
 if __name__ == '__main__':
     val = parse(sys.argv[1])
