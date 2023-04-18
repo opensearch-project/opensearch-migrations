@@ -2,6 +2,7 @@ import sys
 from lark import Lark
 from lark import Transformer
 
+
 class LogstashTransformer(Transformer):
     def var_name(self, s):
         return s.value
@@ -14,6 +15,12 @@ class LogstashTransformer(Transformer):
         (n,) = n
         return float(n)
 
+    def true(self):
+        return True
+
+    def false(self):
+        return False
+
     start = dict
     config_section = tuple
     plugin_params = dict
@@ -23,14 +30,11 @@ class LogstashTransformer(Transformer):
     STRING = var_name
     PLUGIN_TYPE = var_name
 
-    true = lambda self, _: True
-    false = lambda self, _: False
-
 
 logstash_parser = Lark.open("logstash.lark", rel_to=__file__, parser="lalr", transformer=LogstashTransformer())
 
 
-def parse(logstash_file:str) -> dict:
+def parse(logstash_file: str) -> dict:
     conf_file = open(logstash_file, "r")
     res = logstash_parser.parse(conf_file.read())
     conf_file.close()
