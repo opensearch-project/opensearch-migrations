@@ -1,0 +1,38 @@
+// Adapated from https://github.com/bpaquet/node-logstash/blob/master/lib/logstash_config.jison
+// Tested via https://www.lark-parser.org/ide
+// TODO add if/else support
+?start: config_section (config_section)*
+
+?config_section: type "{" plugins? "}"
+
+?plugins: plugins? plugin
+
+?plugin: STRING "{" plugin_params? "}"
+
+?plugin_params: param (param)*
+
+param: STRING "=>" value
+
+?value: string_literal
+    | number
+    | "true" -> true
+    | "false" -> false
+    | list
+
+?list : "[" [member ("," member)*] "]"
+?member: string_literal | number
+PLUGIN_TYPE: "input" | "filter" | "output"
+?type: PLUGIN_TYPE
+STRING: (DIGIT|LETTER|"_"|"-"|".")+
+string_literal: ESCAPED_STRING
+?number: SIGNED_NUMBER
+COMMENT: "#"/.*/
+
+%import common.ESCAPED_STRING
+%import common.SIGNED_NUMBER
+%import common.DIGIT
+%import common.LETTER
+%import common.WS
+
+%ignore WS
+%ignore COMMENT
