@@ -101,18 +101,35 @@ def print_report(source: dict, target: dict) -> set:
     return indices_to_create
 
 
+def create_indices(indices: dict, endpoint: str, auth_tuple: tuple):
+    for index in indices:
+        actual_endpoint = endpoint + index
+        data_dict = dict()
+        data_dict[SETTINGS_KEY] = indices[index][SETTINGS_KEY]
+        data_dict[MAPPINGS_KEY] = indices[index][MAPPINGS_KEY]
+        try:
+            resp = requests.put(actual_endpoint, auth=auth_tuple, json=data_dict)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print("Failed to create index [" + index + "] - " + str(e), file=sys.stderr)
+
+
 if __name__ == '__main__':
     # Parse logstash config file
+    print("\n##### Starting index configuration tool... #####\n")
     logstash = parser.parse(sys.argv[1])
     validate_logstash_config(logstash)
     # Fetch all indices from source cluster
     source_indices = fetch_all_indices_by_plugin(get_plugin_config(logstash, "input"))
-    print("Indices from source: " + string_from_set(set(source_indices.keys())))
-    target_endpoint, target_auth = get_endpoint_info(get_plugin_config(logstash, "output"))
     # Fetch all indices from target cluster
+    target_endpoint, target_auth = get_endpoint_info(get_plugin_config(logstash, "output"))
     target_indices = fetch_all_indices(target_endpoint, target_auth)
     # Print report and get index data for indices to be created
     indices_set = print_report(source_indices, target_indices)
-    index_data = dict()
-    for index in indices_set:
-        index_data[index] = source_indices[index]
+    # Create indices
+    if indices_set:
+        index_data = dict()
+        for index_name in indices_set:
+            index_data[index_name] = source_indices[index_name]
+        create_indices(index_data, target_endpoint, target_auth)
+    print("\n##### Index configuration tool has completed! #####\n")

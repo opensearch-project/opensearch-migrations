@@ -15,10 +15,10 @@ class LogstashTransformer(Transformer):
         (n,) = n
         return float(n)
 
-    def true(self):
+    def true(self, b):
         return True
 
-    def false(self):
+    def false(self, b):
         return False
 
     start = dict
