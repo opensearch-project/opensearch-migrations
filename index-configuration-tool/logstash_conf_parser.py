@@ -3,6 +3,8 @@ from lark import Lark
 from lark import Transformer
 
 
+# Function names in the transformer correspond
+# either rule_names or TERMINALs in the .lark file
 class LogstashTransformer(Transformer):
     def var_name(self, s):
         return s.value
@@ -21,24 +23,23 @@ class LogstashTransformer(Transformer):
     def false(self, b):
         return False
 
+    STRING = var_name
+    PLUGIN_TYPE = var_name
+    # These rules can be transformed directly to a corresponding Python type
     start = dict
     config_section = tuple
     plugin_params = dict
     list = list
     param = tuple
     plugin = tuple
-    STRING = var_name
-    PLUGIN_TYPE = var_name
 
 
 logstash_parser = Lark.open("logstash.lark", rel_to=__file__, parser="lalr", transformer=LogstashTransformer())
 
 
 def parse(logstash_file: str) -> dict:
-    conf_file = open(logstash_file, "r")
-    res = logstash_parser.parse(conf_file.read())
-    conf_file.close()
-    return res
+    with open(logstash_file, "r") as conf_file:
+        return logstash_parser.parse(conf_file.read())
 
 
 if __name__ == '__main__':

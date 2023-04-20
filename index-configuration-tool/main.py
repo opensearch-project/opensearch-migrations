@@ -2,6 +2,7 @@ import sys
 import requests
 import logstash_conf_parser as parser
 from jsondiff import diff
+from typing import Optional
 
 # Constants
 SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
@@ -16,7 +17,7 @@ ALL_INDICES_ENDPOINT = "*"
 
 
 # Utility method to make a comma-separated string from a set
-def string_from_set(s: set) -> str:
+def string_from_set(s: set[str]) -> str:
     if s:
         return ", ".join(s)
     else:
@@ -30,13 +31,15 @@ def get_plugin_config(data: dict, plugin_type: str) -> dict:
 
 
 # TODO Only supports basic auth for now
-def get_auth(input_data: dict) -> tuple:
+def get_auth(input_data: dict) -> Optional[tuple]:
     if USER_KEY in input_data and PWD_KEY in input_data:
         return input_data[USER_KEY], input_data[PWD_KEY]
 
 
 def get_endpoint_info(plugin_config: dict) -> tuple:
     endpoint = "https://" if ("ssl" in plugin_config and plugin_config["ssl"]) else "http://"
+    # "hosts" can be a simple string, or an array of hosts for Logstash to hit.
+    # This tool needs one accessible host, so we pick the first entry in the latter case.
     endpoint += plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
     endpoint += "/"
     return endpoint, get_auth(plugin_config)
@@ -47,9 +50,9 @@ def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
     return fetch_all_indices(endpoint, auth_tuple)
 
 
-def fetch_all_indices(endpoint: str, auth_tuple: tuple) -> dict:
+def fetch_all_indices(endpoint: str, optional_auth: Optional[tuple]) -> dict:
     actual_endpoint = endpoint + ALL_INDICES_ENDPOINT
-    resp = requests.get(actual_endpoint, auth=auth_tuple)
+    resp = requests.get(actual_endpoint, auth=optional_auth)
     # Remove internal settings
     result = dict(resp.json())
     for index in result:
@@ -101,28 +104,28 @@ def print_report(source: dict, target: dict) -> set:
     return indices_to_create
 
 
-def create_indices(indices: dict, endpoint: str, auth_tuple: tuple):
-    for index in indices:
+def create_indices(indices_data: dict, endpoint: str, auth_tuple: tuple):
+    for index in indices_data:
         actual_endpoint = endpoint + index
         data_dict = dict()
-        data_dict[SETTINGS_KEY] = indices[index][SETTINGS_KEY]
-        data_dict[MAPPINGS_KEY] = indices[index][MAPPINGS_KEY]
+        data_dict[SETTINGS_KEY] = indices_data[index][SETTINGS_KEY]
+        data_dict[MAPPINGS_KEY] = indices_data[index][MAPPINGS_KEY]
         try:
             resp = requests.put(actual_endpoint, auth=auth_tuple, json=data_dict)
             resp.raise_for_status()
         except requests.exceptions.RequestException as e:
-            print("Failed to create index [" + index + "] - " + str(e), file=sys.stderr)
+            print(f"Failed to create index [{index}] - {e!s}", file=sys.stderr)
 
 
 if __name__ == '__main__':
     # Parse logstash config file
     print("\n##### Starting index configuration tool... #####\n")
-    logstash = parser.parse(sys.argv[1])
-    validate_logstash_config(logstash)
+    logstash_config = parser.parse(sys.argv[1])
+    validate_logstash_config(logstash_config)
     # Fetch all indices from source cluster
-    source_indices = fetch_all_indices_by_plugin(get_plugin_config(logstash, "input"))
+    source_indices = fetch_all_indices_by_plugin(get_plugin_config(logstash_config, "input"))
     # Fetch all indices from target cluster
-    target_endpoint, target_auth = get_endpoint_info(get_plugin_config(logstash, "output"))
+    target_endpoint, target_auth = get_endpoint_info(get_plugin_config(logstash_config, "output"))
     target_indices = fetch_all_indices(target_endpoint, target_auth)
     # Print report and get index data for indices to be created
     indices_set = print_report(source_indices, target_indices)

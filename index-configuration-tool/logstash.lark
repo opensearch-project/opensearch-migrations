@@ -1,4 +1,4 @@
-// Adapated from https://github.com/bpaquet/node-logstash/blob/master/lib/logstash_config.jison
+// Adapted from https://github.com/bpaquet/node-logstash/blob/master/lib/logstash_config.jison
 // Tested via https://www.lark-parser.org/ide
 // TODO add if/else support
 ?start: config_section (config_section)*
