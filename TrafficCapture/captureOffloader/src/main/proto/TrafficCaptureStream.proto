@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "org.opensearch.migrations.trafficcapture.protos";
+option java_outer_classname = "TrafficCapture";
+
+//message InetAddr {
+//  oneof ip_addr {
+//    fixed32 v4 = 1;
+//    bytes v6 = 2;
+//  }
+//}
+message Bind {
+  //InetAddr addr = 1;
+}
+message Connect {}
+message Read {
+  bytes data = 1;
+}
+message ReadSegment {
+  int32 count = 1;
+  bytes data = 2;
+}
+message ProxyFinishesForwardingRequest {
+  bool timedOut = 1;
+}
+message Write {
+  bytes data = 1;
+}
+message WriteSegment {
+  int32 count = 1;
+  bytes data = 2;
+}
+message Close {}
+message Disconnect {}
+message Exception {
+  string message = 1;
+}
+message EndOfSegments {}
+message EndOfMessageIndicator {
+  optional int32 firstLineByteLength = 1;
+  optional int32 headersByteLength = 2;
+}
+
+message TrafficObservation {
+  google.protobuf.Timestamp ts = 1;
+  oneof Capture {
+    Bind bind = 2;
+    Connect connect = 3;
+    Read read = 4;
+    ReadSegment readSegment = 5;
+    ProxyFinishesForwardingRequest requestReleasedDownstream = 6;
+    Write write = 8;
+    WriteSegment writeSegment = 9;
+    Disconnect disconnect = 10;
+    Close close = 11;
+    Exception exception = 12;
+
+    // This seems a bit easier than adding a count of the number of segments that will be needed,
+    // especially since the first segment might be smaller due to other observations already
+    // having been committed to the stream.
+    EndOfSegments segmentEnd = 14;
+    EndOfMessageIndicator endOfMessageIndicator = 15;
+  }
+}
+
+message TrafficStream {
+  string id = 1; // persistent identifier for all stream objects within a single connection
+  repeated TrafficObservation subStream = 2;
+  oneof index {
+    int32 number = 3;
+    int32 numberOfThisLastChunk = 4;
+  }
+}
