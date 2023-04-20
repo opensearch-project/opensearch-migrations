@@ -5,12 +5,12 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndicator;
-import org.opensearch.migrations.trafficcapture.protos.Exception;
-import org.opensearch.migrations.trafficcapture.protos.Read;
+import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.protos.Write;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -232,12 +232,12 @@ public class StreamChannelConnectionCaptureSerializer implements
 
     @Override
     public void addReadEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addDataMessage(TrafficObservation.READ_FIELD_NUMBER, Read.DATA_FIELD_NUMBER, timestamp, buffer);
+        addDataMessage(TrafficObservation.READ_FIELD_NUMBER, ReadObservation.DATA_FIELD_NUMBER, timestamp, buffer);
     }
 
     @Override
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, Write.DATA_FIELD_NUMBER, timestamp, buffer);
+        addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, WriteObservation.DATA_FIELD_NUMBER, timestamp, buffer);
     }
 
     @Override
@@ -287,7 +287,7 @@ public class StreamChannelConnectionCaptureSerializer implements
 
     @Override
     public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {
-        addStringMessage(TrafficObservation.EXCEPTION_FIELD_NUMBER, Exception.MESSAGE_FIELD_NUMBER,
+        addStringMessage(TrafficObservation.EXCEPTION_FIELD_NUMBER, ConnectionExceptionObservation.MESSAGE_FIELD_NUMBER,
                 timestamp, t.getMessage());
     }
 
@@ -310,12 +310,12 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     private void writeEndOfHttpMessage(Instant timestamp) throws IOException {
-        int eomPairSize = CodedOutputStream.computeInt32Size(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength) +
-                CodedOutputStream.computeInt32Size(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+        int eomPairSize = CodedOutputStream.computeInt32Size(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength) +
+                CodedOutputStream.computeInt32Size(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
         int eomDataSize = eomPairSize + CodedOutputStream.computeInt32SizeNoTag(eomPairSize);
         beginWritingObservationToCurrentStream(timestamp, TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER, eomDataSize);
         currentCodedOutputStream().writeUInt32NoTag(eomPairSize);
-        currentCodedOutputStream().writeInt32(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
-        currentCodedOutputStream().writeInt32(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+        currentCodedOutputStream().writeInt32(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
+        currentCodedOutputStream().writeInt32(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
     }
 }
