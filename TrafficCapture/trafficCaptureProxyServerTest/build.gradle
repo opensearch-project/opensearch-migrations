@@ -1,0 +1,45 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id "com.avast.gradle.docker-compose" version "0.16.12"
+    id "com.palantir.docker" version "0.35.0"
+    id "io.freefair.lombok" version "8.0.1"
+//    id 'de.qualersoft.jmeter' version '2.4.0'
+}
+
+// see https://github.com/apache/jmeter/issues/5322
+def withoutBom = {
+    exclude group: 'org.apache.jmeter', module: 'bom'
+}
+dependencies {
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.5', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.5', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.5', withoutBom
+}
+
+docker {
+    name "nginx-simple"
+    files 'src/main/docker/nginx-simple/'
+}
+//
+//jmeter {
+//    tool {
+//        version = "5.5"
+//    }
+//}
+//
+//task runJMeter(type: de.qualersoft.jmeter.gradleplugin.task.JMeterRunTask) {
+//    jmxFile.set("Test.jmx")
+//    dependsOn(tasks.getByName("composeUp"))
+//}
+//
+//task jmeterReport(type: de.qualersoft.jmeter.gradleplugin.task.JMeterReportTask) {
+//    jmxFile.set("Test.jmx")
+//    dependsOn('runJMeter')
+//}
+
+dockerCompose {
+    useComposeFiles.add("src/main/docker/docker-compose.yml")
+    //isRequiredBy(tasks.getByName('runJMeter'))
+}
+
+tasks.getByName('composeUp').dependsOn(tasks.getByName('docker'))

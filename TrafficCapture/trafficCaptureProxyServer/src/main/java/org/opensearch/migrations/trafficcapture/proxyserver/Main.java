@@ -1,11 +1,15 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import com.google.protobuf.CodedOutputStream;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.env.Environment;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
@@ -17,6 +21,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 public class Main {
@@ -41,12 +46,24 @@ public class Main {
     }
 
     private static IConnectionCaptureFactory getConnectionCaptureFactory(String traceLogsDirectory) {
-        return new FileConnectionCaptureFactory(traceLogsDirectory);
+        if (traceLogsDirectory == null) {
+            System.err.println("No trace log directory specified.  Logging to /dev/null");
+            return new IConnectionCaptureFactory() {
+                @Override
+                public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
+                    return new StreamChannelConnectionCaptureSerializer(connectionId, () ->
+                            CodedOutputStream.newInstance(NullOutputStream.getInstance()),
+                            cos -> CompletableFuture.completedFuture(null));
+                }
+            };
+        } else {
+            return new FileConnectionCaptureFactory(traceLogsDirectory);
+        }
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
 
-        String traceLogsDirectory = args[0];
+        String traceLogsDirectory = args.length > 0 ? args[0] : null;
         var sksOp = Optional.ofNullable(args.length <= 1 ? null : Optional.class)
                 .map(o->new DefaultSecurityKeyStore(getSettings(args[1]),
                         args.length > 1 ? Paths.get(args[2]) : null));
