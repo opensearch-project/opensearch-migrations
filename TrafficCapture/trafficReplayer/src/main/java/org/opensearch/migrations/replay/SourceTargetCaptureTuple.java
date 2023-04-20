@@ -17,14 +17,14 @@ import java.util.Scanner;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class RequestResponseResponseTriple {
+public class SourceTargetCaptureTuple {
     private RequestResponsePacketPair sourcePair;
     private List<byte[]> shadowResponseData;
     Duration shadowResponseDuration;
 
-    public RequestResponseResponseTriple(RequestResponsePacketPair sourcePair,
-                                         List<byte[]> shadowResponseData,
-                                         Duration shadowResponseDuration) {
+    public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
+                                    List<byte[]> shadowResponseData,
+                                    Duration shadowResponseDuration) {
         this.sourcePair = sourcePair;
         this.shadowResponseData = shadowResponseData;
         this.shadowResponseDuration = shadowResponseDuration;
@@ -62,7 +62,7 @@ public class RequestResponseResponseTriple {
             return message;
         }
 
-        private JSONObject toJSONObject(RequestResponseResponseTriple triple) throws IOException {
+        private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData));
             log.warn("TODO: These durations are not measuring the same values!");
@@ -112,7 +112,7 @@ public class RequestResponseResponseTriple {
          *
          * @param  triple  the RequestResponseResponseTriple object to be converted into json and written to the stream.
          */
-        public void writeJSON(RequestResponseResponseTriple triple) throws IOException {
+        public void writeJSON(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject jsonObject = toJSONObject(triple);
 
             outputStream.write(jsonObject.toString().getBytes(StandardCharsets.UTF_8));

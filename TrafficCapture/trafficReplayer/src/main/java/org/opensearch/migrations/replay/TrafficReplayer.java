@@ -4,6 +4,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import lombok.extern.log4j.Log4j2;
+import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.BufferedOutputStream;
@@ -20,12 +21,12 @@ import java.util.stream.Stream;
 @Log4j2
 public class TrafficReplayer {
 
-    private final NettyPacketToHttpHandlerFactory packetHandlerFactory;
+    private final PacketToTransformingProxyHandlerFactory packetHandlerFactory;
     private Duration timeout = Duration.ofSeconds(20);
 
     public TrafficReplayer(URI serverUri)
     {
-        packetHandlerFactory = new NettyPacketToHttpHandlerFactory(serverUri);
+        packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri);
     }
 
 
@@ -87,7 +88,7 @@ public class TrafficReplayer {
     private static void runReplayWithIOStreams(TrafficReplayer tr, Stream<TrafficStream> trafficChunkStream,
                                                BufferedOutputStream bufferedOutputStream)
             throws IOException, InterruptedException {
-        var tripleWriter = new RequestResponseResponseTriple.TupleToFileWriter(bufferedOutputStream);
+        var tripleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
                 triple -> {
                     try {
@@ -103,7 +104,7 @@ public class TrafficReplayer {
     }
 
     private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
-                                       Consumer<RequestResponseResponseTriple> onResponseReceivedCallback) {
+                                       Consumer<SourceTargetCaptureTuple> onResponseReceivedCallback) {
         try {
             log.debug("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
@@ -112,7 +113,7 @@ public class TrafficReplayer {
             }
             AtomicBoolean waiter = new AtomicBoolean(true);
             packetHandler.finalizeRequest(summary-> {
-                RequestResponseResponseTriple requestResponseTriple = new RequestResponseResponseTriple(requestResponsePacketPair,
+                SourceTargetCaptureTuple requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
                         summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
                         summary.getResponseDuration()
                 );

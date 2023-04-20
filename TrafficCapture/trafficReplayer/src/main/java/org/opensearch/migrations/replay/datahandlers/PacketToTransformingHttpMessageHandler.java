@@ -1,6 +1,7 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.datahandlers;
 
 import lombok.AllArgsConstructor;
+import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.io.Closeable;
 import java.io.IOException;
