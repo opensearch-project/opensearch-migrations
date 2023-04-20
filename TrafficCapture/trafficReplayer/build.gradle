@@ -24,7 +24,7 @@ plugins {
 }
 
 spotbugs {
-    includeFilter = file('config/spotbugs/spotbugs-include.xml')
+    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
 }
 
 checkstyle {
