@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 import org.json.HTTP;
 import org.json.JSONObject;
-import org.opensearch.migrations.replay.TrafficReplayer.RequestResponsePacketPair;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -11,8 +10,6 @@ import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
@@ -33,7 +30,7 @@ public class RequestResponseResponseTriple {
         this.shadowResponseDuration = shadowResponseDuration;
     }
 
-    public static class TripleToFileWriter {
+    public static class TupleToFileWriter {
         OutputStream outputStream;
 
         private JSONObject jsonFromHttpData(List<byte[]> data) throws IOException {
@@ -77,7 +74,7 @@ public class RequestResponseResponseTriple {
             return meta;
         }
 
-        public TripleToFileWriter(OutputStream outputStream){
+        public TupleToFileWriter(OutputStream outputStream){
             this.outputStream = outputStream;
         }
 

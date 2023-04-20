@@ -10,20 +10,20 @@ import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.StringReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.time.temporal.TemporalUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 class TrafficReplayerTest {
@@ -73,7 +73,7 @@ class TrafficReplayerTest {
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger();
-            Assertions.assertTrue(TrafficReplayer.getLogEntriesFromInputStream(bais).stream()
+            Assertions.assertTrue(CloseableTrafficStreamWrapper.getCaptureEntriesFromInputStream(bais).stream()
                     .allMatch(ts->ts.equals(makeTrafficStream(timestamp.plus(counter.getAndIncrement(),
                             ChronoUnit.SECONDS)))));
         }
@@ -94,7 +94,7 @@ class TrafficReplayerTest {
     public void testReader() throws IOException, URISyntaxException, InterruptedException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"));
         List<List<byte[]>> byteArrays = new ArrayList<>();
-        TrafficReplayer.ReplayEngine re = new TrafficReplayer.ReplayEngine(rrpp -> {
+        ReplayEngine re = new ReplayEngine(rrpp -> {
             var bytesList = rrpp.getRequestDataStream().collect(Collectors.toList());
             byteArrays.add(bytesList);
             Assertions.assertEquals(FAKE_READ_PACKET_DATA,
@@ -105,11 +105,57 @@ class TrafficReplayerTest {
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 3);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
-            try (var cssw = TrafficReplayer.getLogEntriesFromInputStream(bais)) {
+            try (var cssw = CloseableTrafficStreamWrapper.getCaptureEntriesFromInputStream(bais)) {
                 tr.runReplay(cssw.stream(), re);
             }
         }
         Assertions.assertEquals(3, byteArrays.size());
         Assertions.assertEquals(1, byteArrays.get(0).size());
+    }
+
+    @Test
+    public void testTransformer() throws Exception {
+        var referenceStringBuilder = new StringBuilder();
+        var numFinalizations = new AtomicInteger();
+        // mock object.  values don't matter at all - not what we're testing
+        var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
+        var transformingHandler = new HttpMessageTransformerHandler(new IPacketToHttpHandler() {
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            @Override
+            public void consumeBytes(byte[] nextRequestPacket) throws InvalidHttpStateException, IOException {
+                byteArrayOutputStream.write(nextRequestPacket);
+            }
+
+            @Override
+            public void finalizeRequest(Consumer<AggregatedRawResponse> onResponseFinishedCallback) throws InvalidHttpStateException, IOException {
+                numFinalizations.incrementAndGet();
+                var bytes = byteArrayOutputStream.toByteArray();
+                Assertions.assertEquals(referenceStringBuilder.toString(), new String(bytes, StandardCharsets.UTF_8));
+                onResponseFinishedCallback.accept(dummyAggregatedResponse);
+            }
+        });
+
+        Random r = new Random(2);
+
+        for (int i=0; i<3; ++i) {
+            String s = r.ints(r.nextInt(10), 'A', 'Z')
+                    .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
+                    .toString();
+            writeStringToBoth(s, referenceStringBuilder, transformingHandler);
+        }
+        var innermostFinalizeCallCount = new AtomicInteger();
+        transformingHandler.finalizeRequest(x-> {
+            // do nothing but check connectivity between the layers in the bottom most handler
+            innermostFinalizeCallCount.incrementAndGet();
+            Assertions.assertEquals(dummyAggregatedResponse, x);
+        });
+        Assertions.assertEquals(1, innermostFinalizeCallCount.get());
+        Assertions.assertEquals(1, numFinalizations.get());
+    }
+
+    private static void writeStringToBoth(String s, StringBuilder referenceStringBuilder,
+                                          HttpMessageTransformerHandler transformingHandler) throws Exception {
+        referenceStringBuilder.append(s);
+        transformingHandler.consumeBytes(s.getBytes(StandardCharsets.UTF_8));
     }
 }

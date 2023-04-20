@@ -1,5 +1,8 @@
 package org.opensearch.migrations.replay;
 
+import org.opensearch.migrations.replay.AggregatedRawResponse;
+
+import java.io.IOException;
 import java.util.function.Consumer;
 
 public interface IPacketToHttpHandler {
@@ -14,6 +17,6 @@ public interface IPacketToHttpHandler {
         }
     }
 
-    void consumeBytes(byte[] nextRequestPacket) throws InvalidHttpStateException;
-    void finalizeRequest(Consumer<AggregatedRawResponse> onResponseFinishedCallback) throws InvalidHttpStateException;
+    void consumeBytes(byte[] nextRequestPacket) throws InvalidHttpStateException, IOException;
+    void finalizeRequest(Consumer<AggregatedRawResponse> onResponseFinishedCallback) throws InvalidHttpStateException, IOException;
 }
