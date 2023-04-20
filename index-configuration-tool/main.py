@@ -65,16 +65,16 @@ def validate_logstash_config(config: dict):
     if "input" not in config or "output" not in config:
         raise ValueError("Missing input or output data from Logstash config")
     for plugin_tuple in config["input"], config["output"]:
-        input_type = plugin_tuple[0]
-        if input_type not in SUPPORTED_ENDPOINTS:
-            raise ValueError("Unsupported plugin type: " + input_type)
+        endpoint_type = plugin_tuple[0]
+        if endpoint_type not in SUPPORTED_ENDPOINTS:
+            raise ValueError("Unsupported endpoint type: " + endpoint_type)
         plugin_config = plugin_tuple[1]
         if HOSTS_KEY not in plugin_config:
-            raise ValueError("No hosts defined for plugin: " + input_type)
+            raise ValueError("No hosts defined for endpoint: " + endpoint_type)
         if USER_KEY in plugin_config and PWD_KEY not in plugin_config:
-            raise ValueError("Invalid auth configuration (no password for user) for plugin: " + input_type)
+            raise ValueError("Invalid auth configuration (no password for user) for endpoint: " + endpoint_type)
         elif PWD_KEY in plugin_config and USER_KEY not in plugin_config:
-            raise ValueError("Invalid auth configuration (Password without user) for plugin: " + input_type)
+            raise ValueError("Invalid auth configuration (Password without user) for endpoint: " + endpoint_type)
 
 
 def has_differences(index: str, dict1: dict, dict2: dict, key: str) -> bool:
