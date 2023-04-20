@@ -180,23 +180,7 @@ public class StreamChannelConnectionCaptureSerializer implements
     static abstract class BufRangeConsumer {
         abstract void accept(byte[] buff, int offset, int len);
     }
-//
-//    private void addByteBuf(ByteBuf buffer, BufRangeConsumer bufConsumer) {
-//        int buffSize = buffer.readableBytes();
-//        buffer.markReaderIndex();
-//        if (bufferedCapacityLeft < getSpaceRequiredForNextDataObservation(buffSize)) {
-//            byte[] buf = new byte[buffSize];
-//            buffer.readBytes(buf);
-//            buffer.
-//            buffer.readBytes()
-//            bufConsumer.accept(buf, 0, buffSize);
-//        } else {
-//
-//        }
-//        buffer.resetReaderIndex();
-//
-//    }
-
+    
     private void addStringMessage(int observationFieldNumber, int dataFieldNumber,
                                   Instant timestamp, String str) throws IOException {
         int dataSize = 0;
