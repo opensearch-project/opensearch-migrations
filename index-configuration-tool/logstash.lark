@@ -7,11 +7,11 @@
 
 ?plugins: plugins? plugin
 
-?plugin: STRING "{" plugin_params? "}"
+?plugin: key "{" plugin_params? "}"
 
 ?plugin_params: param (param)*
 
-param: STRING "=>" value
+param: key "=>" value
 
 ?value: string_literal
     | number
@@ -21,11 +21,12 @@ param: STRING "=>" value
 
 ?list : "[" [member ("," member)*] "]"
 ?member: string_literal | number
-PLUGIN_TYPE: "input" | "filter" | "output"
-?type: PLUGIN_TYPE
-STRING: (DIGIT|LETTER|"_"|"-"|".")+
+type: PLUGIN_TYPE
+key: STRING
 string_literal: ESCAPED_STRING
 ?number: SIGNED_NUMBER
+PLUGIN_TYPE: "input" | "filter" | "output"
+STRING: (DIGIT|LETTER|"_"|"-"|".")+
 COMMENT: "#"/.*/
 
 %import common.ESCAPED_STRING

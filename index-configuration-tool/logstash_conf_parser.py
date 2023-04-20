@@ -3,17 +3,19 @@ from lark import Lark
 from lark import Transformer
 
 
-# Function names in the transformer correspond
-# either rule_names or TERMINALs in the .lark file
+# The names of each function in the Transformer corresponds
+# to
 class LogstashTransformer(Transformer):
-    def var_name(self, s):
-        return s.value
+    def var_name(self, v: list):
+        (v,) = v
+        return v.value
 
-    def string_literal(self, s):
-        (s,) = s
+    def string_literal(self, s: list):
+        s = self.var_name(s)
+        # Remove surrounding quotes
         return s[1:-1]
 
-    def number(self, n):
+    def number(self, n: list):
         (n,) = n
         return float(n)
 
@@ -23,8 +25,9 @@ class LogstashTransformer(Transformer):
     def false(self, b):
         return False
 
-    STRING = var_name
-    PLUGIN_TYPE = var_name
+    # The same logic is applied for both rules
+    key = var_name
+    type = var_name
     # These rules can be transformed directly to a corresponding Python type
     start = dict
     config_section = tuple
