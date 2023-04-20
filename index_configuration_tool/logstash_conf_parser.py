@@ -6,23 +6,23 @@ from lark import Transformer
 # The names of each function in the Transformer corresponds
 # to
 class LogstashTransformer(Transformer):
-    def var_name(self, v: list):
+    def var_name(self, v: list) -> str:
         (v,) = v
         return v.value
 
-    def string_literal(self, s: list):
+    def string_literal(self, s: list) -> str:
         s = self.var_name(s)
         # Remove surrounding quotes
         return s[1:-1]
 
-    def number(self, n: list):
+    def number(self, n: list) -> int:
         (n,) = n
-        return float(n)
+        return int(n)
 
-    def true(self, b):
+    def true(self, b) -> bool:
         return True
 
-    def false(self, b):
+    def false(self, b) -> bool:
         return False
 
     # The same logic is applied for both rules
@@ -35,6 +35,7 @@ class LogstashTransformer(Transformer):
     list = list
     param = tuple
     plugin = tuple
+    plugins = list
 
 
 logstash_parser = Lark.open("logstash.lark", rel_to=__file__, parser="lalr", transformer=LogstashTransformer())
