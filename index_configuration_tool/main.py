@@ -1,8 +1,10 @@
 import sys
-import requests
-import logstash_conf_parser as parser
-from jsondiff import diff
 from typing import Optional
+
+import requests
+
+import logstash_conf_parser as parser
+import utils
 
 # Constants
 SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
@@ -14,20 +16,6 @@ MAPPINGS_KEY = "mappings"
 INDEX_KEY = "index"
 INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version", "store"]
 ALL_INDICES_ENDPOINT = "*"
-
-
-# Utility method to make a comma-separated string from a set
-def string_from_set(s: set[str]) -> str:
-    if s:
-        return ", ".join(s)
-    else:
-        return "[]"
-
-
-# Utility method to get the plugin config from the base data
-def get_plugin_config(data: dict, plugin_type: str) -> dict:
-    # Tuple contents are (type, config)
-    return data[plugin_type][1]
 
 
 # TODO Only supports basic auth for now
@@ -77,30 +65,23 @@ def validate_logstash_config(config: dict):
             raise ValueError("Invalid auth configuration (Password without user) for endpoint: " + endpoint_type)
 
 
-def has_differences(index: str, dict1: dict, dict2: dict, key: str) -> bool:
-    if key in dict1[index] and key in dict2[index]:
-        data_diff = diff(dict1[index][key], dict2[index][key])
-        return bool(data_diff)
-    else:
-        return True
-
-
 def print_report(source: dict, target: dict) -> set:
     index_conflicts = set()
     indices_in_target = set(source.keys()) & set(target.keys())
     for index in indices_in_target:
         # Check settings
-        if has_differences(index, source, target, SETTINGS_KEY):
+        if utils.has_differences(SETTINGS_KEY, source[index], target[index]):
             index_conflicts.add(index)
         # Check mappings
-        if has_differences(index, source, target, MAPPINGS_KEY):
+        if utils.has_differences(MAPPINGS_KEY, source[index], target[index]):
             index_conflicts.add(index)
     identical_indices = set(indices_in_target) - set(index_conflicts)
     indices_to_create = set(source.keys()) - set(indices_in_target)
     # Print report
-    print("Indices in target cluster with conflicting settings/mappings: " + string_from_set(index_conflicts))
-    print("Indices already created in target cluster (data will NOT be moved): " + string_from_set(identical_indices))
-    print("Indices to create: " + string_from_set(indices_to_create))
+    print("Indices in target cluster with conflicting settings/mappings: " + utils.string_from_set(index_conflicts))
+    print("Indices already created in target cluster (data will NOT be moved): " +
+          utils.string_from_set(identical_indices))
+    print("Indices to create: " + utils.string_from_set(indices_to_create))
     return indices_to_create
 
 
@@ -122,10 +103,13 @@ if __name__ == '__main__':
     print("\n##### Starting index configuration tool... #####\n")
     logstash_config = parser.parse(sys.argv[1])
     validate_logstash_config(logstash_config)
+    # Get input config. The tuple contents are (type, config)
+    plugin_config = logstash_config["input"][1]
     # Fetch all indices from source cluster
-    source_indices = fetch_all_indices_by_plugin(get_plugin_config(logstash_config, "input"))
+    source_indices = fetch_all_indices_by_plugin(plugin_config)
     # Fetch all indices from target cluster
-    target_endpoint, target_auth = get_endpoint_info(get_plugin_config(logstash_config, "output"))
+    plugin_config = logstash_config["output"][1]
+    target_endpoint, target_auth = get_endpoint_info(plugin_config)
     target_indices = fetch_all_indices(target_endpoint, target_auth)
     # Print report and get index data for indices to be created
     indices_set = print_report(source_indices, target_indices)
