@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
-    public static class SimpleHttpResponseDecoder extends HttpResponseDecoder {
+    static class SimpleHttpResponseDecoder extends HttpResponseDecoder {
         /**
          * Override to broaden the visibility.
          *
@@ -56,7 +56,7 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     }
 
     public HttpCaptureSerializerUtil.HttpProcessedState onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
-        return HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
+        return HttpCaptureSerializerUtil.addRelevantHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
     }
 
     public void parseHttpMessageParts(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {

@@ -18,7 +18,7 @@ import java.util.List;
 
 @Slf4j
 public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
-    public static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
+    static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
          * Override to broaden the visibility.
          *
@@ -65,7 +65,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
                 .map(o -> (DefaultHttpRequest) o)
                 .findAny()
                 .ifPresent(req -> this.currentHttpRequest = req);
-        return HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
+        return HttpCaptureSerializerUtil.addRelevantHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
     }
 
     private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
