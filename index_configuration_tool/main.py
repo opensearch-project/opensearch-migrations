@@ -31,21 +31,32 @@ def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
     endpoint, auth_tuple = get_endpoint_info(plugin_config)
     return search_endpoint.fetch_all_indices(endpoint, auth_tuple)
 
+def get_supported_endpoint(config: dict, key: str) -> tuple:
+    # The value of each key is a list of plugin configs.
+    # Each config is a tuple, where the first value is the endpoint type.
+    supported_endpoint = next((p for p in config[key] if p[0] in SUPPORTED_ENDPOINTS), None)
+    if not supported_endpoint:
+        raise ValueError("Could not find any supported endpoints in section: " + key)
+    return supported_endpoint
+
+
+def validate_plugin_config(config: dict, key: str):
+    # Raises a ValueError if no supported endpoints are found
+    supported_endpoint = get_supported_endpoint(config, key)
+    plugin_config = supported_endpoint[1]
+    if HOSTS_KEY not in plugin_config:
+        raise ValueError("No hosts defined for endpoint: " + supported_endpoint[0])
+    if USER_KEY in plugin_config and PWD_KEY not in plugin_config:
+        raise ValueError("Invalid auth configuration (no password for user) for endpoint: " + supported_endpoint[0])
+    elif PWD_KEY in plugin_config and USER_KEY not in plugin_config:
+        raise ValueError("Invalid auth configuration (Password without user) for endpoint: " + supported_endpoint[0])
+
 
 def validate_logstash_config(config: dict):
     if "input" not in config or "output" not in config:
         raise ValueError("Missing input or output data from Logstash config")
-    for plugin_tuple in config["input"], config["output"]:
-        endpoint_type = plugin_tuple[0]
-        if endpoint_type not in SUPPORTED_ENDPOINTS:
-            raise ValueError("Unsupported endpoint type: " + endpoint_type)
-        plugin_config = plugin_tuple[1]
-        if HOSTS_KEY not in plugin_config:
-            raise ValueError("No hosts defined for endpoint: " + endpoint_type)
-        if USER_KEY in plugin_config and PWD_KEY not in plugin_config:
-            raise ValueError("Invalid auth configuration (no password for user) for endpoint: " + endpoint_type)
-        elif PWD_KEY in plugin_config and USER_KEY not in plugin_config:
-            raise ValueError("Invalid auth configuration (Password without user) for endpoint: " + endpoint_type)
+    validate_plugin_config(config, "input")
+    validate_plugin_config(config, "output")
 
 
 def print_report(source: dict, target: dict) -> set:
@@ -73,13 +84,13 @@ if __name__ == '__main__':
     print("\n##### Starting index configuration tool... #####\n")
     logstash_config = parser.parse(sys.argv[1])
     validate_logstash_config(logstash_config)
-    # Get input config. The tuple contents are (type, config)
-    plugin_config = logstash_config["input"][1]
+    # Endpoint is a tuple of (type, config)
+    endpoint = get_supported_endpoint(logstash_config, "input")
     # Fetch all indices from source cluster
-    source_indices = fetch_all_indices_by_plugin(plugin_config)
+    source_indices = fetch_all_indices_by_plugin(endpoint[1])
     # Fetch all indices from target cluster
-    plugin_config = logstash_config["output"][1]
-    target_endpoint, target_auth = get_endpoint_info(plugin_config)
+    endpoint = get_supported_endpoint(logstash_config, "output")
+    target_endpoint, target_auth = get_endpoint_info(endpoint[1])
     target_indices = search_endpoint.fetch_all_indices(target_endpoint, target_auth)
     # Print report and get index data for indices to be created
     indices_set = print_report(source_indices, target_indices)
