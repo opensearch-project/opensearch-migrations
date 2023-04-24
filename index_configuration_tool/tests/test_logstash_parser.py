@@ -13,7 +13,6 @@ LOGSTASH_EXPECTED_OUTPUT_FILE = dirname(__file__) + "/expected_parse_output.pick
 
 
 class TestLogstashParser(unittest.TestCase):
-
     # Run before each test
     def setUp(self) -> None:
         with open(LOGSTASH_EXPECTED_OUTPUT_FILE, "rb") as f:
@@ -23,9 +22,11 @@ class TestLogstashParser(unittest.TestCase):
             # where the data is a dict of key-value pairs.
             self.test_data = pickle.load(f)
 
+    # Test input json should match loaded pickle data
     def test_parser_happy_case(self):
         actual = parse(LOGSTASH_TEST_INPUT_FILE)
         test_diff = diff(self.test_data, actual)
+        # Validate that diff is empty
         self.assertFalse(test_diff)
 
     def test_bad_configs(self):
@@ -65,7 +66,7 @@ class TestLogstashParser(unittest.TestCase):
 
 # Utility method to update the expected output pickle
 # file if/when the input conf file is changed.
-def _update_output_pickle():
+def __update_output_pickle():
     with open(LOGSTASH_EXPECTED_OUTPUT_FILE, "wb") as out:
         val = parse(LOGSTASH_TEST_INPUT_FILE)
         pickle.dump(val, out)
@@ -73,4 +74,3 @@ def _update_output_pickle():
 
 if __name__ == '__main__':
     unittest.main()
-    #_update_output_pickle()

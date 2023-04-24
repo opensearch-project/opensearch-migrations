@@ -1,9 +1,8 @@
 import sys
 from typing import Optional
 
-import requests
-
 import logstash_conf_parser as parser
+import search_endpoint
 import utils
 
 # Constants
@@ -11,11 +10,6 @@ SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
 HOSTS_KEY = "hosts"
 USER_KEY = "user"
 PWD_KEY = "password"
-SETTINGS_KEY = "settings"
-MAPPINGS_KEY = "mappings"
-INDEX_KEY = "index"
-INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version", "store"]
-ALL_INDICES_ENDPOINT = "*"
 
 
 # TODO Only supports basic auth for now
@@ -35,18 +29,7 @@ def get_endpoint_info(plugin_config: dict) -> tuple:
 
 def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
     endpoint, auth_tuple = get_endpoint_info(plugin_config)
-    return fetch_all_indices(endpoint, auth_tuple)
-
-
-def fetch_all_indices(endpoint: str, optional_auth: Optional[tuple]) -> dict:
-    actual_endpoint = endpoint + ALL_INDICES_ENDPOINT
-    resp = requests.get(actual_endpoint, auth=optional_auth)
-    # Remove internal settings
-    result = dict(resp.json())
-    for index in result:
-        for setting in INTERNAL_SETTINGS_KEYS:
-            result[index][SETTINGS_KEY][INDEX_KEY].pop(setting, None)
-    return result
+    return search_endpoint.fetch_all_indices(endpoint, auth_tuple)
 
 
 def validate_logstash_config(config: dict):
@@ -70,10 +53,10 @@ def print_report(source: dict, target: dict) -> set:
     indices_in_target = set(source.keys()) & set(target.keys())
     for index in indices_in_target:
         # Check settings
-        if utils.has_differences(SETTINGS_KEY, source[index], target[index]):
+        if utils.has_differences(search_endpoint.SETTINGS_KEY, source[index], target[index]):
             index_conflicts.add(index)
         # Check mappings
-        if utils.has_differences(MAPPINGS_KEY, source[index], target[index]):
+        if utils.has_differences(search_endpoint.MAPPINGS_KEY, source[index], target[index]):
             index_conflicts.add(index)
     identical_indices = set(indices_in_target) - set(index_conflicts)
     indices_to_create = set(source.keys()) - set(indices_in_target)
@@ -83,19 +66,6 @@ def print_report(source: dict, target: dict) -> set:
           utils.string_from_set(identical_indices))
     print("Indices to create: " + utils.string_from_set(indices_to_create))
     return indices_to_create
-
-
-def create_indices(indices_data: dict, endpoint: str, auth_tuple: tuple):
-    for index in indices_data:
-        actual_endpoint = endpoint + index
-        data_dict = dict()
-        data_dict[SETTINGS_KEY] = indices_data[index][SETTINGS_KEY]
-        data_dict[MAPPINGS_KEY] = indices_data[index][MAPPINGS_KEY]
-        try:
-            resp = requests.put(actual_endpoint, auth=auth_tuple, json=data_dict)
-            resp.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to create index [{index}] - {e!s}", file=sys.stderr)
 
 
 if __name__ == '__main__':
@@ -110,7 +80,7 @@ if __name__ == '__main__':
     # Fetch all indices from target cluster
     plugin_config = logstash_config["output"][1]
     target_endpoint, target_auth = get_endpoint_info(plugin_config)
-    target_indices = fetch_all_indices(target_endpoint, target_auth)
+    target_indices = search_endpoint.fetch_all_indices(target_endpoint, target_auth)
     # Print report and get index data for indices to be created
     indices_set = print_report(source_indices, target_indices)
     # Create indices
@@ -118,5 +88,5 @@ if __name__ == '__main__':
         index_data = dict()
         for index_name in indices_set:
             index_data[index_name] = source_indices[index_name]
-        create_indices(index_data, target_endpoint, target_auth)
+        search_endpoint.create_indices(index_data, target_endpoint, target_auth)
     print("\n##### Index configuration tool has completed! #####\n")
