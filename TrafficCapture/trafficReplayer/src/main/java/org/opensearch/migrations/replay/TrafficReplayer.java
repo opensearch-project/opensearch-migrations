@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -104,37 +106,31 @@ public class TrafficReplayer {
     }
 
     private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
-                                       Consumer<SourceTargetCaptureTuple> onResponseReceivedCallback) {
+                                       Consumer<SourceTargetCaptureTuple> onResponseReceivedCallback)
+    {
         try {
             log.debug("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
             for (var packetData : requestResponsePacketPair.requestData) {
                 packetHandler.consumeBytes(packetData);
             }
-            AtomicBoolean waiter = new AtomicBoolean(true);
-            packetHandler.finalizeRequest(summary-> {
-                SourceTargetCaptureTuple requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
-                        summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
-                        summary.getResponseDuration()
-                );
-
+            var cf = packetHandler.finalizeRequest();
+            cf.whenComplete((summary, t) -> {
+                SourceTargetCaptureTuple requestResponseTriple;
+                if (t != null) {
+                    log.error("Got exception in CompletableFuture callback: ", t);
+                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
+                            new ArrayList<>(), Duration.ZERO
+                    );
+                } else {
+                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
+                            summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                            summary.getResponseDuration()
+                    );
+                }
                 onResponseReceivedCallback.accept(requestResponseTriple);
-
-                synchronized (waiter) {
-                    waiter.set(false);
-                    waiter.notify();
-                }
             });
-            synchronized (waiter) {
-                if (waiter.get()) {
-                    waiter.wait(timeout.toMillis());
-                }
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } catch (IPacketToHttpHandler.InvalidHttpStateException e) {
-            throw new RuntimeException(e);
-        } catch (InterruptedException e) {
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }

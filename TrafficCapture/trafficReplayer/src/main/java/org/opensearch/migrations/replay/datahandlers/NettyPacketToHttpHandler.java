@@ -18,7 +18,7 @@ import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
-import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
 
 @Log4j2
 public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
@@ -27,7 +27,7 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
     AggregatedRawResponse.Builder responseBuilder;
     BacksideHttpWatcherHandler responseWatchHandler;
 
-    public NettyPacketToHttpHandler(NioEventLoopGroup eventLoopGroup, URI serverUri) throws IOException {
+    public NettyPacketToHttpHandler(NioEventLoopGroup eventLoopGroup, URI serverUri) {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
@@ -59,34 +59,51 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
     }
 
     @Override
-    public void consumeBytes(byte[] packetData) throws InvalidHttpStateException {
+    public CompletableFuture<Void> consumeBytes(byte[] packetData) {
         log.trace("Writing packetData["+packetData+"]");
         var packet = Unpooled.wrappedBuffer(packetData);
+        var completableFuture = new CompletableFuture<Void>();
         if (outboundChannelFuture.isDone()) {
             Channel channel = outboundChannelFuture.channel();
             if (!channel.isActive()) {
                 log.warn("Channel is not active - future packets for this connection will be dropped.");
                 log.warn("Need to do more sophisticated tracking of progress and retry further up the stack");
-                return;
+                return null;
             }
             log.trace("Writing data to backside handler");
             channel.writeAndFlush(packet)
                     .addListener((ChannelFutureListener) future -> {
                         if (future.isSuccess()) {
                             log.trace("packet write was successful: "+packetData);
+                            completableFuture.complete(null);
                         } else {
                             log.warn("closing outbound channel because WRITE future was not successful "+future.cause());
                             future.channel().close(); // close the backside
+                            completableFuture.completeExceptionally(future.cause());
                         }
                     });
         } else {
-            outboundChannelFuture.addListener(f->consumeBytes(packetData));
+            outboundChannelFuture.addListener(f-> {
+                    if (outboundChannelFuture.isSuccess()) {
+                        consumeBytes(packetData).whenComplete((x,t)-> {
+                            if (x != null) {
+                                completableFuture.complete(x);
+                            } else {
+                                completableFuture.completeExceptionally(t);
+                            }
+                        });
+                    } else {
+                        completableFuture.completeExceptionally(outboundChannelFuture.cause());
+                    }
+            });
         }
+        return completableFuture;
     }
 
     @Override
-    public void finalizeRequest(Consumer<AggregatedRawResponse> onResponseFinishedCallback)
-            throws InvalidHttpStateException {
-        responseWatchHandler.addCallback(onResponseFinishedCallback);
+    public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
+        var future = new CompletableFuture();
+        responseWatchHandler.addCallback(arr -> future.complete(arr));
+        return future;
     }
 }

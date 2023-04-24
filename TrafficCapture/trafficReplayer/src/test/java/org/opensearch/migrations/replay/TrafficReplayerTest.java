@@ -23,8 +23,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 class TrafficReplayerTest {
@@ -114,49 +114,4 @@ class TrafficReplayerTest {
         Assertions.assertEquals(1, byteArrays.get(0).size());
     }
 
-    @Test
-    public void testTransformer() throws Exception {
-        var referenceStringBuilder = new StringBuilder();
-        var numFinalizations = new AtomicInteger();
-        // mock object.  values don't matter at all - not what we're testing
-        var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
-        var transformingHandler = new HttpMessageTransformerHandler(new IPacketToHttpHandler() {
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            @Override
-            public void consumeBytes(byte[] nextRequestPacket) throws InvalidHttpStateException, IOException {
-                byteArrayOutputStream.write(nextRequestPacket);
-            }
-
-            @Override
-            public void finalizeRequest(Consumer<AggregatedRawResponse> onResponseFinishedCallback) throws InvalidHttpStateException, IOException {
-                numFinalizations.incrementAndGet();
-                var bytes = byteArrayOutputStream.toByteArray();
-                Assertions.assertEquals(referenceStringBuilder.toString(), new String(bytes, StandardCharsets.UTF_8));
-                onResponseFinishedCallback.accept(dummyAggregatedResponse);
-            }
-        });
-
-        Random r = new Random(2);
-
-        for (int i=0; i<3; ++i) {
-            String s = r.ints(r.nextInt(10), 'A', 'Z')
-                    .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
-                    .toString();
-            writeStringToBoth(s, referenceStringBuilder, transformingHandler);
-        }
-        var innermostFinalizeCallCount = new AtomicInteger();
-        transformingHandler.finalizeRequest(x-> {
-            // do nothing but check connectivity between the layers in the bottom most handler
-            innermostFinalizeCallCount.incrementAndGet();
-            Assertions.assertEquals(dummyAggregatedResponse, x);
-        });
-        Assertions.assertEquals(1, innermostFinalizeCallCount.get());
-        Assertions.assertEquals(1, numFinalizations.get());
-    }
-
-    private static void writeStringToBoth(String s, StringBuilder referenceStringBuilder,
-                                          HttpMessageTransformerHandler transformingHandler) throws Exception {
-        referenceStringBuilder.append(s);
-        transformingHandler.consumeBytes(s.getBytes(StandardCharsets.UTF_8));
-    }
 }

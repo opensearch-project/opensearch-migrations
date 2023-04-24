@@ -1,13 +1,17 @@
 package org.opensearch.migrations.replay.datahandlers;
 
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
+@Slf4j
 public abstract class PacketToTransformingHttpMessageHandler implements IPacketToHttpHandler {
     private final IPacketToHttpHandler httpHandler;
     private final ByteTransformer transformer;
@@ -30,7 +34,7 @@ public abstract class PacketToTransformingHttpMessageHandler implements IPacketT
     }
 
     public interface ByteTransformer {
-        void consumeBytes(byte[] nextRequestPacket) throws IOException;
+        CompletableFuture<Void> addBytes(byte[] nextRequestPacket);
 
         /**
          * To be called once consumeBytes() has been called with all of the data from a request.
@@ -39,34 +43,61 @@ public abstract class PacketToTransformingHttpMessageHandler implements IPacketT
          * @return
          * @throws IOException
          */
-         SizeAndInputStream getFullyTransformedBytes() throws IOException;
+         CompletableFuture<SizeAndInputStream> getFullyTransformedBytes();
     }
 
     @Override
-    public void consumeBytes(byte[] nextRequestPacket) throws InvalidHttpStateException, IOException {
+    public CompletableFuture<Void> consumeBytes(byte[] nextRequestPacket) {
         packetCount++;
-        transformer.consumeBytes(nextRequestPacket);
+        return transformer.addBytes(nextRequestPacket);
     }
 
     @Override
-    public void finalizeRequest(Consumer<AggregatedRawResponse> onResponseFinishedCallback)
-            throws InvalidHttpStateException, IOException {
-        try (var sizeAndOutputStream = transformer.getFullyTransformedBytes()) {
-            int remainingBytes = sizeAndOutputStream.size;
-            for (int packetsRemaining=packetCount; ; --packetsRemaining) {
-                byte[] nextBuffer;
-                if (remainingBytes <= 0) {
-                    break;
-                } else if (packetsRemaining <= 1) {
-                    nextBuffer = sizeAndOutputStream.inputStream.readAllBytes();
-                } else {
-                    var nextChunkSize = Math.max(1, sizeAndOutputStream.size / packetCount);
-                    nextBuffer = sizeAndOutputStream.inputStream.readNBytes(nextChunkSize);
+    public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
+        return transformer.getFullyTransformedBytes().thenCompose(sizeAndOutputStream -> {
+            try {
+                try (sizeAndOutputStream) {
+                    int chunkSize = Math.max(1, sizeAndOutputStream.size / packetCount);
+                    var chunkConsumerFuture = getAndConsumeNextChunk(httpHandler, sizeAndOutputStream.inputStream, chunkSize,
+                            sizeAndOutputStream.size, packetCount);
+                    return chunkConsumerFuture.thenCompose(v -> httpHandler.finalizeRequest());
                 }
-                httpHandler.consumeBytes(nextBuffer);
-                remainingBytes -= nextBuffer.length;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
+        });
+    }
+
+    private static CompletableFuture<Void>
+    getAndConsumeNextChunk(IPacketToHttpHandler httpHandler, InputStream stream,
+                            int chunkSize, int bytesLeft, int packetsLeft) throws IOException {
+        if (bytesLeft <= 0) {
+            return CompletableFuture.completedFuture(null);
         }
-        httpHandler.finalizeRequest(onResponseFinishedCallback);
+        var nextBuffer = getNextBytes(stream, chunkSize, bytesLeft, packetsLeft);
+        final int bufferLength = nextBuffer.length;
+        log.info("consuming "+nextBuffer.length+" bytes");
+        return httpHandler.consumeBytes(nextBuffer)
+                .thenCompose(v -> {
+                    try {
+                        log.info("getAndConsumeNextChunk has completed... recursing");
+                        return getAndConsumeNextChunk(httpHandler, stream, chunkSize,
+                                bytesLeft - bufferLength, packetsLeft - 1);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
+    final static byte[] EMPTY_ARRAY = new byte[0];
+    private static byte[] getNextBytes(InputStream inputStream, int chunkSize,
+                                int bytesLeft, int packetsLeft) throws IOException {
+        if (bytesLeft <= 0) {
+            return EMPTY_ARRAY;
+        } else if (packetsLeft <= 1) {
+            return inputStream.readAllBytes();
+        } else {
+            return inputStream.readNBytes(chunkSize);
+        }
     }
 }
