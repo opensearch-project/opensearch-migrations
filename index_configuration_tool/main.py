@@ -1,8 +1,8 @@
-import sys
+import argparse
 from typing import Optional
 
-import logstash_conf_parser as parser
 import index_operations
+import logstash_conf_parser as logstash_parser
 import utils
 
 # Constants
@@ -89,10 +89,10 @@ def print_report(index_differences: tuple[set, set, set]):
     print("Indices to create: " + utils.string_from_set(index_differences[0]))
 
 
-if __name__ == '__main__':
+def run(config_file_path: str) -> None:
     # Parse logstash config file
     print("\n##### Starting index configuration tool... #####\n")
-    logstash_config = parser.parse(sys.argv[1])
+    logstash_config = logstash_parser.parse(config_file_path)
     validate_logstash_config(logstash_config)
     # Endpoint is a tuple of (type, config)
     endpoint = get_supported_endpoint(logstash_config, "input")
@@ -112,3 +112,23 @@ if __name__ == '__main__':
             index_data[index_name] = source_indices[index_name]
         index_operations.create_indices(index_data, target_endpoint, target_auth)
     print("\n##### Index configuration tool has completed! #####\n")
+
+
+if __name__ == '__main__':
+    # Set up parsing for command line arguments
+    arg_parser = argparse.ArgumentParser(
+        prog="python main.py",
+        description="This tool creates indices on a target cluster based on the contents of a source cluster.\n" +
+        "The source and target endpoints are obtained by parsing a Logstash config file, which is the " +
+        "sole expected argument for this module.\nAlso prints a report of the indices to be created, " +
+        "along with indices that are identical or have conflicting settings/mappings.\nIn case of the " +
+        "latter, no action will be taken on the target cluster.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    # This tool only takes one argument
+    arg_parser.add_argument(
+        "config_file_path",
+        help="Path to the Logstash config file to parse for source and target endpoint information"
+    )
+    args = arg_parser.parse_args()
+    run(args.config_file_path)
