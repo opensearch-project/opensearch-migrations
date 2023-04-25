@@ -11,7 +11,7 @@ class TestUtils(unittest.TestCase):
     def test_string_from_set(self):
         test_set = {'a b c', 'xyz', '123'}
         # Ordering from a set is not deterministic, but the output should match this regex
-        pattern = re.compile("^(.+)+(, )*")
+        pattern = re.compile("^(.+)(, )*")
         self.assertTrue(pattern.match(utils.string_from_set(test_set)))
 
     def test_has_differences(self):

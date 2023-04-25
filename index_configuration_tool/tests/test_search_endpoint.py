@@ -17,7 +17,8 @@ TEST_DATA = {
         SETTINGS_KEY: {
             INTERNAL_INDEX_KEY: {
                 "uuid": "test",
-                "version": 1
+                "version": 1,
+                "is_filtered": False
             },
             "bool_key": True,
             "str_array": ["abc", "x y z"],
@@ -50,7 +51,8 @@ class TestSearchEndpoint(unittest.TestCase):
         self.assertEqual(2, len(index_data.keys()))
         # Test that internal data has been filtered
         self.assertTrue(INTERNAL_INDEX_KEY in index_data[INDEX1_NAME][SETTINGS_KEY])
-        self.assertFalse(index_data[INDEX1_NAME][SETTINGS_KEY][INTERNAL_INDEX_KEY])
+        # Non-internal data should remain
+        self.assertEqual({"is_filtered": False}, index_data[INDEX1_NAME][SETTINGS_KEY][INTERNAL_INDEX_KEY])
 
     @responses.activate
     def test_create_indices(self):

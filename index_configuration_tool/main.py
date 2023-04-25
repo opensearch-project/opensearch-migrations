@@ -31,6 +31,7 @@ def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
     endpoint, auth_tuple = get_endpoint_info(plugin_config)
     return search_endpoint.fetch_all_indices(endpoint, auth_tuple)
 
+
 def get_supported_endpoint(config: dict, key: str) -> tuple:
     # The value of each key is a list of plugin configs.
     # Each config is a tuple, where the first value is the endpoint type.
@@ -59,7 +60,13 @@ def validate_logstash_config(config: dict):
     validate_plugin_config(config, "output")
 
 
-def print_report(source: dict, target: dict) -> set:
+# Computes differences in indices between source and target.
+# Returns a tuple with 3 elements:
+# - The 1st element is the set of indices to create on the target
+# - The 2nd element is a set of indices that are identical on source and target
+# - The 3rd element is a set of indices that are present on both source and target,
+# but differ in their settings or mappings.
+def get_index_differences(source: dict, target: dict) -> tuple[set, set, set]:
     index_conflicts = set()
     indices_in_target = set(source.keys()) & set(target.keys())
     for index in indices_in_target:
@@ -71,12 +78,15 @@ def print_report(source: dict, target: dict) -> set:
             index_conflicts.add(index)
     identical_indices = set(indices_in_target) - set(index_conflicts)
     indices_to_create = set(source.keys()) - set(indices_in_target)
-    # Print report
-    print("Indices in target cluster with conflicting settings/mappings: " + utils.string_from_set(index_conflicts))
+    return indices_to_create, identical_indices, index_conflicts
+
+
+def print_report(index_differences: tuple[set, set, set]):
+    print("Indices in target cluster with conflicting settings/mappings: " +
+          utils.string_from_set(index_differences[2]))
     print("Indices already created in target cluster (data will NOT be moved): " +
-          utils.string_from_set(identical_indices))
-    print("Indices to create: " + utils.string_from_set(indices_to_create))
-    return indices_to_create
+          utils.string_from_set(index_differences[1]))
+    print("Indices to create: " + utils.string_from_set(index_differences[0]))
 
 
 if __name__ == '__main__':
@@ -92,12 +102,13 @@ if __name__ == '__main__':
     endpoint = get_supported_endpoint(logstash_config, "output")
     target_endpoint, target_auth = get_endpoint_info(endpoint[1])
     target_indices = search_endpoint.fetch_all_indices(target_endpoint, target_auth)
-    # Print report and get index data for indices to be created
-    indices_set = print_report(source_indices, target_indices)
-    # Create indices
-    if indices_set:
+    # Compute index differences and print report
+    diff = get_index_differences(source_indices, target_indices)
+    print_report(diff)
+    # The first element in the tuple is the set of indices to create
+    if diff[0]:
         index_data = dict()
-        for index_name in indices_set:
+        for index_name in diff[0]:
             index_data[index_name] = source_indices[index_name]
         search_endpoint.create_indices(index_data, target_endpoint, target_auth)
     print("\n##### Index configuration tool has completed! #####\n")

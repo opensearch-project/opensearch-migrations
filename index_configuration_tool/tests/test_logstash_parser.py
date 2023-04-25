@@ -27,41 +27,42 @@ class TestLogstashParser(unittest.TestCase):
         actual = parse(LOGSTASH_TEST_INPUT_FILE)
         test_diff = diff(self.test_data, actual)
         # Validate that diff is empty
-        self.assertFalse(test_diff)
+        self.assertEqual(test_diff, dict())
 
     def test_bad_configs(self):
-        with self.assertRaises(lark.exceptions.UnexpectedToken):
-            # Empty config is an error
-            logstash_parser.parse("")
-            # Sections should begin with type name
-            logstash_parser.parse("{}")
-            # Invalid type
-            logstash_parser.parse("bad {}")
-            # Valid type but without params
-            logstash_parser.parse("input")
+        # Checks for:
+        # - Empty config
+        # - Section should begin with type name
+        # - Invalid type
+        # - Valid type but no params
+        bad_configs = ["", "{}", "bad {}", "input"]
+        for config in bad_configs:
+            self.assertRaises(lark.exceptions.UnexpectedToken, logstash_parser.parse, config)
 
-    def test_empty_config(self):
+    # Note that while these are considered valid Logstash configurations,
+    # main.py considers them incomplete and would fail when validating them.
+    def test_empty_config_can_be_parsed(self):
         logstash_parser.parse("input {}")
         logstash_parser.parse("filter {}")
         logstash_parser.parse("output {}")
 
     def test_string(self):
         val = self.test_data["input"][0][1]["string_key"]
-        assert type(val) is str
+        self.assertEqual(str, type(val))
         self.assertTrue(len(val) > 0)
 
     def test_bool(self):
         val = self.test_data["input"][0][1]["bool_key"]
-        assert type(val) is bool
+        self.assertEqual(bool, type(val))
         self.assertTrue(val)
 
     def test_num(self):
         num = self.test_data["input"][0][1]["num_key"]
         neg_num = self.test_data["input"][1][1]["neg_key"]
-        assert type(num) is int
-        self.assertTrue(num > 0)
-        assert type(neg_num) is int
-        self.assertTrue(neg_num < 0)
+        self.assertEqual(int, type(num))
+        self.assertEqual(1, num)
+        self.assertEqual(int, type(neg_num))
+        self.assertEqual(-1, neg_num)
 
 
 # Utility method to update the expected output pickle
