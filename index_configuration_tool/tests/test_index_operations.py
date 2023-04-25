@@ -4,7 +4,7 @@ import unittest
 import responses
 from responses import matchers
 
-import search_endpoint
+import index_operations
 
 # Constants
 TEST_ENDPOINT = "http://test/"
@@ -47,7 +47,7 @@ class TestSearchEndpoint(unittest.TestCase):
         # Set up GET response
         responses.get(TEST_ENDPOINT + "*", json=TEST_DATA)
         # Now send request
-        index_data = search_endpoint.fetch_all_indices(TEST_ENDPOINT)
+        index_data = index_operations.fetch_all_indices(TEST_ENDPOINT)
         self.assertEqual(2, len(index_data.keys()))
         # Test that internal data has been filtered
         self.assertTrue(INTERNAL_INDEX_KEY in index_data[INDEX1_NAME][SETTINGS_KEY])
@@ -61,7 +61,7 @@ class TestSearchEndpoint(unittest.TestCase):
                       match=[matchers.json_params_matcher(self.test_data_without_internal[INDEX1_NAME])])
         responses.put(TEST_ENDPOINT + INDEX2_NAME,
                       match=[matchers.json_params_matcher(self.test_data_without_internal[INDEX2_NAME])])
-        search_endpoint.create_indices(self.test_data_without_internal, TEST_ENDPOINT, None)
+        index_operations.create_indices(self.test_data_without_internal, TEST_ENDPOINT, None)
 
 
 if __name__ == '__main__':

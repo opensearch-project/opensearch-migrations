@@ -2,7 +2,7 @@ import sys
 from typing import Optional
 
 import logstash_conf_parser as parser
-import search_endpoint
+import index_operations
 import utils
 
 # Constants
@@ -29,7 +29,7 @@ def get_endpoint_info(plugin_config: dict) -> tuple:
 
 def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
     endpoint, auth_tuple = get_endpoint_info(plugin_config)
-    return search_endpoint.fetch_all_indices(endpoint, auth_tuple)
+    return index_operations.fetch_all_indices(endpoint, auth_tuple)
 
 
 def get_supported_endpoint(config: dict, key: str) -> tuple:
@@ -71,10 +71,10 @@ def get_index_differences(source: dict, target: dict) -> tuple[set, set, set]:
     indices_in_target = set(source.keys()) & set(target.keys())
     for index in indices_in_target:
         # Check settings
-        if utils.has_differences(search_endpoint.SETTINGS_KEY, source[index], target[index]):
+        if utils.has_differences(index_operations.SETTINGS_KEY, source[index], target[index]):
             index_conflicts.add(index)
         # Check mappings
-        if utils.has_differences(search_endpoint.MAPPINGS_KEY, source[index], target[index]):
+        if utils.has_differences(index_operations.MAPPINGS_KEY, source[index], target[index]):
             index_conflicts.add(index)
     identical_indices = set(indices_in_target) - set(index_conflicts)
     indices_to_create = set(source.keys()) - set(indices_in_target)
@@ -101,7 +101,7 @@ if __name__ == '__main__':
     # Fetch all indices from target cluster
     endpoint = get_supported_endpoint(logstash_config, "output")
     target_endpoint, target_auth = get_endpoint_info(endpoint[1])
-    target_indices = search_endpoint.fetch_all_indices(target_endpoint, target_auth)
+    target_indices = index_operations.fetch_all_indices(target_endpoint, target_auth)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
     print_report(diff)
@@ -110,5 +110,5 @@ if __name__ == '__main__':
         index_data = dict()
         for index_name in diff[0]:
             index_data[index_name] = source_indices[index_name]
-        search_endpoint.create_indices(index_data, target_endpoint, target_auth)
+        index_operations.create_indices(index_data, target_endpoint, target_auth)
     print("\n##### Index configuration tool has completed! #####\n")
