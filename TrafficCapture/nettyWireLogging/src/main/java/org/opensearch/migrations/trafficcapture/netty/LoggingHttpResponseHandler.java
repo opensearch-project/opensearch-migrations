@@ -9,6 +9,8 @@ import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
+import io.netty.util.Attribute;
+import io.netty.util.AttributeKey;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
 import java.io.IOException;
@@ -102,6 +104,12 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        // Enable responses for blocking requests to have the same blocking metadata
+        Attribute<Object> attr = ctx.channel().attr(AttributeKey.valueOf("isBlocking"));
+        if (attr.get() != null) {
+            trafficOffloader.setIsBlockingMetadata(true);
+            attr.set(null);
+        }
         trafficOffloader.addWriteEvent(Instant.now(), (ByteBuf) msg);
         parseHttpMessageParts(ctx, msg, promise);
         super.write(ctx, msg, promise);

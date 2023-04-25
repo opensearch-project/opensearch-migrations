@@ -5,6 +5,8 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.trafficcapture.model.CaptureOutputStreamMetadata;
+import org.opensearch.migrations.trafficcapture.model.OffloaderInput;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndicator;
 import org.opensearch.migrations.trafficcapture.protos.Exception;
 import org.opensearch.migrations.trafficcapture.protos.Read;
@@ -30,18 +32,20 @@ public class StreamChannelConnectionCaptureSerializer implements
     private final static int MAX_ID_SIZE = 32;
 
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
-    private final Function<CodedOutputStream, CompletableFuture> closeHandler;
+    private final Function<OffloaderInput, CompletableFuture> closeHandler;
     private final String idString;
     private CodedOutputStream currentCodedOutputStreamOrNull;
+    private CaptureOutputStreamMetadata outputStreamMetadata;
     private int numFlushesSoFar;
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
 
     public StreamChannelConnectionCaptureSerializer(String id,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
-                                                    Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
+                                                    Function<OffloaderInput, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
+        this.outputStreamMetadata = new CaptureOutputStreamMetadata();
         assert (id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
         this.idString = id;
     }
@@ -125,9 +129,10 @@ public class StreamChannelConnectionCaptureSerializer implements
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
         currentCodedOutputStream().writeInt32(fieldNum, ++numFlushesSoFar);
         currentCodedOutputStream().flush();
-        var future = closeHandler.apply(currentCodedOutputStream());
+        var future = closeHandler.apply(new OffloaderInput(currentCodedOutputStream(), outputStreamMetadata));
         //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
         currentCodedOutputStreamOrNull = null;
+        outputStreamMetadata = new CaptureOutputStreamMetadata();
         return future;
     }
 
@@ -291,6 +296,11 @@ public class StreamChannelConnectionCaptureSerializer implements
         writeEndOfHttpMessage(timestamp);
         this.firstLineByteLength = -1;
         this.headersByteLength = -1;
+    }
+
+    @Override
+    public void setIsBlockingMetadata(boolean isBlocking) {
+        outputStreamMetadata.setMutating(isBlocking);
     }
 
     private void writeEndOfHttpMessage(Instant timestamp) throws IOException {

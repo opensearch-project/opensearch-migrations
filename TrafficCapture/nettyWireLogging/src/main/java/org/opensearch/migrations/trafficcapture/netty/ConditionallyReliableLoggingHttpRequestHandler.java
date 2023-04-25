@@ -5,6 +5,7 @@ import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectDecoder;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.DefaultPromise;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -26,6 +27,8 @@ public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpR
     @Override
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, DefaultHttpRequest httpRequest) throws Exception {
         if (shouldBlockPredicate.test(httpRequest)) {
+            ctx.channel().attr(AttributeKey.valueOf("isBlocking")).set(true);
+            trafficOffloader.setIsBlockingMetadata(true);
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 if (t != null) {
                     log.warn("Got error: "+t.getMessage());

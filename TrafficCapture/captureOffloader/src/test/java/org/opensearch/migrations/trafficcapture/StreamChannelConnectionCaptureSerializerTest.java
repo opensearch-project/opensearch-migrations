@@ -99,8 +99,9 @@ class StreamChannelConnectionCaptureSerializerTest {
                     codedStreamToByteBuffersMap.put(rval, bytes);
                     return rval;
                 },
-                cos-> CompletableFuture.runAsync(() -> {
+                offloaderInput -> CompletableFuture.runAsync(() -> {
                     try {
+                        CodedOutputStream cos = offloaderInput.getCodedOutputStream();
                         cos.flush();
                         var bb = codedStreamToByteBuffersMap.get(cos);
                         bb.position(0);

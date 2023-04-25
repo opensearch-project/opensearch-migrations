@@ -32,6 +32,15 @@ dependencies {
     testImplementation 'com.google.protobuf:protobuf-java:3.22.2'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
     implementation project(':captureOffloader')
+    implementation project(':captureKafkaOffloader')
+}
+
+tasks.withType(Tar){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.withType(Zip){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 application {
