@@ -42,6 +42,7 @@ dependencies {
     implementation project(':captureProtobufs')
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+    implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'
     implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
     implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
@@ -56,6 +57,7 @@ dependencies {
 
     annotationProcessor 'org.projectlombok:lombok:1.18.26'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.26'
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.15.0'
 }
 
 application {
