@@ -114,7 +114,7 @@ def run(config_file_path: str) -> None:
     print("\n##### Index configuration tool has completed! #####\n")
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma no cover
     # Set up parsing for command line arguments
     arg_parser = argparse.ArgumentParser(
         prog="python main.py",

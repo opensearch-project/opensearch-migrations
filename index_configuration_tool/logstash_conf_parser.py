@@ -1,4 +1,5 @@
 import sys
+
 from lark import Lark
 from lark import Transformer
 
@@ -46,6 +47,6 @@ def parse(logstash_file: str) -> dict:
         return logstash_parser.parse(conf_file.read())
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma no cover
     val = parse(sys.argv[1])
     print(val)

@@ -2,28 +2,15 @@ import copy
 import pickle
 import random
 import unittest
-from os.path import dirname
 from typing import Optional
 
 import main
+from tests import test_constants
 
 # Constants
-LOGSTASH_EXPECTED_OUTPUT_FILE = dirname(__file__) + "/expected_parse_output.pickle"
 TEST_KEY = "test_key"
 BASE_CONFIG_SECTION = {
     TEST_KEY: [("invalid_plugin1", None), ("invalid_plugin2", {})]
-}
-BASE_INDEX_CONFIG = {
-    "index1": {
-        "settings": {
-            "bool_key": True,
-            "num_key": 1
-        },
-        "mappings": {
-            "str_key": "value"
-        }
-    },
-    "index2": {}
 }
 
 
@@ -57,7 +44,7 @@ def create_config_section(plugin_config: dict) -> dict:
 class TestMain(unittest.TestCase):
     # Run before each test
     def setUp(self) -> None:
-        with open(LOGSTASH_EXPECTED_OUTPUT_FILE, "rb") as f:
+        with open(test_constants.LOGSTASH_PICKLE_FILE_PATH, "rb") as f:
             self.loaded_logstash_config = pickle.load(f)
 
     def test_get_auth_returns_none(self):
@@ -118,20 +105,22 @@ class TestMain(unittest.TestCase):
         self.assertEqual(set(), result_tuple[2])
 
     def test_get_index_differences_empty_target(self):
-        result_tuple = main.get_index_differences(BASE_INDEX_CONFIG, dict())
+        result_tuple = main.get_index_differences(test_constants.BASE_INDICES_DATA, dict())
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # No conflicts or identical indices
         self.assertEqual(set(), result_tuple[1])
         self.assertEqual(set(), result_tuple[2])
         # Indices-to-create
-        self.assertEqual(2, len(result_tuple[0]))
-        self.assertTrue("index1" in result_tuple[0])
-        self.assertTrue("index2" in result_tuple[0])
+        self.assertEqual(3, len(result_tuple[0]))
+        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[0])
+        self.assertTrue(test_constants.INDEX2_NAME in result_tuple[0])
+        self.assertTrue(test_constants.INDEX3_NAME in result_tuple[0])
 
     def test_get_index_differences_identical_index(self):
-        test_data = copy.deepcopy(BASE_INDEX_CONFIG)
-        del test_data["index2"]
+        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        del test_data[test_constants.INDEX2_NAME]
+        del test_data[test_constants.INDEX3_NAME]
         result_tuple = main.get_index_differences(test_data, test_data)
         # Invariant
         self.assertEqual(3, len(result_tuple))
@@ -140,37 +129,42 @@ class TestMain(unittest.TestCase):
         self.assertEqual(set(), result_tuple[2])
         # Identical indices
         self.assertEqual(1, len(result_tuple[1]))
-        self.assertTrue("index1" in result_tuple[1])
+        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[1])
 
     def test_get_index_differences_settings_conflict(self):
-        test_data = copy.deepcopy(BASE_INDEX_CONFIG)
-        test_data["index1"]["settings"]["num_key"] = -1
-        result_tuple = main.get_index_differences(BASE_INDEX_CONFIG, test_data)
+        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        # Set up conflict in settings
+        index_settings = test_data[test_constants.INDEX2_NAME][test_constants.SETTINGS_KEY]
+        index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
+        result_tuple = main.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # No indices to move
         self.assertEqual(set(), result_tuple[0])
         # Identical indices
-        self.assertEqual(1, len(result_tuple[1]))
-        self.assertTrue("index2" in result_tuple[1])
+        self.assertEqual(2, len(result_tuple[1]))
+        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[1])
+        self.assertTrue(test_constants.INDEX3_NAME in result_tuple[1])
         # Conflicting indices
         self.assertEqual(1, len(result_tuple[2]))
-        self.assertTrue("index1" in result_tuple[2])
+        self.assertTrue(test_constants.INDEX2_NAME in result_tuple[2])
 
     def test_get_index_differences_mappings_conflict(self):
-        test_data = copy.deepcopy(BASE_INDEX_CONFIG)
-        del test_data["index1"]["mappings"]["str_key"]
-        result_tuple = main.get_index_differences(BASE_INDEX_CONFIG, test_data)
+        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        # Set up conflict in mappings
+        test_data[test_constants.INDEX3_NAME][test_constants.MAPPINGS_KEY] = {}
+        result_tuple = main.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # No indices to move
         self.assertEqual(set(), result_tuple[0])
         # Identical indices
-        self.assertEqual(1, len(result_tuple[1]))
-        self.assertTrue("index2" in result_tuple[1])
+        self.assertEqual(2, len(result_tuple[1]))
+        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[1])
+        self.assertTrue(test_constants.INDEX2_NAME in result_tuple[1])
         # Conflicting indices
         self.assertEqual(1, len(result_tuple[2]))
-        self.assertTrue("index1" in result_tuple[2])
+        self.assertTrue(test_constants.INDEX3_NAME in result_tuple[2])
 
     def test_validate_plugin_config_unsupported_endpoints(self):
         # No supported endpoints

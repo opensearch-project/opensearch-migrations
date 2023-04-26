@@ -5,63 +5,32 @@ import responses
 from responses import matchers
 
 import index_operations
-
-# Constants
-TEST_ENDPOINT = "http://test/"
-INDEX1_NAME = "index1"
-INDEX2_NAME = "index2"
-SETTINGS_KEY = "settings"
-INTERNAL_INDEX_KEY = "index"
-TEST_DATA = {
-    INDEX1_NAME: {
-        SETTINGS_KEY: {
-            INTERNAL_INDEX_KEY: {
-                "uuid": "test",
-                "version": 1,
-                "is_filtered": False
-            },
-            "bool_key": True,
-            "str_array": ["abc", "x y z"],
-        },
-        "mappings": {
-            "str_key": "string value",
-            "num_key": -1
-        }
-    },
-    INDEX2_NAME: {
-        SETTINGS_KEY: {},
-        "mappings": {}
-    }
-}
+from tests import test_constants
 
 
 class TestSearchEndpoint(unittest.TestCase):
-    def setUp(self) -> None:
-        self.test_data_without_internal = copy.deepcopy(TEST_DATA)
-        # Remove internal data
-        for i in self.test_data_without_internal.keys():
-            self.test_data_without_internal[i][SETTINGS_KEY].pop(INTERNAL_INDEX_KEY, None)
-
     @responses.activate
     def test_fetch_all_indices(self):
         # Set up GET response
-        responses.get(TEST_ENDPOINT + "*", json=TEST_DATA)
+        responses.get(test_constants.SOURCE_ENDPOINT + "*", json=test_constants.BASE_INDICES_DATA)
         # Now send request
-        index_data = index_operations.fetch_all_indices(TEST_ENDPOINT)
-        self.assertEqual(2, len(index_data.keys()))
-        # Test that internal data has been filtered
-        self.assertTrue(INTERNAL_INDEX_KEY in index_data[INDEX1_NAME][SETTINGS_KEY])
-        # Non-internal data should remain
-        self.assertEqual({"is_filtered": False}, index_data[INDEX1_NAME][SETTINGS_KEY][INTERNAL_INDEX_KEY])
+        index_data = index_operations.fetch_all_indices(test_constants.SOURCE_ENDPOINT)
+        self.assertEqual(3, len(index_data.keys()))
+        # Test that internal data has been filtered, but non-internal data is retained
+        index_settings = index_data[test_constants.INDEX1_NAME][test_constants.SETTINGS_KEY]
+        self.assertTrue(test_constants.INDEX_KEY in index_settings)
+        self.assertEqual({"is_filtered": False}, index_settings[test_constants.INDEX_KEY])
 
     @responses.activate
     def test_create_indices(self):
         # Set up expected PUT calls with a mock response status
-        responses.put(TEST_ENDPOINT + INDEX1_NAME,
-                      match=[matchers.json_params_matcher(self.test_data_without_internal[INDEX1_NAME])])
-        responses.put(TEST_ENDPOINT + INDEX2_NAME,
-                      match=[matchers.json_params_matcher(self.test_data_without_internal[INDEX2_NAME])])
-        index_operations.create_indices(self.test_data_without_internal, TEST_ENDPOINT, None)
+        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        del test_data[test_constants.INDEX1_NAME]
+        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX2_NAME,
+                      match=[matchers.json_params_matcher(test_data[test_constants.INDEX2_NAME])])
+        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX3_NAME,
+                      match=[matchers.json_params_matcher(test_data[test_constants.INDEX3_NAME])])
+        index_operations.create_indices(test_data, test_constants.TARGET_ENDPOINT, None)
 
 
 if __name__ == '__main__':

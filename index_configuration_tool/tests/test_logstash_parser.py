@@ -1,21 +1,17 @@
 import pickle
 import unittest
-from os.path import dirname
 
 import lark.exceptions
 from jsondiff import diff
 
 from logstash_conf_parser import logstash_parser, parse
-
-# Constants
-LOGSTASH_TEST_INPUT_FILE = dirname(__file__) + "/logstash_test_input.conf"
-LOGSTASH_EXPECTED_OUTPUT_FILE = dirname(__file__) + "/expected_parse_output.pickle"
+from tests import test_constants
 
 
 class TestLogstashParser(unittest.TestCase):
     # Run before each test
     def setUp(self) -> None:
-        with open(LOGSTASH_EXPECTED_OUTPUT_FILE, "rb") as f:
+        with open(test_constants.LOGSTASH_PICKLE_FILE_PATH, "rb") as f:
             # The root DS is a dict, with input type as key.
             # The value of each key is an array of inputs.
             # Each input is a tuple of plugin name and data,
@@ -24,7 +20,7 @@ class TestLogstashParser(unittest.TestCase):
 
     # Test input json should match loaded pickle data
     def test_parser_happy_case(self):
-        actual = parse(LOGSTASH_TEST_INPUT_FILE)
+        actual = parse(test_constants.LOGSTASH_RAW_FILE_PATH)
         test_diff = diff(self.test_data, actual)
         # Validate that diff is empty
         self.assertEqual(test_diff, dict())
@@ -68,8 +64,8 @@ class TestLogstashParser(unittest.TestCase):
 # Utility method to update the expected output pickle
 # file if/when the input conf file is changed.
 def __update_output_pickle():
-    with open(LOGSTASH_EXPECTED_OUTPUT_FILE, "wb") as out:
-        val = parse(LOGSTASH_TEST_INPUT_FILE)
+    with open(test_constants.LOGSTASH_PICKLE_FILE_PATH, "wb") as out:
+        val = parse(test_constants.LOGSTASH_RAW_FILE_PATH)
         pickle.dump(val, out)
 
 
