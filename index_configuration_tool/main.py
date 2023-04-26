@@ -81,17 +81,18 @@ def get_index_differences(source: dict, target: dict) -> tuple[set, set, set]:
     return indices_to_create, identical_indices, index_conflicts
 
 
-def print_report(index_differences: tuple[set, set, set]):
+# The order of data in the tuple is:
+# (indices to create), (identical indices), (indices with conflicts)
+def print_report(index_differences: tuple[set, set, set]):  # pragma no cover
+    print("Identical indices in the target cluster (no changes will be made): " +
+          utils.string_from_set(index_differences[1]))
     print("Indices in target cluster with conflicting settings/mappings: " +
           utils.string_from_set(index_differences[2]))
-    print("Indices already created in target cluster (data will NOT be moved): " +
-          utils.string_from_set(index_differences[1]))
     print("Indices to create: " + utils.string_from_set(index_differences[0]))
 
 
 def run(config_file_path: str) -> None:
-    # Parse logstash config file
-    print("\n##### Starting index configuration tool... #####\n")
+    # Parse and validate logstash config file
     logstash_config = logstash_parser.parse(config_file_path)
     validate_logstash_config(logstash_config)
     # Endpoint is a tuple of (type, config)
@@ -111,7 +112,6 @@ def run(config_file_path: str) -> None:
         for index_name in diff[0]:
             index_data[index_name] = source_indices[index_name]
         index_operations.create_indices(index_data, target_endpoint, target_auth)
-    print("\n##### Index configuration tool has completed! #####\n")
 
 
 if __name__ == '__main__':  # pragma no cover
@@ -131,4 +131,6 @@ if __name__ == '__main__':  # pragma no cover
         help="Path to the Logstash config file to parse for source and target endpoint information"
     )
     args = arg_parser.parse_args()
+    print("\n##### Starting index configuration tool... #####\n")
     run(args.config_file_path)
+    print("\n##### Index configuration tool has completed! #####\n")

@@ -3,6 +3,7 @@ import pickle
 import random
 import unittest
 from typing import Optional
+from unittest.mock import patch, MagicMock, ANY
 
 import main
 from tests import test_constants
@@ -199,6 +200,31 @@ class TestMain(unittest.TestCase):
 
     def test_validate_logstash_config_happy_case(self):
         main.validate_logstash_config(self.loaded_logstash_config)
+
+    @patch('main.print_report')
+    @patch('index_operations.create_indices')
+    @patch('index_operations.fetch_all_indices')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_run(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock, mock_print_report: MagicMock):
+        index_to_create = test_constants.INDEX3_NAME
+        index_with_conflict = test_constants.INDEX2_NAME
+        index_exact_match = test_constants.INDEX1_NAME
+        # Set up expected arguments to mocks so we can verify
+        expected_create_payload = {index_to_create: test_constants.BASE_INDICES_DATA[index_to_create]}
+        # Print report accepts a tuple. The elements of the tuple
+        # are in the order: to-create, exact-match, conflicts
+        expected_diff = {index_to_create}, {index_exact_match}, {index_with_conflict}
+        # Create mock data for indices on target
+        target_indices_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        del target_indices_data[index_to_create]
+        # Index with conflict
+        index_settings = target_indices_data[index_with_conflict][test_constants.SETTINGS_KEY]
+        index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
+        # Fetch indices is called first for source, then for target
+        mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
+        main.run(test_constants.LOGSTASH_RAW_FILE_PATH)
+        mock_create_indices.assert_called_once_with(expected_create_payload, test_constants.TARGET_ENDPOINT, ANY)
+        mock_print_report.assert_called_once_with(expected_diff)
 
 
 if __name__ == '__main__':
