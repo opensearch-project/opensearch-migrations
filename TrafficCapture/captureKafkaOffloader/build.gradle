@@ -17,4 +17,5 @@ dependencies {
     implementation 'software.amazon.msk:aws-msk-iam-auth:1.1.6'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
     testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    testImplementation project(':captureProtobufs')
 }
