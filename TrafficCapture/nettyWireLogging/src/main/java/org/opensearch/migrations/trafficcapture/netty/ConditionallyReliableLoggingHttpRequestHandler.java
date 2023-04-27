@@ -23,7 +23,7 @@ public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpR
         if (shouldBlockPredicate.test(httpRequest)) {
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 if (t != null) {
-                    log.warn("Got error: "+t.getMessage());
+                    log.warn("Got error: " + t.getMessage());
                     ctx.close();
                 } else {
                     try {

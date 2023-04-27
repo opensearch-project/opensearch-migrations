@@ -11,8 +11,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 
-public class HttpCaptureSerializerUtil
-{
+public class HttpCaptureSerializerUtil {
 
     public enum HttpProcessedState {
         ONGOING, FULL_MESSAGE
@@ -40,8 +39,7 @@ public class HttpCaptureSerializerUtil
             var decoderResultLoose = getDecoderResult(obj);
             if (decoderResultLoose != null &&
                     decoderResultLoose.isSuccess() &&
-                    decoderResultLoose instanceof HttpMessageDecoderResult)
-            {
+                    decoderResultLoose instanceof HttpMessageDecoderResult) {
                 var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
                 trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
                 trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());

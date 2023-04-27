@@ -8,7 +8,12 @@
  */
 
 rootProject.name = 'LoggingProxy'
-include('trafficCaptureProxyServer', 'captureOffloader', 'nettyWireLogging', 'captureKafkaOffloader'
+include('captureOffloader',
+        'captureKafkaOffloader',
+        'captureProtobufs',
+        'nettyWireLogging',
+        'trafficCaptureProxyServer',
+        'trafficReplayer',
         //'plugins:elasticsearch:loggable-transport-netty4',
         //'plugins:opensearch:loggable-transport-netty4'
 )

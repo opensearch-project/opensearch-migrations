@@ -4,12 +4,10 @@ import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
 
-import java.util.Set;
-import java.util.TreeSet;
-
 public class PassThruHttpHeaders extends DefaultHttpHeaders {
 
     private static DefaultHttpHeaders HEADERS_TO_PRESERVE = makeHeadersToPreserve();
+
     private static DefaultHttpHeaders makeHeadersToPreserve() {
         var h = new DefaultHttpHeaders(false);
         h.add(HttpHeaderNames.CONTENT_LENGTH, "");

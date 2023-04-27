@@ -8,6 +8,7 @@ plugins {
 }
 
 configurations {
+    // This is included to load certs and keys.  Doing it again isn't currently worth it.
     opensearchSecurityPlugin
 }
 
@@ -29,8 +30,12 @@ dependencies {
 //    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
 //    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
 
+
+    testImplementation project(':captureProtobufs')
     testImplementation 'com.google.protobuf:protobuf-java:3.22.2'
+
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
+    testImplementation "com.google.protobuf:protobuf-java:3.22.2"
     implementation project(':captureOffloader')
     implementation project(':captureKafkaOffloader')
 }
