@@ -51,9 +51,9 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
             var cos = CodedOutputStream.newInstance(fs);
             codedStreamToFileStreamMap.put(cos, fs);
             return cos;
-        }, (offloaderInput) -> CompletableFuture.runAsync(() -> {
+        }, (offloader, codedOutputStream) -> CompletableFuture.runAsync(() -> {
             try {
-                var fs = codedStreamToFileStreamMap.get(offloaderInput.getCodedOutputStream());
+                var fs = codedStreamToFileStreamMap.get(codedOutputStream);
                 fs.flush();
                 log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
                 //codedStreamToFileStreamMap.remove(stream);

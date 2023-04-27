@@ -8,10 +8,10 @@ bootstrap.servers = localhost:9092
 
 client.id = KafkaLoggingProducer
 
-# Serializer for key of Producer record map
+# Serializer Kafka producer will use for key of a record sent to Kafka Topic
 key.serializer = org.apache.kafka.common.serialization.StringSerializer
 
-# Serializer for value of Producer record map
+# Serializer Kafka producer will use for value of a record sent to Kafka Topic
 value.serializer = org.apache.kafka.common.serialization.ByteArraySerializer
 
 # --- Additional setup to use AWS MSK IAM library for communication with an AWS MSK cluster
@@ -29,31 +29,19 @@ value.serializer = org.apache.kafka.common.serialization.ByteArraySerializer
 #sasl.client.callback.handler.class = software.amazon.msk.auth.iam.IAMClientCallbackHandler
 ```
 
-### Sample Docker Compose for Local Kafka Cluster
-```
-version: '3'
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.3.2
-    container_name: zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
+### Development
 
-  broker:
-    image: confluentinc/cp-kafka:7.3.2
-    container_name: broker
-    ports:
-      - "9092:9092"
-    depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      # Development values for easy debugging
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+Resources for making testing/development easier
+
+##### Setting up a development Kafka cluster
+
+For quick startup of a Kafka cluster sample docker-compose files are placed in [dev-tools](../dev-tools/docker)
+
+A Kafka instance can be started by running the following command in the proper directory
+```
+docker-compose up
+```
+This Kafka instance can then be cleaned up with the following command
+```
+docker-compose down -v
 ```

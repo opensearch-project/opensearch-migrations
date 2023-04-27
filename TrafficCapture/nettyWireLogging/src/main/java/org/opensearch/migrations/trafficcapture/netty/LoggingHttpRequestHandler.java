@@ -84,6 +84,9 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        if (currentHttpRequest != null) {
+            trafficOffloader.setRequestMethod(currentHttpRequest.method().name());
+        }
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
                 log.warn("Got error: "+t.getMessage());

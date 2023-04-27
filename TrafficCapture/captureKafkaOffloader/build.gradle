@@ -8,13 +8,6 @@ repositories {
     mavenCentral()
 }
 
-sourceSets {
-    main {
-        java {
-            srcDirs 'src/main/java'
-        }
-    }
-}
 dependencies {
     api group: 'io.netty', name: 'netty-buffer', version: '4.1.89.Final'
     implementation project(':captureOffloader')
