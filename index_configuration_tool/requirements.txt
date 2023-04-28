@@ -1,0 +1,4 @@
+jsondiff>=2.0.0
+lark>=1.1.5
+requests>=2.28.2
+responses>=0.23.1

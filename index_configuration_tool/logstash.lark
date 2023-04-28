@@ -5,11 +5,11 @@
 
 ?config_section: type "{" plugins? "}"
 
-?plugins: plugins? plugin
+plugins: plugin (plugin)*
 
-?plugin: key "{" plugin_params? "}"
+plugin: key "{" plugin_params? "}"
 
-?plugin_params: param (param)*
+plugin_params: param (param)*
 
 param: key "=>" value
 
@@ -24,13 +24,13 @@ param: key "=>" value
 type: PLUGIN_TYPE
 key: STRING
 string_literal: ESCAPED_STRING
-?number: SIGNED_NUMBER
+number: SIGNED_INT
 PLUGIN_TYPE: "input" | "filter" | "output"
 STRING: (DIGIT|LETTER|"_"|"-"|".")+
 COMMENT: "#"/.*/
 
 %import common.ESCAPED_STRING
-%import common.SIGNED_NUMBER
+%import common.SIGNED_INT
 %import common.DIGIT
 %import common.LETTER
 %import common.WS
