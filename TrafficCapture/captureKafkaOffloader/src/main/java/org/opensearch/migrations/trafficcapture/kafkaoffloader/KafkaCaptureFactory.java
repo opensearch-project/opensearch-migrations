@@ -24,6 +24,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
 
     private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
 
+    // Potential future optimization here to use a direct buffer (e.g. nio) instead of byte array
     private final Producer<String, byte[]> producer;
     private final String topicNameForTraffic;
 
@@ -62,13 +63,13 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                 try {
                     ByteBuffer byteBuffer = codedStreamToByteStreamMap.get(codedOutputStream);
                     codedStreamToByteStreamMap.remove(codedOutputStream);
-                    ProducerRecord<String, byte[]> record = new ProducerRecord<>(topicNameForTraffic,
-                        String.format("%s_%d", connectionId, supplierCallCounter.incrementAndGet()),
+                    String recordId = String.format("%s_%d", connectionId, supplierCallCounter.incrementAndGet());
+                    ProducerRecord<String, byte[]> record = new ProducerRecord<>(topicNameForTraffic, recordId,
                         Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
                     // Used to essentially wrap Future returned by Producer to CompletableFuture
                     CompletableFuture cf = new CompletableFuture<>();
                     // Async request to Kafka cluster
-                    producer.send(record, handleProducerRecordSent(cf));
+                    producer.send(record, handleProducerRecordSent(cf, recordId));
                     return cf;
                 } catch (Exception e) {
                     throw new RuntimeException(e);
@@ -76,12 +77,17 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
             });
     }
 
-    private Callback handleProducerRecordSent(CompletableFuture cf) {
+    private Callback handleProducerRecordSent(CompletableFuture cf, String recordId) {
         return (metadata, exception) -> {
             cf.complete(metadata);
-            // Add more logging and error handling here
-            log.info(String.format("Kafka producer record has finished sending for topic: %s and partition %d",
-                metadata.topic(), metadata.partition()));
+
+            if (exception != null) {
+                log.error(String.format("Error sending producer record: %s", recordId), exception);
+            }
+            else if (log.isDebugEnabled()) {
+                log.debug(String.format("Kafka producer record: %s has finished sending for topic: %s and partition %d",
+                    recordId, metadata.topic(), metadata.partition()));
+            }
         };
     }
 

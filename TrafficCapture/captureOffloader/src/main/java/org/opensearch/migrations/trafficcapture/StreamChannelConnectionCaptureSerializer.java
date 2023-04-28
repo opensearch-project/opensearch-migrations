@@ -121,10 +121,11 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         if (currentCodedOutputStreamOrNull == null && !isFinal) {
             return closeHandler.apply(null);
         }
+        CodedOutputStream currentStream = getOrCreateCodedOutputStream();
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
-        getOrCreateCodedOutputStream().writeInt32(fieldNum, ++numFlushesSoFar);
-        getOrCreateCodedOutputStream().flush();
-        var future = closeHandler.apply(getOrCreateCodedOutputStream());
+        currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
+        currentStream.flush();
+        var future = closeHandler.apply(currentStream);
         //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
         currentCodedOutputStreamOrNull = null;
         return future;

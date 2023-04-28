@@ -9,13 +9,12 @@ repositories {
 }
 
 dependencies {
-    api group: 'io.netty', name: 'netty-buffer', version: '4.1.89.Final'
+    api 'io.netty:netty-buffer:4.1.89.Final'
     implementation project(':captureOffloader')
     implementation 'org.projectlombok:lombok:1.18.26'
-    implementation "com.google.protobuf:protobuf-java:3.22.2"
+    implementation 'com.google.protobuf:protobuf-java:3.22.2'
     implementation 'org.apache.kafka:kafka-clients:3.4.0'
     implementation 'software.amazon.msk:aws-msk-iam-auth:1.1.6'
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
-    testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    implementation 'org.slf4j:slf4j-api:2.0.7'
     testImplementation project(':captureProtobufs')
 }

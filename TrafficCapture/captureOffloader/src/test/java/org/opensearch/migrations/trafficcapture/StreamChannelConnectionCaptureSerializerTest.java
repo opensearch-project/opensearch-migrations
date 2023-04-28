@@ -101,11 +101,10 @@ class StreamChannelConnectionCaptureSerializerTest {
                 },
             (codedOutputStream) -> CompletableFuture.runAsync(() -> {
                     try {
-                        CodedOutputStream cos = codedOutputStream;
-                        cos.flush();
-                        var bb = codedStreamToByteBuffersMap.get(cos);
+                        codedOutputStream.flush();
+                        var bb = codedStreamToByteBuffersMap.get(codedOutputStream);
                         bb.position(0);
-                        var bytesWritten = cos.getTotalBytesWritten();
+                        var bytesWritten = codedOutputStream.getTotalBytesWritten();
                         bb.limit(bytesWritten);
                         outputBuffersCreated.add(bb);
                     } catch (IOException e) {
