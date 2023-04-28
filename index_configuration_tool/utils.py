@@ -4,10 +4,10 @@ from jsondiff import diff
 # Utility method to make a comma-separated string from a set.
 # If the set is empty, "[]" is returned for clarity.
 def string_from_set(s: set[str]) -> str:
+    result = "["
     if s:
-        return ", ".join(s)
-    else:
-        return "[]"
+        result += ", ".join(s)
+    return result + "]"
 
 
 # Utility method to compare the JSON contents of a key in two dicts.

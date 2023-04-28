@@ -13,6 +13,7 @@ The input to the tool is a Logstash configuration file that is then parsed to ob
 
 ## Current Limitations
 
+* Only supports ElasticSearch and OpenSearch endpoints for source and target
 * Only supports basic auth
 * Type mappings for legacy indices are not handled
 * Index templates and index aliases are not copied
@@ -57,6 +58,12 @@ confPath=<path-to-Logstash-config-file>; docker run -v $confPath:/tmp/conf.json 
 
 The source code for the tool is located under the `index_configuration_tool/` directory. Please refer to the [Setup](#setup) section to ensure that the necessary dependencies are installed prior to development.
 
+Additionally, you'll also need to install development dependencies by running:
+
+```shell
+python -m pip install -r index_configuration_tool/dev-requirements.txt
+```
+
 ### Unit Tests
 
 Unit tests are located in a sub-directory named `tests`. Unit tests can be run using:
@@ -80,3 +87,8 @@ Note that the `--omit` parameter must be specified to avoid tracking code covera
 python -m coverage report --omit "*/tests/*"
 python -m coverage html --omit "*/tests/*"
 ```
+
+### Lark
+
+The code uses [Lark](https://github.com/lark-parser/lark) for grammar definition, tree parsing and transformation.
+The Logstash parser grammar is adapted from [node-logstash](https://github.com/bpaquet/node-logstash/blob/master/lib/logstash_config.jison).

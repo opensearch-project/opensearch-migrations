@@ -1,8 +1,9 @@
 # Holds constants for unit tests
 from os.path import dirname
 
-LOGSTASH_RAW_FILE_PATH = dirname(__file__) + "/logstash_test_input.conf"
-LOGSTASH_PICKLE_FILE_PATH = dirname(__file__) + "/expected_parse_output.pickle"
+TEST_RESOURCES_SUBPATH = "/resources/"
+LOGSTASH_RAW_FILE_PATH = dirname(__file__) + TEST_RESOURCES_SUBPATH + "logstash_test_input.conf"
+LOGSTASH_PICKLE_FILE_PATH = dirname(__file__) + TEST_RESOURCES_SUBPATH + "expected_parse_output.pickle"
 
 INDEX1_NAME = "index1"
 INDEX2_NAME = "index2"
