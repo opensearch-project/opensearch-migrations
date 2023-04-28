@@ -31,6 +31,10 @@ apply plugin: 'opensearch.opensearchplugin'
 apply plugin: 'opensearch.yaml-rest-test'
 apply plugin: 'opensearch.internal-cluster-test'
 
+plugins {
+  id 'org.owasp.dependencycheck' version '8.2.1'
+}
+
 opensearchplugin {
   description 'Plugin to override the transport-netty4 module surgically to add logging of all HTTP requests'
   classname 'org.opensearch.transport.LoggableNetty4ModulePlugin'
