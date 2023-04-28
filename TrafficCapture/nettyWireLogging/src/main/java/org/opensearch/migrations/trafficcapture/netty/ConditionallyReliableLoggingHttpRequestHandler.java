@@ -19,7 +19,6 @@ public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpR
 
     @Override
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, DefaultHttpRequest httpRequest) throws Exception {
-        trafficOffloader.setRequestMethod(httpRequest.method().name());
         if (shouldBlockPredicate.test(httpRequest)) {
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 if (t != null) {

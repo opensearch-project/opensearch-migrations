@@ -51,7 +51,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
             var cos = CodedOutputStream.newInstance(fs);
             codedStreamToFileStreamMap.put(cos, fs);
             return cos;
-        }, (offloader, codedOutputStream) -> CompletableFuture.runAsync(() -> {
+        }, (codedOutputStream) -> CompletableFuture.runAsync(() -> {
             try {
                 var fs = codedStreamToFileStreamMap.get(codedOutputStream);
                 fs.flush();

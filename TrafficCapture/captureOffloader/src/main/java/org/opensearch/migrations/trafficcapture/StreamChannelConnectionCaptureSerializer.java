@@ -20,17 +20,16 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 @Slf4j
-public class StreamChannelConnectionCaptureSerializer implements
-        IChannelConnectionCaptureSerializer, IChannelConnectionCaptureOffloader, Closeable {
+public class StreamChannelConnectionCaptureSerializer implements IChannelConnectionCaptureSerializer, Closeable {
 
     private final static int MAX_ID_SIZE = 32;
 
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
-    private final BiFunction<IChannelConnectionCaptureOffloader, CodedOutputStream, CompletableFuture> closeHandler;
+    private final Function<CodedOutputStream, CompletableFuture> closeHandler;
     private final String idString;
     private CodedOutputStream currentCodedOutputStreamOrNull;
     private int numFlushesSoFar;
@@ -39,7 +38,7 @@ public class StreamChannelConnectionCaptureSerializer implements
 
     public StreamChannelConnectionCaptureSerializer(String id,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
-                                                    BiFunction<IChannelConnectionCaptureOffloader, CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
+                                                    Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
         assert (id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
@@ -120,12 +119,12 @@ public class StreamChannelConnectionCaptureSerializer implements
     @Override
     public CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
         if (currentCodedOutputStreamOrNull == null && !isFinal) {
-            return closeHandler.apply(null,null);
+            return closeHandler.apply(null);
         }
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
         getOrCreateCodedOutputStream().writeInt32(fieldNum, ++numFlushesSoFar);
         getOrCreateCodedOutputStream().flush();
-        var future = closeHandler.apply(this, getOrCreateCodedOutputStream());
+        var future = closeHandler.apply(getOrCreateCodedOutputStream());
         //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
         currentCodedOutputStreamOrNull = null;
         return future;

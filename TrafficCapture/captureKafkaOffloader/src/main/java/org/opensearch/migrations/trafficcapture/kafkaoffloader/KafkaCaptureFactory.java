@@ -8,15 +8,13 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.MetadataCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Properties;
-import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
@@ -24,15 +22,12 @@ import java.util.concurrent.atomic.AtomicLong;
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory {
 
-    private static final String DEFAULT_TOPIC_NAME_MUTATING_TRAFFIC = "logging-mutating-topic";
-    private static final String DEFAULT_TOPIC_NAME_NON_MUTATING_TRAFFIC = "logging-non-mutating-topic";
+    private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
 
     private final Producer<String, byte[]> producer;
-    private final String topicNameForMutatingTraffic;
-    private final String topicNameForNonMutatingTraffic;
-    private final Set<String> mutatingRequestMethods;
+    private final String topicNameForTraffic;
 
-    public KafkaCaptureFactory(String producerPropertiesPath, String topicNameForMutatingTraffic, String topicNameForNonMutatingTraffic) throws IOException {
+    public KafkaCaptureFactory(String producerPropertiesPath, String topicNameForTraffic) throws IOException {
         Properties producerProps = new Properties();
         try {
             producerProps.load(new FileReader(producerPropertiesPath));
@@ -43,23 +38,18 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         // There is likely some default timeout/retry settings we should configure here to reduce any potential blocking
         // i.e. the Kafka cluster is unavailable
         producer = new KafkaProducer<>(producerProps);
-        this.topicNameForMutatingTraffic = topicNameForMutatingTraffic;
-        this.topicNameForNonMutatingTraffic = topicNameForNonMutatingTraffic;
-        mutatingRequestMethods = new HashSet<>(3);
-        mutatingRequestMethods.add("POST");
-        mutatingRequestMethods.add("PUT");
-        mutatingRequestMethods.add("DELETE");
+        this.topicNameForTraffic = topicNameForTraffic;
     }
 
     public KafkaCaptureFactory(String producerPropertiesPath) throws IOException {
-        this(producerPropertiesPath, DEFAULT_TOPIC_NAME_MUTATING_TRAFFIC, DEFAULT_TOPIC_NAME_NON_MUTATING_TRAFFIC);
+        this(producerPropertiesPath, DEFAULT_TOPIC_NAME_FOR_TRAFFIC);
     }
 
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
         AtomicLong supplierCallCounter = new AtomicLong();
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteStreamMap = new WeakHashMap<>();
-        return new MetadataCaptureSerializer(connectionId,
+        return new StreamChannelConnectionCaptureSerializer(connectionId,
             () -> {
                 // Set ByteBuffer to Kafka max message size of 1MB with 1024 bytes of leeway temporarily until
                 // serializer has been updated
@@ -68,14 +58,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                 codedStreamToByteStreamMap.put(cos, bb);
                 return cos;
             },
-            (offloader, codedOutputStream) -> {
+            (codedOutputStream) -> {
                 try {
                     ByteBuffer byteBuffer = codedStreamToByteStreamMap.get(codedOutputStream);
                     codedStreamToByteStreamMap.remove(codedOutputStream);
-                    assert(offloader.getRequestMethod() != null);
-                    String topic = mutatingRequestMethods.contains(offloader.getRequestMethod().toUpperCase())
-                        ? topicNameForMutatingTraffic : topicNameForNonMutatingTraffic;
-                    ProducerRecord<String, byte[]> record = new ProducerRecord<>(topic,
+                    ProducerRecord<String, byte[]> record = new ProducerRecord<>(topicNameForTraffic,
                         String.format("%s_%d", connectionId, supplierCallCounter.incrementAndGet()),
                         Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
                     // Used to essentially wrap Future returned by Producer to CompletableFuture

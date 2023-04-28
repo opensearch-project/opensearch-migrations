@@ -43,7 +43,7 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
             var cos = CodedOutputStream.newInstance(baos);
             codedStreamToFileStreamMap.put(cos, baos);
             return cos;
-        }, (offloader, codedOutputStream) -> CompletableFuture.runAsync(() -> {
+        }, (codedOutputStream) -> CompletableFuture.runAsync(() -> {
             try {
                 CodedOutputStream stream = codedOutputStream;
                 ByteArrayOutputStream baos = codedStreamToFileStreamMap.get(stream);
