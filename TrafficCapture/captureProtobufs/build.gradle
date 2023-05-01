@@ -5,6 +5,7 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'com.google.protobuf' version "0.9.2"
+    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
 repositories {
