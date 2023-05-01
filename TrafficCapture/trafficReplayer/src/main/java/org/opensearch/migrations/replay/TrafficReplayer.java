@@ -4,8 +4,9 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import lombok.extern.log4j.Log4j2;
-import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.transform.JsonTransformBuilder;
+import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
@@ -14,8 +15,6 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -28,7 +27,10 @@ public class TrafficReplayer {
 
     public TrafficReplayer(URI serverUri)
     {
-        packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri);
+        var jsonTransformer = JsonTransformer.newBuilder()
+                .addHostSwitchOperation(serverUri.getHost())
+                .build();
+        packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer);
     }
 
 

@@ -1,0 +1,10 @@
+{
+  "spec": [
+    {
+      "operation": "shift",
+      "spec": {
+        "*": "&"
+      }
+    }
+  ]
+}

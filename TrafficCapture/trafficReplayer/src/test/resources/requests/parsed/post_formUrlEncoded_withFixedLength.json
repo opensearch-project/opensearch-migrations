@@ -1,0 +1,13 @@
+{
+  "method": "PUT",
+  "uri": "/test",
+  "protocol": "HTTP/1.1",
+  "headers": {
+    "Host": "sourcecluster.org",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Content-Length": "27"
+  },
+  "payload": {
+    "opaqueBytes": "field1=value1&field2=value2"
+  }
+}

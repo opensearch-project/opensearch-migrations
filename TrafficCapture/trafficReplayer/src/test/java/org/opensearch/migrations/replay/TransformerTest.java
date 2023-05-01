@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.HttpMessageTransformerHandler;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
+import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -30,7 +31,7 @@ public class TransformerTest {
         AtomicInteger decayedMilliseconds = new AtomicInteger(50);
         final int DECAY_FACTOR = 4;
         var transformingHandler = new HttpMessageTransformerHandler(
-                new IPacketToHttpHandler() {
+                JsonTransformer.newBuilder().build(), new IPacketToHttpHandler() {
                     ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
                     @Override
                     public CompletableFuture<Void> consumeBytes(byte[] nextRequestPacket) {

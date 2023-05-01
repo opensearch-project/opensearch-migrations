@@ -8,8 +8,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 public abstract class PacketToTransformingHttpMessageHandler implements IPacketToHttpHandler {
@@ -31,19 +29,6 @@ public abstract class PacketToTransformingHttpMessageHandler implements IPacketT
         public void close() throws IOException {
             inputStream.close();
         }
-    }
-
-    public interface ByteTransformer {
-        CompletableFuture<Void> addBytes(byte[] nextRequestPacket);
-
-        /**
-         * To be called once consumeBytes() has been called with all of the data from a request.
-         * Once this is called, the transformed contents of the full Http message will be returned
-         * as a stream.
-         * @return
-         * @throws IOException
-         */
-         CompletableFuture<SizeAndInputStream> getFullyTransformedBytes();
     }
 
     @Override
