@@ -24,8 +24,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 @Slf4j
-public class StreamChannelConnectionCaptureSerializer implements
-        IChannelConnectionCaptureSerializer, Closeable {
+public class StreamChannelConnectionCaptureSerializer implements IChannelConnectionCaptureSerializer, Closeable {
 
     private final static int MAX_ID_SIZE = 32;
 
@@ -50,7 +49,7 @@ public class StreamChannelConnectionCaptureSerializer implements
         return d.findFieldByNumber(fieldNumber).getLiteType().getWireType();
     }
 
-    private CodedOutputStream currentCodedOutputStream() throws IOException {
+    private CodedOutputStream getOrCreateCodedOutputStream() throws IOException {
         if (currentCodedOutputStreamOrNull != null) {
             return currentCodedOutputStreamOrNull;
         } else {
@@ -61,12 +60,12 @@ public class StreamChannelConnectionCaptureSerializer implements
     }
 
     private void writeTrafficStreamTag(int fieldNumber) throws IOException {
-        currentCodedOutputStream().writeTag(fieldNumber,
+        getOrCreateCodedOutputStream().writeTag(fieldNumber,
                 getWireTypeForFieldIndex(TrafficStream.getDescriptor(), fieldNumber));
     }
 
     private void writeObservationTag(int fieldNumber) throws IOException {
-        currentCodedOutputStream().writeTag(fieldNumber,
+        getOrCreateCodedOutputStream().writeTag(fieldNumber,
                 getWireTypeForFieldIndex(TrafficObservation.getDescriptor(), fieldNumber));
     }
 
@@ -74,7 +73,7 @@ public class StreamChannelConnectionCaptureSerializer implements
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
         final var tsSize = getSizeOfTimestamp(timestamp);
         final var observationTagSize = CodedOutputStream.computeTagSize(tag);
-        currentCodedOutputStream().writeUInt32NoTag(tsSize +
+        getOrCreateCodedOutputStream().writeUInt32NoTag(tsSize +
                 CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsSize) +
                 observationTagSize +
                 bodySize);
@@ -92,28 +91,28 @@ public class StreamChannelConnectionCaptureSerializer implements
 
     private void writeTimestampForNowToCurrentStream(Instant timestamp) throws IOException {
         writeObservationTag(TrafficObservation.TS_FIELD_NUMBER);
-        currentCodedOutputStream().writeUInt32NoTag(getSizeOfTimestamp(timestamp));
+        getOrCreateCodedOutputStream().writeUInt32NoTag(getSizeOfTimestamp(timestamp));
 
-        currentCodedOutputStream().writeInt64(Timestamp.SECONDS_FIELD_NUMBER, timestamp.getEpochSecond());
+        getOrCreateCodedOutputStream().writeInt64(Timestamp.SECONDS_FIELD_NUMBER, timestamp.getEpochSecond());
         if (timestamp.getNano() != 0) {
-            currentCodedOutputStream().writeInt32(Timestamp.NANOS_FIELD_NUMBER, timestamp.getNano());
+            getOrCreateCodedOutputStream().writeInt32(Timestamp.NANOS_FIELD_NUMBER, timestamp.getNano());
         }
     }
 
     private void writeByteBufferToCurrentStream(int fieldNum, ByteBuffer byteBuffer) throws IOException {
         if (byteBuffer.remaining() > 0) {
-            currentCodedOutputStream().writeByteBuffer(fieldNum, byteBuffer);
+            getOrCreateCodedOutputStream().writeByteBuffer(fieldNum, byteBuffer);
         } else {
-            currentCodedOutputStream().writeUInt32NoTag(0);
+            getOrCreateCodedOutputStream().writeUInt32NoTag(0);
         }
     }
 
 
     private void writeByteStringToCurrentStream(int fieldNum, String str) throws IOException {
         if (str.length() > 0) {
-            currentCodedOutputStream().writeString(fieldNum, str);
+            getOrCreateCodedOutputStream().writeString(fieldNum, str);
         } else {
-            currentCodedOutputStream().writeUInt32NoTag(0);
+            getOrCreateCodedOutputStream().writeUInt32NoTag(0);
         }
     }
 
@@ -122,10 +121,11 @@ public class StreamChannelConnectionCaptureSerializer implements
         if (currentCodedOutputStreamOrNull == null && !isFinal) {
             return closeHandler.apply(null);
         }
+        CodedOutputStream currentStream = getOrCreateCodedOutputStream();
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
-        currentCodedOutputStream().writeInt32(fieldNum, ++numFlushesSoFar);
-        currentCodedOutputStream().flush();
-        var future = closeHandler.apply(currentCodedOutputStream());
+        currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
+        currentStream.flush();
+        var future = closeHandler.apply(currentStream);
         //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
         currentCodedOutputStreamOrNull = null;
         return future;
@@ -187,12 +187,12 @@ public class StreamChannelConnectionCaptureSerializer implements
         int lengthSize = 1;
         if (str.length() > 0) {
             dataSize = CodedOutputStream.computeStringSize(dataFieldNumber, str);
-            lengthSize = currentCodedOutputStream().computeInt32SizeNoTag(dataSize);
+            lengthSize = getOrCreateCodedOutputStream().computeInt32SizeNoTag(dataSize);
         }
         beginWritingObservationToCurrentStream(timestamp, observationFieldNumber,
                 dataSize + lengthSize);
         if (dataSize > 0) {
-            currentCodedOutputStream().writeInt32NoTag(dataSize);
+            getOrCreateCodedOutputStream().writeInt32NoTag(dataSize);
         }
         writeByteStringToCurrentStream(dataFieldNumber, str);
     }
@@ -204,12 +204,12 @@ public class StreamChannelConnectionCaptureSerializer implements
         int lengthSize = 1;
         if (byteBuffer.remaining() > 0) {
             dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, byteBuffer);
-            lengthSize = currentCodedOutputStream().computeInt32SizeNoTag(dataSize);
+            lengthSize = getOrCreateCodedOutputStream().computeInt32SizeNoTag(dataSize);
         }
         beginWritingObservationToCurrentStream(timestamp, observationFieldNumber,
                 dataSize + lengthSize);
         if (dataSize > 0) {
-            currentCodedOutputStream().writeInt32NoTag(dataSize);
+            getOrCreateCodedOutputStream().writeInt32NoTag(dataSize);
         }
         writeByteBufferToCurrentStream(dataFieldNumber, byteBuffer);
     }
@@ -298,8 +298,8 @@ public class StreamChannelConnectionCaptureSerializer implements
                 CodedOutputStream.computeInt32Size(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
         int eomDataSize = eomPairSize + CodedOutputStream.computeInt32SizeNoTag(eomPairSize);
         beginWritingObservationToCurrentStream(timestamp, TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER, eomDataSize);
-        currentCodedOutputStream().writeUInt32NoTag(eomPairSize);
-        currentCodedOutputStream().writeInt32(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
-        currentCodedOutputStream().writeInt32(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+        getOrCreateCodedOutputStream().writeUInt32NoTag(eomPairSize);
+        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
+        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
     }
 }
