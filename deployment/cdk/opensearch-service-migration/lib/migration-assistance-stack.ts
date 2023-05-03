@@ -1,6 +1,3 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: MIT-0
-
 import {Stack, StackProps} from "aws-cdk-lib";
 import {
     Instance,
@@ -60,7 +57,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create CW Puller Container
         const cwPullerImage = new DockerImageAsset(this, "CWPullerImage", {
-            directory: join(__dirname, "..", "docker/cw-puller")
+            directory: join(__dirname, "../../..", "docker/cw-puller")
         });
         const clearIdentifierString = props.sourceCWLogStreamARN.split(":log-group:")[1]
         const[logGroupName, logStreamName] = clearIdentifierString.split(":log-stream:")
@@ -75,7 +72,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create Traffic Comparator Container
         const trafficComparatorImage = new DockerImageAsset(this, "TrafficComparatorImage", {
-            directory: join(__dirname, "..", "docker/traffic-comparator")
+            directory: join(__dirname, "../../..", "docker/traffic-comparator")
         });
         const trafficComparatorContainer = migrationFargateTask.addContainer("TrafficComparatorContainer", {
             image: ContainerImage.fromDockerImageAsset(trafficComparatorImage),
@@ -88,7 +85,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create Traffic Replayer Container
         const trafficReplayerImage = new DockerImageAsset(this, "TrafficReplayerImage", {
-            directory: join(__dirname, "..", "docker/traffic-replayer")
+            directory: join(__dirname, "../../..", "docker/traffic-replayer")
         });
         const trafficReplayerContainer = migrationFargateTask.addContainer("TrafficReplayerContainer", {
             image: ContainerImage.fromDockerImageAsset(trafficReplayerImage),

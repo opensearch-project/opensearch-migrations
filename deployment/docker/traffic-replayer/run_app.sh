@@ -23,7 +23,7 @@ do
   # process with the Replayer jar before ultimately printing the produced triples to stdout via tee and sending to TC via netcat
   # Note: Unbuffer has not been verified to actually be effective here. stdbuf was ruled out for its caveat with tee (https://linux.die.net/man/1/stdbuf)
   unbuffer tail -f triples.log | tee /dev/stderr | nc -v localhost 9220 &
-  nc -v -l -p 9210 | java -jar TrafficReplayer-uber-0.1.0.jar -o triples.log "$target_endpoint"
+  nc -v -l -p 9210 | java -jar trafficReplayer.jar -o triples.log "$target_endpoint"
 
   rm triple.log
   >&2 echo "Command has encountered error. Restarting now ..."
