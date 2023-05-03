@@ -1,15 +1,13 @@
 # syntax=docker/dockerfile:1
 FROM python:3.10.10
 
-WORKDIR /traffic_comparator
-RUN apt-get update && apt-get install -y netcat
+RUN apt-get update && apt-get install -y netcat && apt-get install -y git
 
-# Copying the local necessary files for the comparator to run is only temporary, until the comparator repo is public.
-# Then the steps here would be to clone the repo.
+# Be weary that this layer can be cached and not capture recent commits. Run docker build --no-cache to avoid this
+RUN git clone https://github.com/opensearch-project/traffic-comparator.git
 
-COPY traffic_comparator ./traffic_comparator
-COPY cli.py .
-COPY setup.py .
+WORKDIR /traffic-comparator
+
 COPY run_app.sh .
 
 RUN pip3 install --editable .

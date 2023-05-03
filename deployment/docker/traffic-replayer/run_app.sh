@@ -7,11 +7,6 @@ target_endpoint="$1"
 
 while true
 do
-  java -jar trafficReplayer.jar -o triples.log "$target_endpoint"
-done
-
-while true
-do
   # Verify connection with TC can be made before disconnecting via 1 second timeout and moving forward
   while ! nc -v -w 1 localhost 9220
   do
