@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers;
 
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -59,9 +60,8 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
     }
 
     @Override
-    public CompletableFuture<Void> consumeBytes(byte[] packetData) {
+    public CompletableFuture<Void> consumeBytes(ByteBuf packetData) {
         log.trace("Writing packetData["+packetData+"]");
-        var packet = Unpooled.wrappedBuffer(packetData);
         var completableFuture = new CompletableFuture<Void>();
         if (outboundChannelFuture.isDone()) {
             Channel channel = outboundChannelFuture.channel();
@@ -71,7 +71,7 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
                 return null;
             }
             log.trace("Writing data to backside handler");
-            channel.writeAndFlush(packet)
+            channel.writeAndFlush(packetData)
                     .addListener((ChannelFutureListener) future -> {
                         if (future.isSuccess()) {
                             log.trace("packet write was successful: "+packetData);

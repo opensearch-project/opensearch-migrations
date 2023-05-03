@@ -1,9 +1,9 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.channel.nio.NioEventLoopGroup;
-import org.opensearch.migrations.replay.datahandlers.HttpMessageTransformerHandler;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpHandler;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformerHandler;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.io.IOException;
@@ -22,7 +22,7 @@ public class PacketToTransformingProxyHandlerFactory {
 
     public IPacketToHttpHandler create() throws IOException {
         var nettyHandler = new NettyPacketToHttpHandler(eventLoopGroup, serverUri);
-        return new HttpMessageTransformerHandler(jsonTransformer, nettyHandler);
+        return new HttpJsonTransformerHandler(jsonTransformer, nettyHandler);
     }
 
     public void stopGroup() {

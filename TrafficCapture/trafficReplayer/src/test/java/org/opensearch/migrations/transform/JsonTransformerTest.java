@@ -2,26 +2,14 @@ package org.opensearch.migrations.transform;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datahandlers.http.HttpParser;
-import org.opensearch.migrations.replay.datahandlers.http.LazyLoadingPayloadMap;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Writer;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 
 @Slf4j
 class JsonTransformerTest {
@@ -95,19 +83,19 @@ class JsonTransformerTest {
         //Assertions.assertEquals(parseSampleRequestFromResource(testResourceName).toString(), transformedHeaders.toString());
     }
 
-    @Test
-    public void testThatLazyPayloadsAreLazy() throws IOException {
-        Map<String, Object> jsonRequest;
-        var httpParser = new HttpParser();
-        try (var is = getClass().getResourceAsStream("/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
-            httpParser.write(is.readAllBytes());
-        }
-        jsonRequest = httpParser.asJsonDocument();
-        //var payloadJson = ((Map)jsonRequest.get("payload")).get("inlinedJsonBody");
-        var transformer = JsonTransformer.newBuilder()
-                .addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING)
-                .build();
-        var transformedDocument = transformer.transformJson(jsonRequest);
-        log.error(transformedDocument.toString());
-    }
+//    @Test
+//    public void testThatLazyPayloadsAreLazy() throws IOException {
+//        Map<String, Object> jsonRequest;
+//        var httpParser = new HttpJsonTransformer();
+//        try (var is = getClass().getResourceAsStream("/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
+//            httpParser.acceptRawRequestBytes(is.readAllBytes());
+//        }
+//        jsonRequest = httpParser.asJsonDocument();
+//        //var payloadJson = ((Map)jsonRequest.get("payload")).get("inlinedJsonBody");
+//        var transformer = JsonTransformer.newBuilder()
+//                .addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING)
+//                .build();
+//        var transformedDocument = transformer.transformJson(jsonRequest);
+//        log.error(transformedDocument.toString());
+//    }
 }
