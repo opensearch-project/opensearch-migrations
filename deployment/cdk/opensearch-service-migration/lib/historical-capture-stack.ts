@@ -1,6 +1,3 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: MIT-0
-
 import {Stack, StackProps} from "aws-cdk-lib";
 import {IVpc} from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
@@ -16,8 +13,11 @@ export interface historicalCaptureStackProps extends StackProps {
     readonly targetEndpoint: string
 }
 
-
-export class HistorialCaptureStack extends Stack {
+/**
+ * This stack was a short exploratory task into having a deployable Logstash ECS cluster for historical data migration.
+ * NOTE: It should only be used for development purposes in its current state
+ */
+export class HistoricalCaptureStack extends Stack {
 
     constructor(scope: Construct, id: string, props: historicalCaptureStackProps) {
         super(scope, id, props);
@@ -40,7 +40,7 @@ export class HistorialCaptureStack extends Stack {
         logstashConfigData = logstashConfigData.replace(/(\n)/g, "PUT_LINE")
         // Create Historical Capture Container
         const historicalCaptureImage = new DockerImageAsset(this, "historicalCaptureImage", {
-            directory: join(__dirname, "..", "docker/logstash-setup")
+            directory: join(__dirname, "../../..", "docker/logstash-setup")
         });
 
         const historicalCaptureContainer = historicalCaptureFargateTask.addContainer("historicalCaptureContainer", {

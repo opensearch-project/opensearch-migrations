@@ -1,6 +1,3 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: MIT-0
-
 import {Construct} from "constructs";
 import {RemovalPolicy, Stack, StackProps} from "aws-cdk-lib";
 import {OpensearchServiceDomainCdkStack} from "./opensearch-service-domain-cdk-stack";
@@ -10,7 +7,7 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
-import {HistorialCaptureStack} from "./historical-capture-stack";
+import {HistoricalCaptureStack} from "./historical-capture-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string
@@ -179,7 +176,7 @@ export class StackComposer {
         // Note: Future work to provide orchestration between historical capture and migration assistance as the current
         // state will potentially have both stacks trying to add the same data
         if (historicalCaptureEnabled && networkStack) {
-            const historicalCaptureStack = new HistorialCaptureStack(scope, "historicalCaptureStack", {
+            const historicalCaptureStack = new HistoricalCaptureStack(scope, "historicalCaptureStack", {
                 vpc: networkStack.vpc,
                 logstashConfigFilePath: logstashConfigFilePath,
                 sourceEndpoint: sourceClusterEndpoint,

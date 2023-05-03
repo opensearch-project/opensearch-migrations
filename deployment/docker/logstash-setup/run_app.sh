@@ -16,9 +16,3 @@ else
   echo "Logstash migration has failed. Will relaunch shortly..."
   sleep 60
 fi
-    
-
-#while true
-#do
-#  sleep 5
-#done
