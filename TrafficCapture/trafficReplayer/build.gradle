@@ -67,17 +67,11 @@ jar {
     }
 }
 
-task uberJar(type: Jar) {
-    manifest {
-        attributes 'Main-Class': application.mainClass
-    }
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }
-    archiveBaseName = project.name + "-uber"
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    with jar
+task copyDependencies(type: Copy) {
+    from configurations.runtimeClasspath
+    into 'dependencies'
 }
+
 
 tasks.named('test') {
     useJUnitPlatform()
