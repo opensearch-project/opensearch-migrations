@@ -66,8 +66,15 @@ public class TransformerTest {
 
         Random r = new Random(2);
 
-        var allConsumesFuture = IntStream.range(0, 3).mapToObj(i->makeRandomString(r)).map(o->(String)o)
-                .collect(foldLeft(CompletableFuture.completedFuture(null),
+        var stringParts = IntStream.range(0, 3).mapToObj(i->makeRandomString(r)).map(o->(String)o)
+                .collect(Collectors.toList());
+        var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
+        var preambleStr = "GET / HTTP/1.1\n" +
+                "host: localhost\n" +
+                "content-length: " + contentLength + "\n\n";
+        var preamble = preambleStr.getBytes(StandardCharsets.UTF_8);
+        var allConsumesFuture = stringParts.stream()
+                .collect(foldLeft(CompletableFuture.completedFuture(transformingHandler.consumeBytes(preamble)),
                         (cf, s)->cf.thenApply(v->writeStringToBoth(s, referenceStringBuilder, transformingHandler))));
 
         var innermostFinalizeCallCount = new AtomicInteger();

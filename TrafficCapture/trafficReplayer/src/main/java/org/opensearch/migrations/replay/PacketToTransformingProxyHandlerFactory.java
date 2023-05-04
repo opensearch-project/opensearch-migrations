@@ -20,9 +20,12 @@ public class PacketToTransformingProxyHandlerFactory {
         this.serverUri = serverUri;
     }
 
-    public IPacketToHttpHandler create() throws IOException {
-        var nettyHandler = new NettyPacketToHttpHandler(eventLoopGroup, serverUri);
-        return new HttpJsonTransformerHandler(jsonTransformer, nettyHandler);
+    public IPacketToHttpHandler createNettyHandler() {
+        return new NettyPacketToHttpHandler(eventLoopGroup, serverUri);
+    }
+
+    public IPacketToHttpHandler create() {
+        return new HttpJsonTransformerHandler(jsonTransformer, createNettyHandler());
     }
 
     public void stopGroup() {
