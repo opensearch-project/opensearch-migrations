@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 @Slf4j
-public class HttpJsonTransformerHandler implements IPacketToHttpHandler {
+public class HttpJsonTransformer implements IPacketToHttpHandler {
     private final EmbeddedChannel channel;
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
@@ -27,20 +27,20 @@ public class HttpJsonTransformerHandler implements IPacketToHttpHandler {
 
     HTTP_CONSUMPTION_STATUS handlerStatus;
 
-    public HttpJsonTransformerHandler(JsonTransformer transformer, IPacketToHttpHandler transformedPacketReceiver) {
+    public HttpJsonTransformer(JsonTransformer transformer, IPacketToHttpHandler transformedPacketReceiver) {
         chunkSizes = new ArrayList<>(2);
         chunkSizes.add(new ArrayList<>(4));
         channel = new EmbeddedChannel(
                 new HttpRequestDecoder(),
                 new LoggingHandler(ByteBufFormat.HEX_DUMP)
-                ,new HttpRequestStreamHandler(transformer, chunkSizes, transformedPacketReceiver, s -> {handlerStatus = s;})
+                ,new NettyDecodedHttpRequestHandler(transformer, chunkSizes, transformedPacketReceiver, s -> {handlerStatus = s;})
                 ,new LoggingHandler(ByteBufFormat.HEX_DUMP)
         );
     }
 
-    private FinalByteBufConsumerHandler getEndOfConsumptionHandler() {
+    private NettySendByteBufsToPacketHandlerHandler getEndOfConsumptionHandler() {
         var last = channel.pipeline().last();
-        return (FinalByteBufConsumerHandler) last;
+        return (NettySendByteBufsToPacketHandlerHandler) last;
     }
 
     public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {

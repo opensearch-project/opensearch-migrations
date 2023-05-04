@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.datahandlers.http;
+package org.opensearch.migrations.replay.datahandlers;
 
 /**
  * This class is used to throw in LazyLoadingPayloadMap when the json payload has yet to be loaded.

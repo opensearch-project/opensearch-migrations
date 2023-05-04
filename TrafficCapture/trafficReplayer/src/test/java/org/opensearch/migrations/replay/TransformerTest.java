@@ -5,7 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformerHandler;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.io.ByteArrayOutputStream;
@@ -31,7 +31,7 @@ public class TransformerTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
         AtomicInteger decayedMilliseconds = new AtomicInteger(50);
         final int DECAY_FACTOR = 4;
-        var transformingHandler = new HttpJsonTransformerHandler(
+        var transformingHandler = new HttpJsonTransformer(
                 JsonTransformer.newBuilder().build(),
                 new IPacketToHttpHandler() {
                     ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
@@ -104,7 +104,7 @@ public class TransformerTest {
     }
 
     private static CompletableFuture<Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
-                                                             HttpJsonTransformerHandler transformingHandler) {
+                                                             HttpJsonTransformer transformingHandler) {
         log.info("Sending string to transformer: "+s);
         referenceStringBuilder.append(s);
         var bytes = s.getBytes(StandardCharsets.UTF_8);

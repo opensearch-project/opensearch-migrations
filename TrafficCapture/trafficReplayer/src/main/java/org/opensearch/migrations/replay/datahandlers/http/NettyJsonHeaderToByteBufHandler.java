@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import com.google.common.collect.ImmutableList;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufOutputStream;
@@ -15,32 +14,32 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
-public class HttpTransformedRequestSenderHandler extends ChannelInboundHandlerAdapter {
+public class NettyJsonHeaderToByteBufHandler extends ChannelInboundHandlerAdapter {
     //private final HttpJsonTransformerHandler httpJsonTransformerHandler;
     List<List<Integer>> sharedInProgressChunkSizes;
     short currentSectionToPullChunksFrom;
     short chunksSentForSection;
 
-    public HttpTransformedRequestSenderHandler(List<List<Integer>> sharedInProgressChunkSizes) {
+    public NettyJsonHeaderToByteBufHandler(List<List<Integer>> sharedInProgressChunkSizes) {
         this.sharedInProgressChunkSizes = sharedInProgressChunkSizes;
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        log.trace("channelRead: "+msg);
         if (msg instanceof HttpJsonMessageWithFaultablePayload) {
             var byteBufs = writeHeadersIntoByteBufs((HttpJsonMessageWithFaultablePayload) msg);
             for (var bb : byteBufs) {
                 ctx.fireChannelRead(bb);
             }
-            super.channelRead(ctx, msg);
-        } else {
-            super.channelRead(ctx, msg);
+        } else if (msg instanceof ByteBuf) {
+            ctx.fireChannelRead((ByteBuf) msg);
         }
+        super.channelRead(ctx, msg);
     }
 
     @Override

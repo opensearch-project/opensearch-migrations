@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import com.google.common.collect.ImmutableList;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.DecoderException;
@@ -14,6 +13,8 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
+import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
+import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.util.ArrayList;
@@ -24,7 +25,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class HttpRequestStreamHandler extends ChannelInboundHandlerAdapter {
+public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter {
     /**
      * This is stored as part of a closure for the pipeline continuation that will be triggered
      * once it becomes apparent if we need to process the payload stream or if we can pass it
@@ -37,10 +38,9 @@ public class HttpRequestStreamHandler extends ChannelInboundHandlerAdapter {
     JsonAccumulator payloadAccumulator;
     Consumer<HTTP_CONSUMPTION_STATUS> statusWatcher;
 
-    public HttpRequestStreamHandler(JsonTransformer transformer, List<List<Integer>> chunkSizes,
-                                    IPacketToHttpHandler packetReceiver,
-                                    Consumer<HTTP_CONSUMPTION_STATUS> statusWatcher) {
-
+    public NettyDecodedHttpRequestHandler(JsonTransformer transformer, List<List<Integer>> chunkSizes,
+                                          IPacketToHttpHandler packetReceiver,
+                                          Consumer<HTTP_CONSUMPTION_STATUS> statusWatcher) {
         this.packetReceiver = packetReceiver;
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
@@ -57,9 +57,9 @@ public class HttpRequestStreamHandler extends ChannelInboundHandlerAdapter {
                 transformer.transformJson(httpJsonMessage);
                 if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                         headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
-                    addPassThroughHandlers(ctx);
+                    addBaselineHandlers(ctx);
                 } else {
-                    addJsonParsingHandlers(ctx);
+                    addContentRepackingHandlers(ctx);
                 }
             } catch (PayloadNotLoadedException pnle) {
                 payloadAccumulator = new JsonAccumulator();
@@ -114,16 +114,29 @@ public class HttpRequestStreamHandler extends ChannelInboundHandlerAdapter {
         return jsonMsg;
     }
 
-    private void addJsonParsingHandlers(ChannelHandlerContext ctx) {
-        ctx.pipeline().addLast(new HttpContentDecompressor());
-        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
-        ctx.pipeline().addLast(new HttpTransformedRequestSenderHandler(Collections.unmodifiableList(chunkSizes)));
-        ctx.pipeline().addLast(new HttpContentCompressor());
-        ctx.pipeline().addLast(new FinalByteBufConsumerHandler(packetReceiver));
+    private void addContentRepackingHandlers(ChannelHandlerContext ctx) {
+        addContentParsingHandlers(ctx, false);
     }
 
-    private void addPassThroughHandlers(ChannelHandlerContext ctx) {
-        ctx.pipeline().addLast(new FinalByteBufConsumerHandler(packetReceiver));
+    private void addJsonParsingHandlers(ChannelHandlerContext ctx) {
+        addContentParsingHandlers(ctx, true);
+    }
+    private void addContentParsingHandlers(ChannelHandlerContext ctx, boolean addFullJsonTransformer) {
+        ctx.pipeline().addLast(new HttpContentDecompressor());
+        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
+        if (addFullJsonTransformer) {
+            ctx.pipeline().addLast(new NettyJsonAccumulateAndTransformHandler());
+        }
+        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
+        ctx.pipeline().addLast(new HttpContentCompressor());
+        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
+        addBaselineHandlers(ctx);
+    }
+
+    private void addBaselineHandlers(ChannelHandlerContext ctx) {
+        ctx.pipeline().addLast(new NettyJsonHeaderToByteBufHandler(Collections.unmodifiableList(chunkSizes)));
+        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
+        ctx.pipeline().addLast(new NettySendByteBufsToPacketHandlerHandler(packetReceiver));
     }
 
     private List<String> nullIfEmpty(List list) {

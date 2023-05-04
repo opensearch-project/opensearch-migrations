@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;

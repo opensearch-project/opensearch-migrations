@@ -3,10 +3,9 @@ package org.opensearch.migrations.replay;
 import io.netty.channel.nio.NioEventLoopGroup;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpHandler;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformerHandler;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 
-import java.io.IOException;
 import java.net.URI;
 
 public class PacketToTransformingProxyHandlerFactory {
@@ -25,7 +24,7 @@ public class PacketToTransformingProxyHandlerFactory {
     }
 
     public IPacketToHttpHandler create() {
-        return new HttpJsonTransformerHandler(jsonTransformer, createNettyHandler());
+        return new HttpJsonTransformer(jsonTransformer, createNettyHandler());
     }
 
     public void stopGroup() {

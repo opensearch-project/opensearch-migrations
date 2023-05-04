@@ -1,8 +1,6 @@
-package org.opensearch.migrations.replay.datahandlers.http;
+package org.opensearch.migrations.replay.datahandlers;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.collect.AbstractIterator;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.AbstractMap;
