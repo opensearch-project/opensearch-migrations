@@ -95,7 +95,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
             osw.append(httpJson.protocol());
             osw.append("\n");
 
-            for (var kvpList : httpJson.headers().entrySet()) {
+            for (var kvpList : httpJson.headers().asStrictMap().entrySet()) {
                 var key = kvpList.getKey();
                 for (var valueEntry : kvpList.getValue()) {
                     osw.append(key);

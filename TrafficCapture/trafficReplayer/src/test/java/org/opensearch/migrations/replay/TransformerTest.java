@@ -23,6 +23,9 @@ import java.util.stream.IntStream;
 @Slf4j
 public class TransformerTest {
 
+    public static final String SILLY_TARGET_CLUSTER_NAME = "remoteguest";
+    public static final String SOURCE_CLUSTER_NAME = "localhost";
+
     @Test
     public void testTransformer() throws Exception {
         var referenceStringBuilder = new StringBuilder();
@@ -33,7 +36,9 @@ public class TransformerTest {
         final int DECAY_FACTOR = 1;
         final String[] capturedCompleteString = {null};
         var transformingHandler = new HttpJsonTransformer(
-                JsonTransformer.newBuilder().build(),
+                JsonTransformer.newBuilder()
+                        .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
+                        .build(),
                 new IPacketToHttpHandler() {
                     ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
                     @Override
@@ -73,7 +78,7 @@ public class TransformerTest {
                 .collect(Collectors.toList());
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var preambleStr = "GET / HTTP/1.1\n" +
-                "host: localhost\n" +
+                "host: " + SOURCE_CLUSTER_NAME +  "\n" +
                 "content-length: " + contentLength + "\n\n";
         var preamble = preambleStr.getBytes(StandardCharsets.UTF_8);
         referenceStringBuilder.append(preambleStr);
@@ -91,9 +96,15 @@ public class TransformerTest {
             Assertions.assertEquals(dummyAggregatedResponse, arr);
         });
         finalizationFuture.get();
-        Assertions.assertEquals(referenceStringBuilder.toString(), capturedCompleteString[0]);
+        Assertions.assertEquals(resolveReferenceString(referenceStringBuilder), capturedCompleteString[0]);
         Assertions.assertEquals(1, innermostFinalizeCallCount.get());
         Assertions.assertEquals(1, numFinalizations.get());
+    }
+
+    private String resolveReferenceString(StringBuilder referenceStringBuilder) {
+        var idx = referenceStringBuilder.indexOf(SOURCE_CLUSTER_NAME);
+        referenceStringBuilder.replace(idx, idx+SOURCE_CLUSTER_NAME.length(), SILLY_TARGET_CLUSTER_NAME);
+        return referenceStringBuilder.toString();
     }
 
     public static <A, B> Collector<A, ?, B> foldLeft(final B init, final BiFunction<? super B, ? super A, ? extends B> f) {

@@ -2,13 +2,12 @@ package org.opensearch.migrations.replay.datahandlers;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
 
 import java.util.AbstractMap;
 import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -32,12 +31,8 @@ public class PayloadFaultMap extends AbstractMap<String, Object> {
     private final boolean isJson;
     private Object onlyValue;
 
-    public PayloadFaultMap(Map<String, List<String>> headers) {
+    public PayloadFaultMap(StrictCaseInsensitiveHttpHeadersMap headers) {
         isJson = Optional.ofNullable(headers.get(CONTENT_TYPE)).map(s->s.equals(APPLICATION_JSON)).orElse(false);
-    }
-
-    public boolean payloadWasLoaded() {
-        return onlyValue != null;
     }
 
     @Override

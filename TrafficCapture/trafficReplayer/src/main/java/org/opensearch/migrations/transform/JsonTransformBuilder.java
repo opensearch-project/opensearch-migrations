@@ -53,12 +53,7 @@ public class JsonTransformBuilder {
         var jsonHostSwitchTemplateJson = parseSpecOperationFromResource(RESOURCE_HOST_SWITCH_OPERATION);
         var specJson = (Map<String, Object>) jsonHostSwitchTemplateJson.get("spec");
         var headersSpecJson = (Map<String, Object>) specJson.get("headers");
-        // TODO: It seems totally fair that the transform has a case-sensitive constant value for
-        // to delineate the host header.  However, as the transform is, it will ONLY match, AFAIK,
-        // the value that matches the exact case sensitivity of "Host", and as per the HTTP Spec,
-        // header names are case INSENSITIVE!
-        log.error("TODO: Fix case-sensitive check on this transform!");
-        headersSpecJson.put("Host", targetClusterHostname);
+        headersSpecJson.put("host", targetClusterHostname);
         return jsonHostSwitchTemplateJson;
     }
 

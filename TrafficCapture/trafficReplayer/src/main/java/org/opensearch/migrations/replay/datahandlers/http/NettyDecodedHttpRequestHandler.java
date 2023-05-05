@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -10,8 +9,6 @@ import io.netty.handler.codec.http.HttpContentCompressor;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.LastHttpContent;
-import io.netty.handler.logging.ByteBufFormat;
-import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
@@ -19,10 +16,8 @@ import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.transform.JsonTransformer;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -113,13 +108,11 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         // This is an example of where netty moves too far away from the source for our needs
         log.info("TODO: pull the exact HTTP version string from the packets instead of hardcoding it.");
         jsonMsg.setProtocol("HTTP/1.1");
-        log.info("TODO: Copying header NAMES over through a lowercase transformation that is currently NOT preserved " +
-                "when sending the response");
         var headers = request.headers().entries().stream()
-                .collect(Collectors.groupingBy(kvp->kvp.getKey().toLowerCase(),
-                        LinkedHashMap::new,
+                .collect(Collectors.groupingBy(kvp->kvp.getKey(),
+                        () -> new StrictCaseInsensitiveHttpHeadersMap(),
                         Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
-        jsonMsg.setHeaders(headers);
+        jsonMsg.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(headers));
         jsonMsg.setPayload(new PayloadFaultMap(headers));
         return jsonMsg;
     }
@@ -168,7 +161,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
     private boolean headerFieldIsIdentical(String headerName, HttpRequest request,
                                            HttpJsonMessageWithFaultablePayload httpJsonMessage) {
         var originalValue = nullIfEmpty(request.headers().getAll(headerName));
-        var newValue = nullIfEmpty(httpJsonMessage.headers().get(headerName));
+        var newValue = nullIfEmpty(httpJsonMessage.headers().asStrictMap().get(headerName));
         if (originalValue != null && newValue != null) {
             return originalValue.equals(newValue);
         } else if (originalValue == null && newValue == null) {

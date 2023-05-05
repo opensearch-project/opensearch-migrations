@@ -3,8 +3,6 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 
 import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 
 public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, Object> {
     public final static String METHOD = "method";
@@ -33,10 +31,10 @@ public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, O
         this.put(PROTOCOL, value);
     }
 
-    public Map<String, List<String>> headers() {
-        return (Map<String, List<String>>) this.get(HEADERS);
+    public ListKeyAdaptingCaseInsensitiveHeadersMap headers() {
+        return (ListKeyAdaptingCaseInsensitiveHeadersMap) this.get(HEADERS);
     }
-    public void setHeaders(Map<String, List<String>> value) {
+    public void setHeaders(ListKeyAdaptingCaseInsensitiveHeadersMap value) {
         this.put(HEADERS, value);
     }
     public PayloadFaultMap payload() {
