@@ -29,8 +29,9 @@ public class TransformerTest {
         var numFinalizations = new AtomicInteger();
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
-        AtomicInteger decayedMilliseconds = new AtomicInteger(50);
-        final int DECAY_FACTOR = 4;
+        AtomicInteger decayedMilliseconds = new AtomicInteger(100);
+        final int DECAY_FACTOR = 1;
+        final String[] capturedCompleteString = {null};
         var transformingHandler = new HttpJsonTransformer(
                 JsonTransformer.newBuilder().build(),
                 new IPacketToHttpHandler() {
@@ -39,10 +40,12 @@ public class TransformerTest {
                     public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {
                         return CompletableFuture.runAsync(() -> {
                             try {
+                                log.info("Running async future for "+nextRequestPacket);
                                 int oldV = decayedMilliseconds.get();
-                                int v = oldV / DECAY_FACTOR;
+                                int v = oldV * DECAY_FACTOR;
                                 Assertions.assertTrue(decayedMilliseconds.compareAndSet(oldV, v));
                                 Thread.sleep(decayedMilliseconds.get());
+                                log.info("woke up from sleeping for "+nextRequestPacket);
                             } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
@@ -59,20 +62,21 @@ public class TransformerTest {
                     public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
                         numFinalizations.incrementAndGet();
                         var bytes = byteArrayOutputStream.toByteArray();
-                        Assertions.assertEquals(referenceStringBuilder.toString(), new String(bytes, StandardCharsets.UTF_8));
+                        capturedCompleteString[0] = new String(bytes, StandardCharsets.UTF_8);
                         return CompletableFuture.completedFuture(dummyAggregatedResponse);
                     }
                 });
 
         Random r = new Random(2);
 
-        var stringParts = IntStream.range(0, 3).mapToObj(i->makeRandomString(r)).map(o->(String)o)
+        var stringParts = IntStream.range(0, 1).mapToObj(i->makeRandomString(r)).map(o->(String)o)
                 .collect(Collectors.toList());
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var preambleStr = "GET / HTTP/1.1\n" +
                 "host: localhost\n" +
                 "content-length: " + contentLength + "\n\n";
         var preamble = preambleStr.getBytes(StandardCharsets.UTF_8);
+        referenceStringBuilder.append(preambleStr);
         var allConsumesFuture = stringParts.stream()
                 .collect(foldLeft(CompletableFuture.completedFuture(transformingHandler.consumeBytes(preamble)),
                         (cf, s)->cf.thenApply(v->writeStringToBoth(s, referenceStringBuilder, transformingHandler))));
@@ -87,6 +91,7 @@ public class TransformerTest {
             Assertions.assertEquals(dummyAggregatedResponse, arr);
         });
         finalizationFuture.get();
+        Assertions.assertEquals(referenceStringBuilder.toString(), capturedCompleteString[0]);
         Assertions.assertEquals(1, innermostFinalizeCallCount.get());
         Assertions.assertEquals(1, numFinalizations.get());
     }

@@ -2,7 +2,13 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.DefaultHttpRequest;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpMessage;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.logging.ByteBufFormat;
 import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -12,7 +18,9 @@ import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 @Slf4j
@@ -27,14 +35,33 @@ public class HttpJsonTransformer implements IPacketToHttpHandler {
 
     HTTP_CONSUMPTION_STATUS handlerStatus;
 
+    private static class OrderWatchingHeaders extends DefaultHttpHeaders {
+        List<String> orderOfKeyAdds = new ArrayList<>();
+
+        @Override
+        public HttpHeaders add(String name, Object value) {
+            orderOfKeyAdds.add(name);
+            return super.add(name, value);
+        }
+    }
+
+    private static class HttpRequestDecoderWithOrderedHeaders extends HttpRequestDecoder {
+        @Override
+        protected HttpMessage createMessage(String[] initialLine) throws Exception {
+            DefaultHttpRequest superMsg = (DefaultHttpRequest) super.createMessage(initialLine);
+            return new DefaultHttpRequest(superMsg.protocolVersion(), superMsg.method(), superMsg.uri(),
+                    new OrderWatchingHeaders());
+        }
+    }
+
     public HttpJsonTransformer(JsonTransformer transformer, IPacketToHttpHandler transformedPacketReceiver) {
         chunkSizes = new ArrayList<>(2);
         chunkSizes.add(new ArrayList<>(4));
         channel = new EmbeddedChannel(
-                new HttpRequestDecoder(),
-                new LoggingHandler(ByteBufFormat.HEX_DUMP)
+                new HttpRequestDecoder()
+                //,new LoggingHandler(ByteBufFormat.HEX_DUMP)
                 ,new NettyDecodedHttpRequestHandler(transformer, chunkSizes, transformedPacketReceiver, s -> {handlerStatus = s;})
-                ,new LoggingHandler(ByteBufFormat.HEX_DUMP)
+                //,new LoggingHandler(ByteBufFormat.HEX_DUMP)
         );
     }
 

@@ -18,13 +18,13 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
-public class NettyJsonHeaderToByteBufHandler extends ChannelInboundHandlerAdapter {
+public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
     //private final HttpJsonTransformerHandler httpJsonTransformerHandler;
     List<List<Integer>> sharedInProgressChunkSizes;
     short currentSectionToPullChunksFrom;
     short chunksSentForSection;
 
-    public NettyJsonHeaderToByteBufHandler(List<List<Integer>> sharedInProgressChunkSizes) {
+    public NettyJsonToByteBufHandler(List<List<Integer>> sharedInProgressChunkSizes) {
         this.sharedInProgressChunkSizes = sharedInProgressChunkSizes;
     }
 
@@ -38,8 +38,9 @@ public class NettyJsonHeaderToByteBufHandler extends ChannelInboundHandlerAdapte
             }
         } else if (msg instanceof ByteBuf) {
             ctx.fireChannelRead((ByteBuf) msg);
+        } else {
+            super.channelRead(ctx, msg);
         }
-        super.channelRead(ctx, msg);
     }
 
     @Override
@@ -88,7 +89,9 @@ public class NettyJsonHeaderToByteBufHandler extends ChannelInboundHandlerAdapte
                                                OutputStream os) throws IOException {
         try (var osw = new OutputStreamWriter(os, StandardCharsets.UTF_8)) {
             osw.append(httpJson.method());
+            osw.append(" ");
             osw.append(httpJson.uri());
+            osw.append(" ");
             osw.append(httpJson.protocol());
             osw.append("\n");
 
@@ -96,12 +99,12 @@ public class NettyJsonHeaderToByteBufHandler extends ChannelInboundHandlerAdapte
                 var key = kvpList.getKey();
                 for (var valueEntry : kvpList.getValue()) {
                     osw.append(key);
-                    osw.append(":");
+                    osw.append(": ");
                     osw.append(valueEntry);
                     osw.append("\n");
                 }
             }
-            osw.append("\n\n");
+            osw.append("\n");
             osw.flush();
         }
     }
