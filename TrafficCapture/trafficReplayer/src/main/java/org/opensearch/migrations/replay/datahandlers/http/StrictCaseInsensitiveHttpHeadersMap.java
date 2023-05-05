@@ -22,10 +22,13 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List
     }
 
     @Override
-    public List<String> put(String key, List<String> value) {
-        SimpleEntry<String,List<String>> existing =
-                lowerCaseToUpperCaseAndValueMap.put(key.toLowerCase(), new SimpleEntry(key, value));
-        return existing == null ? null : existing.getValue();
+    public List<String> put(String incomingKey, List<String> value) {
+        var normalizedKey = incomingKey.toLowerCase();
+        SimpleEntry<String,List<String>> oldEntry =
+                lowerCaseToUpperCaseAndValueMap.get(normalizedKey);
+        var newValue = new SimpleEntry(oldEntry == null ? incomingKey : oldEntry.getKey(), value);
+        lowerCaseToUpperCaseAndValueMap.put(normalizedKey, newValue);
+        return oldEntry == null ? null : oldEntry.getValue();
     }
 
     @Override

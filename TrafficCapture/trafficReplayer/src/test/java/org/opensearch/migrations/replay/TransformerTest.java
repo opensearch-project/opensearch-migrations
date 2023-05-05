@@ -78,7 +78,7 @@ public class TransformerTest {
                 .collect(Collectors.toList());
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var preambleStr = "GET / HTTP/1.1\n" +
-                "host: " + SOURCE_CLUSTER_NAME +  "\n" +
+                "HoSt: " + SOURCE_CLUSTER_NAME +  "\n" +
                 "content-length: " + contentLength + "\n\n";
         var preamble = preambleStr.getBytes(StandardCharsets.UTF_8);
         referenceStringBuilder.append(preambleStr);
