@@ -9,6 +9,8 @@ import io.netty.handler.codec.http.HttpContentCompressor;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.handler.logging.ByteBufFormat;
+import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
@@ -125,15 +127,18 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         addContentParsingHandlers(ctx, true);
     }
     private void addContentParsingHandlers(ChannelHandlerContext ctx, boolean addFullJsonTransformer) {
+        log.warn("Adding handlers to pipeline");
         ctx.pipeline().addLast(new HttpContentDecompressor());
-//        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
+        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
         if (addFullJsonTransformer) {
+            log.warn("Adding JSON handlers to pipeline");
             ctx.pipeline().addLast(new NettyJsonBodyAccumulateHandler());
             ctx.pipeline().addLast(new NettyJsonBodyConvertHandler());
             ctx.pipeline().addLast(new NettyJsonBodySerializeHandler());
         }
 //        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
         ctx.pipeline().addLast(new HttpContentCompressor());
+        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
 //        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
         addBaselineHandlers(ctx);
     }

@@ -16,6 +16,21 @@ import java.util.Map;
 @Slf4j
 public class JsonTransformBuilder {
 
+    public enum CANNED_OPERATIONS {
+        ADD_GZIP("addGzip"), PASS_THRU("passThru");
+
+        private final String value;
+
+        CANNED_OPERATIONS(String s) {
+            value = s;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+    }
+
     /**
      * Visibility increased for testing
      */
@@ -61,11 +76,15 @@ public class JsonTransformBuilder {
          return addOperationObject(getHostSwitchOperation(hostname));
     }
 
+    public JsonTransformBuilder addCannedOperation(CANNED_OPERATIONS operation) {
+        return addCannedOperation(operation.toString() + ".jolt");
+    }
+
     public JsonTransformBuilder addCannedOperation(String resourceName) {
         return addOperationObject(parseSpecOperationFromResource(resourceName));
     }
 
-    private JsonTransformBuilder addOperationObject(Map<String, Object> stringObjectMap) {
+    public JsonTransformBuilder addOperationObject(Map<String, Object> stringObjectMap) {
         chainedSpec.add(stringObjectMap);
         return this;
     }
