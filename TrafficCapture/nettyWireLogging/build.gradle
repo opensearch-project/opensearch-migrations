@@ -5,6 +5,7 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id("io.freefair.lombok") version "8.0.1"
+    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
 dependencies {
@@ -12,5 +13,5 @@ dependencies {
     api group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
     testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
-    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '4.5.14'
+    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
 }

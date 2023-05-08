@@ -5,18 +5,16 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.env.Environment;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
 import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -45,7 +43,7 @@ public class Main {
         return builder.build();
     }
 
-    private static IConnectionCaptureFactory getConnectionCaptureFactory(String traceLogsDirectory) {
+    private static IConnectionCaptureFactory getTraceConnectionCaptureFactory(String traceLogsDirectory) {
         if (traceLogsDirectory == null) {
             System.err.println("No trace log directory specified.  Logging to /dev/null");
             return new IConnectionCaptureFactory() {
@@ -61,9 +59,14 @@ public class Main {
         }
     }
 
+    private static IConnectionCaptureFactory getConnectionCaptureFactory(String kafkaPropsPath) throws IOException {
+        //return new FileConnectionCaptureFactory("./traceLogs");
+        return new KafkaCaptureFactory(kafkaPropsPath);
+    }
+
     public static void main(String[] args) throws InterruptedException, IOException {
 
-        String traceLogsDirectory = args.length > 0 ? args[0] : null;
+        String kafkaPropsPath = args[0];
         var sksOp = Optional.ofNullable(args.length <= 1 ? null : Optional.class)
                 .map(o->new DefaultSecurityKeyStore(getSettings(args[1]),
                         args.length > 1 ? Paths.get(args[2]) : null));
@@ -80,7 +83,7 @@ public class Main {
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
-                    }).orElse(null), getConnectionCaptureFactory(traceLogsDirectory));
+                    }).orElse(null), getConnectionCaptureFactory(kafkaPropsPath));
         } catch (Exception e) {
             System.err.println(e);
             e.printStackTrace();

@@ -1,0 +1,84 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ *
+ * Modifications Copyright OpenSearch Contributors. See
+ * GitHub history for details.
+ */
+
+
+buildscript {
+    dependencies {
+        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
+    }
+}
+
+plugins {
+    id 'java'
+    id 'application'
+    id "com.github.spotbugs" version "4.7.3"
+    id 'checkstyle'
+    id 'org.owasp.dependencycheck' version '8.2.1'
+}
+
+spotbugs {
+    includeFilter = file('config/spotbugs/spotbugs-include.xml')
+}
+
+checkstyle {
+    toolVersion = '10.9.3'
+    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
+    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
+            buildDir, 'checkstyle.cachefile'))
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':captureProtobufs')
+
+    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+    implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
+    implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
+    implementation group: 'org.json', name: 'json', version: '20230227'
+    implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter', version: '5.9.2'
+
+    annotationProcessor 'org.projectlombok:lombok:1.18.26'
+}
+
+application {
+    mainClass = 'org.opensearch.migrations.replay.TrafficReplayer'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': application.mainClass
+    }
+}
+
+task uberJar(type: Jar) {
+    manifest {
+        attributes 'Main-Class': application.mainClass
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    archiveBaseName = project.name + "-uber"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    with jar
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

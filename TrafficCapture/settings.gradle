@@ -9,6 +9,8 @@
 
 rootProject.name = 'LoggingProxy'
 include('captureOffloader',
+        'captureKafkaOffloader',
+        'captureProtobufs',
         'nettyWireLogging',
         'trafficCaptureProxyServer',
         'trafficCaptureProxyServerTest',

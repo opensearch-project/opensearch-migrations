@@ -21,9 +21,10 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     public static class SimpleHttpResponseDecoder extends HttpResponseDecoder {
         /**
          * Override to broaden the visibility.
-         * @param ctx           the {@link ChannelHandlerContext} which this {@link ByteToMessageDecoder} belongs to
-         * @param buffer            the {@link ByteBuf} from which to read data
-         * @param out           the {@link List} to which decoded messages should be added
+         *
+         * @param ctx    the {@link ChannelHandlerContext} which this {@link ByteToMessageDecoder} belongs to
+         * @param buffer the {@link ByteBuf} from which to read data
+         * @param out    the {@link List} to which decoded messages should be added
          * @throws Exception
          */
         @Override
@@ -48,6 +49,7 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
 
     private final IChannelConnectionCaptureSerializer trafficOffloader;
     private final SimpleHttpResponseDecoder decoder;
+
     public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
         decoder = new SimpleHttpResponseDecoder();

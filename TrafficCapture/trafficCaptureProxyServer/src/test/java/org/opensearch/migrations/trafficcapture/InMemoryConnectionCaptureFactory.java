@@ -43,12 +43,12 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
             var cos = CodedOutputStream.newInstance(baos);
             codedStreamToFileStreamMap.put(cos, baos);
             return cos;
-        }, (stream) -> CompletableFuture.runAsync(() -> {
+        }, (codedOutputStream) -> CompletableFuture.runAsync(() -> {
             try {
-                ByteArrayOutputStream baos = codedStreamToFileStreamMap.get(stream);
+                ByteArrayOutputStream baos = codedStreamToFileStreamMap.get(codedOutputStream);
                 baos.close();
                 recordedStreams.add(new RecordedTrafficStream(baos.toByteArray()));
-                codedStreamToFileStreamMap.remove(stream);
+                codedStreamToFileStreamMap.remove(codedOutputStream);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
