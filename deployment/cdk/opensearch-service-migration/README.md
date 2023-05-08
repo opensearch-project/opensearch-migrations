@@ -33,8 +33,13 @@ This CDK has been structured to allow multiple stacks to be deployed out-of-the-
 This is the core required stack of this CDK which is responsible for deploying the OpenSearch Service Domain and associated resources such as CloudWatch log groups for Domain logging.
 
 #### Network Stack (OSServiceNetworkCDKStack-STAGE-REGION)
-This is an additional stack that will be used when the Domain is configured to be placed inside a VPC and will contain resources related to the networking of this VPC such as Security Groups and Subnets.
+This optional stack will be used when the Domain is configured to be placed inside a VPC and will contain resources related to the networking of this VPC such as Security Groups and Subnets. It has a dependency on the Domain stack.
 
+#### Migration Assistance Stack (OSServiceMigrationCDKStack-STAGE-REGION)
+This optional stack is used to house the migration assistance resources which are in the process of being developed to assist in migrating to an OpenSearch domain. It has dependencies on both the Domain and Network stacks.
+
+#### Historical Capture Stack (OSServiceHistoricalCDKStack-STAGE-REGION)
+This optional exploratory stack sets up a deployable Logstash ECS cluster for historical data migration. It is experimental and should only be used for development purposes. It has dependencies on both the Domain and Network stacks.
 
 ### Configuration Options
 
