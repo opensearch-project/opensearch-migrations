@@ -32,7 +32,7 @@ public class TestUtils {
                                          Collection<AbstractMap.SimpleEntry<String,String>> replacementMappings) {
         for (var kvp : replacementMappings) {
             var idx = referenceStringBuilder.indexOf(kvp.getKey());
-            referenceStringBuilder.replace(idx, idx + kvp.getValue().length(), kvp.getValue());
+            referenceStringBuilder.replace(idx, idx + kvp.getKey().length(), kvp.getValue());
         }
         return referenceStringBuilder.toString();
     }

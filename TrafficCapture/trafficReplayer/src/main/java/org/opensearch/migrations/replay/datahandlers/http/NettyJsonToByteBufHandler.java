@@ -3,12 +3,15 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufOutputStream;
+import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.util.ResourceLeakDetector;
+import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.ByteArrayOutputStream;
@@ -129,15 +132,27 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
     {
         AtomicInteger counter = new AtomicInteger(headerChunkSizes.size());
         var bufs = headerChunkSizes.stream()
-                .map(i -> ByteBufAllocator.DEFAULT.buffer(counter.decrementAndGet()==0?maxLastBufferSize:i))
+                .map(i -> ByteBufAllocator.DEFAULT.buffer(counter.decrementAndGet()==0?maxLastBufferSize:i).retain())
                 .toArray(ByteBuf[]::new);
-        ByteBuf cbb = Unpooled.wrappedBuffer(bufs);
+        var cbb = ByteBufAllocator.DEFAULT.compositeBuffer(bufs.length);
+        ResourceLeakDetector<CompositeByteBuf> rld =
+                (ResourceLeakDetector<CompositeByteBuf>) ResourceLeakDetectorFactory.instance().newResourceLeakDetector(cbb.getClass());
+        rld.track(cbb);
+        cbb.addComponents(bufs);
+        log.info("cbb.refcnt="+cbb.refCnt());
         try (var bbos = new ByteBufOutputStream(cbb)) {
             writeHeadersIntoStream(httpJson, bbos);
         }
+        log.info("post write cbb.refcnt="+cbb.refCnt());
+        int debugCounter = 0;
         for (var bb : bufs) {
+            log.info("bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
             ctx.fireChannelRead(bb);
+            bb.release();
+            log.info("Post fire & decrement - bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
+            debugCounter++;
         }
+        cbb.release();
     }
 
     private static void writeHeadersIntoStream(HttpJsonMessageWithFaultablePayload httpJson,

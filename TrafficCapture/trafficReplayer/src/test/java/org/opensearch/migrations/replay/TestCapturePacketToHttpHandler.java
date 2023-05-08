@@ -30,6 +30,8 @@ class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
 
     @Override
     public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {
+        log.info("incoming buffer refcnt="+nextRequestPacket.refCnt());
+        var duplicatedPacket = nextRequestPacket.duplicate().retain();
         return CompletableFuture.runAsync(() -> {
             try {
                 log.info("Running async future for " + nextRequestPacket);
@@ -39,8 +41,9 @@ class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
                 throw new RuntimeException(e);
             }
             try {
-                nextRequestPacket.duplicate()
-                        .readBytes(byteArrayOutputStream, nextRequestPacket.readableBytes());
+                log.info("At the time of committing the buffer, refcnt="+duplicatedPacket.refCnt());
+                duplicatedPacket.readBytes(byteArrayOutputStream, nextRequestPacket.readableBytes());
+                duplicatedPacket.release();
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

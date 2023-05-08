@@ -2,7 +2,7 @@
   "operation": "modify-overwrite-beta",
   "spec": {
     "headers": {
-      "transfer-encoding": "gzip"
+      "accept-encoding": "gzip"
     }
   }
 }

@@ -7,6 +7,7 @@ import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpContentCompressor;
 import io.netty.handler.codec.http.HttpContentDecompressor;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.logging.ByteBufFormat;
@@ -63,7 +64,6 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
                     // I'm not sure if I should be releasing the HttpRequest `msg`.
                     log.warn("TODO - there might be a memory leak here.  " +
                             "I'm not sure if I should be releasing the HttpRequest `msg`.");
-                    ChannelHandler thisHandler = this;
                     addBaselineHandlers(ctx);
                     ctx.fireChannelRead(httpJsonMessage);
                     removeThisAndPreviousHandlers(ctx);
@@ -119,25 +119,39 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         return jsonMsg;
     }
 
-    private void addContentRepackingHandlers(ChannelHandlerContext ctx) {
-        addContentParsingHandlers(ctx, false);
+    private void addContentRepackingHandlers(ChannelHandlerContext ctx)
+    {
+        addContentParsingHandlers(ctx,false);
     }
 
     private void addJsonParsingHandlers(ChannelHandlerContext ctx) {
         addContentParsingHandlers(ctx, true);
     }
-    private void addContentParsingHandlers(ChannelHandlerContext ctx, boolean addFullJsonTransformer) {
+
+    private void addContentParsingHandlers(ChannelHandlerContext ctx,
+                                           boolean addFullJsonTransformer)
+    {
         log.warn("Adding handlers to pipeline");
+        // IN: HttpJsonMessage with headers and HttpContent blocks (which may be compressed)
+        // OUT: HttpJsonMessage with headers and HttpContent uncompressed blocks
         ctx.pipeline().addLast(new HttpContentDecompressor());
         ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
         if (addFullJsonTransformer) {
             log.warn("Adding JSON handlers to pipeline");
+            // IN: HttpJsonMessage with headers and HttpContent blocks that are aggregated into to the payload of the HttpJsonMessage
+            // OUT: HttpJsonMessage with headers and payload
             ctx.pipeline().addLast(new NettyJsonBodyAccumulateHandler());
+            // IN: HttpJsonMessage with headers and payload
+            // OUT: HttpJsonMessage with headers and payload, but transformed by the json transformer
             ctx.pipeline().addLast(new NettyJsonBodyConvertHandler());
+            // IN: HttpJsonMessage with headers and payload
+            // OUT: HttpJsonMessage with headers only + HttpContent blocks
             ctx.pipeline().addLast(new NettyJsonBodySerializeHandler());
         }
 //        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
-        ctx.pipeline().addLast(new HttpContentCompressor());
+        // IN: HttpJsonMessage with headers only + HttpContent blocks
+        // OUT: Same as IN, but HttpContent blocks may be compressed
+        ctx.pipeline().addLast(new NettyJsonContentCompressor());
         ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
 //        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
         addBaselineHandlers(ctx);
@@ -145,8 +159,12 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
 
     private void addBaselineHandlers(ChannelHandlerContext ctx) {
 //        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
+        // IN: HttpJsonMessage with headers only + (EITHER HttpContent blocks OR ByteBufs)
+        // OUT: ByteBufs that attempt to match the sizing of the original chunkSizes
         ctx.pipeline().addLast(new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes)));
 //        ctx.pipeline().addLast(new LoggingHandler(ByteBufFormat.HEX_DUMP));
+        // IN: ByteBufs that attempt to match the sizing of the original chunkSizes
+        // OUT: nothing - terminal.  ByteBufs are routed to the packet handler.
         ctx.pipeline().addLast(new NettySendByteBufsToPacketHandlerHandler(packetReceiver));
     }
 

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -60,5 +61,4 @@ public class HeaderTransformerTest {
                 testPacketCapture.getCapturedAsString());
         Assertions.assertEquals(1, innermostFinalizeCallCount.get());
     }
-
 }

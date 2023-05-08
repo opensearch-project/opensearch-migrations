@@ -9,7 +9,10 @@ import java.util.concurrent.CompletableFuture;
 public interface IPacketToHttpHandler {
 
     default CompletableFuture<Void> consumeBytes(byte[] nextRequestPacket) {
-        return consumeBytes(Unpooled.wrappedBuffer(nextRequestPacket));
+        var bb = Unpooled.wrappedBuffer(nextRequestPacket).retain();
+        var rval = consumeBytes(bb);
+        bb.release();
+        return rval;
     }
     CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket);
     CompletableFuture<AggregatedRawResponse> finalizeRequest();

@@ -44,9 +44,12 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
         if (msg instanceof ByteBuf) {
             log.info("autoread="+ctx.channel().config().isAutoRead());
             log.info("read the following message and sending it to consumeBytes"+msg);
+            var bb = ((ByteBuf) msg).retain();
             currentFuture = currentFuture.thenCompose(v-> {
                 log.info("calling consumingBytes with "+msg);
-                return packetReceiver.consumeBytes((ByteBuf) msg);
+                var rval = packetReceiver.consumeBytes(bb);
+                bb.release();
+                return rval;
             });
         }
     }
