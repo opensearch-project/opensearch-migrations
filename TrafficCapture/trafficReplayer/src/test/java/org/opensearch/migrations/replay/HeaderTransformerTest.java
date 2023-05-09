@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -34,11 +33,11 @@ public class HeaderTransformerTest {
                         .build(), testPacketCapture);
 
         Random r = new Random(2);
-        var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r)).map(o->(String)o)
+        var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)
                 .collect(Collectors.toList());
 
         CompletableFuture<Void> allConsumesFuture =
-                TestUtils.dualWriteRequestWithBodyAndCombineConsumptionFutures(transformingHandler,
+                TestUtils.chainedDualWriteHeaderAndPayloadParts(transformingHandler,
                         stringParts,
                         referenceStringBuilder,
                         contentLength -> "GET / HTTP/1.1\n" +

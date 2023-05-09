@@ -32,6 +32,12 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List
     }
 
     @Override
+    public List<String> remove(Object key) {
+        var origKeyAndVal = lowerCaseToUpperCaseAndValueMap.remove(((String)key).toLowerCase());
+        return origKeyAndVal == null ? null : origKeyAndVal.getValue();
+    }
+
+    @Override
     public Set<Entry<String, List<String>>> entrySet() {
         return new AbstractSet() {
             @Override

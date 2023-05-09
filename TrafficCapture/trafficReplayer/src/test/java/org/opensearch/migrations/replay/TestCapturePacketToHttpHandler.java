@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
@@ -16,7 +17,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
     private final Duration consumeDuration;
     private final AtomicInteger numFinalizations;
-    private String capturedCompleteString;
+    @Getter
+    private byte[] bytesCaptured;
     private final AggregatedRawResponse dummyAggregatedResponse;
     ByteArrayOutputStream byteArrayOutputStream;
 
@@ -54,12 +56,12 @@ class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
     public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
         numFinalizations.incrementAndGet();
         Assertions.assertEquals(1, numFinalizations.get());
-        var bytes = byteArrayOutputStream.toByteArray();
-        capturedCompleteString = new String(bytes, StandardCharsets.UTF_8);
+        bytesCaptured = byteArrayOutputStream.toByteArray();
         return CompletableFuture.completedFuture(dummyAggregatedResponse);
     }
 
     public String getCapturedAsString() {
-        return capturedCompleteString;
+        return new String(bytesCaptured, StandardCharsets.UTF_8);
+
     }
 }

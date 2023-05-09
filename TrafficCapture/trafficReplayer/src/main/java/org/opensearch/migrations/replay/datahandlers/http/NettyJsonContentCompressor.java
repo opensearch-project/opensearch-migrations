@@ -1,23 +1,17 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.http.HttpContent;
-import io.netty.handler.codec.http.LastHttpContent;
-import io.netty.util.concurrent.EventExecutorGroup;
-import lombok.SneakyThrows;
+import io.netty.handler.stream.ChunkedWriteHandler;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.zip.GZIPOutputStream;
 
 @Slf4j
@@ -47,10 +41,12 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
     BufferedOutputStream bufferedOutputStream;
     ChunkWriterOutputStream passChunkDownstreamOutputStream;
 
-    public void initializeStreams(ChannelHandlerContext ctx) throws IOException {
+    public void activateCompressorComponents(ChannelHandlerContext ctx) throws IOException {
         passChunkDownstreamOutputStream = new ChunkWriterOutputStream(ctx);
         bufferedOutputStream = new BufferedOutputStream(passChunkDownstreamOutputStream);
         compressorStream = new GZIPOutputStream(bufferedOutputStream);
+        ctx.pipeline().addAfter(ctx.name(), "postCompressChunkedHandler",
+                new ChunkedWriteHandler());
     }
 
     @Override
@@ -59,21 +55,34 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
         if (msg instanceof HttpJsonMessageWithFaultablePayload) {
             var transferEncoding =
                     ((HttpJsonMessageWithFaultablePayload) msg).headers().asStrictMap().get("transfer-encoding");
-            if (TRANSFER_ENCODING_GZIP_VALUE.equals(transferEncoding)) {
-                initializeStreams(ctx);
+            if (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_GZIP_VALUE)) {
+                activateCompressorComponents(ctx);
+                convertHeadersToChunked(((HttpJsonMessageWithFaultablePayload)msg).headers().strictHeadersMap);
             }
-        } else if (compressorStream != null && msg instanceof HttpContent) {
-            var contentBuf = ((HttpContent) msg).content();
-            contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
-        } else {
-            super.channelRead(ctx, msg);
+        } else if (compressorStream != null) {
+            if (msg instanceof HttpContent) {
+                var contentBuf = ((HttpContent) msg).content();
+                contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
+                return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
+            } else {
+                assert bufferedOutputStream == null && passChunkDownstreamOutputStream == null;
+            }
         }
+        super.channelRead(ctx, msg);
     }
 
+    private void convertHeadersToChunked(StrictCaseInsensitiveHttpHeadersMap httpHeaders) {
+        //httpHeaders.put("Content-Transfer-Encoding", List.of("chunked"));
+        httpHeaders.remove("Content-length");
+    }
 
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-        compressorStream.flush();
+        if (compressorStream != null) {
+            //compressorStream.flush();
+            compressorStream.close();
+            compressorStream = null;
+        }
     }
 
     @Override

@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
 
 import java.nio.charset.StandardCharsets;
 import java.util.AbstractMap;
@@ -37,8 +36,8 @@ public class TestUtils {
         return referenceStringBuilder.toString();
     }
 
-    static String makeRandomString(Random r) {
-        return r.ints(r.nextInt(10), 'A', 'Z')
+    static String makeRandomString(Random r, int maxStringSize) {
+        return r.ints(r.nextInt(maxStringSize), 'A', 'Z')
                 .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
                 .toString();
     }
@@ -51,15 +50,23 @@ public class TestUtils {
         return transformingHandler.consumeBytes(bytes);
     }
 
+    static CompletableFuture<Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketToHttpHandler packetConsumer,
+                                                                               List<String> stringParts,
+                                                                               StringBuilder referenceStringAccumulator,
+                                                                               String headers) {
+        return stringParts.stream().collect(
+                foldLeft(packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
+                        (cf, s) -> cf.thenCompose(v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer))));
+    }
+
     static CompletableFuture<Void>
-    dualWriteRequestWithBodyAndCombineConsumptionFutures(IPacketToHttpHandler packetConsumer, List<String> stringParts, StringBuilder referenceStringAccumulator,
-                                                         Function<Integer, String> headersGenerator) {
+    chainedDualWriteHeaderAndPayloadParts(IPacketToHttpHandler packetConsumer,
+                                          List<String> stringParts,
+                                          StringBuilder referenceStringAccumulator,
+                                          Function<Integer, String> headersGenerator) {
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         String headers = headersGenerator.apply(contentLength) + "\n";
         referenceStringAccumulator.append(headers);
-        CompletableFuture<Void> allConsumesFuture = stringParts.stream().collect(
-                foldLeft(packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
-                        (cf, s)->cf.thenCompose(v-> writeStringToBoth(s, referenceStringAccumulator, packetConsumer))));
-        return allConsumesFuture;
+        return chainedWriteHeadersAndDualWritePayloadParts(packetConsumer, stringParts, referenceStringAccumulator, headers);
     }
 }

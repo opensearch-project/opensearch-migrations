@@ -42,12 +42,9 @@ public class HttpJsonTransformer implements IPacketToHttpHandler {
     public HttpJsonTransformer(JsonTransformer transformer, IPacketToHttpHandler transformedPacketReceiver) {
         chunkSizes = new ArrayList<>(2);
         chunkSizes.add(new ArrayList<>(4));
-        channel = new EmbeddedChannel(
-                new HttpRequestDecoder()
-                //,new LoggingHandler(ByteBufFormat.HEX_DUMP)
-                ,new NettyDecodedHttpRequestHandler(transformer, chunkSizes, transformedPacketReceiver, s -> {handlerStatus = s;})
-                //,new LoggingHandler(ByteBufFormat.HEX_DUMP)
-        );
+        channel = new EmbeddedChannel();
+        var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver);
+        pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer,  s -> {handlerStatus = s;});
     }
 
     private NettySendByteBufsToPacketHandlerHandler getEndOfConsumptionHandler() {
