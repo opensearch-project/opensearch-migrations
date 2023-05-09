@@ -37,7 +37,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
         Bootstrap b = new Bootstrap();
         b.group(inboundChannel.eventLoop())
                 .channel(ctx.channel().getClass())
-                .handler(new LoggingHandler(LogLevel.ERROR))
+                .handler(new BacksideHandler(inboundChannel))
                 .option(ChannelOption.AUTO_READ, false);
         log.debug("Active - setting up backend connection");
         var f = b.connect(host, port);
@@ -48,8 +48,6 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                 if (future.isSuccess()) {
                     // connection complete start to read first data
                     log.debug("Done setting up backend channel & it was successful");
-                    var pipeline = future.channel().pipeline();
-                    pipeline.addFirst(new BacksideHandler(inboundChannel));
                     inboundChannel.read();
                 } else {
                     // Close the connection if the connection attempt has failed.

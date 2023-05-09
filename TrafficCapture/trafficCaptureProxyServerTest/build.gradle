@@ -1,0 +1,77 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id "com.avast.gradle.docker-compose" version "0.16.12"
+    id "com.palantir.docker" version "0.35.0"
+    id "io.freefair.lombok" version "8.0.1"
+//    id 'de.qualersoft.jmeter' version '2.4.0'
+}
+
+// see https://github.com/apache/jmeter/issues/5322
+def withoutBom = {
+    exclude group: 'org.apache.jmeter', module: 'bom'
+}
+dependencies {
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.5', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.5', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.5', withoutBom
+
+    constraints {
+        implementation('net.minidev:json-smart:2.4.9') {
+            because 'mend security issue'
+        }
+        implementation('xalan:xalan:2.7.3') {
+            because 'mend security issue'
+        }
+        implementation('com.fasterxml.jackson.core:jackson-databind:2.14.3') {
+            because 'mend security issue'
+        }
+        implementation('com.thoughtworks.xstream:xstream:1.4.20') {
+            because 'mend security issue'
+        }
+        implementation('commons-net:commons-net:3.9.0') {
+            because 'mend security issue'
+        }
+        implementation('org.jsoup:jsoup:1.15.3') {
+            because 'mend security issue'
+        }
+        implementation('org.apache.tika:tika-core:1.28.4') {
+            because 'mend security issue'
+        }
+    }
+}
+
+configurations {
+    all {
+        resolutionStrategy.dependencySubstitution {
+            substitute module('org.apache.xmlgraphics:batik-codec') using module('org.apache.xmlgraphics:batik-all:1.15')
+        }
+    }
+}
+
+docker {
+    name "nginx-simple"
+    files 'src/main/docker/nginx-simple/'
+}
+//
+//jmeter {
+//    tool {
+//        version = "5.5"
+//    }
+//}
+//
+//task runJMeter(type: de.qualersoft.jmeter.gradleplugin.task.JMeterRunTask) {
+//    jmxFile.set("Test.jmx")
+//    dependsOn(tasks.getByName("composeUp"))
+//}
+//
+//task jmeterReport(type: de.qualersoft.jmeter.gradleplugin.task.JMeterReportTask) {
+//    jmxFile.set("Test.jmx")
+//    dependsOn('runJMeter')
+//}
+
+dockerCompose {
+    useComposeFiles.add("src/main/docker/docker-compose.yml")
+    //isRequiredBy(tasks.getByName('runJMeter'))
+}
+
+tasks.getByName('composeUp').dependsOn(tasks.getByName('docker'))
