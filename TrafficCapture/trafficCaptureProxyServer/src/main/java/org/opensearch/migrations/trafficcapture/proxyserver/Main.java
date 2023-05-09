@@ -49,7 +49,7 @@ public class Main {
             return new IConnectionCaptureFactory() {
                 @Override
                 public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
-                    return new StreamChannelConnectionCaptureSerializer(connectionId, () ->
+                    return new StreamChannelConnectionCaptureSerializer(connectionId, 100, () ->
                             CodedOutputStream.newInstance(NullOutputStream.getInstance()),
                             cos -> CompletableFuture.completedFuture(null));
                 }

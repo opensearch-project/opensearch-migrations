@@ -78,7 +78,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     private void beginWritingObservationToCurrentStream(Instant timestamp, int tag, int bodySize) throws IOException {
         // 2 {
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
-        final var tsSize = getSizeOfTimestamp(timestamp);
+        final var tsSize = CodedOutputStreamSizeUtil.getSizeOfTimestamp(timestamp);
         final var observationTagSize = CodedOutputStream.computeTagSize(tag);
         // Writing size of [ts size + ts tag + observation/body tag + observation/body size]
         getOrCreateCodedOutputStream().writeUInt32NoTag(tsSize +
@@ -91,17 +91,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         writeObservationTag(tag);
     }
 
-    private int getSizeOfTimestamp(Instant t) throws IOException {
-        long seconds = t.getEpochSecond();
-        int nanos = t.getNano();
-        var secSize = CodedOutputStream.computeInt64Size(Timestamp.SECONDS_FIELD_NUMBER, seconds);
-        var nanoSize = nanos == 0 ? 0 : CodedOutputStream.computeInt32Size(Timestamp.NANOS_FIELD_NUMBER, nanos);
-        return secSize + nanoSize;
-    }
-
     private void writeTimestampForNowToCurrentStream(Instant timestamp) throws IOException {
         writeObservationTag(TrafficObservation.TS_FIELD_NUMBER);
-        getOrCreateCodedOutputStream().writeUInt32NoTag(getSizeOfTimestamp(timestamp));
+        getOrCreateCodedOutputStream().writeUInt32NoTag(CodedOutputStreamSizeUtil.getSizeOfTimestamp(timestamp));
 
         getOrCreateCodedOutputStream().writeInt64(Timestamp.SECONDS_FIELD_NUMBER, timestamp.getEpochSecond());
         if (timestamp.getNano() != 0) {
@@ -192,27 +184,6 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         abstract void accept(byte[] buff, int offset, int len);
     }
 
-    private int totalBytesNeededForMessage(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
-        int dataCountFieldNumber, int dataCount,  ByteBuffer buffer) throws IOException {
-        // Timestamp closure bytes
-        int tsContentSize = getSizeOfTimestamp(timestamp);
-        int tsClosureSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
-
-        // Capture closure bytes
-        int dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, buffer);
-        int dataCountSize = dataCountFieldNumber > 0 ? CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount) : 0;
-        int captureContentSize = dataSize + dataCountSize;
-        int captureClosureSize = CodedOutputStream.computeInt32Size(observationFieldNumber, captureContentSize) + captureContentSize;
-
-        // Observation tag and closure size needed bytes
-        int observationTagAndClosureSize = CodedOutputStream.computeInt32Size(TrafficStream.SUBSTREAM_FIELD_NUMBER, tsClosureSize + captureClosureSize);
-
-        // Size for closing index, use arbitrary field to calculate
-        int indexSize = CodedOutputStream.computeInt32Size(TrafficStream.NUMBER_FIELD_NUMBER, numFlushesSoFar + 1);
-
-        return observationTagAndClosureSize + tsClosureSize + captureClosureSize + indexSize;
-    }
-
     private void addStringMessage(int observationFieldNumber, int dataFieldNumber,
                                   Instant timestamp, String str) throws IOException {
         int dataSize = 0;
@@ -247,7 +218,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         // the potentially required bytes for simplicity. This could leave ~5 bytes of unused space in the CodedOutputStream
         // when considering the case of a message that does not need segments or the case of a smaller segment created
         // from a much larger message
-        int totalMessageBytesRequired = totalBytesNeededForMessage(timestamp, segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, 2, byteBuffer);
+        int totalMessageBytesRequired = CodedOutputStreamSizeUtil.totalBytesNeededForMessage(timestamp,
+            segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, 2, byteBuffer, numFlushesSoFar + 1);
         int totalDataSurroundingBytesRequired = totalMessageBytesRequired - byteBuffer.capacity();
 
         if (totalDataSurroundingBytesRequired + minDataChunkBytes >= getOrCreateCodedOutputStream().spaceLeft()) {
@@ -281,7 +253,6 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         int segmentCountSize = 0;
         int lengthSize = 1;
         CodedOutputStream codedOutputStream = getOrCreateCodedOutputStream();
-
         // Calculate segment count size
         if (dataCountFieldNumber > 0) {
             segmentCountSize = CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount);
@@ -296,12 +267,11 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             // Write size of data after observation tag
             codedOutputStream.writeInt32NoTag(dataSize + segmentCountSize);
         }
-
         // Write segment count field
         if (dataCountFieldNumber > 0) {
             codedOutputStream.writeInt32(dataCountFieldNumber, dataCount);
         }
-        // Write data and tag (there is no closure here)
+        // Write data field
         writeByteBufferToCurrentStream(dataFieldNumber, byteBuffer);
     }
 
@@ -312,12 +282,12 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public void addReadEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addSubstreamMessage(TrafficObservation.READ_FIELD_NUMBER, Read.DATA_FIELD_NUMBER, timestamp, buffer.nioBuffer());
+        addDataMessage(TrafficObservation.READ_FIELD_NUMBER, Read.DATA_FIELD_NUMBER, timestamp, buffer);
     }
 
     @Override
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addSubstreamMessage(TrafficObservation.WRITE_FIELD_NUMBER, Write.DATA_FIELD_NUMBER, timestamp, buffer.nioBuffer());
+        addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, Write.DATA_FIELD_NUMBER, timestamp, buffer);
     }
 
     @Override

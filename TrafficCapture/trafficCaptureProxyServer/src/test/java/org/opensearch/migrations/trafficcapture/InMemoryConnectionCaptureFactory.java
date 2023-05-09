@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -26,7 +27,8 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
 
     private CompletableFuture closeHandler(ByteBuffer byteBuffer) {
         return CompletableFuture.runAsync(() -> {
-            recordedStreams.add(new RecordedTrafficStream(byteBuffer.array()));
+            byte[] filledBytes = Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position());
+            recordedStreams.add(new RecordedTrafficStream(filledBytes));
         });
     }
 

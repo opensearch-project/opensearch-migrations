@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,7 +49,8 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
         return CompletableFuture.runAsync(() -> {
             try {
                 FileOutputStream fs = outputStreamCreator.apply(connectionId, callCounter);
-                fs.write(byteBuffer.array());
+                byte[] filledBytes = Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position());
+                fs.write(filledBytes);
                 fs.flush();
                 log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
                 //codedStreamToFileStreamMap.remove(stream);
