@@ -5,6 +5,7 @@
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id("io.freefair.lombok") version "8.0.1"
+    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
 configurations {
@@ -37,6 +38,15 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
     testImplementation "com.google.protobuf:protobuf-java:3.22.2"
     implementation project(':captureOffloader')
+    implementation project(':captureKafkaOffloader')
+}
+
+tasks.withType(Tar){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.withType(Zip){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 application {
