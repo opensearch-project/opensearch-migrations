@@ -18,6 +18,7 @@ import java.util.Properties;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory {
@@ -49,12 +50,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
         AtomicLong supplierCallCounter = new AtomicLong();
+        AtomicReference<CompletableFuture> aggregateCf = new AtomicReference<>(CompletableFuture.completedFuture(null));
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteStreamMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(connectionId,
+        return new StreamChannelConnectionCaptureSerializer(connectionId, 100,
             () -> {
-                // Set ByteBuffer to Kafka max message size of 1MB with 1024 bytes of leeway temporarily until
-                // serializer has been updated
-                ByteBuffer bb = ByteBuffer.allocate(1024 * 1023);
+                ByteBuffer bb = ByteBuffer.allocate(1024 * 1024);
                 var cos = CodedOutputStream.newInstance(bb);
                 codedStreamToByteStreamMap.put(cos, bb);
                 return cos;
@@ -70,7 +70,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     CompletableFuture cf = new CompletableFuture<>();
                     // Async request to Kafka cluster
                     producer.send(record, handleProducerRecordSent(cf, recordId));
-                    return cf;
+                    // TODO more reliable way to cut off CF tree
+                    aggregateCf.set(aggregateCf.get().isDone() ? cf : CompletableFuture.allOf(aggregateCf.get(), cf));
+                    return aggregateCf.get();
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }

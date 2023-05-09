@@ -81,6 +81,53 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     @Test
+    public void testLargeReadPacketIsSplit() throws IOException, ExecutionException, InterruptedException {
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
+        List<ByteBuffer> outputBuffersCreated = new ArrayList<>();
+        WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBuffersMap = new WeakHashMap<>();
+        var serializer = new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING, 100,
+            () -> {
+                ByteBuffer bytes = ByteBuffer.allocate(1024*1024);
+                var rval = CodedOutputStream.newInstance(bytes);
+                codedStreamToByteBuffersMap.put(rval, bytes);
+                return rval;
+            },
+            (codedOutputStream) -> CompletableFuture.runAsync(() -> {
+                try {
+                    codedOutputStream.flush();
+                    var bb = codedStreamToByteBuffersMap.get(codedOutputStream);
+                    bb.position(0);
+                    var bytesWritten = codedOutputStream.getTotalBytesWritten();
+                    bb.limit(bytesWritten);
+                    outputBuffersCreated.add(bb);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }));
+
+        StringBuilder sb = new StringBuilder();
+        // Create over 1MB packet
+        for (int i = 0; i < 15000; i++) {
+            sb.append("{ \"create\": { \"_index\": \"office-index\" } }\n{ \"title\": \"Malone's Cones\", \"year\": 2013 }\n");
+        }
+        byte[] fakeDataBytes = sb.toString().getBytes(StandardCharsets.UTF_8);
+        var bb = Unpooled.wrappedBuffer(fakeDataBytes);
+        serializer.addReadEvent(referenceTimestamp, bb);
+        serializer.flushCommitAndResetStream(true);
+        bb.release();
+
+        TrafficStream reconstitutedTrafficStreamPart1 = TrafficStream.parseFrom(outputBuffersCreated.get(0));
+        int part1DataSize = reconstitutedTrafficStreamPart1.getSubStream(0).getReadSegment().getData().size();
+        Assertions.assertEquals(1, reconstitutedTrafficStreamPart1.getSubStream(0).getReadSegment().getCount());
+        Assertions.assertEquals(1, reconstitutedTrafficStreamPart1.getNumber());
+        TrafficStream reconstitutedTrafficStreamPart2 = TrafficStream.parseFrom(outputBuffersCreated.get(1));
+        int part2DataSize = reconstitutedTrafficStreamPart2.getSubStream(0).getReadSegment().getData().size();
+        Assertions.assertEquals(2, reconstitutedTrafficStreamPart2.getSubStream(0).getReadSegment().getCount());
+        Assertions.assertEquals(2, reconstitutedTrafficStreamPart2.getNumberOfThisLastChunk());
+        Assertions.assertEquals(fakeDataBytes.length, part1DataSize + part2DataSize);
+    }
+
+    @Test
     public void testThatReadCanBeDeserialized() throws IOException, ExecutionException, InterruptedException {
         final var referenceTimestamp = Instant.now(Clock.systemUTC());
         // these are only here as a debugging aid
@@ -92,7 +139,7 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         List<ByteBuffer> outputBuffersCreated = new ArrayList<>();
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBuffersMap = new WeakHashMap<>();
-        var serializer = new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING,
+        var serializer = new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING, 100,
                 () -> {
                     ByteBuffer bytes = ByteBuffer.allocate(1024*1024);
                     var rval = CodedOutputStream.newInstance(bytes);

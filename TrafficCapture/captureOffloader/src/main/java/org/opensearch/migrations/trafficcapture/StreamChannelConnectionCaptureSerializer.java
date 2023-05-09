@@ -8,9 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndicator;
 import org.opensearch.migrations.trafficcapture.protos.Exception;
 import org.opensearch.migrations.trafficcapture.protos.Read;
+import org.opensearch.migrations.trafficcapture.protos.ReadSegment;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.Write;
+import org.opensearch.migrations.trafficcapture.protos.WriteSegment;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -31,18 +33,21 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
     private final Function<CodedOutputStream, CompletableFuture> closeHandler;
     private final String idString;
+    private final int minDataChunkBytes;
     private CodedOutputStream currentCodedOutputStreamOrNull;
     private int numFlushesSoFar;
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
 
     public StreamChannelConnectionCaptureSerializer(String id,
+                                                    int minDataChunkBytes,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
                                                     Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
         assert (id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
         this.idString = id;
+        this.minDataChunkBytes = minDataChunkBytes;
     }
 
     private static int getWireTypeForFieldIndex(Descriptors.Descriptor d, int fieldNumber) {
@@ -54,6 +59,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             return currentCodedOutputStreamOrNull;
         } else {
             currentCodedOutputStreamOrNull = codedOutputStreamSupplier.get();
+            // 1: "1234ABCD"
             currentCodedOutputStreamOrNull.writeString(TrafficStream.ID_FIELD_NUMBER, idString);
             return currentCodedOutputStreamOrNull;
         }
@@ -70,14 +76,18 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     }
 
     private void beginWritingObservationToCurrentStream(Instant timestamp, int tag, int bodySize) throws IOException {
+        // 2 {
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
         final var tsSize = getSizeOfTimestamp(timestamp);
         final var observationTagSize = CodedOutputStream.computeTagSize(tag);
+        // Writing size of [ts size + ts tag + observation/body tag + observation/body size]
         getOrCreateCodedOutputStream().writeUInt32NoTag(tsSize +
-                CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsSize) +
-                observationTagSize +
-                bodySize);
+            CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsSize) +
+            observationTagSize +
+            bodySize);
+        // 1 { 1: .. 2: .. }
         writeTimestampForNowToCurrentStream(timestamp);
+        // 4 {
         writeObservationTag(tag);
     }
 
@@ -123,6 +133,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         }
         CodedOutputStream currentStream = getOrCreateCodedOutputStream();
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
+        // 3: 1
         currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
         currentStream.flush();
         var future = closeHandler.apply(currentStream);
@@ -180,7 +191,28 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     static abstract class BufRangeConsumer {
         abstract void accept(byte[] buff, int offset, int len);
     }
-    
+
+    private int totalBytesNeededForMessage(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
+        int dataCountFieldNumber, int dataCount,  ByteBuffer buffer) throws IOException {
+        // Timestamp closure bytes
+        int tsContentSize = getSizeOfTimestamp(timestamp);
+        int tsClosureSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
+
+        // Capture closure bytes
+        int dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, buffer);
+        int dataCountSize = dataCountFieldNumber > 0 ? CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount) : 0;
+        int captureContentSize = dataSize + dataCountSize;
+        int captureClosureSize = CodedOutputStream.computeInt32Size(observationFieldNumber, captureContentSize) + captureContentSize;
+
+        // Observation tag and closure size needed bytes
+        int observationTagAndClosureSize = CodedOutputStream.computeInt32Size(TrafficStream.SUBSTREAM_FIELD_NUMBER, tsClosureSize + captureClosureSize);
+
+        // Size for closing index, use arbitrary field to calculate
+        int indexSize = CodedOutputStream.computeInt32Size(TrafficStream.NUMBER_FIELD_NUMBER, numFlushesSoFar + 1);
+
+        return observationTagAndClosureSize + tsClosureSize + captureClosureSize + indexSize;
+    }
+
     private void addStringMessage(int observationFieldNumber, int dataFieldNumber,
                                   Instant timestamp, String str) throws IOException {
         int dataSize = 0;
@@ -197,31 +229,95 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         writeByteStringToCurrentStream(dataFieldNumber, str);
     }
 
-    private void addDataMessage(int observationFieldNumber, int dataFieldNumber,
-                                Instant timestamp, ByteBuf buffer) throws IOException {
+    private void addDataMessage(int observationFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buffer) throws IOException {
         var byteBuffer = buffer.nioBuffer();
+        int segmentFieldNumber,segmentCountFieldNumber,segmentDataFieldNumber;
+        if (observationFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
+            segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
+            segmentCountFieldNumber = ReadSegment.COUNT_FIELD_NUMBER;
+            segmentDataFieldNumber = ReadSegment.DATA_FIELD_NUMBER;
+        }
+        else {
+            segmentFieldNumber = TrafficObservation.WRITESEGMENT_FIELD_NUMBER;
+            segmentCountFieldNumber = WriteSegment.COUNT_FIELD_NUMBER;
+            segmentDataFieldNumber = WriteSegment.DATA_FIELD_NUMBER;
+        }
+
+        // The required bytes here are not optimizing for space and instead are calculated on the worst case estimate of
+        // the potentially required bytes for simplicity. This could leave ~5 bytes of unused space in the CodedOutputStream
+        // when considering the case of a message that does not need segments or the case of a smaller segment created
+        // from a much larger message
+        int totalMessageBytesRequired = totalBytesNeededForMessage(timestamp, segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, 2, byteBuffer);
+        int totalDataSurroundingBytesRequired = totalMessageBytesRequired - byteBuffer.capacity();
+
+        if (totalDataSurroundingBytesRequired + minDataChunkBytes >= getOrCreateCodedOutputStream().spaceLeft()) {
+            flushCommitAndResetStream(false);
+        }
+
+        if (byteBuffer.limit() == 0 || totalMessageBytesRequired <= getOrCreateCodedOutputStream().spaceLeft()) {
+            addSubstreamMessage(observationFieldNumber, dataFieldNumber, timestamp, byteBuffer);
+            byteBuffer.position(byteBuffer.limit());
+        }
+
+        int dataCount = 0;
+        while(byteBuffer.position() < byteBuffer.limit()) {
+            int availableCOSSpace = getOrCreateCodedOutputStream().spaceLeft();
+            int chunkBytes = totalMessageBytesRequired > availableCOSSpace ? availableCOSSpace - totalDataSurroundingBytesRequired : byteBuffer.limit() - byteBuffer.position();
+            ByteBuffer bb = byteBuffer.slice(byteBuffer.position(), chunkBytes);
+            byteBuffer.position(byteBuffer.position() + chunkBytes);
+            addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, ++dataCount, timestamp, bb);
+            // 1 to N-1 chunked messages
+            if (byteBuffer.position() < byteBuffer.limit()) {
+                flushCommitAndResetStream(false);
+                totalMessageBytesRequired = totalMessageBytesRequired - chunkBytes;
+            }
+        }
+
+    }
+
+    private void addSubstreamMessage(int observationFieldNumber, int dataFieldNumber, int dataCountFieldNumber, int dataCount,
+        Instant timestamp, java.nio.ByteBuffer byteBuffer) throws IOException {
         int dataSize = 0;
+        int segmentCountSize = 0;
         int lengthSize = 1;
+        CodedOutputStream codedOutputStream = getOrCreateCodedOutputStream();
+
+        // Calculate segment count size
+        if (dataCountFieldNumber > 0) {
+            segmentCountSize = CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount);
+        }
         if (byteBuffer.remaining() > 0) {
+            // These combined are everything but the capture tag for the capture closure
             dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, byteBuffer);
-            lengthSize = getOrCreateCodedOutputStream().computeInt32SizeNoTag(dataSize);
+            lengthSize = CodedOutputStream.computeInt32SizeNoTag(dataSize + segmentCountSize);
         }
-        beginWritingObservationToCurrentStream(timestamp, observationFieldNumber,
-                dataSize + lengthSize);
+        beginWritingObservationToCurrentStream(timestamp, observationFieldNumber, dataSize + segmentCountSize + lengthSize);
         if (dataSize > 0) {
-            getOrCreateCodedOutputStream().writeInt32NoTag(dataSize);
+            // Write size of data after observation tag
+            codedOutputStream.writeInt32NoTag(dataSize + segmentCountSize);
         }
+
+        // Write segment count field
+        if (dataCountFieldNumber > 0) {
+            codedOutputStream.writeInt32(dataCountFieldNumber, dataCount);
+        }
+        // Write data and tag (there is no closure here)
         writeByteBufferToCurrentStream(dataFieldNumber, byteBuffer);
+    }
+
+    private void addSubstreamMessage(int observationFieldNumber, int dataFieldNumber, Instant timestamp,
+        java.nio.ByteBuffer byteBuffer) throws IOException {
+        addSubstreamMessage(observationFieldNumber, dataFieldNumber, 0, 0, timestamp, byteBuffer);
     }
 
     @Override
     public void addReadEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addDataMessage(TrafficObservation.READ_FIELD_NUMBER, Read.DATA_FIELD_NUMBER, timestamp, buffer);
+        addSubstreamMessage(TrafficObservation.READ_FIELD_NUMBER, Read.DATA_FIELD_NUMBER, timestamp, buffer.nioBuffer());
     }
 
     @Override
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, Write.DATA_FIELD_NUMBER, timestamp, buffer);
+        addSubstreamMessage(TrafficObservation.WRITE_FIELD_NUMBER, Write.DATA_FIELD_NUMBER, timestamp, buffer.nioBuffer());
     }
 
     @Override
