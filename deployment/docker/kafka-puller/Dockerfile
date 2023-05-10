@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM openjdk:17-jdk-slim AS builder
+FROM openjdk:17-jdk-slim AS cloner
 
 RUN apt-get update && apt-get install -y git
 
@@ -18,7 +18,7 @@ ENV KAFKA_TOPIC_NAME ${KAFKA_TOPIC_NAME}
 RUN apt-get update && apt-get install -y netcat
 RUN apt-get install -y expect
 
-COPY --from=cloner /opensearch-migrations/KafkaPrinter/ ./KafkaPrinter/
+COPY --from=cloner /opensearch-migrations/TrafficCapture/KafkaPrinter/ ./KafkaPrinter/
 WORKDIR /KafkaPrinter/
 COPY run_app.sh .
 
