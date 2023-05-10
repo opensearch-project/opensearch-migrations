@@ -36,7 +36,6 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        log.trace("channelRead: "+msg);
         if (msg instanceof HttpJsonMessageWithFaultablePayload) {
             writeHeadersIntoByteBufs(ctx, (HttpJsonMessageWithFaultablePayload) msg);
         } else if (msg instanceof ByteBuf) {
@@ -138,7 +137,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
         ResourceLeakDetector<CompositeByteBuf> rld =
                 (ResourceLeakDetector<CompositeByteBuf>) ResourceLeakDetectorFactory.instance().newResourceLeakDetector(cbb.getClass());
         rld.track(cbb);
-        cbb.addComponents(bufs);
+        cbb.addComponents(true, bufs);
         log.info("cbb.refcnt="+cbb.refCnt());
         try (var bbos = new ByteBufOutputStream(cbb)) {
             writeHeadersIntoStream(httpJson, bbos);

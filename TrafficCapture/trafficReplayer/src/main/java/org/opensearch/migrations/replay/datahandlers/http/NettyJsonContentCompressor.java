@@ -1,28 +1,42 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.DecoderException;
+import io.netty.handler.codec.http.DefaultHttpContent;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpContent;
-import io.netty.handler.stream.ChunkedWriteHandler;
+import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.util.ResourceLeakDetector;
+import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.util.List;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 @Slf4j
 public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
 
-    public static final String TRANSFER_ENCODING_GZIP_VALUE = "gzip";
+    public static final String CONTENT_ENCODING_GZIP_VALUE = "gzip";
 
-    static class ChunkWriterOutputStream extends OutputStream {
+    static class ImmediateForwardingOutputStream extends OutputStream {
         ChannelHandlerContext ctx;
+        ByteArrayOutputStream baosCapture = new ByteArrayOutputStream();
+        ResourceLeakDetector<ByteBuf> leakDetector = ResourceLeakDetectorFactory.instance()
+                .newResourceLeakDetector(ByteBuf.class);
 
-        public ChunkWriterOutputStream(ChannelHandlerContext ctx) {
+        public ImmediateForwardingOutputStream(ChannelHandlerContext ctx) {
             this.ctx = ctx;
         }
 
@@ -33,56 +47,64 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
 
         @Override
         public void write(byte[] buff, int offset, int len) throws IOException {
-            ctx.fireChannelRead(Unpooled.wrappedBuffer(buff, offset, len));
+            baosCapture.write(buff, offset, len);
+            var byteBuf = ByteBufAllocator.DEFAULT.buffer(len-offset);
+            leakDetector.track(byteBuf);
+            byteBuf.writeBytes(buff, offset, len);
+            ctx.fireChannelRead(new DefaultHttpContent(byteBuf));
         }
     }
 
     GZIPOutputStream compressorStream;
     BufferedOutputStream bufferedOutputStream;
-    ChunkWriterOutputStream passChunkDownstreamOutputStream;
+    ImmediateForwardingOutputStream passDownstreamOutputStream;
 
     public void activateCompressorComponents(ChannelHandlerContext ctx) throws IOException {
-        passChunkDownstreamOutputStream = new ChunkWriterOutputStream(ctx);
-        bufferedOutputStream = new BufferedOutputStream(passChunkDownstreamOutputStream);
+        passDownstreamOutputStream = new ImmediateForwardingOutputStream(ctx);
+        bufferedOutputStream = new BufferedOutputStream(passDownstreamOutputStream);
         compressorStream = new GZIPOutputStream(bufferedOutputStream);
-        ctx.pipeline().addAfter(ctx.name(), "postCompressChunkedHandler",
-                new ChunkedWriteHandler());
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        log.trace("channelRead: " + msg);
         if (msg instanceof HttpJsonMessageWithFaultablePayload) {
-            var transferEncoding =
-                    ((HttpJsonMessageWithFaultablePayload) msg).headers().asStrictMap().get("transfer-encoding");
-            if (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_GZIP_VALUE)) {
+            var contentEncoding =
+                    ((HttpJsonMessageWithFaultablePayload) msg).headers().asStrictMap().get("content-encoding");
+            if (contentEncoding != null && contentEncoding.contains(CONTENT_ENCODING_GZIP_VALUE)) {
                 activateCompressorComponents(ctx);
-                convertHeadersToChunked(((HttpJsonMessageWithFaultablePayload)msg).headers().strictHeadersMap);
             }
-        } else if (compressorStream != null) {
-            if (msg instanceof HttpContent) {
+        } else if (msg instanceof HttpContent) {
+            if (compressorStream != null) {
                 var contentBuf = ((HttpContent) msg).content();
                 contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
+                if (msg instanceof LastHttpContent) {
+                    closeStream();
+                    ctx.fireChannelRead(msg);
+                }
                 return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
             } else {
-                assert bufferedOutputStream == null && passChunkDownstreamOutputStream == null;
+                assert bufferedOutputStream == null && passDownstreamOutputStream == null;
             }
         }
         super.channelRead(ctx, msg);
     }
 
-    private void convertHeadersToChunked(StrictCaseInsensitiveHttpHeadersMap httpHeaders) {
-        //httpHeaders.put("Content-Transfer-Encoding", List.of("chunked"));
-        httpHeaders.remove("Content-length");
+    private void closeStream() throws IOException {
+        if (compressorStream != null) {
+            compressorStream.flush();
+            compressorStream.close();
+            var zippedContents = passDownstreamOutputStream.baosCapture.toByteArray();
+            GZIPInputStream gis = new GZIPInputStream(new ByteArrayInputStream(zippedContents));
+            InputStreamReader isr = new InputStreamReader(gis);
+            BufferedReader br = new BufferedReader(isr);
+            log.error("unzipped contents="+br.readLine());
+            compressorStream = null;
+        }
     }
 
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-        if (compressorStream != null) {
-            //compressorStream.flush();
-            compressorStream.close();
-            compressorStream = null;
-        }
+        closeStream();
     }
 
     @Override

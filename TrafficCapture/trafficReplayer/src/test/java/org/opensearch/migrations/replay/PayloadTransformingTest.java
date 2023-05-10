@@ -9,16 +9,23 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformBuilder;
 import org.opensearch.migrations.transform.JsonTransformer;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Random;
@@ -28,17 +35,22 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.zip.GZIPInputStream;
 
 @Slf4j
 public class PayloadTransformingTest {
-    @Test
-    public void testSimplePayloadTransform() throws ExecutionException, InterruptedException, IOException {
+    @ParameterizedTest
+    @CsvSource({"true,true", "true,false", "false,true", "false,false"})
+    public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
+        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
+
         var referenceStringBuilder = new StringBuilder();
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), null);
-        var transformingHandler = new HttpJsonTransformer(
-                JsonTransformer.newBuilder()
-                        .addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP)
-                        .build(), testPacketCapture);
+        var transformerBuilder = JsonTransformer.newBuilder();
+
+        if (doGzip) { transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP); }
+        if (doChunked) { transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.MAKE_CHUNKED); }
+        var transformingHandler = new HttpJsonTransformer(transformerBuilder.build(), testPacketCapture);
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
@@ -70,12 +82,12 @@ public class PayloadTransformingTest {
 
         AtomicReference<FullHttpRequest> fullHttpRequestAtomicReference = new AtomicReference<>();
         EmbeddedChannel unpackVerifier = new EmbeddedChannel(
-                new LoggingHandler(),
+                new LoggingHandler(LogLevel.ERROR),
                 new HttpRequestDecoder(),
-                new LoggingHandler(),
-                new HttpObjectAggregator(bytesCaptured.length*2),
-                new LoggingHandler(),
+                new LoggingHandler(LogLevel.WARN),
                 new HttpContentDecompressor(),
+                new LoggingHandler(LogLevel.INFO),
+                new HttpObjectAggregator(bytesCaptured.length*2),
                 new SimpleChannelInboundHandler<FullHttpRequest>() {
                     @Override
                     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest msg) throws Exception {
@@ -84,18 +96,24 @@ public class PayloadTransformingTest {
                 }
         );
         unpackVerifier.writeInbound(Unpooled.wrappedBuffer(bytesCaptured));
-
+//        {
+//            var content = fullHttpRequestAtomicReference.get().content();
+//            var zippedContents = new byte[content.readableBytes()];
+//            content.readBytes(zippedContents);
+//            GZIPInputStream gis = new GZIPInputStream(new ByteArrayInputStream(zippedContents));
+//            InputStreamReader isr = new InputStreamReader(gis);
+//            BufferedReader br = new BufferedReader(isr);
+//            log.error("unzipped contents="+br.readLine());
+//        }
         Assertions.assertNotNull(fullHttpRequestAtomicReference.get());
         var fullRequest = fullHttpRequestAtomicReference.get();
 
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
-        // this one is removed by the http content decompressor
-        // expectedRequestHeaders.add("transfer-encoding", "gzip");
+        // netty's decompressor and aggregator remove some header values (& add others)
         expectedRequestHeaders.add("host", "localhost");
-        expectedRequestHeaders.add("Content-Transfer-Encoding", "chunked");
-        expectedRequestHeaders.add("Content-Length", "0");
-        Assertions.assertEquals(expectedRequestHeaders, fullRequest.headers());
+        expectedRequestHeaders.add("Content-Length", "46");
         Assertions.assertEquals((originalPayloadString), getStringFromContent(fullRequest));
+        Assertions.assertEquals(expectedRequestHeaders, fullRequest.headers());
         fullRequest.release();
     }
 

@@ -17,7 +17,9 @@ import java.util.Map;
 public class JsonTransformBuilder {
 
     public enum CANNED_OPERATIONS {
-        ADD_GZIP("addGzip"), PASS_THRU("passThru");
+        ADD_GZIP("addGzip"),
+        MAKE_CHUNKED("makeChunked"),
+        PASS_THRU("passThru");
 
         private final String value;
 

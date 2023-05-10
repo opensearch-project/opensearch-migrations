@@ -14,6 +14,7 @@ import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -29,8 +30,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
     final IPacketToHttpHandler packetReceiver;
     final JsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
-    HttpJsonMessageWithFaultablePayload httpJsonMessage;
-    JsonAccumulator payloadAccumulator;
+    //HttpJsonMessageWithFaultablePayload httpJsonMessage;
     Consumer<HTTP_CONSUMPTION_STATUS> statusWatcher;
 
     public NettyDecodedHttpRequestHandler(JsonTransformer transformer, List<List<Integer>> chunkSizes,
@@ -47,11 +47,12 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         if (msg instanceof HttpRequest) {
             chunkSizes.add(new ArrayList<>(32));
             var request = (HttpRequest) msg;
-            httpJsonMessage = parseHeadersIntoMessage(request);
+            var httpJsonMessage = parseHeadersIntoMessage(request);
             var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, packetReceiver);
             var pipeline = ctx.pipeline();
             try {
                 transformer.transformJson(httpJsonMessage);
+                httpJsonMessage.copyOriginalHeaders(request.headers());
                 if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                         headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
                     statusWatcher.accept(HTTP_CONSUMPTION_STATUS.DONE);
@@ -67,24 +68,20 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
                     pipelineOrchestrator.addContentRepackingHandlers(pipeline);
                 }
             } catch (PayloadNotLoadedException pnle) {
-                payloadAccumulator = new JsonAccumulator();
+                // make a fresh message and its headers
+                httpJsonMessage = parseHeadersIntoMessage(request);
+                httpJsonMessage.copyOriginalHeaders(request.headers());
                 pipelineOrchestrator.addJsonParsingHandlers(pipeline);
             }
+            // send both!  We'll allow some built-in netty http handlers to do their thing & then
+            // reunify any additions with our headers model before serializing
+            ctx.fireChannelRead(request);
             ctx.fireChannelRead(httpJsonMessage);
         } else if (msg instanceof HttpContent) {
             if (msg instanceof LastHttpContent) {
                 statusWatcher.accept(HTTP_CONSUMPTION_STATUS.DONE);
             }
-            if (this.httpJsonMessage.headers().get("content-length") == null &&
-                    this.httpJsonMessage.headers().get("transfer-encoding") == null) {
-                throw new MalformedRequestException();
-            }
-            if (payloadAccumulator != null) {
-                var payloadContent = ((HttpContent) msg).content();
-                payloadAccumulator.consumeNextChunk(payloadContent);
-            } else {
-                ctx.fireChannelRead(msg);
-            }
+            ctx.fireChannelRead(msg);
         }
     }
 

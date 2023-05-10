@@ -2,7 +2,7 @@
   "operation": "modify-overwrite-beta",
   "spec": {
     "headers": {
-      "content-encoding": "gzip"
+      "transfer-encoding": "chunked"
     }
   }
 }
