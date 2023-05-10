@@ -3,18 +3,15 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 import com.google.protobuf.CodedOutputStream;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.Callback;
-import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 
-import java.io.FileReader;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Properties;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
@@ -29,22 +26,15 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     private final Producer<String, byte[]> producer;
     private final String topicNameForTraffic;
 
-    public KafkaCaptureFactory(String producerPropertiesPath, String topicNameForTraffic) throws IOException {
-        Properties producerProps = new Properties();
-        try {
-            producerProps.load(new FileReader(producerPropertiesPath));
-        } catch (IOException e) {
-            log.error("Unable to locate provided Kafka producer properties file path: " + producerPropertiesPath);
-            throw e;
-        }
+    public KafkaCaptureFactory(Producer<String, byte[]> producer, String topicNameForTraffic) {
         // There is likely some default timeout/retry settings we should configure here to reduce any potential blocking
         // i.e. the Kafka cluster is unavailable
-        producer = new KafkaProducer<>(producerProps);
+        this.producer = producer;
         this.topicNameForTraffic = topicNameForTraffic;
     }
 
-    public KafkaCaptureFactory(String producerPropertiesPath) throws IOException {
-        this(producerPropertiesPath, DEFAULT_TOPIC_NAME_FOR_TRAFFIC);
+    public KafkaCaptureFactory(Producer<String, byte[]> producer) {
+        this(producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC);
     }
 
     @Override
@@ -70,7 +60,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     CompletableFuture cf = new CompletableFuture<>();
                     // Async request to Kafka cluster
                     producer.send(record, handleProducerRecordSent(cf, recordId));
-                    // TODO more reliable way to cut off CF tree
+                    // A more desirable way to cut off our tree of cf aggregation should be investigated
                     aggregateCf.set(aggregateCf.get().isDone() ? cf : CompletableFuture.allOf(aggregateCf.get(), cf));
                     return aggregateCf.get();
                 } catch (Exception e) {

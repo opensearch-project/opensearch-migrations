@@ -59,7 +59,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             return currentCodedOutputStreamOrNull;
         } else {
             currentCodedOutputStreamOrNull = codedOutputStreamSupplier.get();
-            // 1: "1234ABCD"
+            // i.e. 1: "1234ABCD"
             currentCodedOutputStreamOrNull.writeString(TrafficStream.ID_FIELD_NUMBER, idString);
             return currentCodedOutputStreamOrNull;
         }
@@ -76,7 +76,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     }
 
     private void beginWritingObservationToCurrentStream(Instant timestamp, int tag, int bodySize) throws IOException {
-        // 2 {
+        // i.e. 2 {
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
         final var tsSize = CodedOutputStreamSizeUtil.getSizeOfTimestamp(timestamp);
         final var observationTagSize = CodedOutputStream.computeTagSize(tag);
@@ -85,9 +85,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsSize) +
             observationTagSize +
             bodySize);
-        // 1 { 1: .. 2: .. }
+        // i.e. 1 { 1: .. 2: .. }
         writeTimestampForNowToCurrentStream(timestamp);
-        // 4 {
+        // i.e. 4 {
         writeObservationTag(tag);
     }
 
@@ -125,7 +125,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         }
         CodedOutputStream currentStream = getOrCreateCodedOutputStream();
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
-        // 3: 1
+        // i.e. 3: 1
         currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
         currentStream.flush();
         var future = closeHandler.apply(currentStream);
@@ -253,12 +253,10 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         int segmentCountSize = 0;
         int lengthSize = 1;
         CodedOutputStream codedOutputStream = getOrCreateCodedOutputStream();
-        // Calculate segment count size
         if (dataCountFieldNumber > 0) {
             segmentCountSize = CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount);
         }
         if (byteBuffer.remaining() > 0) {
-            // These combined are everything but the capture tag for the capture closure
             dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, byteBuffer);
             lengthSize = CodedOutputStream.computeInt32SizeNoTag(dataSize + segmentCountSize);
         }
@@ -267,7 +265,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             // Write size of data after observation tag
             codedOutputStream.writeInt32NoTag(dataSize + segmentCountSize);
         }
-        // Write segment count field
+        // Write segment count field for segment observations
         if (dataCountFieldNumber > 0) {
             codedOutputStream.writeInt32(dataCountFieldNumber, dataCount);
         }
