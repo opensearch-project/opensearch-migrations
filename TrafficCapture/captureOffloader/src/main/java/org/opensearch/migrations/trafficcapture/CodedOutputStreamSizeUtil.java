@@ -21,7 +21,11 @@ public class CodedOutputStreamSizeUtil {
         return secSize + nanoSize;
     }
 
-    public static int totalBytesNeededForMessage(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
+    /**
+     * This function calculates the maximum bytes needed to store a message ByteBuffer and its associated
+     * Traffic Stream overhead into a CodedOutputStream. The actual required bytes could be marginally smaller.
+     */
+    public static int maxBytesNeededForMessage(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
         int dataCountFieldNumber, int dataCount,  ByteBuffer buffer, int flushes) {
         // Timestamp closure bytes
         int tsContentSize = getSizeOfTimestamp(timestamp);

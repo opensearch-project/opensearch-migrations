@@ -55,15 +55,25 @@ public class KafkaCaptureFactoryTest {
         CompletableFuture cf3 = offloader.flushCommitAndResetStream(false);
         bb.release();
 
+        Assertions.assertEquals(false, cf1.isDone());
+        Assertions.assertEquals(false, cf2.isDone());
+        Assertions.assertEquals(false, cf3.isDone());
+        recordSentCallbacks.get(2).onCompletion(null, null);
+
         // Assert that even though particular final producer record has finished sending, its predecessors are incomplete
         // and thus this wrapper cf is also incomplete
-        recordSentCallbacks.get(2).onCompletion(null, null);
+        Assertions.assertEquals(false, cf1.isDone());
+        Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
-
         recordSentCallbacks.get(1).onCompletion(null, null);
-        Assertions.assertEquals(false, cf3.isDone());
 
+        Assertions.assertEquals(false, cf1.isDone());
+        Assertions.assertEquals(false, cf2.isDone());
+        Assertions.assertEquals(false, cf3.isDone());
         recordSentCallbacks.get(0).onCompletion(null, null);
+
+        Assertions.assertEquals(true, cf1.isDone());
+        Assertions.assertEquals(true, cf2.isDone());
         Assertions.assertEquals(true, cf3.isDone());
 
         mockProducer.close();

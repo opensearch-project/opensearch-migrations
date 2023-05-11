@@ -15,7 +15,6 @@ import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory {
@@ -40,7 +39,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
         AtomicLong supplierCallCounter = new AtomicLong();
-        AtomicReference<CompletableFuture> aggregateCf = new AtomicReference<>(CompletableFuture.completedFuture(null));
+        // This array is only an indirection to work around Java's constraint that lambda values are final
+        CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
+        singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteStreamMap = new WeakHashMap<>();
         return new StreamChannelConnectionCaptureSerializer(connectionId, 100,
             () -> {
@@ -60,9 +61,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     CompletableFuture cf = new CompletableFuture<>();
                     // Async request to Kafka cluster
                     producer.send(record, handleProducerRecordSent(cf, recordId));
+                    // Note that ordering is not guaranteed to be preserved here
                     // A more desirable way to cut off our tree of cf aggregation should be investigated
-                    aggregateCf.set(aggregateCf.get().isDone() ? cf : CompletableFuture.allOf(aggregateCf.get(), cf));
-                    return aggregateCf.get();
+                    singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
+                    return singleAggregateCfRef[0];
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
