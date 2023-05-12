@@ -32,7 +32,6 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
 
     static class ImmediateForwardingOutputStream extends OutputStream {
         ChannelHandlerContext ctx;
-        ByteArrayOutputStream baosCapture = new ByteArrayOutputStream();
         ResourceLeakDetector<ByteBuf> leakDetector = ResourceLeakDetectorFactory.instance()
                 .newResourceLeakDetector(ByteBuf.class);
 
@@ -46,8 +45,7 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
         }
 
         @Override
-        public void write(byte[] buff, int offset, int len) throws IOException {
-            baosCapture.write(buff, offset, len);
+        public void write(byte[] buff, int offset, int len) {
             var byteBuf = ByteBufAllocator.DEFAULT.buffer(len-offset);
             leakDetector.track(byteBuf);
             byteBuf.writeBytes(buff, offset, len);
@@ -93,11 +91,6 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
         if (compressorStream != null) {
             compressorStream.flush();
             compressorStream.close();
-            var zippedContents = passDownstreamOutputStream.baosCapture.toByteArray();
-            GZIPInputStream gis = new GZIPInputStream(new ByteArrayInputStream(zippedContents));
-            InputStreamReader isr = new InputStreamReader(gis);
-            BufferedReader br = new BufferedReader(isr);
-            log.error("unzipped contents="+br.readLine());
             compressorStream = null;
         }
     }

@@ -63,7 +63,7 @@ public class RequestPipelineOrchestrator {
                             Consumer<HTTP_CONSUMPTION_STATUS> statusWatcher) {
         pipeline.addFirst(new HttpRequestDecoder());
         // IN:  Netty HttpRequest(1) + HttpContent(1) blocks (which may be compressed)
-        // OUT: Netty HttpRequest(1) + HttpJsonMessage(1) with only headers PLUS + HttpContent(1) blocks
+        // OUT: ByteBufs(1) OR Netty HttpRequest(1) + HttpJsonMessage(1) with only headers PLUS + HttpContent(1) blocks
         // Note1: original Netty headers are preserved so that HttpContentDecompressor can work appropriately.
         //        HttpJsonMessage is used so that we can capture the headers exactly as they were and to
         //        observe packet sizes.
@@ -92,27 +92,12 @@ public class RequestPipelineOrchestrator {
         }
         // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
-        pipeline.addLast(new LoggingHandler(LogLevel.ERROR, ByteBufFormat.HEX_DUMP));
         pipeline.addLast(COMPRESS_HANDLER_NAME, new NettyJsonContentCompressor());
-        pipeline.addLast(new LoggingHandler(LogLevel.WARN, ByteBufFormat.HEX_DUMP));
+        // IN:  Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
+        // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + ByteBufs(2)
         pipeline.addLast(CONTENT_STREAMER_HANDLER_NAME, new NettyJsonContentStreamToByteBufHandler());
         addBaselineHandlers(pipeline);
     }
-
-    /**
-     * When the NettyJsonContentCompressor performs compression, these handlers will be added to the pipeline.
-     * @param pipeline
-     */
-//    public static void addCompressedHelpers(ChannelPipeline pipeline) {
-//        // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
-//        // OUT: Netty HttpRequest(3) + HttpJsonMessage(3) with headers only + HttpContent(4) blocks
-//        pipeline.addAfter(COMPRESS_HANDLER_NAME, AFTER_COMPRESS_CHUNKED_HANDLER_NAME, new ChunkedWriteHandler());
-//        // IN:  Netty HttpRequest(3) + HttpJsonMessage(3) with headers only + HttpContent(4) blocks
-//        // OUT:                        HttpJsonMessage(4) with headers only + HttpContent(4) blocks
-//        pipeline.addAfter(AFTER_COMPRESS_CHUNKED_HANDLER_NAME, COMPRESSED_CHUNK_HEADER_MERGER_HANDLER_NAME,
-//                new NettyJsonHeaderReunificationHandler());
-//
-//    }
 
     void addBaselineHandlers(ChannelPipeline pipeline) {
         //  IN: ByteBufs(2) + HttpJsonMessage(4) with headers only + HttpContent(1) (if the repackaging handlers were skipped)

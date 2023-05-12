@@ -14,31 +14,24 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformBuilder;
 import org.opensearch.migrations.transform.JsonTransformer;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.zip.GZIPInputStream;
 
 @Slf4j
-public class PayloadTransformingTest {
+public class PayloadRepackingTest {
     @ParameterizedTest
     @CsvSource({"true,true", "true,false", "false,true", "false,false"})
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
