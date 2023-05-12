@@ -28,11 +28,6 @@ import java.util.function.Consumer;
  */
 @Slf4j
 public class RequestPipelineOrchestrator {
-    public static final String COMPRESS_HANDLER_NAME = "compressionHandler";
-    public static final String AFTER_COMPRESS_CHUNKED_HANDLER_NAME = "postCompressChunkedHandler";
-    public static final String COMPRESSED_CHUNK_HEADER_MERGER_HANDLER_NAME = "compressedChunkHeaderMerger";
-    public static final String CONTENT_STREAMER_HANDLER_NAME = "contentStreamerHandler";
-
     private final List<List<Integer>> chunkSizes;
     private final IPacketToHttpHandler packetReceiver;
 
@@ -51,11 +46,11 @@ public class RequestPipelineOrchestrator {
     }
 
     void addContentRepackingHandlers(ChannelPipeline pipeline) {
-        addContentParsingHandlers(pipeline, false);
+        addContentParsingHandlers(pipeline, null);
     }
 
-    void addJsonParsingHandlers(ChannelPipeline pipeline) {
-        addContentParsingHandlers(pipeline, true);
+    void addJsonParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
+        addContentParsingHandlers(pipeline, transformer);
     }
 
     void addInitialHandlers(ChannelPipeline pipeline,
@@ -73,29 +68,29 @@ public class RequestPipelineOrchestrator {
         pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, packetReceiver, statusWatcher));
     }
 
-    void addContentParsingHandlers(ChannelPipeline pipeline, boolean addFullJsonTransformer) {
+    void addContentParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
         log.warn("Adding handlers to pipeline");
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
         pipeline.addLast(new HttpContentDecompressor());
-        if (addFullJsonTransformer) {
+        if (transformer != null) {
             log.warn("Adding JSON handlers to pipeline");
             //  IN: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) blocks
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
             pipeline.addLast(new NettyJsonBodyAccumulateHandler());
             //  IN: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(3) with headers AND payload (transformed)
-            pipeline.addLast(new NettyJsonBodyConvertHandler());
+            pipeline.addLast(new NettyJsonBodyConvertHandler(transformer));
             // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers AND payload
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
             pipeline.addLast(new NettyJsonBodySerializeHandler());
         }
         // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
-        pipeline.addLast(COMPRESS_HANDLER_NAME, new NettyJsonContentCompressor());
+        pipeline.addLast(new NettyJsonContentCompressor());
         // IN:  Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + ByteBufs(2)
-        pipeline.addLast(CONTENT_STREAMER_HANDLER_NAME, new NettyJsonContentStreamToByteBufHandler());
+        pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
         addBaselineHandlers(pipeline);
     }
 

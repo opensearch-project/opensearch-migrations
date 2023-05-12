@@ -1,11 +1,140 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import io.netty.buffer.ByteBuf;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.async.ByteBufferFeeder;
+import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Stack;
+import java.util.stream.Collectors;
 
+@Slf4j
 public class JsonAccumulator {
-    public void consumeNextChunk(ByteBuf payloadContent) {
 
+    private final JsonParser parser;
+    /**
+     * This stack will contain JSON Objects, FieldName tokens, and ArrayLists.
+     * ArrayLists will be converted into arrays upon popping them from the stack.
+     * FieldName tokens, once bound with a child (a scalar, object or array) will
+     * be popped and added to the object that is situated directly above the Field
+     * Name in the stack.
+     */
+    private final Stack<Object> jsonObjectStack;
+
+    public JsonAccumulator() throws IOException {
+        jsonObjectStack = new Stack<>();
+        JsonFactory factory = new JsonFactory();
+        parser = factory.createNonBlockingByteBufferParser();
+    }
+
+    protected Map<String, Object> createMap() {
+        return new LinkedHashMap<>();
+    }
+
+    /**
+     * Returns the top-level object once it has been fully constructed or null if more input is still required.
+     * @param byteBuffer
+     * @return
+     * @throws IOException
+     */
+    public Object consumeByteBuffer(ByteBuffer byteBuffer) throws IOException {
+        ByteBufferFeeder feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
+        log.trace("Consuming bytes: "+byteBuffer.toString());
+        feeder.feedInput(byteBuffer);
+
+        while (!parser.isClosed()) {
+            var token = parser.nextToken();
+            if (token == null) {
+                // pipeline stall - need more data
+                break;
+            }
+
+            log.trace(this+" ... adding token="+token);
+            switch (token) {
+                case FIELD_NAME:
+                    jsonObjectStack.push(parser.getText());
+                    break;
+                case START_ARRAY:
+                    jsonObjectStack.push(new ArrayList<>());
+                    break;
+                case END_ARRAY: {
+                    var array = ((ArrayList) jsonObjectStack.pop()).toArray();
+                    pushCompletedValue(array);
+                    if (jsonObjectStack.empty()) {
+                        return array;
+                    }
+                    break;
+                }
+                case START_OBJECT:
+                    jsonObjectStack.push(createMap());
+                    break;
+                case END_OBJECT: {
+                    var popped = jsonObjectStack.pop();
+                    if (jsonObjectStack.empty()) {
+                        return popped;
+                    } else {
+                        pushCompletedValue(popped);
+                    }
+                    break;
+                }
+                case VALUE_NULL:
+                    pushCompletedValue(null);
+                    break;
+                case VALUE_TRUE:
+                    pushCompletedValue(true);
+                    break;
+                case VALUE_FALSE:
+                    pushCompletedValue(false);
+                    break;
+                case VALUE_STRING:
+                    pushCompletedValue(parser.getText());
+                    break;
+                case VALUE_NUMBER_INT:
+                    pushCompletedValue(parser.getIntValue());
+                    break;
+                case VALUE_NUMBER_FLOAT:
+                    pushCompletedValue(parser.getFloatValue());
+                    break;
+                case NOT_AVAILABLE:
+                    // pipeline stall - need more data
+                    return null;
+                case VALUE_EMBEDDED_OBJECT:
+                default:
+                    throw new RuntimeException("Unexpected value type: "+token);
+            }
+        }
+        return null;
+    }
+
+    private void pushCompletedValue(Object value) {
+        var topElement = jsonObjectStack.peek();
+        if (topElement instanceof String) {
+            var fieldName = (String) jsonObjectStack.pop();
+            var grandParent = jsonObjectStack.peek();
+            if (grandParent instanceof Map) {
+                ((Map) grandParent).put(fieldName, value);
+            } else {
+                throw new RuntimeException("Stack mismatch, cannot push a value " + toString());
+            }
+        } else if (topElement instanceof ArrayList) {
+            ((ArrayList) topElement).add(value);
+        }
+    }
+
+    @Override
+    public String toString() {
+        var jsonStackString = ""+jsonObjectStack.size();//jsonObjectStack.stream().map(s->s.toString()).collect(Collectors.joining("|"));
+        final StringBuilder sb = new StringBuilder("JsonAccumulator{");
+        //sb.append("parser=").append(parser);
+        sb.append(", jsonObjectStack=").append(jsonStackString);
+        sb.append('}');
+        return sb.toString();
     }
 }
+

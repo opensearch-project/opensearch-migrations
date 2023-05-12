@@ -71,7 +71,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
                 // make a fresh message and its headers
                 httpJsonMessage = parseHeadersIntoMessage(request);
                 httpJsonMessage.copyOriginalHeaders(request.headers());
-                pipelineOrchestrator.addJsonParsingHandlers(pipeline);
+                pipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer);
             }
             // send both!  We'll allow some built-in netty http handlers to do their thing & then
             // reunify any additions with our headers model before serializing
