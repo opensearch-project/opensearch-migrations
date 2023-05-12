@@ -19,7 +19,7 @@ public class KafkaPrinter {
 
     public static void main(String[] args) {
         String bootstrapServers = args[1];
-        String groupId = "GroupID";
+        String groupId = "default-logging-group";
         String topic = args[2];
 
         Properties properties = new Properties();
@@ -30,7 +30,6 @@ public class KafkaPrinter {
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
         KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties);
-        final Thread mainThread = Thread.currentThread();
 
         try {
             consumer.subscribe(Collections.singleton(topic));
@@ -40,7 +39,7 @@ public class KafkaPrinter {
                         consumer.poll(Duration.ofMillis(100));
 
                 for (ConsumerRecord<String, byte[]> record : records) {
-                    log.info(record.value().toString());
+                    System.out.println(record.value().toString());
                 }
             }
         } catch (WakeupException e) {
