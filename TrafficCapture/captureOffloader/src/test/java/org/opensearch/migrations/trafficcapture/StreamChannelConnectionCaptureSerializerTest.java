@@ -31,7 +31,7 @@ class StreamChannelConnectionCaptureSerializerTest {
     private final static String FAKE_READ_PACKET_DATA = "ABCDEFGHIJKLMNOP";
     public static final String TEST_TRAFFIC_STREAM_ID_STRING = "Test";
 
-    private static TrafficStream makeEmptyTrafficStream(Instant t) {
+    private static TrafficStream makeSampleTrafficStream(Instant t) {
         return TrafficStream.newBuilder()
                 .setId(TEST_TRAFFIC_STREAM_ID_STRING)
                 .setNumberOfThisLastChunk(1)
@@ -168,7 +168,7 @@ class StreamChannelConnectionCaptureSerializerTest {
     public void testThatReadCanBeDeserialized() throws IOException, ExecutionException, InterruptedException {
         final var referenceTimestamp = Instant.now(Clock.systemUTC());
         // these are only here as a debugging aid
-        var groundTruth = makeEmptyTrafficStream(referenceTimestamp);
+        var groundTruth = makeSampleTrafficStream(referenceTimestamp);
         System.err.println("groundTruth: "+groundTruth);
         // Pasting this into `base64 -d | protoc --decode_raw` will also show the structure
         var groundTruthBytes = groundTruth.toByteArray();
@@ -202,7 +202,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBuffersMap = new WeakHashMap<>();
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
-        return new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING, 1,
+        return new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING,
             () -> {
                 ByteBuffer bytes = ByteBuffer.allocate(bufferSize);
                 var rval = CodedOutputStream.newInstance(bytes);

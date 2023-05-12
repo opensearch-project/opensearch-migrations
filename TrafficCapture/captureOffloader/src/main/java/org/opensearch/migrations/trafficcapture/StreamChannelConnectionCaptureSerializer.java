@@ -64,21 +64,18 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
     private final Function<CodedOutputStream, CompletableFuture> closeHandler;
     private final String idString;
-    private final int minDataChunkBytes;
     private CodedOutputStream currentCodedOutputStreamOrNull;
     private int numFlushesSoFar;
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
 
     public StreamChannelConnectionCaptureSerializer(String id,
-                                                    int minDataChunkBytes,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
                                                     Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
         assert (id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
         this.idString = id;
-        this.minDataChunkBytes = minDataChunkBytes;
     }
 
     private static int getWireTypeForFieldIndex(Descriptors.Descriptor d, int fieldNumber) {
@@ -253,7 +250,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, 2, byteBuffer, numFlushesSoFar + 1);
         int trafficStreamOverhead = messageAndOverheadBytesLeft - byteBuffer.capacity();
 
-        if (trafficStreamOverhead + minDataChunkBytes >= getOrCreateCodedOutputStream().spaceLeft()) {
+        // Ensure that space for at least one data byte and overhead exists, otherwise a flush is necessary.
+        if (trafficStreamOverhead + 1 >= getOrCreateCodedOutputStream().spaceLeft()) {
             flushCommitAndResetStream(false);
         }
 

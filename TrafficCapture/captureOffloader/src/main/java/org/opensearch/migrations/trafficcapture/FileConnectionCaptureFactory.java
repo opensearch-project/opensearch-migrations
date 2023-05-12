@@ -13,7 +13,6 @@ import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 
 /**
@@ -26,23 +25,25 @@ import java.util.function.BiFunction;
 @Deprecated
 public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
     private final BiFunction<String, Integer, FileOutputStream> outputStreamCreator;
+    private final int bufferSize;
 
-    public FileConnectionCaptureFactory(BiFunction<String, Integer, FileOutputStream> outputStreamCreator) {
+    public FileConnectionCaptureFactory(BiFunction<String, Integer, FileOutputStream> outputStreamCreator, int bufferSize) {
         this.outputStreamCreator = outputStreamCreator;
+        this.bufferSize = bufferSize;
     }
 
-    public FileConnectionCaptureFactory(Path rootPath) {
+    public FileConnectionCaptureFactory(Path rootPath, int bufferSize) {
         this((id, n) -> {
             try {
                 return new FileOutputStream(rootPath.resolve(id + "_" + n.toString() + ".protocap").toString());
             } catch (FileNotFoundException e) {
                 throw new RuntimeException(e);
             }
-        });
+        }, bufferSize);
     }
 
-    public FileConnectionCaptureFactory(String path) {
-        this(Paths.get(path));
+    public FileConnectionCaptureFactory(String path, int bufferSize) {
+        this(Paths.get(path), bufferSize);
     }
 
     private CompletableFuture closeHandler(String connectionId, ByteBuffer byteBuffer, CodedOutputStream codedOutputStream, int callCounter) {
@@ -63,19 +64,21 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
         AtomicInteger supplierCallCounter = new AtomicInteger();
-        AtomicReference<CompletableFuture> aggregateCf = new AtomicReference<>(CompletableFuture.completedFuture(null));
+        // This array is only an indirection to work around Java's constraint that lambda values are final
+        CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
+        singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToFileStreamMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(connectionId, 100,
+        return new StreamChannelConnectionCaptureSerializer(connectionId,
             () -> {
-                ByteBuffer bb = ByteBuffer.allocate(1024 * 1024);
+                ByteBuffer bb = ByteBuffer.allocate(bufferSize);
                 var cos = CodedOutputStream.newInstance(bb);
                 codedStreamToFileStreamMap.put(cos, bb);
                 return cos;
             },
             (codedOutputStream) -> {
                 CompletableFuture cf = closeHandler(connectionId, codedStreamToFileStreamMap.get(codedOutputStream), codedOutputStream, supplierCallCounter.incrementAndGet());
-                aggregateCf.set(aggregateCf.get().isDone() ? cf : CompletableFuture.allOf(aggregateCf.get(), cf));
-                return aggregateCf.get();
+                singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
+                return singleAggregateCfRef[0];
             }
         );
     }

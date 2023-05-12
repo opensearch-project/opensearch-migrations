@@ -24,16 +24,18 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     // Potential future optimization here to use a direct buffer (e.g. nio) instead of byte array
     private final Producer<String, byte[]> producer;
     private final String topicNameForTraffic;
+    private final int bufferSize;
 
-    public KafkaCaptureFactory(Producer<String, byte[]> producer, String topicNameForTraffic) {
+    public KafkaCaptureFactory(Producer<String, byte[]> producer, String topicNameForTraffic, int bufferSize) {
         // There is likely some default timeout/retry settings we should configure here to reduce any potential blocking
         // i.e. the Kafka cluster is unavailable
         this.producer = producer;
         this.topicNameForTraffic = topicNameForTraffic;
+        this.bufferSize = bufferSize;
     }
 
-    public KafkaCaptureFactory(Producer<String, byte[]> producer) {
-        this(producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC);
+    public KafkaCaptureFactory(Producer<String, byte[]> producer, int bufferSize) {
+        this(producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, bufferSize);
     }
 
     @Override
@@ -43,9 +45,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteStreamMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(connectionId, 100,
+        return new StreamChannelConnectionCaptureSerializer(connectionId,
             () -> {
-                ByteBuffer bb = ByteBuffer.allocate(1024 * 1024);
+                ByteBuffer bb = ByteBuffer.allocate(bufferSize);
                 var cos = CodedOutputStream.newInstance(bb);
                 codedStreamToByteStreamMap.put(cos, bb);
                 return cos;

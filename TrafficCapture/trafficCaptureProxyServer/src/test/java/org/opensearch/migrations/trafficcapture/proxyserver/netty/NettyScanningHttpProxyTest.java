@@ -36,7 +36,7 @@ class NettyScanningHttpProxyTest {
         while (true) {
             try {
                 int port = (abs(random.nextInt()) % (2 ^ 16 - 1025)) + 1025;
-                r.accept(new Integer(port));
+                r.accept(Integer.valueOf(port));
                 return port;
             } catch (Exception e) {
                 System.err.println("Exception: "+e);
@@ -48,7 +48,7 @@ class NettyScanningHttpProxyTest {
 
     @Test
     public void testRoundTrip() throws IOException, InterruptedException {
-        var captureFactory = new InMemoryConnectionCaptureFactory();
+        var captureFactory = new InMemoryConnectionCaptureFactory(1024*1024);
         var servers = startServers(captureFactory);
 
         String responseBody;
