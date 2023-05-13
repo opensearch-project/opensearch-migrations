@@ -1,10 +1,14 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import com.google.protobuf.CodedOutputStream;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
@@ -15,6 +19,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 public class Main {
@@ -36,6 +41,22 @@ public class Main {
         builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
         builder.put("path.home", configFile);
         return builder.build();
+    }
+
+    private static IConnectionCaptureFactory getTraceConnectionCaptureFactory(String traceLogsDirectory) {
+        if (traceLogsDirectory == null) {
+            System.err.println("No trace log directory specified.  Logging to /dev/null");
+            return new IConnectionCaptureFactory() {
+                @Override
+                public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
+                    return new StreamChannelConnectionCaptureSerializer(connectionId, () ->
+                            CodedOutputStream.newInstance(NullOutputStream.getInstance()),
+                            cos -> CompletableFuture.completedFuture(null));
+                }
+            };
+        } else {
+            return new FileConnectionCaptureFactory(traceLogsDirectory);
+        }
     }
 
     private static IConnectionCaptureFactory getConnectionCaptureFactory(String kafkaPropsPath) throws IOException {

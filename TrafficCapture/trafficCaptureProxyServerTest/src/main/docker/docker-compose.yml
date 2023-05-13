@@ -1,0 +1,6 @@
+version: '3.7'
+services:
+  webserver:
+    image: 'nginx-simple:latest'
+    ports:
+      - "80:80"

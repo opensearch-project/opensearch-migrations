@@ -47,7 +47,7 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         }
 
         var offloader = connectionCaptureFactory.createOffloader(ch.id().asShortText());
-        ch.pipeline().addLast(new LoggingHandler("PRE", LogLevel.WARN));
+        //ch.pipeline().addLast(new LoggingHandler("PRE", LogLevel.WARN));
         ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
         ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader,
                 this::shouldGuaranteeMessageOffloading));
