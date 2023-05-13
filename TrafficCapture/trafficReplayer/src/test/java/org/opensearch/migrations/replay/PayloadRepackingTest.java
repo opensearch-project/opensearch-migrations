@@ -87,7 +87,7 @@ public class PayloadRepackingTest {
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var headerString = "GET / HTTP/1.1\n" +
                 "host: localhost\n" +
-                extraHeaders +
+                (extraHeaders == null ? "" : extraHeaders) +
                 "content-length: " + contentLength + "\n\n";
         var referenceStringBuilder = new StringBuilder();
         var allConsumesFuture = TestUtils.chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,

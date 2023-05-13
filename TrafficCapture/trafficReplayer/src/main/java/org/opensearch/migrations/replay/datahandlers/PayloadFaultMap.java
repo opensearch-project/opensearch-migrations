@@ -93,4 +93,13 @@ public class PayloadFaultMap extends AbstractMap<String, Object> {
         onlyValue = value;
         return old;
     }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("PayloadFaultMap{");
+        sb.append("isJson=").append(isJson);
+        sb.append(", onlyValue=").append(onlyValue);
+        sb.append('}');
+        return sb.toString();
+    }
 }
