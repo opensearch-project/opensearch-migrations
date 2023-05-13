@@ -3,12 +3,15 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.codec.http.DefaultHttpContent;
+import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.concurrent.EventExecutorGroup;
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
 import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter {
     public static final int NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING = 1024;
@@ -24,21 +27,23 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
             var jsonMessage = (HttpJsonMessageWithFaultablePayload) msg;
             var payload = jsonMessage.payload();
             jsonMessage.setPayload(null);
+            var payloadContents = (Map<String, Object>) payload.get(PayloadFaultMap.INLINED_JSON_BODY_DOCUMENT_KEY);
             ctx.fireChannelRead(msg);
-            if (payload != null) {
-                serializePayload(ctx, payload);
+            if (payload != null && payloadContents != null) {
+                serializePayload(ctx, payloadContents);
             }
         } else {
             super.channelRead(ctx, msg);
         }
     }
 
-    private void serializePayload(ChannelHandlerContext ctx, PayloadFaultMap payload) throws IOException {
+    private void serializePayload(ChannelHandlerContext ctx, Map<String,Object> payload) throws IOException {
         var pac = jsonEmitter.getChunkAndContinuations(payload, NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING);
         while (true) {
-            ctx.fireChannelRead(pac.partialSerializedContents);
+            ctx.fireChannelRead(new DefaultHttpContent(pac.partialSerializedContents));
             pac.partialSerializedContents.release();
             if (pac.nextSupplier == null) {
+                ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
                 break;
             }
             pac = pac.nextSupplier.get();

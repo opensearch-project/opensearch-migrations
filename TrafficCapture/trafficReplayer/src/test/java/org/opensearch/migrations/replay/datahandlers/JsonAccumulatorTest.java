@@ -85,12 +85,12 @@ public class JsonAccumulatorTest {
             case TOY:
                 return "{\"name\":\"John\", \"age\":30}".getBytes();
             case MEDIUM:
-                try (FileInputStream fis = new FileInputStream("/Users/schohn/es_bank_results_1.json");
+                try (FileInputStream fis = new FileInputStream("FILLMEIN");
                      BufferedInputStream bis = new BufferedInputStream(fis)) {
                     return bis.readAllBytes();
                 }
             case LARGE:
-                try (FileInputStream fis = new FileInputStream("/Users/schohn/tmp.json");
+                try (FileInputStream fis = new FileInputStream("FILLMEIN");
                      BufferedInputStream bis = new BufferedInputStream(fis)) {
                     return bis.readAllBytes();
                 }
@@ -99,9 +99,10 @@ public class JsonAccumulatorTest {
         }
     }
     @ParameterizedTest
-    @CsvSource({"toy,2","toy,20000",
-            "medium,2","medium,20000",
-            "large,2","large,20000"})
+    @CsvSource({"toy,2", "toy,20000",
+            //"medium,2","medium,20000",
+            //"large,2","large,20000"})
+    })
     public void testAccumulation(String dataName, int chunkBound) throws IOException {
         var testFileBytes = getData(dataName);
         var outputJson = readJson(testFileBytes, 2);

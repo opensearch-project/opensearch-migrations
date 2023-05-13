@@ -1,49 +1,64 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.channel.embedded.EmbeddedChannel;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.HttpContentDecompressor;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
 import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformBuilder;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 @Slf4j
 public class PayloadRepackingTest {
+
+    public static Stream<List<Object>> expandList(Stream<List<Object>> stream, List possibilities) {
+        return stream.flatMap(list-> possibilities.stream().map(innerB -> {
+            var rval = new ArrayList<Object>(list);
+            rval.add(innerB);
+            return rval;
+        }));
+    }
+
+    public static Arguments[] makeCombinations() {
+        List<Object> allBools = List.of(true, false);
+        Stream<List<Object>> seedLists = allBools.stream().map(b->List.of(b));
+        return expandList(expandList(seedLists, allBools), allBools)
+               .map(list->Arguments.of(list.toArray(Object[]::new)))
+                .toArray(Arguments[]::new);
+    }
+
     @ParameterizedTest
-    @CsvSource({"true,true", "true,false", "false,true", "false,false"})
+    @MethodSource("makeCombinations")
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
-        var referenceStringBuilder = new StringBuilder();
-        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), null);
         var transformerBuilder = JsonTransformer.newBuilder();
 
         if (doGzip) { transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP); }
         if (doChunked) { transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.MAKE_CHUNKED); }
-        var transformingHandler = new HttpJsonTransformer(transformerBuilder.build(), testPacketCapture);
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
@@ -51,12 +66,32 @@ public class PayloadRepackingTest {
                 .map(o -> (String) o)
                 .collect(Collectors.toList());
 
+        DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
+        // netty's decompressor and aggregator remove some header values (& add others)
+        expectedRequestHeaders.add("host", "localhost");
+        expectedRequestHeaders.add("Content-Length", "46");
+
+        runPipelineAndValidate(transformerBuilder.build(), null, stringParts,
+                expectedRequestHeaders,
+                referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder));
+    }
+
+    private static void runPipelineAndValidate(JsonTransformer transformer,
+                                               String extraHeaders,
+                                               List<String> stringParts,
+                                               DefaultHttpHeaders expectedRequestHeaders,
+                                               Function<StringBuilder,String> expectedOutputGenerator) throws Exception {
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), null);
+        var transformingHandler = new HttpJsonTransformer(transformer, testPacketCapture);
+
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var headerString = "GET / HTTP/1.1\n" +
                 "host: localhost\n" +
+                extraHeaders +
                 "content-length: " + contentLength + "\n\n";
-        var allConsumesFuture = TestUtils.chainedWriteHeadersAndDualWritePayloadParts(transformingHandler, stringParts,
-                referenceStringBuilder, headerString);
+        var referenceStringBuilder = new StringBuilder();
+        var allConsumesFuture = TestUtils.chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,
+                stringParts, referenceStringBuilder, headerString);
 
         var innermostFinalizeCallCount = new AtomicInteger();
         var finalizationFuture = allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest());
@@ -67,54 +102,53 @@ public class PayloadRepackingTest {
             innermostFinalizeCallCount.incrementAndGet();
         });
         finalizationFuture.get();
-        verifyResponse(testPacketCapture.getBytesCaptured(), TestUtils.resolveReferenceString(referenceStringBuilder));
+
+        TestUtils.verifyCapturedResponseMatchesExpectedPayload(testPacketCapture.getBytesCaptured(),
+                expectedRequestHeaders, expectedOutputGenerator.apply(referenceStringBuilder));
     }
 
-    private void verifyResponse(byte[] bytesCaptured, String originalPayloadString) throws IOException {
-        log.warn("\n\nBeginning verification pipeline\n\n");
+    String simplePayloadTransform = "" +
+            "  {\n" +
+            "    \"operation\": \"shift\",\n" +
+            "    \"spec\": {\n" +
+            "      \"headers\": \"&\",\n" +
+            "      \"method\": \"&\",\n" +
+            "      \"URI\": \"&\",\n" +
+            "      \"protocol\": \"&\",\n" +
+            "      \"payload\": {\n" +
+            "        \"inlinedJsonBody\": {\n" +
+            "          \"top\": {\n" +
+            "            \"*\": {\n" +
+            "              \"$\": \"payload.inlinedJsonBody.top[#2].Name\",\n" +
+            "              \"@\": \"payload.inlinedJsonBody.top[#2].Value\"\n" +
+            "            }\n" +
+            "          }\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n";
 
-        AtomicReference<FullHttpRequest> fullHttpRequestAtomicReference = new AtomicReference<>();
-        EmbeddedChannel unpackVerifier = new EmbeddedChannel(
-                new LoggingHandler(LogLevel.ERROR),
-                new HttpRequestDecoder(),
-                new LoggingHandler(LogLevel.WARN),
-                new HttpContentDecompressor(),
-                new LoggingHandler(LogLevel.INFO),
-                new HttpObjectAggregator(bytesCaptured.length*2),
-                new SimpleChannelInboundHandler<FullHttpRequest>() {
-                    @Override
-                    protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest msg) throws Exception {
-                        fullHttpRequestAtomicReference.set(msg.retainedDuplicate());
-                    }
-                }
-        );
-        unpackVerifier.writeInbound(Unpooled.wrappedBuffer(bytesCaptured));
-//        {
-//            var content = fullHttpRequestAtomicReference.get().content();
-//            var zippedContents = new byte[content.readableBytes()];
-//            content.readBytes(zippedContents);
-//            GZIPInputStream gis = new GZIPInputStream(new ByteArrayInputStream(zippedContents));
-//            InputStreamReader isr = new InputStreamReader(gis);
-//            BufferedReader br = new BufferedReader(isr);
-//            log.error("unzipped contents="+br.readLine());
-//        }
-        Assertions.assertNotNull(fullHttpRequestAtomicReference.get());
-        var fullRequest = fullHttpRequestAtomicReference.get();
+    @Test
+    public void testJsonPayloadTransformation() throws Exception {
+        var transformerBuilder = JsonTransformer.newBuilder();
+
+        ObjectMapper mapper = new ObjectMapper();
+        var simpleTransform = mapper.readValue(simplePayloadTransform,
+                new TypeReference<LinkedHashMap<String, Object>>(){});
+        transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.PASS_THRU);
+        transformerBuilder.addOperationObject(simpleTransform);
+
+        var jsonPayload = "{\"top\": {\"A\": 1,\"B\": 2}}";
+        String extraHeaders = "content-type: application/json; charset=UTF-8\n";
 
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
         expectedRequestHeaders.add("host", "localhost");
-        expectedRequestHeaders.add("Content-Length", "46");
-        Assertions.assertEquals((originalPayloadString), getStringFromContent(fullRequest));
-        Assertions.assertEquals(expectedRequestHeaders, fullRequest.headers());
-        fullRequest.release();
-    }
+        expectedRequestHeaders.add("content-type", "application/json; charset=UTF-8");
+        expectedRequestHeaders.add("Content-Length", "55");
 
-    private static String getStringFromContent(FullHttpRequest fullRequest) throws IOException {
-        try (var baos = new ByteArrayOutputStream()) {
-            var bb = fullRequest.content();
-            bb.readBytes(baos, bb.readableBytes());
-            return new String(baos.toByteArray(), StandardCharsets.UTF_8);
-        }
+        runPipelineAndValidate(transformerBuilder.build(), extraHeaders, List.of(jsonPayload),
+                expectedRequestHeaders,
+                x -> "{\"top\":[{\"Name\":\"A\",\"Value\":1},{\"Name\":\"B\",\"Value\":2}]}");
     }
 }

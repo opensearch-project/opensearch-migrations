@@ -52,7 +52,6 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             var pipeline = ctx.pipeline();
             try {
                 transformer.transformJson(httpJsonMessage);
-                httpJsonMessage.copyOriginalHeaders(request.headers());
                 if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                         headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
                     statusWatcher.accept(HTTP_CONSUMPTION_STATUS.DONE);
@@ -70,7 +69,6 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             } catch (PayloadNotLoadedException pnle) {
                 // make a fresh message and its headers
                 httpJsonMessage = parseHeadersIntoMessage(request);
-                httpJsonMessage.copyOriginalHeaders(request.headers());
                 pipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer);
             }
             // send both!  We'll allow some built-in netty http handlers to do their thing & then

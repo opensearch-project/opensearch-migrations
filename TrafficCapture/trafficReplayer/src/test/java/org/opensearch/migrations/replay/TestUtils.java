@@ -1,14 +1,29 @@
 package org.opensearch.migrations.replay;
 
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpContentDecompressor;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.AbstractMap;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collector;
@@ -68,5 +83,44 @@ public class TestUtils {
         String headers = headersGenerator.apply(contentLength) + "\n";
         referenceStringAccumulator.append(headers);
         return chainedWriteHeadersAndDualWritePayloadParts(packetConsumer, stringParts, referenceStringAccumulator, headers);
+    }
+
+    static void verifyCapturedResponseMatchesExpectedPayload(byte[] bytesCaptured,
+                                                             DefaultHttpHeaders expectedRequestHeaders,
+                                                             String expectedPayloadString)
+            throws IOException
+    {
+        log.warn("\n\nBeginning verification pipeline\n\n");
+
+        AtomicReference<FullHttpRequest> fullHttpRequestAtomicReference = new AtomicReference<>();
+        EmbeddedChannel unpackVerifier = new EmbeddedChannel(
+                new LoggingHandler(LogLevel.ERROR),
+                new HttpRequestDecoder(),
+                new LoggingHandler(LogLevel.WARN),
+                new HttpContentDecompressor(),
+                new LoggingHandler(LogLevel.INFO),
+                new HttpObjectAggregator(bytesCaptured.length*2),
+                new SimpleChannelInboundHandler<FullHttpRequest>() {
+                    @Override
+                    protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest msg) throws Exception {
+                        fullHttpRequestAtomicReference.set(msg.retainedDuplicate());
+                    }
+                }
+        );
+        unpackVerifier.writeInbound(Unpooled.wrappedBuffer(bytesCaptured));
+        Assertions.assertNotNull(fullHttpRequestAtomicReference.get());
+        var fullRequest = fullHttpRequestAtomicReference.get();
+
+        Assertions.assertEquals((expectedPayloadString), getStringFromContent(fullRequest));
+        Assertions.assertEquals(expectedRequestHeaders, fullRequest.headers());
+        fullRequest.release();
+    }
+
+    private static String getStringFromContent(FullHttpRequest fullRequest) throws IOException {
+        try (var baos = new ByteArrayOutputStream()) {
+            var bb = fullRequest.content();
+            bb.readBytes(baos, bb.readableBytes());
+            return new String(baos.toByteArray(), StandardCharsets.UTF_8);
+        }
     }
 }

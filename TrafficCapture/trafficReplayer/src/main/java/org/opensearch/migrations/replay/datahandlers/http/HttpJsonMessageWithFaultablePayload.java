@@ -4,6 +4,7 @@ import io.netty.handler.codec.http.HttpHeaders;
 import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 
 import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, Object> {
     public final static String METHOD = "method";
@@ -12,7 +13,12 @@ public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, O
     public final static String HEADERS = "headers";
     public final static String PAYLOAD = "payload";
 
-    private HttpHeaders originalHeaders;
+    public HttpJsonMessageWithFaultablePayload() {
+    }
+
+    public HttpJsonMessageWithFaultablePayload(Map<? extends String, ?> m) {
+        super(m);
+    }
 
     public String method() {
         return (String) this.get(METHOD);
@@ -40,14 +46,10 @@ public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, O
     public void setHeaders(ListKeyAdaptingCaseInsensitiveHeadersMap value) {
         this.put(HEADERS, value);
     }
-    public PayloadFaultMap payload() {
-        return (PayloadFaultMap) this.get(PAYLOAD);
+    public Map<String,Object> payload() {
+        return (Map<String,Object>) this.get(PAYLOAD);
     }
     public void setPayload(PayloadFaultMap value) {
         this.put(PAYLOAD, value);
-    }
-
-    public void copyOriginalHeaders(HttpHeaders headers) {
-        //originalHeaders = headers.copy();
     }
 }

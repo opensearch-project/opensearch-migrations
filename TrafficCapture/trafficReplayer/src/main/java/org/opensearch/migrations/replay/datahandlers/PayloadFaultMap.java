@@ -32,7 +32,9 @@ public class PayloadFaultMap extends AbstractMap<String, Object> {
     private Object onlyValue;
 
     public PayloadFaultMap(StrictCaseInsensitiveHttpHeadersMap headers) {
-        isJson = Optional.ofNullable(headers.get(CONTENT_TYPE)).map(s->s.equals(APPLICATION_JSON)).orElse(false);
+        isJson = Optional.ofNullable(headers.get(CONTENT_TYPE))
+                .map(list->list.stream()
+                        .anyMatch(s->s.startsWith(APPLICATION_JSON))).orElse(false);
     }
 
     @Override
@@ -62,15 +64,16 @@ public class PayloadFaultMap extends AbstractMap<String, Object> {
 
                         @Override
                         public Entry<String, Object> next() {
-                            ++count;
-                            if (count == 0 && isJson) {
+                            if (isJson && count == 0) {
+                                ++count;
                                 if (onlyValue != null) {
                                     return new SimpleEntry(INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue);
                                 } else {
                                     throw PayloadNotLoadedException.getInstance();
                                 }
+                            } else {
+                                throw new NoSuchElementException();
                             }
-                            throw new NoSuchElementException();
                         }
                     };
                 }
