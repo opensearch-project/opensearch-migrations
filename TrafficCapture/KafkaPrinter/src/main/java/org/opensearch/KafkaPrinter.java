@@ -1,6 +1,9 @@
 package org.opensearch;
 
 
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 import java.util.ArrayList;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -17,10 +20,37 @@ import java.util.Properties;
 public class KafkaPrinter {
     private static final Logger log = LoggerFactory.getLogger(KafkaPrinter.class);
 
+    static class Parameters {
+        @Parameter(required = true,
+                names = {"-b", "--broker-address"},
+                description = "Broker's address")
+        String brokerAddress;
+        @Parameter(required = true,
+                names = {"-t", "--topic-name"},
+                description = "topic name")
+        String topicName;
+    }
+
+    public static Parameters parseArgs(String[] args) {
+        Parameters p = new Parameters();
+        JCommander jCommander = new JCommander(p);
+        try {
+            jCommander.parse(args);
+            return p;
+        } catch (ParameterException e) {
+            System.err.println(e.getMessage());
+            System.err.println("Got args: "+ String.join("; ", args));
+            jCommander.usage();
+            return null;
+        }
+    }
+
     public static void main(String[] args) {
-        String bootstrapServers = args[1];
+        var params = parseArgs(args);
+
+        String bootstrapServers = params.brokerAddress;
         String groupId = "default-logging-group";
-        String topic = args[2];
+        String topic = params.topicName;
 
         Properties properties = new Properties();
         properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);

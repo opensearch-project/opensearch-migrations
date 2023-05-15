@@ -8,7 +8,7 @@ jars=$(ls extracted/*/*/*.jar | tr \\n :)
 
 while true
 do
-  nc -v -l -p 9220 |  java -cp build/libs/KafkaPrinter.jar:"$jars" org.opensearch.KafkaPrinter -o "$target_endpoint" "$topic_name"
+  java -cp build/libs/KafkaPrinter.jar:"$jars" org.opensearch.KafkaPrinter -b "$bootstrap_server" -t "$topic_name" | nc -v localhost 9210
   >&2 echo "Command has encountered error. Restarting now ..."
   sleep 1
 done
