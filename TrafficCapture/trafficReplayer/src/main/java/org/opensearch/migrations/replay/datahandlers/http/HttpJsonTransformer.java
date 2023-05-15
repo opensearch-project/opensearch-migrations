@@ -29,16 +29,6 @@ public class HttpJsonTransformer implements IPacketToHttpHandler {
 
     HTTP_CONSUMPTION_STATUS handlerStatus;
 
-    private static class OrderWatchingHeaders extends DefaultHttpHeaders {
-        List<String> orderOfKeyAdds = new ArrayList<>();
-
-        @Override
-        public HttpHeaders add(String name, Object value) {
-            orderOfKeyAdds.add(name);
-            return super.add(name, value);
-        }
-    }
-
     public HttpJsonTransformer(JsonTransformer transformer, IPacketToHttpHandler transformedPacketReceiver) {
         chunkSizes = new ArrayList<>(2);
         chunkSizes.add(new ArrayList<>(4));

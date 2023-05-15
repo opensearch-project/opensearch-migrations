@@ -19,6 +19,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Random;
@@ -31,7 +32,7 @@ public class JsonAccumulatorTest {
 
     @Test
     public void testAccumulationTiny() throws IOException {
-        byte[] jsonData = "{\"name\":\"John\", \"age\":30}".getBytes();
+        byte[] jsonData = "{\"name\":\"John\", \"age\":30}".getBytes(StandardCharsets.UTF_8);
         var byteBuf = Unpooled.wrappedBuffer(jsonData);
         var jsonParser = new JsonAccumulator();
         var outputJson = jsonParser.consumeByteBuffer(byteBuf.nioBuffer());
@@ -83,7 +84,7 @@ public class JsonAccumulatorTest {
     byte[] getData(String key) throws IOException {
         switch (key) {
             case TOY:
-                return "{\"name\":\"John\", \"age\":30}".getBytes();
+                return "{\"name\":\"John\", \"age\":30}".getBytes(StandardCharsets.UTF_8);
             case MEDIUM:
                 try (FileInputStream fis = new FileInputStream("FILLMEIN");
                      BufferedInputStream bis = new BufferedInputStream(fis)) {

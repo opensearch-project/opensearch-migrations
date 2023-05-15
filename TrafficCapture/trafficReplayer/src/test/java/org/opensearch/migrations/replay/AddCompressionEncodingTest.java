@@ -61,7 +61,7 @@ public class AddCompressionEncodingTest {
         fullyProcessedResponse.get();
         try (var bais = new ByteArrayInputStream(testPacketCapture.getBytesCaptured());
              var unzipStream = new GZIPInputStream(bais);
-             var isr = new InputStreamReader(unzipStream);
+             var isr = new InputStreamReader(unzipStream, StandardCharsets.UTF_8);
              var br = new BufferedReader(isr)) {
             int counter = 0;
             int c;
