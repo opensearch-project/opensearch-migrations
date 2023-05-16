@@ -3,6 +3,8 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 import com.google.protobuf.CodedOutputStream;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
@@ -15,13 +17,16 @@ import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
 import javax.net.ssl.SSLEngine;
+import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
+@Slf4j
 public class Main {
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
@@ -55,18 +60,31 @@ public class Main {
                 }
             };
         } else {
-            return new FileConnectionCaptureFactory(traceLogsDirectory);
+            return new FileConnectionCaptureFactory(traceLogsDirectory, 1024 * 1024 * 1024);
         }
     }
 
-    private static IConnectionCaptureFactory getConnectionCaptureFactory(String kafkaPropsPath) throws IOException {
-        //return new FileConnectionCaptureFactory("./traceLogs");
-        return new KafkaCaptureFactory(kafkaPropsPath);
+    private static IConnectionCaptureFactory getKafkaConnectionFactory(String kafkaPropsPath, int bufferSize) throws IOException {
+        Properties producerProps = new Properties();
+        try {
+            producerProps.load(new FileReader(kafkaPropsPath));
+        } catch (IOException e) {
+            log.error("Unable to locate provided Kafka producer properties file path: " + kafkaPropsPath);
+            throw e;
+        }
+        return new KafkaCaptureFactory(new KafkaProducer<>(producerProps), bufferSize);
+    }
+
+    private static IConnectionCaptureFactory getConnectionCaptureFactory(String kafkaPropsPath, int bufferSize) throws IOException {
+        //return new FileConnectionCaptureFactory("./traceLogs", 1024 * 1024 * 1024);
+        return getKafkaConnectionFactory(kafkaPropsPath, bufferSize);
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
 
         String kafkaPropsPath = args[0];
+        // This should be added to the argument parser when added in
+        int bufferSize = 1024 * 1024;
         var sksOp = Optional.ofNullable(args.length <= 1 ? null : Optional.class)
                 .map(o->new DefaultSecurityKeyStore(getSettings(args[1]),
                         args.length > 1 ? Paths.get(args[2]) : null));
@@ -83,7 +101,7 @@ public class Main {
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
-                    }).orElse(null), getConnectionCaptureFactory(kafkaPropsPath));
+                    }).orElse(null), getConnectionCaptureFactory(kafkaPropsPath, bufferSize));
         } catch (Exception e) {
             System.err.println(e);
             e.printStackTrace();
