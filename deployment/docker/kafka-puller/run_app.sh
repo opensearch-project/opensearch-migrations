@@ -2,7 +2,7 @@
 
 bootstrap_server="$1"
 topic_name="$2"
-./gradlew build
+
 # The below variable will contain the classpath for all the jar dependencies.
 jars=$(ls extracted/*/*/*.jar | tr \\n :)
 

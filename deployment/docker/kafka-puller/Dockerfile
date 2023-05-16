@@ -20,6 +20,8 @@ RUN apt-get install -y expect
 
 COPY --from=cloner /opensearch-migrations/TrafficCapture/KafkaPrinter/ ./KafkaPrinter/
 WORKDIR /KafkaPrinter/
+RUN ./gradlew build
+
 COPY run_app.sh .
 
 CMD ./run_app.sh ${KAFKA_BOOTSTRAP_SERVER} ${KAFKA_TOPIC_NAME}
