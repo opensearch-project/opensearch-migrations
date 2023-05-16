@@ -8,13 +8,11 @@ import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
-import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -105,7 +103,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
                         () -> new StrictCaseInsensitiveHttpHeadersMap(),
                         Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
         jsonMsg.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(headers));
-        jsonMsg.setPayload(new PayloadFaultMap(headers));
+        jsonMsg.setPayloadFaultMap(new PayloadFaultMap(headers));
         return jsonMsg;
     }
 

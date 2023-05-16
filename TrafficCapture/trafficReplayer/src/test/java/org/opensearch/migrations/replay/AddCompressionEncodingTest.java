@@ -1,17 +1,12 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.CompositeByteBuf;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.ResourceLeakDetector;
-import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
-import org.opensearch.migrations.transform.JsonTransformBuilder;
+import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
+import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.io.BufferedReader;
@@ -37,8 +32,8 @@ public class AddCompressionEncodingTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var compressingTransformer = new HttpJsonTransformer(
-                JsonTransformer.newBuilder()
-                        .addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP)
+                JoltJsonTransformer.newBuilder()
+                        .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP)
                         .build(), testPacketCapture);
 
         final var payloadPartSize = 511;

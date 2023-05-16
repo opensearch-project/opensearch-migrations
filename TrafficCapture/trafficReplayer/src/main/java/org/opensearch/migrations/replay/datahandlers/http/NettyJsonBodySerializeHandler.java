@@ -1,16 +1,13 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
-import io.netty.util.concurrent.EventExecutorGroup;
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
 import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter {
@@ -26,7 +23,7 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
         if (msg instanceof HttpJsonMessageWithFaultablePayload) {
             var jsonMessage = (HttpJsonMessageWithFaultablePayload) msg;
             var payload = jsonMessage.payload();
-            jsonMessage.setPayload(null);
+            jsonMessage.setPayloadFaultMap(null);
             var payloadContents = (Map<String, Object>) payload.get(PayloadFaultMap.INLINED_JSON_BODY_DOCUMENT_KEY);
             ctx.fireChannelRead(msg);
             if (payload != null && payloadContents != null) {

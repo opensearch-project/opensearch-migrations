@@ -1,11 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.http.HttpContent;
-import io.netty.util.concurrent.EventExecutorGroup;
-import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.util.Map;

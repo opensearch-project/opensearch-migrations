@@ -2,11 +2,6 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.handler.codec.http.DefaultHttpRequest;
-import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.HttpMessage;
-import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
@@ -49,8 +44,8 @@ public class HttpJsonTransformer implements IPacketToHttpHandler {
             nextRequestPacket.duplicate().readBytes(copy);
             log.debug("Writing into embedded channel: " + new String(copy, StandardCharsets.UTF_8));
         }
-        channel.writeInbound(nextRequestPacket);
-        return CompletableFuture.completedFuture(null);
+        return CompletableFuture.completedFuture(null).thenAccept(x->
+            channel.writeInbound(nextRequestPacket));
     }
 
     @Override

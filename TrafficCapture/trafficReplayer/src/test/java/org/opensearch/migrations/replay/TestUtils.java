@@ -74,7 +74,7 @@ public class TestUtils {
                         (cf, s) -> cf.thenCompose(v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer))));
     }
 
-    static CompletableFuture<Void>
+    public static CompletableFuture<Void>
     chainedDualWriteHeaderAndPayloadParts(IPacketToHttpHandler packetConsumer,
                                           List<String> stringParts,
                                           StringBuilder referenceStringAccumulator,
@@ -85,7 +85,7 @@ public class TestUtils {
         return chainedWriteHeadersAndDualWritePayloadParts(packetConsumer, stringParts, referenceStringAccumulator, headers);
     }
 
-    static void verifyCapturedResponseMatchesExpectedPayload(byte[] bytesCaptured,
+    public static void verifyCapturedResponseMatchesExpectedPayload(byte[] bytesCaptured,
                                                              DefaultHttpHeaders expectedRequestHeaders,
                                                              String expectedPayloadString)
             throws IOException

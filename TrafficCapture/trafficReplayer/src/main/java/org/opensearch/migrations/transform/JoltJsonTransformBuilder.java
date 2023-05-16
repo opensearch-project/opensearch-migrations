@@ -1,6 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
@@ -14,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
-public class JsonTransformBuilder {
+public class JoltJsonTransformBuilder {
 
     public enum CANNED_OPERATIONS {
         ADD_GZIP("addGzip"),
@@ -49,7 +48,7 @@ public class JsonTransformBuilder {
     }
 
     public static Map<String, Object> loadResourceAsJson(ObjectMapper mapper, String path) throws IOException {
-        try (InputStream inputStream = JsonTransformBuilder.class.getResourceAsStream(path)) {
+        try (InputStream inputStream = JoltJsonTransformBuilder.class.getResourceAsStream(path)) {
             return mapper.readValue(inputStream, TYPE_REFERENCE_FOR_MAP_TYPE);
         }
     }
@@ -74,19 +73,19 @@ public class JsonTransformBuilder {
         return jsonHostSwitchTemplateJson;
     }
 
-    public JsonTransformBuilder addHostSwitchOperation(String hostname) {
+    public JoltJsonTransformBuilder addHostSwitchOperation(String hostname) {
          return addOperationObject(getHostSwitchOperation(hostname));
     }
 
-    public JsonTransformBuilder addCannedOperation(CANNED_OPERATIONS operation) {
+    public JoltJsonTransformBuilder addCannedOperation(CANNED_OPERATIONS operation) {
         return addCannedOperation(operation.toString() + ".jolt");
     }
 
-    public JsonTransformBuilder addCannedOperation(String resourceName) {
+    public JoltJsonTransformBuilder addCannedOperation(String resourceName) {
         return addOperationObject(parseSpecOperationFromResource(resourceName));
     }
 
-    public JsonTransformBuilder addOperationObject(Map<String, Object> stringObjectMap) {
+    public JoltJsonTransformBuilder addOperationObject(Map<String, Object> stringObjectMap) {
         chainedSpec.add(stringObjectMap);
         return this;
     }
@@ -95,6 +94,6 @@ public class JsonTransformBuilder {
         if (chainedSpec.size() == 0) {
             addCannedOperation(RESOURCE_PASS_THRU_OPERATION);
         }
-        return new JsonTransformer((List) chainedSpec);
+        return new JoltJsonTransformer((List) chainedSpec);
     }
 }

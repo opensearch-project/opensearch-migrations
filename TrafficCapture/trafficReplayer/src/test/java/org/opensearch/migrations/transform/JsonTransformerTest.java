@@ -22,13 +22,13 @@ class JsonTransformerTest {
     }
 
     private Map<String, Object> parseStringAsJson(String jsonStr) throws JsonProcessingException {
-        return mapper.readValue(jsonStr, JsonTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
+        return mapper.readValue(jsonStr, JoltJsonTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
     }
 
     @SneakyThrows
     private Map<String, Object> parseSampleRequestFromResource(String path) {
-        try (InputStream inputStream = JsonTransformBuilder.class.getResourceAsStream("/requests/"+path)) {
-            return mapper.readValue(inputStream, JsonTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
+        try (InputStream inputStream = JoltJsonTransformBuilder.class.getResourceAsStream("/requests/"+path)) {
+            return mapper.readValue(inputStream, JoltJsonTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
         }
     }
 
@@ -42,7 +42,7 @@ class JsonTransformerTest {
     public void testSimpleTransform() throws JsonProcessingException {
         final String TEST_DOCUMENT = "{\"Hello\":\"world\"}";
         var documentJson = parseStringAsJson(TEST_DOCUMENT);
-        var transformer = JsonTransformer.newBuilder()
+        var transformer = JoltJsonTransformer.newBuilder()
                 .addCannedOperation("passThru.jolt")
                 .build();
         var transformedDocument = transformer.transformJson(documentJson);
@@ -62,7 +62,7 @@ class JsonTransformerTest {
     public void testHttpTransform() throws IOException {
         var testResourceName = "parsed/post_formUrlEncoded_withFixedLength.json";
         final var documentJson = parseSampleRequestFromResource(testResourceName);
-        var transformer = JsonTransformer.newBuilder()
+        var transformer = JoltJsonTransformer.newBuilder()
                 .addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING)
                 .build();
         var transformedDocument = transformer.transformJson(documentJson);

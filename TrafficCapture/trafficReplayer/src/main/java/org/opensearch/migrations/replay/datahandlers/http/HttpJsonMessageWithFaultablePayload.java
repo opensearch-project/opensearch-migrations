@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import io.netty.handler.codec.http.HttpHeaders;
 import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
 
 import java.util.LinkedHashMap;
@@ -49,7 +48,7 @@ public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, O
     public Map<String,Object> payload() {
         return (Map<String,Object>) this.get(PAYLOAD);
     }
-    public void setPayload(PayloadFaultMap value) {
+    public void setPayloadFaultMap(PayloadFaultMap value) {
         this.put(PAYLOAD, value);
     }
 }

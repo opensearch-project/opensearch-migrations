@@ -5,8 +5,10 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import lombok.extern.log4j.Log4j2;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.transform.JsonTransformBuilder;
+import org.opensearch.migrations.transform.CompositeJsonTransformer;
+import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
 
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
@@ -25,11 +27,15 @@ public class TrafficReplayer {
     private final PacketToTransformingProxyHandlerFactory packetHandlerFactory;
     private Duration timeout = Duration.ofSeconds(20);
 
-    public TrafficReplayer(URI serverUri)
-    {
-        var jsonTransformer = JsonTransformer.newBuilder()
-                .addHostSwitchOperation(serverUri.getHost())
+    public static JsonTransformer buildDefaultJsonTransformer(String newHostName) {
+        var joltJsonTransformer = JoltJsonTransformer.newBuilder()
+                .addHostSwitchOperation(newHostName)
                 .build();
+        return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer());
+    }
+
+    public TrafficReplayer(URI serverUri) {
+        var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost());
         packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer);
     }
 

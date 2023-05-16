@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -12,19 +11,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
-import org.opensearch.migrations.transform.JsonTransformBuilder;
+import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
+import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.StringReader;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -55,10 +50,10 @@ public class PayloadRepackingTest {
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
-        var transformerBuilder = JsonTransformer.newBuilder();
+        var transformerBuilder = JoltJsonTransformer.newBuilder();
 
-        if (doGzip) { transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP); }
-        if (doChunked) { transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.MAKE_CHUNKED); }
+        if (doGzip) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP); }
+        if (doChunked) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.MAKE_CHUNKED); }
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
@@ -130,12 +125,12 @@ public class PayloadRepackingTest {
 
     @Test
     public void testJsonPayloadTransformation() throws Exception {
-        var transformerBuilder = JsonTransformer.newBuilder();
+        var transformerBuilder = JoltJsonTransformer.newBuilder();
 
         ObjectMapper mapper = new ObjectMapper();
         var simpleTransform = mapper.readValue(simplePayloadTransform,
                 new TypeReference<LinkedHashMap<String, Object>>(){});
-        transformerBuilder.addCannedOperation(JsonTransformBuilder.CANNED_OPERATIONS.PASS_THRU);
+        transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.PASS_THRU);
         transformerBuilder.addOperationObject(simpleTransform);
 
         var jsonPayload = "{\"top\": {\"A\": 1,\"B\": 2}}";
