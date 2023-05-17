@@ -51,7 +51,7 @@ public class TypeMappingsExcisionTest {
     private static Object parseJsonFromResourceName(String resourceName) throws Exception {
         var jsonAccumulator = new JsonAccumulator();
         try (var resourceStream = getTypeMappingResourceStream(resourceName);
-             var isr = new InputStreamReader(resourceStream)) {
+             var isr = new InputStreamReader(resourceStream, StandardCharsets.UTF_8)) {
             var expectedBytes = CharStreams.toString(isr).getBytes(StandardCharsets.UTF_8);
             return jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
         }
