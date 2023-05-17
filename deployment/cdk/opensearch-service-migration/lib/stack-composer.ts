@@ -53,7 +53,9 @@ export class StackComposer {
         const openAccessPolicyEnabled = getContextForType('openAccessPolicyEnabled', 'boolean')
         const availabilityZoneCount = getContextForType('availabilityZoneCount', 'number')
         const migrationAssistanceEnabled = getContextForType('migrationAssistanceEnabled', 'boolean')
-        const sourceCWLogStreamARN = getContextForType('sourceCWLogStreamARN', 'string')
+        const MSKARN = getContextForType('MSKARN', 'string')
+        const MSKBrokers = getContextForType('MSKBrokers', 'object')
+        const MSKTopic = getContextForType('MSKTopic', 'string')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
         const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
@@ -161,7 +163,9 @@ export class StackComposer {
         if (migrationAssistanceEnabled && networkStack) {
             const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
                 vpc: networkStack.vpc,
-                sourceCWLogStreamARN: sourceCWLogStreamARN,
+                MSKARN: MSKARN,
+                MSKBrokers: MSKBrokers,
+                MSKTopic: MSKTopic,
                 targetEndpoint: opensearchStack.domainEndpoint,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
@@ -238,6 +242,6 @@ export class StackComposer {
             }
             return accessPolicies
         }
-        
+
     }
 }

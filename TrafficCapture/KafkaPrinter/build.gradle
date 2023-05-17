@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.4.0'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.5'
+    implementation group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.5'
+    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+
+application {
+    // Define the main class for the application.
+    mainClass = 'org.opensearch.KafkaPrinter'
+}
+
+
+task unzip(type: Copy) {
+    def zipFile = file('build/distributions/KafkaPrinter.zip')
+    def outputDir = file("extracted")
+
+    from zipTree(zipFile)
+    into outputDir
+}
+
+task cleanUp(type: Delete) {
+    delete 'extracted'
+}
+
+build.finalizedBy(unzip)
+clean.finalizedBy(cleanUp)

@@ -17,7 +17,9 @@ import {Effect, PolicyDocument, PolicyStatement, Role, ServicePrincipal} from "a
 
 export interface migrationStackProps extends StackProps {
     readonly vpc: IVpc,
-    readonly sourceCWLogStreamARN: string,
+    readonly MSKARN: string,
+    readonly MSKBrokers: string[],
+    readonly MSKTopic: string,
     readonly targetEndpoint: string
 }
 
@@ -27,21 +29,40 @@ export class MigrationAssistanceStack extends Stack {
     constructor(scope: Construct, id: string, props: migrationStackProps) {
         super(scope, id, props);
 
-        // Create IAM Role for Fargate Task to read from CW log group
-        const cwAccessPolicy = new PolicyStatement({
+        // Create IAM policy to connect to cluster
+        const MSKConsumerPolicy1 = new PolicyStatement({
             effect: Effect.ALLOW,
-            // At the LG level these permissions may be necessary "logs:DescribeLogGroups", "logs:DescribeLogStreams"
-            actions: ["logs:FilterLogEvents", "logs:GetLogEvents"],
-            resources: [props.sourceCWLogStreamARN]
+            actions: ["kafka-cluster:Connect",
+                "kafka-cluster:AlterCluster",
+                "kafka-cluster:DescribeCluster"],
+            resources: [props.MSKARN]
         })
-        const cwAccessDoc = new PolicyDocument({
-            statements: [cwAccessPolicy]
+
+        // Create IAM policy to read/write from kafka topics on the cluster
+        let policyRegex1 = /([^//]+$)/gi
+        let policyRegex2 = /:(cluster)/gi
+        let policyARN = props.MSKARN.replace(policyRegex1, "*");
+        policyARN = policyARN.replace(policyRegex2, ":topic");
+
+        const MSKConsumerPolicy2 = new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ["kafka-cluster:*Topic*",
+                "kafka-cluster:WriteData",
+                "kafka-cluster:ReadData"],
+            resources: [policyARN]
         })
-        const cwRole = new Role(this, 'CWReadAccessRole', {
+
+
+        const MSKConsumerAccessDoc = new PolicyDocument({
+            statements: [MSKConsumerPolicy1, MSKConsumerPolicy2]
+        })
+
+        // Create IAM Role for Fargate Task to read from MSK Topic
+        const MSKConsumerRole = new Role(this, 'MSKConsumerRole', {
             assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
-            description: 'Allow Fargate container to access CW log group',
+            description: 'Allow Fargate container to consume from MSK',
             inlinePolicies: {
-                ReadCWLogGroup: cwAccessDoc,
+                ReadMSKTopic: MSKConsumerAccessDoc,
             },
         });
 
@@ -52,22 +73,21 @@ export class MigrationAssistanceStack extends Stack {
         const migrationFargateTask = new FargateTaskDefinition(this, "migrationFargateTask", {
             memoryLimitMiB: 2048,
             cpu: 512,
-            taskRole: cwRole
+            taskRole: MSKConsumerRole
         });
 
-        // Create CW Puller Container
-        const cwPullerImage = new DockerImageAsset(this, "CWPullerImage", {
-            directory: join(__dirname, "../../..", "docker/cw-puller")
+        // Create MSK Consumer Container
+        const MSKConsumerImage = new DockerImageAsset(this, "MSKConsumerImage", {
+            directory: join(__dirname, "../../..", "docker/kafka-puller")
         });
-        const clearIdentifierString = props.sourceCWLogStreamARN.split(":log-group:")[1]
-        const[logGroupName, logStreamName] = clearIdentifierString.split(":log-stream:")
-        const cwPullerContainer = migrationFargateTask.addContainer("CWPullerContainer", {
-            image: ContainerImage.fromDockerImageAsset(cwPullerImage),
+        const MSKConsumerContainer = migrationFargateTask.addContainer("MSKConsumerContainer", {
+            image: ContainerImage.fromDockerImageAsset(MSKConsumerImage),
             // Add in region and stage
-            containerName: "cw-puller",
-            environment: {"CW_LOG_GROUP_NAME": logGroupName, "CW_LOG_STREAM_NAME": logStreamName},
+            containerName: "msk-consumer",
+            environment: {"KAFKA_BOOTSTRAP_SERVERS": props.MSKBrokers.toString(),
+                "KAFKA_TOPIC_NAME": props.MSKTopic},
             // portMappings: [{containerPort: 9210}],
-            logging: LogDrivers.awsLogs({ streamPrefix: 'cw-puller-container-lg', logRetention: 30 })
+            logging: LogDrivers.awsLogs({ streamPrefix: 'msk-consumer-container-lg', logRetention: 30 })
         });
 
         // Create Traffic Comparator Container
