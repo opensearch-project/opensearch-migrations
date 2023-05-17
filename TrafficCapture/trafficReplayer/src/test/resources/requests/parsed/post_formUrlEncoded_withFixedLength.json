@@ -8,6 +8,18 @@
     "Content-Length": "27"
   },
   "payload": {
-    "opaqueBytes": "field1=value1&field2=value2"
+    "inlinedJsonBody": {
+      "account_number": 921,
+      "balance": 49119,
+      "firstname": "Barbara",
+      "lastname": "Wade",
+      "age": 29,
+      "gender": "M",
+      "address": "687 Hoyts Lane",
+      "employer": "Roughies",
+      "email": "barbarawade@roughies.com",
+      "city": "Sattley",
+      "state": "CO"
+    }
   }
 }
