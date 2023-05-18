@@ -8,12 +8,14 @@
  */
 
 rootProject.name = 'LoggingProxy'
-include('captureOffloader',
-        'captureKafkaOffloader',
+include('captureKafkaOffloader',
+        'captureOffloader',
         'captureProtobufs',
+        'kafkaPrinter',
         'nettyWireLogging',
         'trafficCaptureProxyServer',
-        'trafficCaptureProxyServerTest',
         'trafficReplayer',
-        'dockerSolution'
+
+        'dockerSolution',
+        'trafficCaptureProxyServerTest'
 )

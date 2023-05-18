@@ -47,6 +47,7 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
 
 def containerServices = [
         "trafficCaptureProxyServer": "capture_proxy",
+        "kafkaPrinter": "kafka_capture_puller",
         "trafficReplayer": "traffic_replayer"
 ]
 def baseImageProjectOverrides = [
@@ -84,7 +85,7 @@ containerServices.each { projectName, dockerImageName ->
         // constructed in the configuration phase and the classpath won't be realized until the
         // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
         // and it's simplest to pack that up into a helper script.
-        runCommand("echo \"java -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
+        runCommand("printf \"#!/bin/sh\\njava -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
         runCommand("chmod +x /runJavaWithClasspath.sh")
         // container stay-alive
         defaultCommand('tail', '-f', '/dev/null')
@@ -104,9 +105,11 @@ dockerCompose {
 }
 
 task buildAllDockerImages {
-    dependsOn dockerBuildImage_trafficReplayer
-    dependsOn dockerBuildImage_trafficCaptureProxyServer
     dependsOn dockerBuildImage_elasticsearchWithSearchGuard
+
+    dependsOn dockerBuildImage_trafficCaptureProxyServer
+    dependsOn dockerBuildImage_trafficReplayer
+    dependsOn dockerBuildImage_kafkaPrinter
     //dependsOn dockerBuildImage_
 }
 

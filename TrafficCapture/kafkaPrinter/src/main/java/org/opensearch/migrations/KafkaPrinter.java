@@ -1,24 +1,24 @@
-package org.opensearch;
-
+package org.opensearch.migrations;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
-import java.util.ArrayList;
+import com.google.protobuf.CodedOutputStream;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
 
 public class KafkaPrinter {
     private static final Logger log = LoggerFactory.getLogger(KafkaPrinter.class);
+    public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
 
     static class Parameters {
         @Parameter(required = true,
@@ -29,6 +29,10 @@ public class KafkaPrinter {
                 names = {"-t", "--topic-name"},
                 description = "topic name")
         String topicName;
+        @Parameter(required = true,
+                names = {"-g", "--group-id"},
+                description = "Client id that should be used when communicating with the Kafka broker.")
+        String clientGroupId;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -41,15 +45,20 @@ public class KafkaPrinter {
             System.err.println(e.getMessage());
             System.err.println("Got args: "+ String.join("; ", args));
             jCommander.usage();
-            return null;
+            throw e;
         }
     }
 
     public static void main(String[] args) {
-        var params = parseArgs(args);
+        Parameters params;
+        try {
+            params = parseArgs(args);
+        } catch (ParameterException e) {
+            return;
+        }
 
         String bootstrapServers = params.brokerAddress;
-        String groupId = "default-logging-group";
+        String groupId = params.clientGroupId;
         String topic = params.topicName;
 
         Properties properties = new Properties();
@@ -63,15 +72,7 @@ public class KafkaPrinter {
 
         try {
             consumer.subscribe(Collections.singleton(topic));
-
-            while (true) {
-                ConsumerRecords<String, byte[]> records =
-                        consumer.poll(Duration.ofMillis(100));
-
-                for (ConsumerRecord<String, byte[]> record : records) {
-                    System.out.println(record.value().toString());
-                }
-            }
+            consumeRecordsToProtoBufDelimitedOutputStream(consumer, System.out);
         } catch (WakeupException e) {
             log.info("Wake up exception!");
         } catch (Exception e) {
@@ -79,6 +80,19 @@ public class KafkaPrinter {
         } finally {
             consumer.close();
             log.info("This consumer close successfully.");
+        }
+    }
+
+    private static void consumeRecordsToProtoBufDelimitedOutputStream(KafkaConsumer<String, byte[]> consumer,
+                                                                      OutputStream outputStream) throws IOException {
+        CodedOutputStream codedOutputStream = CodedOutputStream.newInstance(outputStream);
+        while (true) {
+            for (var record : consumer.poll(CONSUMER_POLL_TIMEOUT)) {
+                var buffer = record.value();
+                codedOutputStream.writeUInt32NoTag(buffer.length);
+                codedOutputStream.writeRawBytes(buffer);
+            }
+            codedOutputStream.flush();
         }
     }
 }

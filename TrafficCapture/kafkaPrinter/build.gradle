@@ -1,4 +1,5 @@
 plugins {
+    id 'org.opensearch.migrations.java-application-conventions'
     id 'java'
     id 'application'
 }
@@ -8,10 +9,11 @@ repositories {
 }
 
 dependencies {
+    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
     implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.4.0'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.5'
     implementation group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.5'
-    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
@@ -24,7 +26,7 @@ test {
 
 application {
     // Define the main class for the application.
-    mainClass = 'org.opensearch.KafkaPrinter'
+    mainClass = 'org.opensearch.migrations.KafkaPrinter'
 }
 
 

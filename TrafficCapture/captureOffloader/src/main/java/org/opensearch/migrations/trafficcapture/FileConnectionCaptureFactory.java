@@ -35,7 +35,8 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
     public FileConnectionCaptureFactory(Path rootPath, int bufferSize) {
         this((id, n) -> {
             try {
-                return new FileOutputStream(rootPath.resolve(id + "_" + n.toString() + ".protocap").toString());
+                var filePath = rootPath.resolve(id + "_" + n.toString() + ".protocap");
+                return new FileOutputStream(filePath.toString());
             } catch (FileNotFoundException e) {
                 throw new RuntimeException(e);
             }
