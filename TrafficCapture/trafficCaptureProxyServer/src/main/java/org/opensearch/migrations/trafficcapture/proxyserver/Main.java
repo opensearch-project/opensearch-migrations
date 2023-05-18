@@ -20,6 +20,7 @@ import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
 import javax.net.ssl.SSLEngine;
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -66,11 +67,6 @@ public class Main {
                 arity = 1,
                 description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
         String sslConfigFilePath;
-        @Parameter(required = false,
-                names = {"--configDirectory"},
-                arity = 1,
-                description = "Directory that all sslConfigFile resources will be relative to.")
-        String sslConfigWorkingDirectoryPath;
         @Parameter(required = false,
                 names = {"--maxTrafficBufferSize"},
                 arity = 1,
@@ -125,7 +121,8 @@ public class Main {
                     });
         }
         builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
-        builder.put("path.home", configFile);
+        var configParentDirStr = Paths.get(configFile).toAbsolutePath().getParent();
+        builder.put("path.home", configParentDirStr);
         return builder.build();
     }
 
@@ -136,10 +133,6 @@ public class Main {
                 cos -> CompletableFuture.completedFuture(null));
     }
 
-    private static IConnectionCaptureFactory
-    getTraceConnectionCaptureFactory(String traceLogsDirectory, int maxBufferSize) {
-        return new FileConnectionCaptureFactory(traceLogsDirectory, maxBufferSize);
-    }
 
     private static IConnectionCaptureFactory getKafkaConnectionFactory(String kafkaPropsPath, int bufferSize)
             throws IOException {
@@ -183,10 +176,8 @@ public class Main {
 
         // This should be added to the argument parser when added in
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
-                .map(o->new DefaultSecurityKeyStore(getSettings(o),
-                        Optional.ofNullable(params.sslConfigWorkingDirectoryPath)
-                                .map(wd->Paths.get(wd))
-                                .orElse(null)));
+                .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),
+                        Paths.get(sslConfigFile).toAbsolutePath().getParent()));
 
         sksOp.ifPresent(x->x.initHttpSSLConfig());
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
