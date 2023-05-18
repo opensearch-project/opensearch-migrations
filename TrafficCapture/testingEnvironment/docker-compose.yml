@@ -2,16 +2,16 @@ version: '3.7'
 services:
   webserver:
     build:
-      context: ..
-      dockerfile: nginx/nginx.Dockerfile
+      context: nginx/
+      dockerfile: nginx.Dockerfile
     ports:
       - "8080:80"
     depends_on:
       - proxy
   proxy:
     build:
-      context: ..
-      dockerfile: trafficCaptureProxyServer/Proxy.Dockerfile
+      context: trafficCaptureProxy/
+      dockerfile: Proxy.Dockerfile
     ports:
       - "9201:9201"
     environment:
@@ -21,8 +21,8 @@ services:
 
   jmeter:
     build:
-      context: ..
-      dockerfile: JMeter/JMeter.Dockerfile
+      context: JMeter/
+      dockerfile: JMeter.Dockerfile
     depends_on:
       - webserver
     environment:
