@@ -15,5 +15,5 @@ include('captureOffloader',
         'trafficCaptureProxyServer',
         'trafficCaptureProxyServerTest',
         'trafficReplayer',
-        'captureEndToEndDocker'
+        'dockerSolution'
 )

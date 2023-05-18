@@ -3,13 +3,15 @@ services:
 
   capture_proxy:
     image: 'migrations/capture_proxy:latest'
-    command: /run.sh org.opensearch.migrations.trafficcapture.proxyserver.Main
-#
-#  elasticsearch_7.10:
-#    image: 'docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2'
 #    ports:
-#      - '9200:9200'
+#      - "9203:9203"
+    #command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --traceDirectory ./traceLogs --destinationPort 19200 --listenPort 9200
 
+  elasticsearch_7.10:
+    image: 'migrations/elasticsearch_searchguard:latest'
+    ports:
+      - '19200:9200'
+#
 #  zookeeper:
 #    image: docker.io/bitnami/zookeeper:3.8
 #    ports:
@@ -18,8 +20,8 @@ services:
 #      - "zookeeper_data:/bitnami"
 #    environment:
 #      - ALLOW_ANONYMOUS_LOGIN=yes
-
-
+#
+#
 #  kafka:
 #    image: docker.io/bitnami/kafka:3.4
 #    ports:

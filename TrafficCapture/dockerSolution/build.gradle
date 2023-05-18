@@ -11,13 +11,13 @@ dependencies {
     implementation project(':trafficReplayer')
 }
 
-
 def containerServices = [
         "trafficCaptureProxyServer": "capture_proxy",
         "trafficReplayer": "traffic_replayer"
 ]
+
 containerServices.each { projectName, dockerImageName ->
-    def dockerBuildDir = "${project}/docker/${projectName}"
+    def dockerBuildDir = "build/docker/${projectName}"
     def artifactsDir = "${dockerBuildDir}/jars";
     task("copyArtifact_${projectName}", type: Copy) {
         dependsOn ":${projectName}:build"
@@ -51,35 +51,16 @@ containerServices.each { projectName, dockerImageName ->
         inputDir = project.file("${dockerBuildDir}")
         images.add("migrations/${dockerImageName}:latest")
     }
-//
-//    docker {
-//        dependsOn "copyArtifact${projectName}"
-//        javaApplication {
-//            baseImage = 'openjdk:11-jre'
-//            maintainer = '"OpenSearch Migrations"'
-//            tags = ["project$proj:latest"]
-//            jvmArgs = ['-Xmx512m']
-//            applicationName = "${projectName}"
-//            applicationJar = file("${projectDir}/artifacts${projectName}/project${projectName}.jar")
-//            // other settings as needed...
-//        }
-//    }
+}
 
-
-//    task("buildImage_${projectName}", type: DockerBuildImage) {
-//        dependsOn "copyArtifact${projectName}"
-//        group = 'docker'
-//
-//        javaApplication {
-//            maintainer = 'OpenSearch Migrations'
-//            tags = ['latest']
-////            jvmArgs = ['-Xmx512m', '-Xms512m']
-////            args = ['arg1', 'arg2']
-//        }
-//        inputDir = file("src/main/docker/${projectName}/")
-//        dockerFile = file("src/main/docker/${projectName}/Dockerfile")
-//        images.add("migrations/${dockerImageName}:latest")
-//    }
+def dockerFilesForExternalServices =
+        ["elasticsearchWithSearchGuard": "elasticsearch_searchguard"]
+// Create the static docker files that aren't hosting migrations java code from this repo
+dockerFilesForExternalServices.each { projectName, dockerImageName ->
+    task "dockerBuildImage_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.DockerBuildImage) {
+        inputDir = project.file("src/main/docker/${projectName}")
+        images.add("migrations/${dockerImageName}:latest")
+    }
 }
 
 dockerCompose {
@@ -89,6 +70,8 @@ dockerCompose {
 task buildAllDockerImages {
     dependsOn dockerBuildImage_trafficReplayer
     dependsOn dockerBuildImage_trafficCaptureProxyServer
+    dependsOn dockerBuildImage_elasticsearchWithSearchGuard
+    //dependsOn dockerBuildImage_
 }
 
 tasks.getByName('composeUp').dependsOn(tasks.getByName('buildAllDockerImages'))
