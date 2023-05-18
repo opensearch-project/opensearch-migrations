@@ -77,7 +77,7 @@ public class Main {
                 description = "The maximum number of bytes that will be written to a single TrafficStream object.")
         int maximumTrafficStreamSize = 1024*1024;
         @Parameter(required = false,
-                names = {"--destinationHostname"},
+                names = {"--destinationHost"},
                 arity = 1,
                 description = "Hostname of the server that the proxy is capturing traffic for.")
         String backsideHostname = "localhost";
@@ -192,7 +192,7 @@ public class Main {
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
 
         try {
-            proxy.start("localhost", params.backsidePort,
+            proxy.start(params.backsideHostname, params.backsidePort,
                     sksOp.map(sks-> (Supplier<SSLEngine>) () -> {
                         try {
                             var sslEngine = sks.createHTTPSSLEngine();

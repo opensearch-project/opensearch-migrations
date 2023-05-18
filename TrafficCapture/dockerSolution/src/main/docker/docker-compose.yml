@@ -3,12 +3,16 @@ services:
 
   capture_proxy:
     image: 'migrations/capture_proxy:latest'
-#    ports:
-#      - "9203:9203"
-    #command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --traceDirectory ./traceLogs --destinationPort 19200 --listenPort 9200
+    networks:
+      - migrations
+    ports:
+      - "9200:9200"
+    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --traceDirectory ./traceLogs --destinationHost  elasticsearch --destinationPort 9200 --listenPort 9200
 
-  elasticsearch_7.10:
+  elasticsearch:
     image: 'migrations/elasticsearch_searchguard:latest'
+    networks:
+      - migrations
     ports:
       - '19200:9200'
 #
@@ -45,6 +49,8 @@ services:
 
   replayer:
     image: 'migrations/traffic_replayer:latest'
+    networks:
+      - migrations
 
 #  traffic_comparator:
 #    image: '''
@@ -55,3 +61,7 @@ services:
 #    driver: local
 #  kafka_data:
 #    driver: local
+
+networks:
+  migrations:
+    driver: bridge
