@@ -6,6 +6,7 @@ plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id("io.freefair.lombok") version "8.0.1"
     id 'org.owasp.dependencycheck' version '8.2.1'
+    id 'application'
 }
 
 configurations {
@@ -55,3 +56,19 @@ application {
     // Define the main class for the application.
     mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.Main'
 }
+
+
+task unzip(type: Copy) {
+    def zipFile = file('build/distributions/trafficCaptureProxyServer.zip')
+    def outputDir = file("extracted")
+
+    from zipTree(zipFile)
+    into outputDir
+}
+
+task cleanUp(type: Delete) {
+    delete 'extracted'
+}
+
+build.finalizedBy(unzip)
+clean.finalizedBy(cleanUp)

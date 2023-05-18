@@ -3,6 +3,7 @@ plugins {
     id "com.avast.gradle.docker-compose" version "0.16.12"
     id "com.palantir.docker" version "0.35.0"
     id "io.freefair.lombok" version "8.0.1"
+    id 'application'
 //    id 'de.qualersoft.jmeter' version '2.4.0'
 }
 
@@ -11,6 +12,7 @@ def withoutBom = {
     exclude group: 'org.apache.jmeter', module: 'bom'
 }
 dependencies {
+    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.5', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.5', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.5', withoutBom
@@ -75,3 +77,24 @@ dockerCompose {
 }
 
 tasks.getByName('composeUp').dependsOn(tasks.getByName('docker'))
+
+
+task unzip(type: Copy) {
+    def zipFile = file('build/distributions/trafficCaptureProxyServerTest.zip')
+    def outputDir = file("extracted")
+
+    from zipTree(zipFile)
+    into outputDir
+}
+
+task cleanUp(type: Delete) {
+    delete 'extracted'
+}
+
+build.finalizedBy(unzip)
+clean.finalizedBy(cleanUp)
+
+application {
+    // Define the main class for the application.
+    mainClass = 'org.opensearch.migrations.trafficcapture.JMeterLoadTest'
+}

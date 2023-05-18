@@ -16,6 +16,10 @@ import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningH
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
+
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 import javax.net.ssl.SSLEngine;
 import java.io.FileReader;
 import java.io.IOException;
@@ -28,6 +32,52 @@ import java.util.function.Supplier;
 
 @Slf4j
 public class Main {
+
+    static class Parameters {
+        @Parameter(required = false,
+                names = {"-p", "--backside-port"},
+                //arity = 1,
+                description = "Backside port number")
+        int backsidePort = 80;
+        @Parameter(required = false,
+                names = {"-h", "--backside-host"},
+                description = "Backside hostname")
+        String backsideHostname = "webserver";
+        @Parameter(required = false,
+                names = {"-b", "--bind-port"},
+                description = "port number to bind to")
+        int bindPort = 9200;
+
+        @Parameter(required = false,
+                names = {"-c", "--config"},
+                description = "yaml config file name")
+        String configFile = null;
+
+        @Parameter(required = false,
+                names = {"-w", "--workdir"},
+                description = "working directory")
+        String workingDir = null;
+
+        @Parameter(required = false,
+                names = {"-k", "--kafka-prop"},
+                description = "kafka props path")
+        String kafkaPath = null;
+    }
+
+    public static Parameters parseArgs(String[] args) {
+        Parameters p = new Parameters();
+        JCommander jCommander = new JCommander(p);
+        try {
+            jCommander.parse(args);
+            return p;
+        } catch (ParameterException e) {
+            System.err.println(e.getMessage());
+            System.err.println("Got args: "+ String.join("; ", args));
+            jCommander.usage();
+            return null;
+        }
+    }
+
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
 
@@ -76,24 +126,26 @@ public class Main {
     }
 
     private static IConnectionCaptureFactory getConnectionCaptureFactory(String kafkaPropsPath, int bufferSize) throws IOException {
-        //return new FileConnectionCaptureFactory("./traceLogs", 1024 * 1024 * 1024);
-        return getKafkaConnectionFactory(kafkaPropsPath, bufferSize);
+        return new FileConnectionCaptureFactory("./traceLogs", 1024 * 1024 * 1024);
+        //return getKafkaConnectionFactory(kafkaPropsPath, bufferSize);
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
-
-        String kafkaPropsPath = args[0];
+        var params = parseArgs(args);
+        String kafkaPropsPath = params.kafkaPath;
+        String traceLogsDirectory = null;
         // This should be added to the argument parser when added in
         int bufferSize = 1024 * 1024;
-        var sksOp = Optional.ofNullable(args.length <= 1 ? null : Optional.class)
-                .map(o->new DefaultSecurityKeyStore(getSettings(args[1]),
-                        args.length > 1 ? Paths.get(args[2]) : null));
+        var sksOp = Optional.ofNullable(params.configFile)
+                .map(o->new DefaultSecurityKeyStore(getSettings(o),
+                        Optional.ofNullable(params.workingDir).map(w-> Paths.get(w)).orElse(null)
+                ));
 
         sksOp.ifPresent(x->x.initHttpSSLConfig());
-        var proxy = new NettyScanningHttpProxy(sksOp.isPresent() ? 443 : 80);
+        var proxy = new NettyScanningHttpProxy(params.bindPort);
 
         try {
-            proxy.start("localhost", 9200,
+            proxy.start(params.backsideHostname, params.backsidePort,
                     sksOp.map(sks-> (Supplier<SSLEngine>) () -> {
                         try {
                             var sslEngine = sks.createHTTPSSLEngine();
@@ -101,6 +153,7 @@ public class Main {
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
+                    //}).orElse(null), getTraceConnectionCaptureFactory(traceLogsDirectory));
                     }).orElse(null), getConnectionCaptureFactory(kafkaPropsPath, bufferSize));
         } catch (Exception e) {
             System.err.println(e);
