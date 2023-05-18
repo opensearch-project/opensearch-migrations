@@ -62,6 +62,11 @@ public class Main {
                 names = {"-k", "--kafka-prop"},
                 description = "kafka props path")
         String kafkaPath = null;
+
+        @Parameter(required = false,
+                names = {"-t", "--test-mode"},
+                description = "Testing environment toggle")
+        boolean testMode = false;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -125,9 +130,11 @@ public class Main {
         return new KafkaCaptureFactory(new KafkaProducer<>(producerProps), bufferSize);
     }
 
-    private static IConnectionCaptureFactory getConnectionCaptureFactory(String kafkaPropsPath, int bufferSize) throws IOException {
-        return new FileConnectionCaptureFactory("./traceLogs", 1024 * 1024 * 1024);
-        //return getKafkaConnectionFactory(kafkaPropsPath, bufferSize);
+    private static IConnectionCaptureFactory getConnectionCaptureFactory(boolean testMode, String kafkaPropsPath, int bufferSize) throws IOException {
+        if (testMode)
+            return new FileConnectionCaptureFactory("./traceLogs", 1024 * 1024 * 1024);
+        else
+            return getKafkaConnectionFactory(kafkaPropsPath, bufferSize);
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
@@ -154,7 +161,7 @@ public class Main {
                             throw new RuntimeException(e);
                         }
                     //}).orElse(null), getTraceConnectionCaptureFactory(traceLogsDirectory));
-                    }).orElse(null), getConnectionCaptureFactory(kafkaPropsPath, bufferSize));
+                    }).orElse(null), params.testMode? getTraceConnectionCaptureFactory(traceLogsDirectory) : getConnectionCaptureFactory(params.testMode, kafkaPropsPath, bufferSize));
         } catch (Exception e) {
             System.err.println(e);
             e.printStackTrace();
