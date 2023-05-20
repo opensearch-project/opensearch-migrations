@@ -2,6 +2,7 @@ plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id 'java'
     id 'application'
+    id "io.freefair.lombok" version "8.0.1"
 }
 
 repositories {
@@ -16,6 +17,8 @@ dependencies {
     implementation group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.5'
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    testImplementation project(":captureProtobufs")
+    testImplementation 'org.projectlombok:lombok:1.18.26'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
 }
 

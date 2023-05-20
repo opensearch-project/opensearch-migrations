@@ -29,7 +29,6 @@ services:
     environment:
       - ALLOW_ANONYMOUS_LOGIN=yes
 
-
   kafka:
     image: docker.io/bitnami/kafka:3.4
     networks:
@@ -48,19 +47,36 @@ services:
     depends_on:
       - zookeeper
 
-
   traffic_capture_puller:
     image: 'migrations/kafka_capture_puller:latest'
     networks:
       - migrations
-    command: /runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic
+    command: /runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic | nc -v replayer 10001
     depends_on:
       - kafka
+      - replayer
 
-#  replayer:
-#    image: 'migrations/traffic_replayer:latest'
-#    networks:
-#      - migrations
+  replayer:
+    image: 'migrations/traffic_replayer:latest'
+    ports:
+      - "10001:10001"
+    networks:
+      - migrations
+    #command: nc -v -l -p 10001 | tee /dev/stderr | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer opensearch_target:9200
+    #command: /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer opensearch_target:9200
+
+  opensearch_target:
+    image: 'opensearchproject/opensearch:latest'
+    volumes:
+      - "./opensearch/esnode-key.pem:/usr/share/opensearch/config/esnode-key.pem"
+      - "./opensearch/esnode.pem:/usr/share/opensearch/config/root-ca.pem"
+      - "./opensearch/esnode.pem:/usr/share/opensearch/config/esnode.pem"
+    environment:
+      - discovery.type=single-node
+    networks:
+      - migrations
+    ports:
+      - "29200:9200"
 
 #  traffic_comparator:
 #    image: ''

@@ -4,6 +4,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.google.protobuf.CodedOutputStream;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.errors.WakeupException;
@@ -15,6 +16,8 @@ import java.io.OutputStream;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 public class KafkaPrinter {
     private static final Logger log = LoggerFactory.getLogger(KafkaPrinter.class);
@@ -72,7 +75,7 @@ public class KafkaPrinter {
 
         try {
             consumer.subscribe(Collections.singleton(topic));
-            consumeRecordsToProtoBufDelimitedOutputStream(consumer, System.out);
+            pipeRecordsToProtoBufDelimited(consumer, getDelimitedProtoBufOutputter(System.out));
         } catch (WakeupException e) {
             log.info("Wake up exception!");
         } catch (Exception e) {
@@ -83,16 +86,36 @@ public class KafkaPrinter {
         }
     }
 
-    private static void consumeRecordsToProtoBufDelimitedOutputStream(KafkaConsumer<String, byte[]> consumer,
-                                                                      OutputStream outputStream) throws IOException {
-        CodedOutputStream codedOutputStream = CodedOutputStream.newInstance(outputStream);
+    static void pipeRecordsToProtoBufDelimited(org.apache.kafka.clients.consumer.Consumer<String, byte[]> kafkaConsumer,
+                                               java.util.function.Consumer<Stream<byte[]>> binaryReceiver) {
         while (true) {
-            for (var record : consumer.poll(CONSUMER_POLL_TIMEOUT)) {
-                var buffer = record.value();
-                codedOutputStream.writeUInt32NoTag(buffer.length);
-                codedOutputStream.writeRawBytes(buffer);
-            }
-            codedOutputStream.flush();
+            processNextChunkOfKafkaEvents(kafkaConsumer, binaryReceiver);
         }
+    }
+
+    static void processNextChunkOfKafkaEvents(Consumer<String, byte[]> kafkaConsumer, java.util.function.Consumer<Stream<byte[]>> binaryReceiver) {
+        var records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
+        binaryReceiver.accept(StreamSupport.stream(records.spliterator(), false)
+                .map(cr->cr.value()));
+    }
+
+    static java.util.function.Consumer<Stream<byte[]>> getDelimitedProtoBufOutputter(OutputStream outputStream) {
+        CodedOutputStream codedOutputStream = CodedOutputStream.newInstance(outputStream);
+
+        return bufferStream -> {
+            bufferStream.forEach(buffer -> {
+                try {
+                    codedOutputStream.writeUInt32NoTag(buffer.length);
+                    codedOutputStream.writeRawBytes(buffer);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            try {
+                codedOutputStream.flush();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        };
     }
 }
