@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.Closeable;
@@ -9,6 +10,7 @@ import java.io.InputStream;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+@Slf4j
 public class CloseableTrafficStreamWrapper implements Closeable {
     private final Closeable underlyingCloseableResource;
     private final Stream<TrafficStream> underlyingStream;
@@ -21,6 +23,7 @@ public class CloseableTrafficStreamWrapper implements Closeable {
                     return null;
                 }
                 var ts = builder.build();
+                log.warn("Parsed traffic stream: "+ts);
                 return ts;
             } catch (IOException e) {
                 throw new RuntimeException(e);

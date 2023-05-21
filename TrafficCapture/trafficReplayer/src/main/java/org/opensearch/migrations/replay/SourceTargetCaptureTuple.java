@@ -61,10 +61,10 @@ public class SourceTargetCaptureTuple {
 
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
-            meta.put("request", jsonFromHttpData(triple.sourcePair.requestData));
+            meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
             log.warn("TODO: These durations are not measuring the same values!");
-            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData,
-                    triple.sourcePair.getTotalResponseDuration()));
+            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
+                    triple.sourcePair.responseData.getTotalDuration()));
             meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
                     triple.shadowResponseDuration));
 

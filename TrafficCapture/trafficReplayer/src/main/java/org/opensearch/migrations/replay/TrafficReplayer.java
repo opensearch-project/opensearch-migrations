@@ -17,6 +17,8 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.WeakHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -35,6 +37,15 @@ public class TrafficReplayer {
     }
 
     public TrafficReplayer(URI serverUri) {
+        if (serverUri.getPort() < 0) {
+            throw new RuntimeException("Port not present for URI: "+serverUri);
+        }
+        if (serverUri.getHost() == null) {
+            throw new RuntimeException("Hostname not present for URI: "+serverUri);
+        }
+        if (serverUri.getScheme() == null) {
+            throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
+        }
         var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost());
         packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer);
     }
@@ -99,45 +110,47 @@ public class TrafficReplayer {
                                                BufferedOutputStream bufferedOutputStream)
             throws IOException, InterruptedException {
         var tripleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
-        ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
-                triple -> {
-                    try {
-                        tripleWriter.writeJSON(triple);
-                    } catch (IOException e) {
-                        log.error("Caught an IOException while writing triples output.");
-                        e.printStackTrace();
-                    }
+        WeakHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>> requestFutureMap =
+                new WeakHashMap<>();
+        ReplayEngine replayEngine = new ReplayEngine(request ->
+                requestFutureMap.put(request, tr.writeToSocketAndClose(request)),
+                rrPair -> {
+                    requestFutureMap.get(rrPair.requestData)
+                            .whenComplete((summary, t) -> {
+                                SourceTargetCaptureTuple requestResponseTriple;
+                                if (t != null) {
+                                    log.error("Got exception in CompletableFuture callback: ", t);
+                                    requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
+                                            new ArrayList<>(), Duration.ZERO
+                                    );
+                                } else {
+                                    requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
+                                            summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                                            summary.getResponseDuration()
+                                    );
+                                }
+
+                                try {
+                                    tripleWriter.writeJSON(requestResponseTriple);
+                                } catch (IOException e) {
+                                    log.error("Caught an IOException while writing triples output.");
+                                    e.printStackTrace();
+                                }
+                            });
                 }
-        )
         );
         tr.runReplay(trafficChunkStream, replayEngine);
     }
 
-    private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
-                                       Consumer<SourceTargetCaptureTuple> onResponseReceivedCallback)
+    private CompletableFuture writeToSocketAndClose(HttpMessageAndTimestamp request)
     {
         try {
             log.debug("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
-            for (var packetData : requestResponsePacketPair.requestData) {
+            for (var packetData : request.packetBytes) {
                 packetHandler.consumeBytes(packetData);
             }
-            var cf = packetHandler.finalizeRequest();
-            cf.whenComplete((summary, t) -> {
-                SourceTargetCaptureTuple requestResponseTriple;
-                if (t != null) {
-                    log.error("Got exception in CompletableFuture callback: ", t);
-                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
-                            new ArrayList<>(), Duration.ZERO
-                    );
-                } else {
-                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
-                            summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
-                            summary.getResponseDuration()
-                    );
-                }
-                onResponseReceivedCallback.accept(requestResponseTriple);
-            });
+            return packetHandler.finalizeRequest();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
