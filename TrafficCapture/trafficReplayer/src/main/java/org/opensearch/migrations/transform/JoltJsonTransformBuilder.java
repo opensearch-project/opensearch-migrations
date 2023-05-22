@@ -18,6 +18,7 @@ public class JoltJsonTransformBuilder {
     public enum CANNED_OPERATIONS {
         ADD_GZIP("addGzip"),
         MAKE_CHUNKED("makeChunked"),
+        ADD_ADMIN_AUTH("addAdminAuth"),
         PASS_THRU("passThru");
 
         private final String value;
@@ -38,6 +39,7 @@ public class JoltJsonTransformBuilder {
     static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE =
             new TypeReference<LinkedHashMap<String, Object>>(){};
     public static final String RESOURCE_HOST_SWITCH_OPERATION = "hostSwitch.jolt";
+    public static final String ADD_ADMIN_AUTH_OPERATION = "addAdminAuth.jolt";
     public static final String RESOURCE_PASS_THRU_OPERATION = "passThru.jolt";
 
     ObjectMapper mapper = new ObjectMapper();

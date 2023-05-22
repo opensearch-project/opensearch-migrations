@@ -55,7 +55,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
                     statusWatcher.accept(HTTP_CONSUMPTION_STATUS.DONE);
                     // TODO - there might be a memory leak here.
                     // I'm not sure if I should be releasing the HttpRequest `msg`.
-                    log.warn("TODO - there might be a memory leak here.  " +
+                    log.info("TODO - there might be a memory leak here.  " +
                             "I'm not sure if I should be releasing the HttpRequest `msg`.");
                     pipelineOrchestrator.addBaselineHandlers(pipeline);
                     ctx.fireChannelRead(httpJsonMessage);

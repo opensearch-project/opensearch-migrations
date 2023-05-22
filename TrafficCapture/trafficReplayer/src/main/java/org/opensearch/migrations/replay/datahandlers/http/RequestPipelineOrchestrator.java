@@ -98,7 +98,7 @@ public class RequestPipelineOrchestrator {
         //  IN: ByteBufs(2) + HttpJsonMessage(4) with headers only + HttpContent(1) (if the repackaging handlers were skipped)
         // OUT: ByteBufs(3) which are sized similarly to how they were received
         pipeline.addLast(new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes)));
-        pipeline.addLast(new LoggingHandler(LogLevel.INFO, ByteBufFormat.HEX_DUMP));
+        //pipeline.addLast(new LoggingHandler(LogLevel.INFO, ByteBufFormat.HEX_DUMP));
         // IN:  ByteBufs(3)
         // OUT: nothing - terminal!  ByteBufs are routed to the packet handler!
         pipeline.addLast(new NettySendByteBufsToPacketHandlerHandler(packetReceiver));

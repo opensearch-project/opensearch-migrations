@@ -24,6 +24,8 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        log.debug("Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
+        log.trace("HR: old currentFuture="+currentFuture);
         currentFuture = currentFuture.whenComplete((v1,t1) -> {
             packetReceiver.finalizeRequest()
                     .whenComplete((v2, t2) -> {
@@ -36,20 +38,26 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                         }
                     });
         });
+        log.trace("HR: new currentFuture="+currentFuture);
         super.handlerRemoved(ctx);
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (msg instanceof ByteBuf) {
-            log.info("read the following message and sending it to consumeBytes"+msg);
+            log.trace("read the following message and sending it to consumeBytes: " + msg +
+                    " hashCode=" + System.identityHashCode(msg) +
+                    " ctx hash=" + System.identityHashCode(ctx));
             var bb = ((ByteBuf) msg).retain();
+            log.trace("CR: old currentFuture="+currentFuture);
             currentFuture = currentFuture.thenCompose(v-> {
-                log.info("calling consumingBytes with "+msg);
+                log.trace("chaining consumingBytes with "+msg + " hashCode=" + System.identityHashCode(msg) +
+                        " ctx hash=" + System.identityHashCode(ctx));
                 var rval = packetReceiver.consumeBytes(bb);
                 bb.release();
                 return rval;
             });
+            log.trace("CR: new currentFuture="+currentFuture);
         }
     }
 

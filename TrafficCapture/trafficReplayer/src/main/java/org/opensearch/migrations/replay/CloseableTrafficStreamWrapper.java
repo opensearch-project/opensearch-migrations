@@ -23,7 +23,7 @@ public class CloseableTrafficStreamWrapper implements Closeable {
                     return null;
                 }
                 var ts = builder.build();
-                log.warn("Parsed traffic stream: "+ts);
+                log.trace("Parsed traffic stream: "+ts);
                 return ts;
             } catch (IOException e) {
                 throw new RuntimeException(e);

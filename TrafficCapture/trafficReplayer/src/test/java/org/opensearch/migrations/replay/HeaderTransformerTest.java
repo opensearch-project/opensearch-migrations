@@ -85,7 +85,8 @@ public class HeaderTransformerTest {
                 contentLength -> "GET / HTTP/1.1\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
                         "content-type: application/json\n" +
-                        "content-length: " + contentLength + "\n");
+                        "content-length: " + contentLength + "\n" +
+                        "Authorization: Basic YWRtaW46YWRtaW4=\n");
     }
 
     /**

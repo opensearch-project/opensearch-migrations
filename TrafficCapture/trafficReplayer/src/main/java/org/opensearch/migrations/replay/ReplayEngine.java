@@ -35,15 +35,9 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
         var pbts = observation.getTs();
         var timestamp = Instant.ofEpochSecond(pbts.getSeconds(), pbts.getNanos());
         if (observation.hasEndOfMessageIndicator()) {
-            handleEndOfMessage(id);
+            handleEndOfMessage(id, getAccumulationForFirstRequestObservation(id));
         } else if (observation.hasRead()) {
-            var accum = liveStreams.computeIfAbsent(id, k -> new Accumulation());
-            if (accum.state == State.REQUEST_SENT) {
-                handleEndOfMessage(id);
-                accum = new Accumulation();
-                liveStreams.put(id, accum);
-            }
-            var runningList = accum.rrPair;
+            var runningList = getAccumulationForFirstRequestObservation(id).rrPair;
             // TODO - eliminate the byte[] and use the underlying nio buffer
             runningList.addRequestData(timestamp, observation.getRead().getData().toByteArray());
         } else if (observation.hasReadSegment()) {
@@ -62,23 +56,45 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
         }
     }
 
-    private void handleEndOfMessage(String id) {
-        var priorBuffers = liveStreams.get(id);
-        if (priorBuffers == null) {
-            log.warn("No prior messages, but received an EOM.  " +
-                    "Considering that as nothing to do, but it indicates either a corruption or logical error " +
-                    "here or in the capture");
-            return;
+    private Accumulation getAccumulationForFirstRequestObservation(String id) {
+        var accum = liveStreams.computeIfAbsent(id, k -> new Accumulation());
+        if (accum.state == State.REQUEST_SENT) {
+            handleEndOfMessage(id, accum);
+            accum = new Accumulation();
+            liveStreams.put(id, accum);
         }
-        switch (priorBuffers.state) {
+        return accum;
+    }
+
+    /**
+     * @param id
+     * @param accumulation
+     * @return true if there are still callbacks remaining to be called
+     */
+    private boolean handleEndOfMessage(String id, Accumulation accumulation) {
+        switch (accumulation.state) {
             case NOTHING_SENT:
-                requestHandler.accept(priorBuffers.rrPair.requestData);
-                priorBuffers.state = State.REQUEST_SENT;
-                break;
+                requestHandler.accept(accumulation.rrPair.requestData);
+                accumulation.state = State.REQUEST_SENT;
+                return true;
             case REQUEST_SENT:
-                fullDataHandler.accept(priorBuffers.rrPair);
+                fullDataHandler.accept(accumulation.rrPair);
                 liveStreams.remove(id);
-                break;
         }
+        return false;
+    }
+
+    public void close() {
+        liveStreams.values().forEach(accumulation-> {
+            switch (accumulation.state) {
+                case NOTHING_SENT:
+                    requestHandler.accept(accumulation.rrPair.requestData);
+                    accumulation.state = State.REQUEST_SENT;
+                    // fall through
+                case REQUEST_SENT:
+                    fullDataHandler.accept(accumulation.rrPair);
+            }
+        });
+        liveStreams.clear();
     }
 }
