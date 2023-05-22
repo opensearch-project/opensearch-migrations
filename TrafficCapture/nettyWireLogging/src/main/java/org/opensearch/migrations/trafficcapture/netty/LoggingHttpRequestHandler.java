@@ -72,10 +72,22 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         var bb = msg;
         bb.markReaderIndex();
         // todo - move this into a pool
+        var rval = HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
         var parsedMsgs = new ArrayList<>(4);
-        httpDecoder.decode(ctx, bb, parsedMsgs);
+        while (bb.readableBytes() > 0) {
+            var lastIdx = bb.readerIndex();
+            log.warn("Parsing from idx="+lastIdx+" readableBytes="+ bb.readableBytes());
+            httpDecoder.decode(ctx, bb, parsedMsgs);
+            rval = onHttpObjectsDecoded(parsedMsgs);
+            if (rval == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE || // got what we needed
+                    lastIdx == bb.readerIndex()) { // no progress
+                break;
+            }
+            parsedMsgs.clear();
+        }
+        log.trace("Resetting index");
         bb.resetReaderIndex();
-        return onHttpObjectsDecoded(parsedMsgs);
+        return rval;
     }
 
     @Override
