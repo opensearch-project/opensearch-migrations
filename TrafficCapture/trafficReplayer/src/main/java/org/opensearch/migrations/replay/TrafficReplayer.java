@@ -9,7 +9,6 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.log4j.Log4j2;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.CompositeJsonTransformer;
-import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
@@ -36,15 +35,20 @@ public class TrafficReplayer {
     private final PacketToTransformingProxyHandlerFactory packetHandlerFactory;
     private Duration timeout = Duration.ofSeconds(20);
 
-    public static JsonTransformer buildDefaultJsonTransformer(String newHostName) {
-        var joltJsonTransformer = JoltJsonTransformer.newBuilder()
-                .addHostSwitchOperation(newHostName)
-                .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.ADD_ADMIN_AUTH)
-                .build();
+    public static JsonTransformer buildDefaultJsonTransformer(String newHostName,
+                                                              String authorizationHeader) {
+        var joltJsonTransformerBuilder = JoltJsonTransformer.newBuilder()
+                .addHostSwitchOperation(newHostName);
+        if (authorizationHeader != null) {
+            joltJsonTransformerBuilder = joltJsonTransformerBuilder.addAuthorizationOperation(authorizationHeader);
+        }
+        var joltJsonTransformer = joltJsonTransformerBuilder.build();
         return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer());
     }
 
-    public TrafficReplayer(URI serverUri, boolean allowInsecureConnections) throws SSLException {
+    public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
+            throws SSLException
+    {
         if (serverUri.getPort() < 0) {
             throw new RuntimeException("Port not present for URI: "+serverUri);
         }
@@ -54,7 +58,7 @@ public class TrafficReplayer {
         if (serverUri.getScheme() == null) {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
-        var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost());
+        var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader);
         packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer,
                 loadSslContext(serverUri, allowInsecureConnections));
     }
@@ -82,6 +86,11 @@ public class TrafficReplayer {
                 arity = 0,
                 description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
+        @Parameter(required = false,
+                names = {"--auth-header-value"},
+                arity = 1,
+                description = "Value to use for the \"authorization\" header of each request")
+        String authHeaderValue;
         @Parameter(required = false,
                 names = {"-o", "--output"},
                 arity=1,
@@ -121,7 +130,7 @@ public class TrafficReplayer {
             return;
         }
 
-        var tr = new TrafficReplayer(uri, params.allowInsecureConnections);
+        var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
