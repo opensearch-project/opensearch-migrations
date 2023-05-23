@@ -43,4 +43,13 @@ public class RequestResponsePacketPair {
     public Stream<byte[]> getResponseDataStream() {
         return responseData.stream();
     }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("RequestResponsePacketPair{");
+        sb.append("requestData=").append(requestData);
+        sb.append(", responseData=").append(responseData);
+        sb.append('}');
+        return sb.toString();
+    }
 }

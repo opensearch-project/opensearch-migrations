@@ -18,6 +18,15 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
     public static class Accumulation {
         RequestResponsePacketPair rrPair = new RequestResponsePacketPair();
         State state = State.NOTHING_SENT;
+
+        @Override
+        public String toString() {
+            final StringBuilder sb = new StringBuilder("Accumulation{");
+            sb.append("rrPair=").append(rrPair);
+            sb.append(", state=").append(state);
+            sb.append('}');
+            return sb.toString();
+        }
     }
     private final Map<String, Accumulation> liveStreams;
     private final Consumer<HttpMessageAndTimestamp> requestHandler;
@@ -32,7 +41,7 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
 
     @Override
     public void accept(String id, TrafficObservation observation) {
-        log.error("Consuming observation: " + observation);
+        log.error("Stream: " + id + " Consuming observation: " + observation);
         var pbts = observation.getTs();
         var timestamp = Instant.ofEpochSecond(pbts.getSeconds(), pbts.getNanos());
         if (observation.hasEndOfMessageIndicator()) {
@@ -61,14 +70,18 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
                 throw new RuntimeException("Apparent out of order exception - " +
                         "found a purported write to a socket before a read!");
             }
-            runningList.addResponseData(timestamp, observation.getWrite().toByteArray());
+            runningList.addResponseData(timestamp, observation.getWrite().getData().toByteArray());
         } else if (observation.hasWriteSegment()) {
             var accum = liveStreams.get(id);
             assert accum != null && accum.state == State.REQUEST_SENT;
             var runningList = accum.rrPair;
             throw new RuntimeException("Not implemented yet.");
-        } else if (observation.hasRequestReleasedDownstream()) {
-
+        } else if (observation.hasConnectionException()) {
+            var accum = liveStreams.remove(id);
+            log.warn("Removing accumulated traffic pair for " + id);
+            log.debug("Accumulated object: " + accum);
+        } else {
+            log.warn("unaccounted for observation type " + observation);
         }
     }
 
