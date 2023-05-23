@@ -51,26 +51,23 @@ services:
     image: 'migrations/kafka_capture_puller:latest'
     networks:
       - migrations
-    command: /runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic | nc -v replayer 10001
     depends_on:
       - kafka
       - replayer
+    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic | nc -v replayer 10001"
 
   replayer:
     image: 'migrations/traffic_replayer:latest'
-    ports:
-      - "10001:10001"
     networks:
       - migrations
-    #command: nc -v -l -p 10001 | tee /dev/stderr | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200
-    #command: /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200
+    ports:
+      - "10001:10001"
+    depends_on:
+      - opensearchtarget
+    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --insecure"
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:latest'
-#    volumes:
-#      - "./opensearch/esnode-key.pem:/usr/share/opensearch/config/esnode-key.pem"
-#      - "./opensearch/esnode.pem:/usr/share/opensearch/config/root-ca.pem"
-#      - "./opensearch/esnode.pem:/usr/share/opensearch/config/esnode.pem"
     environment:
       - discovery.type=single-node
     networks:
