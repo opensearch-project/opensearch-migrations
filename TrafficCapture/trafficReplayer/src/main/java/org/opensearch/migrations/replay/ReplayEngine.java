@@ -13,7 +13,7 @@ import java.util.function.Consumer;
 public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
     enum State {
         NOTHING_SENT,
-        REQUEST_SENT
+        RESPONSE_SENT, REQUEST_SENT
     }
     public static class Accumulation {
         RequestResponsePacketPair rrPair = new RequestResponsePacketPair();
@@ -32,24 +32,40 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
 
     @Override
     public void accept(String id, TrafficObservation observation) {
+        log.error("Consuming observation: " + observation);
         var pbts = observation.getTs();
         var timestamp = Instant.ofEpochSecond(pbts.getSeconds(), pbts.getNanos());
         if (observation.hasEndOfMessageIndicator()) {
-            handleEndOfMessage(id, getAccumulationForFirstRequestObservation(id));
+            var accum = liveStreams.get(id);
+            if (accum == null) {
+                log.warn("Received EOM w/out an accumulated value, assuming an empty server interaction and " +
+                        "NOT reproducing this to the target cluster (TODO - do something better?)");
+                return;
+            }
+            handleEndOfMessage(id, accum);
         } else if (observation.hasRead()) {
-            var runningList = getAccumulationForFirstRequestObservation(id).rrPair;
+            var accum = getAccumulationForFirstRequestObservation(id);
+            assert accum.state == State.NOTHING_SENT;
+            var runningList = accum.rrPair;
             // TODO - eliminate the byte[] and use the underlying nio buffer
             runningList.addRequestData(timestamp, observation.getRead().getData().toByteArray());
         } else if (observation.hasReadSegment()) {
+            var accum = getAccumulationForFirstRequestObservation(id);
+            assert accum.state == State.NOTHING_SENT;
             throw new RuntimeException("Not implemented yet.");
         } else if (observation.hasWrite()) {
-            var runningList = liveStreams.get(id).rrPair;
+            var accum = liveStreams.get(id);
+            assert accum != null && accum.state == State.REQUEST_SENT;
+            var runningList = accum.rrPair;
             if (runningList == null) {
                 throw new RuntimeException("Apparent out of order exception - " +
                         "found a purported write to a socket before a read!");
             }
             runningList.addResponseData(timestamp, observation.getWrite().toByteArray());
         } else if (observation.hasWriteSegment()) {
+            var accum = liveStreams.get(id);
+            assert accum != null && accum.state == State.REQUEST_SENT;
+            var runningList = accum.rrPair;
             throw new RuntimeException("Not implemented yet.");
         } else if (observation.hasRequestReleasedDownstream()) {
 
@@ -79,6 +95,7 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
                 return true;
             case REQUEST_SENT:
                 fullDataHandler.accept(accumulation.rrPair);
+                accumulation.state = State.RESPONSE_SENT;
                 liveStreams.remove(id);
         }
         return false;
@@ -93,6 +110,7 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
                     // fall through
                 case REQUEST_SENT:
                     fullDataHandler.accept(accumulation.rrPair);
+                    accumulation.state = State.RESPONSE_SENT;
             }
         });
         liveStreams.clear();

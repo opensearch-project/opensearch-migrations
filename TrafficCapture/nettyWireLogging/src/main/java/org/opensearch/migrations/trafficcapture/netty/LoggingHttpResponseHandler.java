@@ -9,6 +9,7 @@ import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
 import java.io.IOException;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     static class SimpleHttpResponseDecoder extends HttpResponseDecoder {
         /**
@@ -63,10 +65,21 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
         var bb = (ByteBuf) msg;
         bb.markReaderIndex();
         // todo - move this into a pool
+        var httpProcessedState = HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
         var parsedMsgs = new ArrayList<>(4);
-        decoder.decode(ctx, bb, parsedMsgs);
+        while (bb.readableBytes() > 0) {
+            var lastIdx = bb.readerIndex();
+            log.warn("Parsing from idx="+lastIdx+" readableBytes="+ bb.readableBytes());
+            decoder.decode(ctx, bb, parsedMsgs);
+            httpProcessedState = onHttpObjectsDecoded(parsedMsgs);
+            if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE || // got what we needed
+                    lastIdx == bb.readerIndex()) { // no progress
+                break;
+            }
+            parsedMsgs.clear();
+        }
+        log.trace("Resetting index");
         bb.resetReaderIndex();
-        var httpProcessedState = onHttpObjectsDecoded(parsedMsgs);
         if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
             trafficOffloader.flushCommitAndResetStream(false);
         }
