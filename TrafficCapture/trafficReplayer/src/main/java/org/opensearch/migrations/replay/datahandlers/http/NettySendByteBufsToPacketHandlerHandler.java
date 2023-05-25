@@ -31,12 +31,18 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         log.debug("Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
         log.trace("HR: old currentFuture="+currentFuture);
-        if (currentFuture.isDone() && currentFuture.get() == null) {
-            packetReceiverCompletionFutureRef.set(CompletableFuture.failedFuture(new NoContentException()));
-            return;
-        }
         CompletableFuture<AggregatedRawResponse> packetReceiverCompletionFuture =
                 new CompletableFuture<>();
+        if (currentFuture.isDone()) {
+            if (currentFuture.isCompletedExceptionally()) {
+                currentFuture.handle((v,t)->
+                        packetReceiverCompletionFuture.completeExceptionally(t));
+                packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
+            } else if (currentFuture.get() == null) {
+                packetReceiverCompletionFutureRef.set(CompletableFuture.failedFuture(new NoContentException()));
+            }
+            return;
+        }
         packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
         currentFuture = currentFuture.whenComplete((v1,t1) -> {
             assert v1 != null :

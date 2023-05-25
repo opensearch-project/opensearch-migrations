@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import com.beust.ah.A;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -26,6 +27,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -128,6 +130,7 @@ public class TrafficReplayer {
         var params = parseArgs(args);
         URI uri;
         System.err.println("Starting Traffic Replayer");
+        System.out.println("Starting Traffic Replayer2");
         System.err.println("Got args: "+ String.join("; ", args));
         try {
             uri = new URI(params.targetUriString);
@@ -153,6 +156,8 @@ public class TrafficReplayer {
     private void runReplayWithIOStreams(Stream<TrafficStream> trafficChunkStream,
                                         BufferedOutputStream bufferedOutputStream)
             throws IOException, InterruptedException, ExecutionException {
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger exceptionCount = new AtomicInteger();
         var tripleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         ConcurrentHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>> requestFutureMap =
                 new ConcurrentHashMap<>();
@@ -164,30 +169,14 @@ public class TrafficReplayer {
                     log.warn("Done receiving captured stream for this "+rrPair.requestData);
                     var resultantCf = requestFutureMap.get(rrPair.requestData)
                             .handle((summary, t) -> {
-                                log.warn("done sending and finalizing data to the packet handler");
-                                SourceTargetCaptureTuple requestResponseTriple;
-                                if (t != null) {
-                                    log.error("Got exception in CompletableFuture callback: ", t);
-                                    requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
-                                            new ArrayList<>(), Duration.ZERO
-                                    );
-                                } else {
-                                    requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
-                                            summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
-                                            summary.getResponseDuration()
-                                    );
-                                }
-
                                 try {
-                                    tripleWriter.writeJSON(requestResponseTriple);
-                                } catch (IOException e) {
-                                    log.error("Caught an IOException while writing triples output.");
-                                    e.printStackTrace();
-                                    throw new CompletionException(e);
+                                    var rval = packageAndWriteResponse(tripleWriter, rrPair, summary, t);
+                                    successCount.incrementAndGet();
+                                    return rval;
+                                } catch (Exception e) {
+                                    exceptionCount.incrementAndGet();
+                                    throw e;
                                 }
-
-                                if (t!=null) { throw new CompletionException(t); }
-                                return summary;
                             })
                             .whenComplete((v,t) -> requestToFinalWorkFuturesMap.remove(rrPair.requestData));
                     requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
@@ -200,15 +189,51 @@ public class TrafficReplayer {
             var allRemainingWorkArray = requestToFinalWorkFuturesMap.values().toArray(CompletableFuture[]::new);
             log.info("All remaining work to wait on: " +
                     Arrays.stream(allRemainingWorkArray).map(cf->cf.toString()).collect(Collectors.joining()));
+            // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
+            // and were removed from the live map (hopefully)
             CompletableFuture.allOf(allRemainingWorkArray)
-                    .whenComplete((t, v) -> {
+                    .handle((t, v) -> {
                         log.info("stopping packetHandlerFactory's group");
                         packetHandlerFactory.stopGroup();
+                        return null; // squash exceptions for individual requests
                     })
                     .get();
+            if (exceptionCount.get() > 0) {
+                log.warn(exceptionCount.get() + " requests to the target threw an exception; " +
+                        successCount.get() + " requests were successfully processed.");
+            } else {
+                log.info(successCount.get() + " requests were successfully processed.");
+            }
             assert requestToFinalWorkFuturesMap.size() == 0 :
                     "expected to wait for all of the in flight requests to fully flush and self destruct themselves";
         }
+    }
+
+    private static AggregatedRawResponse packageAndWriteResponse(SourceTargetCaptureTuple.TupleToFileWriter tripleWriter, RequestResponsePacketPair rrPair, AggregatedRawResponse summary, Throwable t) {
+        log.warn("done sending and finalizing data to the packet handler");
+        SourceTargetCaptureTuple requestResponseTriple;
+        if (t != null) {
+            log.error("Got exception in CompletableFuture callback: ", t);
+            requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
+                    new ArrayList<>(), Duration.ZERO
+            );
+        } else {
+            requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
+                    summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                    summary.getResponseDuration()
+            );
+        }
+
+        try {
+            tripleWriter.writeJSON(requestResponseTriple);
+        } catch (IOException e) {
+            log.error("Caught an IOException while writing triples output.");
+            e.printStackTrace();
+            throw new CompletionException(e);
+        }
+
+        if (t !=null) { throw new CompletionException(t); }
+        return summary;
     }
 
     private CompletableFuture writeToSocketAndClose(HttpMessageAndTimestamp request)
