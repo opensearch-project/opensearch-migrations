@@ -10,6 +10,7 @@ services:
     command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main  --kafkaConnection kafka:9092 --destinationHost  elasticsearch --destinationPort 9200 --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
     depends_on:
       - kafka
+      - elasticsearch
 
   elasticsearch:
     image: 'migrations/elasticsearch_searchguard:latest'
@@ -82,6 +83,8 @@ services:
     image: 'migrations/open_search_benchmark:latest'
     networks:
       - migrations
+    depends_on:
+      - captureproxy
     command:
       - /bin/sh
       - -c
