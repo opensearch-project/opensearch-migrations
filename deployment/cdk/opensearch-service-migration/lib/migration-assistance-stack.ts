@@ -30,7 +30,7 @@ export class MigrationAssistanceStack extends Stack {
         super(scope, id, props);
 
         // Create IAM policy to connect to cluster
-        const MSKConsumerPolicy1 = new PolicyStatement({
+        const MSKConsumerPolicyConnect = new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ["kafka-cluster:Connect",
                 "kafka-cluster:AlterCluster",
@@ -39,22 +39,30 @@ export class MigrationAssistanceStack extends Stack {
         })
 
         // Create IAM policy to read/write from kafka topics on the cluster
-        let policyRegex1 = /([^//]+$)/gi
-        let policyRegex2 = /:(cluster)/gi
-        let policyARN = props.MSKARN.replace(policyRegex1, "*");
-        policyARN = policyARN.replace(policyRegex2, ":topic");
+        const policyRegex1 = /([^//]+$)/gi
+        const policyRegex2 = /:(cluster)/gi
+        const policyShortARN = props.MSKARN.replace(policyRegex1, "*");
+        const topicARN = policyShortARN.replace(policyRegex2, ":topic");
 
-        const MSKConsumerPolicy2 = new PolicyStatement({
+        const MSKConsumerPolicyReadAndWrite = new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ["kafka-cluster:*Topic*",
                 "kafka-cluster:WriteData",
                 "kafka-cluster:ReadData"],
-            resources: [policyARN]
+            resources: [topicARN]
         })
 
+        // Create IAM policy to join Kafka consumer groups
+        let groupARN = policyShortARN.replace(policyRegex2, ":group");
+        const MSKConsumerPolicyGroup = new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ["kafka-cluster:AlterGroup",
+                "kafka-cluster:DescribeGroup"],
+            resources: [groupARN]
+        })
 
         const MSKConsumerAccessDoc = new PolicyDocument({
-            statements: [MSKConsumerPolicy1, MSKConsumerPolicy2]
+            statements: [MSKConsumerPolicyConnect, MSKConsumerPolicyReadAndWrite, MSKConsumerPolicyGroup]
         })
 
         // Create IAM Role for Fargate Task to read from MSK Topic
@@ -111,7 +119,7 @@ export class MigrationAssistanceStack extends Stack {
             image: ContainerImage.fromDockerImageAsset(trafficReplayerImage),
             // Add in region and stage
             containerName: "traffic-replayer",
-            environment: {"TARGET_CLUSTER_ENDPOINT": "https://" + props.targetEndpoint + ":80"},
+            environment: {"TARGET_CLUSTER_ENDPOINT": "http://" + props.targetEndpoint + ":80"},
             logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-replayer-container-lg', logRetention: 30 })
         });
 
