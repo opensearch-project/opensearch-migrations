@@ -128,6 +128,7 @@ public class TrafficReplayer {
         var params = parseArgs(args);
         URI uri;
         System.err.println("Starting Traffic Replayer");
+        System.err.println("Got args: "+ String.join("; ", args));
         try {
             uri = new URI(params.targetUriString);
         } catch (Exception e) {

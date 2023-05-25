@@ -37,8 +37,10 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
                 .channel(NioSocketChannel.class)
                 .handler(new BacksideSnifferHandler(responseBuilder))
                 .option(ChannelOption.AUTO_READ, false);
-        log.debug("Active - setting up backend connection");
-        outboundChannelFuture = b.connect(serverUri.getHost(), serverUri.getPort());
+        String host = serverUri.getHost();
+        int port = serverUri.getPort();
+        log.debug("Active - setting up backend connection to " + host + ":" + port);
+        outboundChannelFuture = b.connect(host, port);
         //outboundChannel = outboundChannelFuture.channel();
         responseWatchHandler = new BacksideHttpWatcherHandler(responseBuilder);
 
@@ -135,7 +137,8 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
     }
 
     @Override
-    public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
+    public CompletableFuture<AggregatedRawResponse>
+    finalizeRequest() {
         var future = new CompletableFuture();
         responseWatchHandler.addCallback(arr -> future.complete(arr));
         return future;

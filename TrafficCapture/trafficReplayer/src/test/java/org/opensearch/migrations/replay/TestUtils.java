@@ -31,12 +31,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class TestUtils {
-    public static <A, B> Collector<A, ?, B> foldLeft(final B init, final BiFunction<? super B, ? super A, ? extends B> f) {
-        return Collectors.collectingAndThen(
-                Collectors.reducing(Function.<B>identity(), a -> b -> f.apply(b, a), Function::andThen),
-                finisherArg -> finisherArg.apply(init)
-        );
-    }
 
     static String resolveReferenceString(StringBuilder referenceStringBuilder) {
         return resolveReferenceString(referenceStringBuilder, List.of());
@@ -70,7 +64,7 @@ public class TestUtils {
                                                                                StringBuilder referenceStringAccumulator,
                                                                                String headers) {
         return stringParts.stream().collect(
-                foldLeft(packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
+                Utils.foldLeft(packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
                         (cf, s) -> cf.thenCompose(v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer))));
     }
 

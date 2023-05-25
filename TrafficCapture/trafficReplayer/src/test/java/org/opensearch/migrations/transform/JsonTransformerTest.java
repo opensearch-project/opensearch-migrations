@@ -14,7 +14,6 @@ import java.util.Map;
 @Slf4j
 class JsonTransformerTest {
     public static final String DUMMY_HOSTNAME_TEST_STRING = "THIS_IS_A_TEST_STRING_THAT_ONLY_EXISTS_IN_ONE_PLACE";
-    public static final String RESOURCE_DECREASE_SHARDS_OPERATION = "decreaseShards.jolt";
     ObjectMapper mapper = new ObjectMapper();
 
     public JsonTransformerTest() {
@@ -52,12 +51,6 @@ class JsonTransformerTest {
         Assertions.assertEquals(TEST_DOCUMENT, finalOutputStr);
     }
 
-
-    private static String chainSpecs(String... specs) {
-        var joinedSpecs = String.join(",", specs);
-        return "{\"spec\": ["+joinedSpecs+"]}";
-    }
-
     @Test
     public void testHttpTransform() throws IOException {
         var testResourceName = "parsed/post_formUrlEncoded_withFixedLength.json";
@@ -69,33 +62,6 @@ class JsonTransformerTest {
         String transformedJsonOutputStr = emitOrderedJson(transformedDocument);
         log.error("transformed json document: "+transformedJsonOutputStr);
         Assertions.assertTrue(transformedJsonOutputStr.contains(DUMMY_HOSTNAME_TEST_STRING));
-
-//        var checkit = HTTP.toJSONObject("" +
-//                "POST /test HTTP/1.1\n"+
-//                "Host: foo.example\n" +
-//                "Content-Type: application/x-www-form-urlencoded\n" +
-//                "Content-Length: 27");
-        //var parsedTransformedHeaders = HTTP.toJSONObject(transformedJsonOutputStr);
-        //Map<String, Object> transformedHeaders = (Map<String, Object>) parsedTransformedHeaders.get("headers");
-        //Assertions.assertEquals("testcluster.org", transformedHeaders.get("Host"));
-
-        //transformedHeaders.put("Host", "sourcecluster.org");
-        //Assertions.assertEquals(parseSampleRequestFromResource(testResourceName).toString(), transformedHeaders.toString());
     }
 
-//    @Test
-//    public void testThatLazyPayloadsAreLazy() throws IOException {
-//        Map<String, Object> jsonRequest;
-//        var httpParser = new HttpJsonTransformer();
-//        try (var is = getClass().getResourceAsStream("/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
-//            httpParser.acceptRawRequestBytes(is.readAllBytes());
-//        }
-//        jsonRequest = httpParser.asJsonDocument();
-//        //var payloadJson = ((Map)jsonRequest.get("payload")).get("inlinedJsonBody");
-//        var transformer = JsonTransformer.newBuilder()
-//                .addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING)
-//                .build();
-//        var transformedDocument = transformer.transformJson(jsonRequest);
-//        log.error(transformedDocument.toString());
-//    }
 }

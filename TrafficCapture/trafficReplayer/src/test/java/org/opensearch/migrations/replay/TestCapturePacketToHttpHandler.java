@@ -14,7 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
-class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
+public class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
     private final Duration consumeDuration;
     private final AtomicInteger numFinalizations;
     @Getter
