@@ -13,7 +13,7 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
+import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -24,10 +24,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.stream.Collector;
-import java.util.stream.Collectors;
 
 @Slf4j
 public class TestUtils {
@@ -36,7 +33,7 @@ public class TestUtils {
         return resolveReferenceString(referenceStringBuilder, List.of());
     }
 
-        static String resolveReferenceString(StringBuilder referenceStringBuilder,
+    static String resolveReferenceString(StringBuilder referenceStringBuilder,
                                          Collection<AbstractMap.SimpleEntry<String,String>> replacementMappings) {
         for (var kvp : replacementMappings) {
             var idx = referenceStringBuilder.indexOf(kvp.getKey());
@@ -52,14 +49,14 @@ public class TestUtils {
     }
 
     static CompletableFuture<Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
-                                                     IPacketToHttpHandler transformingHandler) {
+                                                     IPacketConsumer transformingHandler) {
         log.info("Sending string to transformer: "+s);
         referenceStringBuilder.append(s);
         var bytes = s.getBytes(StandardCharsets.UTF_8);
         return transformingHandler.consumeBytes(bytes);
     }
 
-    static CompletableFuture<Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketToHttpHandler packetConsumer,
+    static CompletableFuture<Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketConsumer packetConsumer,
                                                                                List<String> stringParts,
                                                                                StringBuilder referenceStringAccumulator,
                                                                                String headers) {
@@ -69,7 +66,7 @@ public class TestUtils {
     }
 
     public static CompletableFuture<Void>
-    chainedDualWriteHeaderAndPayloadParts(IPacketToHttpHandler packetConsumer,
+    chainedDualWriteHeaderAndPayloadParts(IPacketConsumer packetConsumer,
                                           List<String> stringParts,
                                           StringBuilder referenceStringAccumulator,
                                           Function<Integer, String> headersGenerator) {

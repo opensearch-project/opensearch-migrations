@@ -1,6 +1,0 @@
-{
-  "operation": "modify-overwrite-beta",
-  "spec": {
-    "uri": "=replace(@(1,uri), 'BBB', '')"
-  }
-}

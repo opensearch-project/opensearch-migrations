@@ -11,7 +11,6 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 
 import java.nio.charset.StandardCharsets;
-import java.util.function.Consumer;
 
 public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandlerAdapter {
     private static final String TRANSFER_ENCODING_CHUNKED_VALUE = "chunked";
@@ -24,12 +23,12 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     MODE streamMode = MODE.CHUNKED;
     int contentBytesReceived;
     CompositeByteBuf bufferedContents;
-    HttpJsonMessageWithFaultablePayload bufferedJsonMessage;
+    HttpJsonMessageWithFaultingPayload bufferedJsonMessage;
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultablePayload) {
-            bufferedJsonMessage = (HttpJsonMessageWithFaultablePayload) msg;
+        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
+            bufferedJsonMessage = (HttpJsonMessageWithFaultingPayload) msg;
             var transferEncoding =
                     bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
             streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE)) ?

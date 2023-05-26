@@ -20,18 +20,16 @@ import java.util.Set;
  *
  */
 @Slf4j
-public class PayloadFaultMap extends AbstractMap<String, Object> {
+public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     public static final String CONTENT_TYPE = "content-type";
     public static final String APPLICATION_JSON = "application/json";
     public static final String INLINED_JSON_BODY_DOCUMENT_KEY = "inlinedJsonBody";
-    private static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE =
-            new TypeReference<LinkedHashMap<String, Object>>(){};
 
     private final boolean isJson;
     private Object onlyValue;
 
-    public PayloadFaultMap(StrictCaseInsensitiveHttpHeadersMap headers) {
+    public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
         isJson = Optional.ofNullable(headers.get(CONTENT_TYPE))
                 .map(list->list.stream()
                         .anyMatch(s->s.startsWith(APPLICATION_JSON))).orElse(false);

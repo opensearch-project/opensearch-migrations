@@ -1,17 +1,12 @@
 package org.opensearch.migrations.transform;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.CharStreams;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
-import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultablePayload;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;

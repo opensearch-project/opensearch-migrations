@@ -5,23 +5,23 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
-import org.checkerframework.checker.units.qual.C;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
+import org.opensearch.migrations.replay.AggregatedTransformedResponse;
+import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 @Slf4j
 public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandlerAdapter {
-    final IPacketToHttpHandler packetReceiver;
+    final IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver;
     // final Boolean value indicates if the handler received a LastHttpContent message
     // TODO - make this threadsafe.  calls may come in on different threads
     CompletableFuture<Boolean> currentFuture;
-    private AtomicReference<CompletableFuture<AggregatedRawResponse>> packetReceiverCompletionFutureRef;
+    private AtomicReference<CompletableFuture<AggregatedTransformedResponse>> packetReceiverCompletionFutureRef;
 
-    public NettySendByteBufsToPacketHandlerHandler(IPacketToHttpHandler packetReceiver) {
+    public NettySendByteBufsToPacketHandlerHandler(IPacketFinalizingConsumer packetReceiver) {
         this.packetReceiver = packetReceiver;
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();
         currentFuture = CompletableFuture.completedFuture(null);
@@ -31,7 +31,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         log.debug("Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
         log.trace("HR: old currentFuture="+currentFuture);
-        CompletableFuture<AggregatedRawResponse> packetReceiverCompletionFuture =
+        CompletableFuture<AggregatedTransformedResponse> packetReceiverCompletionFuture =
                 new CompletableFuture<>();
         if (currentFuture.isDone()) {
             if (currentFuture.isCompletedExceptionally()) {
@@ -39,6 +39,8 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                         packetReceiverCompletionFuture.completeExceptionally(t));
                 packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
             } else if (currentFuture.get() == null) {
+                log.info("The handler responsible for writing data to the server was detached before writing byte " +
+                        "bytes.  Throwing a NoContentException so that the calling context can handle appropriately.");
                 packetReceiverCompletionFutureRef.set(CompletableFuture.failedFuture(new NoContentException()));
             }
             return;
@@ -48,8 +50,8 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
             assert v1 != null :
                     "expected in progress Boolean to be not null since null should signal that work was never started";
             var transformationStatus = v1.booleanValue() ?
-                    AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED :
-                    AggregatedRawResponse.HttpRequestTransformationStatus.ERROR;
+                    AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED :
+                    AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR;
             packetReceiver.finalizeRequest()
                     .whenComplete((v2, t2) -> {
                         if (t1 != null) {
@@ -58,7 +60,9 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                             packetReceiverCompletionFuture.completeExceptionally(t2);
                         } else {
                             packetReceiverCompletionFuture
-                                    .complete(AggregatedRawResponse.addStatusIfPresent(v2, transformationStatus));
+                                    .complete(Optional.ofNullable(v2)
+                                            .map(r->new AggregatedTransformedResponse(r,  transformationStatus))
+                                            .orElse(null));
                         }
                     });
         });
@@ -66,7 +70,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
         super.handlerRemoved(ctx);
     }
 
-    public CompletableFuture<AggregatedRawResponse> getPacketReceiverCompletionFuture() {
+    public CompletableFuture<AggregatedTransformedResponse> getPacketReceiverCompletionFuture() {
         assert packetReceiverCompletionFutureRef.get() != null :
                 "expected close() to have removed the handler and for this to be non-null";
         return packetReceiverCompletionFutureRef.get();

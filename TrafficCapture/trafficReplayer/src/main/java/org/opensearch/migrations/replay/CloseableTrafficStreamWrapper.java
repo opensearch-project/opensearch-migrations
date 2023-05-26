@@ -54,7 +54,7 @@ public class CloseableTrafficStreamWrapper implements Closeable {
     }
 
 
-    public CloseableTrafficStreamWrapper(Closeable underlyingCloseableResource, Stream<TrafficStream> underlyingStream) {
+    private CloseableTrafficStreamWrapper(Closeable underlyingCloseableResource, Stream<TrafficStream> underlyingStream) {
         this.underlyingCloseableResource = underlyingCloseableResource;
         this.underlyingStream = underlyingStream;
     }

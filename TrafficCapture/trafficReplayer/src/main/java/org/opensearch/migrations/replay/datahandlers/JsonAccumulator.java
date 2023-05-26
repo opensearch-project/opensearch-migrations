@@ -14,6 +14,10 @@ import java.util.Optional;
 import java.util.Stack;
 import java.util.stream.Collectors;
 
+/**
+ * Consume data, building the json object tree as it goes.  This returns null until the top-level
+ * object or array has been built, in which case that value will be returned.
+ */
 @Slf4j
 public class JsonAccumulator {
 
