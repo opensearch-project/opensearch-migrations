@@ -58,6 +58,11 @@ public class KafkaPrinter {
         properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        // Required for using SASL auth with MSK public endpoint
+        //properties.setProperty("security.protocol", "SASL_SSL");
+        //properties.setProperty("sasl.mechanism", "AWS_MSK_IAM");
+        //properties.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
+        //properties.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
 
         KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties);
 
@@ -67,7 +72,6 @@ public class KafkaPrinter {
             while (true) {
                 ConsumerRecords<String, byte[]> records =
                         consumer.poll(Duration.ofMillis(100));
-
                 for (ConsumerRecord<String, byte[]> record : records) {
                     System.out.println(record.value().toString());
                 }
