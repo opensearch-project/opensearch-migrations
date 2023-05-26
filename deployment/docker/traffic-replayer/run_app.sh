@@ -4,6 +4,7 @@
 # Traffic Comparator (TC) as connections get setup and restarted
 
 target_endpoint="$1"
+jars=$(ls extracted/*/*/*.jar | tr \\n :)
 
 while true
 do
@@ -23,7 +24,7 @@ do
   # process with the Replayer jar before ultimately printing the produced triples to stdout via tee and sending to TC via netcat
   # Note: Unbuffer has not been verified to actually be effective here. stdbuf was ruled out for its caveat with tee (https://linux.die.net/man/1/stdbuf)
   unbuffer tail -f triples.log | tee /dev/stderr | nc -v localhost 9220 &
-  nc -v -l -p 9210 | java -jar trafficReplayer-uber.jar "$target_endpoint" -o triples.log --insecure
+  nc -v -l -p 9210 | java -cp build/libs/KafkaPrinter.jar:"$jars" org.opensearch.migrations.replay.TrafficReplayer "$target_endpoint" -o triples.log --insecure
 
   rm triple.log
   >&2 echo "Command has encountered error. Restarting now ..."

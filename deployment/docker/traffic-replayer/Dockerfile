@@ -10,7 +10,6 @@ RUN git clone https://github.com/opensearch-project/opensearch-migrations.git
 WORKDIR /opensearch-migrations/TrafficCapture
 
 RUN ./gradlew assemble -p trafficReplayer
-RUN ./gradlew uberJar -p trafficReplayer
 
 
 FROM openjdk:17-jdk-slim
@@ -23,7 +22,7 @@ WORKDIR ./replay-app
 RUN apt-get update && apt-get install -y netcat
 RUN apt-get install -y expect
 
-COPY --from=builder /opensearch-migrations/TrafficCapture/trafficReplayer/build/libs/*.jar .
+COPY --from=builder /opensearch-migrations/TrafficCapture/trafficReplayer/ .
 COPY ./run_app.sh .
 
 CMD ./run_app.sh ${TARGET_CLUSTER_ENDPOINT}

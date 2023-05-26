@@ -67,18 +67,21 @@ jar {
     }
 }
 
-task uberJar(type: Jar) {
-    manifest {
-        attributes 'Main-Class': application.mainClass
-    }
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }
-    archiveBaseName = project.name + "-uber"
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    with jar
-}
-
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+task unzip(type: Copy) {
+    def zipFile = file('build/distributions/trafficReplayer.zip')
+    def outputDir = file("extracted")
+
+    from zipTree(zipFile)
+    into outputDir
+}
+
+task cleanUp(type: Delete) {
+    delete 'extracted'
+}
+
+assemble.finalizedBy(unzip)
+clean.finalizedBy(cleanUp)
