@@ -57,12 +57,6 @@ public class JoltJsonTransformBuilder {
     private static final String SPEC_JSON_KEYNAME = "spec";
 
     @SneakyThrows
-    private List parseSpecListFromTransformResource(String resource) {
-        var jsonObject = loadResourceAsJson("jolt/transformations/"+resource);
-        return (List) jsonObject.get(SPEC_JSON_KEYNAME);
-    }
-
-    @SneakyThrows
     private Map<String, Object> parseSpecOperationFromResource(String resource) {
         return loadResourceAsJson("/jolt/operations/"+resource);
     }
@@ -97,7 +91,7 @@ public class JoltJsonTransformBuilder {
         return addCannedOperation(operation.toString() + ".jolt");
     }
 
-    public JoltJsonTransformBuilder addCannedOperation(String resourceName) {
+    private JoltJsonTransformBuilder addCannedOperation(String resourceName) {
         return addOperationObject(parseSpecOperationFromResource(resourceName));
     }
 

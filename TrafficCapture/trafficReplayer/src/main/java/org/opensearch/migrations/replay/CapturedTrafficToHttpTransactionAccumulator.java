@@ -6,14 +6,42 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+/**
+ * This class consumes TrafficObservation objects, which will be predominated by reads and writes that
+ * were received by some HTTP source.  Reads represent data read by a server from traffic that was
+ * submitted by a client.  Writes will be those packets sent back to the client.
+ *
+ * This class is basically a groupBy operation over a sequence of Observations, where the grouping key
+ * is the id of the TrafficStream that contained the observations.  Recall that a TrafficStream
+ * represents packets that have been read/written to a given socket.  The id represents that connection.
+ *
+ * Today, this class expects traffic to be from HTTP/1.1 or lower.  It will expect well-formed sequences to
+ * have reads, followed by an end of message indicator, followed by writes, which should then be followed
+ * by an end of message indicator.  This pattern may be repeated any number of times for each or any id.
+ * This class expects that ids are unique and that multiple streams will not share the same id AND be
+ * overlapped in time.
+ *
+ * Upon receiving all the packets for a full request, this class will call the first of two callbacks, the
+ * requestReceivedHandler that was passed to the constructor.  A second callback will be called after the
+ * full contents of the source response has been received.  The first callback will ONLY include the
+ * reconstructed source HttpMessageAndTimestamp.  The second callback acts upon the
+ * RequestResponsePacketPair object, which will include the message from the first timestamp as the
+ * requestData field.
+ *
+ * This class needs to do a better job of dealing with edge cases, such as packets/streams being terminated.
+ * It has no notion of time, limiting its ability to terminate and prune transactions whose requests or
+ * responses may not have been completely received.
+ */
 @Slf4j
-public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
+public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<String, TrafficObservation> {
     enum State {
         NOTHING_SENT,
-        RESPONSE_SENT, REQUEST_SENT
+        RESPONSE_SENT,
+        REQUEST_SENT
     }
     public static class Accumulation {
         RequestResponsePacketPair rrPair = new RequestResponsePacketPair();
@@ -32,8 +60,8 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
     private final Consumer<HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
-    public ReplayEngine(Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
-                        Consumer<RequestResponsePacketPair> fullDataHandler) {
+    public CapturedTrafficToHttpTransactionAccumulator(Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
+                                                       Consumer<RequestResponsePacketPair> fullDataHandler) {
         liveStreams = new HashMap<>();
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
@@ -42,8 +70,8 @@ public class ReplayEngine implements BiConsumer<String, TrafficObservation> {
     @Override
     public void accept(String id, TrafficObservation observation) {
         log.error("Stream: " + id + " Consuming observation: " + observation);
-        var pbts = observation.getTs();
-        var timestamp = Instant.ofEpochSecond(pbts.getSeconds(), pbts.getNanos());
+        var timestamp =
+                Optional.of(observation.getTs()).map(t->Instant.ofEpochSecond(t.getSeconds(), t.getNanos())).get();
         if (observation.hasEndOfMessageIndicator()) {
             var accum = liveStreams.get(id);
             if (accum == null) {

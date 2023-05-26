@@ -7,7 +7,7 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
+import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.util.Collections;
@@ -28,12 +28,12 @@ import java.util.Optional;
 @Slf4j
 public class RequestPipelineOrchestrator {
     // Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler
-    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.of(LogLevel.ERROR);
     public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
     private final List<List<Integer>> chunkSizes;
-    final IPacketToHttpHandler packetReceiver;
+    final IPacketFinalizingConsumer packetReceiver;
 
-    public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes, IPacketToHttpHandler packetReceiver) {
+    public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes, IPacketFinalizingConsumer packetReceiver) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
     }
@@ -70,12 +70,12 @@ public class RequestPipelineOrchestrator {
     }
 
     void addContentParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
-        log.warn("Adding handlers to pipeline");
+        log.info("Adding handlers to pipeline");
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
         pipeline.addLast(new HttpContentDecompressor());
         if (transformer != null) {
-            log.warn("Adding JSON handlers to pipeline");
+            log.info("Adding JSON handlers to pipeline");
             //  IN: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) blocks
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
             addLoggingHandler(pipeline, "B");

@@ -2,9 +2,10 @@ package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
+import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -14,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
-public class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
+public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer {
     private final Duration consumeDuration;
     private final AtomicInteger numFinalizations;
     @Getter
@@ -23,7 +24,7 @@ public class TestCapturePacketToHttpHandler implements IPacketToHttpHandler {
     ByteArrayOutputStream byteArrayOutputStream;
 
     public TestCapturePacketToHttpHandler(Duration consumeDuration,
-                                          AggregatedRawResponse dummyAggregatedResponse) {
+                                          @NonNull AggregatedRawResponse dummyAggregatedResponse) {
         this.consumeDuration = consumeDuration;
         this.numFinalizations = new AtomicInteger();
         this.dummyAggregatedResponse = dummyAggregatedResponse;

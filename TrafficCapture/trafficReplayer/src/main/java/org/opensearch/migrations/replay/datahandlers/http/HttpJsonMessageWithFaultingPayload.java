@@ -1,21 +1,21 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
+import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, Object> {
+public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> {
     public final static String METHOD = "method";
     public final static String URI = "URI";
     public final static String PROTOCOL = "protocol";
     public final static String HEADERS = "headers";
     public final static String PAYLOAD = "payload";
 
-    public HttpJsonMessageWithFaultablePayload() {
+    public HttpJsonMessageWithFaultingPayload() {
     }
 
-    public HttpJsonMessageWithFaultablePayload(Map<? extends String, ?> m) {
+    public HttpJsonMessageWithFaultingPayload(Map<? extends String, ?> m) {
         super(m);
     }
 
@@ -48,7 +48,7 @@ public class HttpJsonMessageWithFaultablePayload extends LinkedHashMap<String, O
     public Map<String,Object> payload() {
         return (Map<String,Object>) this.get(PAYLOAD);
     }
-    public void setPayloadFaultMap(PayloadFaultMap value) {
+    public void setPayloadFaultMap(PayloadAccessFaultingMap value) {
         this.put(PAYLOAD, value);
     }
 }

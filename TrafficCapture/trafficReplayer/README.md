@@ -11,8 +11,9 @@ encoded [TrafficStream](../captureProtobufs/src/main/proto/TrafficCaptureStream.
 Currently, these TrafficStream objects are ingested via stdin and are reconstructed into entire traffic channels. This
 involves some buffering for those connections whose contents are divided into a number of TrafficStream objects.
 Read and write observations are extracted from TrafficStream objects into source requests and source responses.
-The [ReplayeEngine](src/main/java/org/opensearch/migrations/replay/ReplayEngine.java) takes full requests (as defined by
-the data, not necessarily by the HTTP format) and sends them to an [IPacketToHttpHandler](
+The [TrafficCaptureToHttpTransactionAccumulator](src/main/java/org/opensearch/migrations/replay/TrafficCaptureToHttpTransactionAccumulator.java)
+takes full requests (as defined by the data, not necessarily by the HTTP format) and sends them to
+an [IPacketToHttpHandler](
 src/main/java/org/opensearch/migrations/replay/datahandlers/IPacketToHttpHandler.java). The packet handler is
 responsible for doing
 any transformation of the request and sending it to the target server. It is also responsible for aggregating the HTTP
@@ -55,9 +56,10 @@ parsing them. If the headers have indicated only a change to the content encodin
 handlers will be added to the pipeline to normalize the payload into a stream and then to repack them as appropriate,
 avoiding the JSON marshalling work.
 
-Since handlers in a netty pipeline don't obviously show the types that they consume and produce or how they fit 
+Since handlers in a netty pipeline don't obviously show the types that they consume and produce or how they fit
 together, the pipeline for the HttpJsonTransformer's EmbeddedChannel is managed through
-(RequestPipelineOrchestrator)[TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/datahandlers/http/RequestPipelineOrchestrator.java],
+(
+RequestPipelineOrchestrator)[TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/datahandlers/http/RequestPipelineOrchestrator.java],
 which has comments throughout it to indicate how data percolates and is converted through the pipeline.
 
 ## Handlers
@@ -77,7 +79,7 @@ target URI.
 
 Transformations are performed via a simple class defined by
 [JsonTransformer](../trafficReplayer/src/main/java/org/opensearch/migrations/transform/JsonTransformer.java). Currently,
-this class uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms that are composed of modular 
-operations that are defined in the [resources](../trafficReplayer/src/main/resources/jolt/operations) associated with 
-the package.  Future work will include adding more JSON transformations and other potential JSON transformation tools 
+this class uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms that are composed of modular
+operations that are defined in the [resources](../trafficReplayer/src/main/resources/jolt/operations) associated with
+the package. Future work will include adding more JSON transformations and other potential JSON transformation tools
 (like [JMESPath](https://jmespath.org/)).
