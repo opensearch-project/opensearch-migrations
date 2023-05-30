@@ -124,10 +124,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         var jsonMsg = new HttpJsonMessageWithFaultingPayload();
         jsonMsg.setUri(request.uri().toString());
         jsonMsg.setMethod(request.method().toString());
-        // TODO - pull the exact HTTP version string from the packets.
-        // This is an example of where netty moves too far away from the source for our needs
-        log.info("TODO: pull the exact HTTP version string from the packets instead of hardcoding it.");
-        jsonMsg.setProtocol("HTTP/1.1");
+        jsonMsg.setProtocol(request.protocolVersion().text());
         var headers = request.headers().entries().stream()
                 .collect(Collectors.groupingBy(kvp -> kvp.getKey(),
                         () -> new StrictCaseInsensitiveHttpHeadersMap(),
