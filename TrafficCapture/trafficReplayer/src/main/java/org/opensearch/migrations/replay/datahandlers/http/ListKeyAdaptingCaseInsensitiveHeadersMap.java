@@ -51,36 +51,11 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
     }
 
     /**
-     * This is effectively just casting the underlying object's entrySet, but I'm not sure how
-     * to indicate that more concisely to Java
+     * This is just casting the underlying object's entrySet.  An old git commit will show this unrolled,
+     * but this should be significantly more efficient.
      */
     @Override
     public Set<Entry<String, Object>> entrySet() {
-//        return new AbstractSet() {
-//            @Override
-//            public Iterator<Entry<String, Object>> iterator() {
-//                return new Iterator<Entry<String, Object>>() {
-//                    Iterator<Entry<String,List<String>>> backingIterator =
-//                            strictHeadersMap.entrySet().iterator();
-//
-//                    @Override
-//                    public boolean hasNext() {
-//                        return backingIterator.hasNext();
-//                    }
-//
-//                    @Override
-//                    public Entry<String, Object> next() {
-//                        var backingEntry = backingIterator.next();
-//                        return backingEntry == null ? null : (Entry) backingEntry;
-//                    }
-//                };
-//            }
-//
-//            @Override
-//            public int size() {
-//                return strictHeadersMap.size();
-//            }
-//        };
         return (Set<Entry<String, Object>>) (Object) strictHeadersMap.entrySet();
     }
 }

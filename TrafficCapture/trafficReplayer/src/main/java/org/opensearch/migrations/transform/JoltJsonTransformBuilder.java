@@ -7,7 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,32 +17,54 @@ import java.util.Map;
 @Slf4j
 public class JoltJsonTransformBuilder {
 
-    public enum CANNED_OPERATIONS {
+    private static String getSubstitutionTemplate(int i) {
+        return "%%SUBSTITION_" + (i+1) + "%%";
+    }
+
+    public enum CANNED_OPERATION {
         ADD_GZIP("addGzip"),
         MAKE_CHUNKED("makeChunked"),
-        ADD_ADMIN_AUTH("addAdminAuth"),
         PASS_THRU("passThru");
 
-        private final String value;
-
-        CANNED_OPERATIONS(String s) {
-            value = s;
+        private final String joltOperationTransformName;
+        CANNED_OPERATION(String s) {
+            joltOperationTransformName = s;
         }
 
         @Override
         public String toString() {
-            return value;
+            return joltOperationTransformName;
+        }
+    }
+
+    private enum OPERATION {
+        ADD_GZIP(CANNED_OPERATION.ADD_GZIP.joltOperationTransformName),
+        MAKE_CHUNKED(CANNED_OPERATION.MAKE_CHUNKED.joltOperationTransformName),
+        PASS_THRU(CANNED_OPERATION.PASS_THRU.joltOperationTransformName),
+        ADD_ADMIN_AUTH("addAdminAuth", 1),
+        HOST_SWITCH("hostSwitch", 1);
+
+        private final String value;
+        private int numberOfTemplateSubstitutions;
+
+        OPERATION(String s, int numberOfTemplateSubstitutions) {
+            this.value = s;
+            this.numberOfTemplateSubstitutions = numberOfTemplateSubstitutions;
+        }
+        OPERATION(String s) {
+            this(s, 0);
+        }
+
+        @Override
+        public String toString() {
+            return "(" + value + "," + numberOfTemplateSubstitutions + ")";
         }
     }
 
     /**
      * Visibility increased for testing
      */
-    static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE =
-            new TypeReference<LinkedHashMap<String, Object>>(){};
-    public static final String RESOURCE_HOST_SWITCH_OPERATION = "hostSwitch.jolt";
-    public static final String ADD_AUTHORIZATION_HEADER_OPERATION = "addAdminAuth.jolt";
-    public static final String RESOURCE_PASS_THRU_OPERATION = "passThru.jolt";
+    static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>() {};
 
     ObjectMapper mapper = new ObjectMapper();
     List<Map<String,Object>> chainedSpec = new ArrayList<>();
@@ -54,45 +78,84 @@ public class JoltJsonTransformBuilder {
             return mapper.readValue(inputStream, TYPE_REFERENCE_FOR_MAP_TYPE);
         }
     }
-    private static final String SPEC_JSON_KEYNAME = "spec";
 
     @SneakyThrows
     private Map<String, Object> parseSpecOperationFromResource(String resource) {
-        return loadResourceAsJson("/jolt/operations/"+resource);
+        return loadResourceAsJson("/jolt/operations/" + resource + ".jolt");
     }
 
-    private Map<String, Object> getHostSwitchOperation(String targetClusterHostname) {
-        var joltTransformTemplate = parseSpecOperationFromResource(RESOURCE_HOST_SWITCH_OPERATION);
-        var specJson = (Map<String, Object>) joltTransformTemplate.get("spec");
-        var headersSpecJson = (Map<String, Object>) specJson.get("headers");
-        headersSpecJson.put("host", targetClusterHostname);
-        return joltTransformTemplate;
+    @SneakyThrows
+    private Map<String, Object> parseSpecOperationFromResourceTemplate(String resource) {
+        return loadResourceAsJson("/jolt/operations/" + resource + ".jolt.template");
     }
 
+    private Object walkAndReplaceAll(Object o, HashMap<String, String> substitutions) {
 
-    public Map<String, Object> getAddAuthorizationOperation(String authorizationHeader) {
-        var joltTransformTemplate = parseSpecOperationFromResource(ADD_AUTHORIZATION_HEADER_OPERATION);
-        var specJson = (Map<String, Object>) joltTransformTemplate.get("spec");
-        var headersSpecJson = (Map<String, Object>) specJson.get("headers");
-        headersSpecJson.put("authorization", authorizationHeader);
-        return joltTransformTemplate;
+        if (o instanceof Map.Entry) {
+            var kvp = (Map.Entry<String,Object>) o;
+            var keyReplacement = substitutions.get(kvp.getKey());
+            if (keyReplacement != null) {
+                return new AbstractMap.SimpleEntry(keyReplacement, walkAndReplaceAll(kvp.getValue(), substitutions));
+            } else {
+                kvp.setValue(walkAndReplaceAll(kvp.getValue(), substitutions));
+                return kvp;
+            }
+        } else if (o instanceof Map) {
+            Map replacement = null;
+            for (var kvp : ((Map<String,Object>) o).entrySet()) {
+                var newKvp = (Map.Entry<String, Object>) walkAndReplaceAll(kvp, substitutions);
+                if (kvp != newKvp) {
+                    if (replacement == null) {
+                        // need to copy the map over
+                        replacement = new LinkedHashMap();
+                        for (var previouslySeenKvp : ((Map<String,Object>) o).entrySet()) {
+                            if (previouslySeenKvp.getKey().equals(kvp.getKey())) {
+                                break;
+                            } else {
+                                replacement.put(previouslySeenKvp.getKey(), previouslySeenKvp.getValue());
+                            }
+                        }
+                    }
+                }
+                if (replacement != null) {
+                    replacement.put(newKvp.getKey(), newKvp.getValue());
+                }
+            }
+            return replacement == null ? o : replacement;
+        } else if (o instanceof String) {
+            var replacement = substitutions.get(o);
+            return replacement == null ? o : replacement;
+        } else if (o.getClass().isArray()) {
+            var arr = (Object[]) o;
+            for (int i = 0; i < arr.length; ++i) {
+                arr[i] = walkAndReplaceAll(arr[i], substitutions);
+            }
+            return arr;
+        } else {
+            throw new RuntimeException("Unexpected node type " + o.getClass());
+        }
     }
 
+    private Map<String, Object> getOperationWithSubstitutions(OPERATION operation, String...substitutions) {
+        assert substitutions.length == operation.numberOfTemplateSubstitutions;
+        var joltTransformTemplate = parseSpecOperationFromResourceTemplate(operation.value);
+        var replacementMap = new HashMap<String, String>();
+        for (int i=0; i<substitutions.length; ++i) {
+            replacementMap.put(getSubstitutionTemplate(i), substitutions[i]);
+        }
+        return (Map<String, Object>) walkAndReplaceAll(joltTransformTemplate, replacementMap);
+    }
 
     public JoltJsonTransformBuilder addHostSwitchOperation(String hostname) {
-        return addOperationObject(getHostSwitchOperation(hostname));
+        return addOperationObject(getOperationWithSubstitutions(OPERATION.HOST_SWITCH, hostname));
     }
 
-    public JoltJsonTransformBuilder addAuthorizationOperation(String hostname) {
-        return addOperationObject(getAddAuthorizationOperation(hostname));
+    public JoltJsonTransformBuilder addAuthorizationOperation(String value) {
+        return addOperationObject(getOperationWithSubstitutions(OPERATION.ADD_ADMIN_AUTH, value));
     }
 
-    public JoltJsonTransformBuilder addCannedOperation(CANNED_OPERATIONS operation) {
-        return addCannedOperation(operation.toString() + ".jolt");
-    }
-
-    private JoltJsonTransformBuilder addCannedOperation(String resourceName) {
-        return addOperationObject(parseSpecOperationFromResource(resourceName));
+    public JoltJsonTransformBuilder addCannedOperation(CANNED_OPERATION operation) {
+        return addOperationObject(parseSpecOperationFromResource(operation.joltOperationTransformName));
     }
 
     public JoltJsonTransformBuilder addOperationObject(Map<String, Object> stringObjectMap) {
@@ -102,7 +165,7 @@ public class JoltJsonTransformBuilder {
 
     public JsonTransformer build() {
         if (chainedSpec.size() == 0) {
-            addCannedOperation(RESOURCE_PASS_THRU_OPERATION);
+            addCannedOperation(CANNED_OPERATION.PASS_THRU);
         }
         return new JoltJsonTransformer((List) chainedSpec);
     }
