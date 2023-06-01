@@ -14,16 +14,24 @@ class Operations:
         pass
 
     @staticmethod
-    def create_document(endpoint, index_name, auth=None):
-        doc_id = '7'
+    def delete_index(endpoint, index_name, auth=None, data=None):
+        response = requests.delete(f'{endpoint}/{index_name}', auth=auth)
+        if response.status_code != 200:
+            print('Failed to delete index')
+            print(response.text)
+        else:
+            print('Deleted index successfully')
+            print(response.text)
+
+    pass
+
+
+    @staticmethod
+    def create_document(endpoint, index_name, doc_id, auth=None):
         document = {
             'title': 'Test Document',
             'content': 'This is a sample document for testing OpenSearch.'
         }
-        url = f'{endpoint}/{index_name}/_doc/{doc_id}'
-        headers = {'Content-Type': 'application/json'}
-
-        # Create the document
         url = f'{endpoint}/{index_name}/_doc/{doc_id}'
         headers = {'Content-Type': 'application/json'}
 
@@ -44,11 +52,13 @@ def main():
     username = '*'  # Enter master username and password
     password = '*'
     auth = (username, password)
-    endpoint = '*:443'  # Replace * with domain endpoint
+    endpoint = '*'   # Replace * with domain endpoint
     index = 'my_index'
+    doc_id = '7'
 
     Operations.create_index(endpoint, index, auth)
-    Operations.create_document(endpoint, index, auth)
+    Operations.create_document(endpoint, index, doc_id, auth)
+    Operations.delete_index(endpoint, index, auth)
 
 
 if __name__ == "__main__":
