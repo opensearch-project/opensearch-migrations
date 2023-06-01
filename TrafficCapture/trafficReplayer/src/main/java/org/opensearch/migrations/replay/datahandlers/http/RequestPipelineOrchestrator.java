@@ -27,8 +27,11 @@ import java.util.Optional;
  */
 @Slf4j
 public class RequestPipelineOrchestrator {
-    // Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler
-    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.of(LogLevel.ERROR);
+    /**
+     * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
+     * Set this to Optional.empty() to disable intra-handler logging.
+     */
+    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
     public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer packetReceiver;
@@ -70,7 +73,7 @@ public class RequestPipelineOrchestrator {
     }
 
     void addContentParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
-        log.info("Adding handlers to pipeline");
+        log.info("Adding content parsing handlers to pipeline");
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
         pipeline.addLast(new HttpContentDecompressor());

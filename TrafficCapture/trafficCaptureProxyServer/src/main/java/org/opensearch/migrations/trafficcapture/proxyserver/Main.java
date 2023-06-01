@@ -85,7 +85,7 @@ public class Main {
         @Parameter(required = true,
                 names = {"--listenPort"},
                 arity = 1,
-                description = "Port of the server that the proxy is capturing traffic for.")
+                description = "Port of that this process should listen on.")
         int frontsidePort = 0;
     }
 
@@ -94,6 +94,7 @@ public class Main {
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);
+            // Exactly one these 4 options are required.  See that exactly one is set by summing up their presence
             if (Stream.of(p.traceDirectory, p.kafkaPropertiesFile, p.kafkaConnection, (p.noCapture?"":null))
                     .mapToInt(s->s!=null?1:0).sum() != 1) {
                 throw new ParameterException("Expected exactly one of '--traceDirectory', '--kafkaConfigFile', " +

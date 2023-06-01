@@ -7,9 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.AbstractMap;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -85,65 +84,17 @@ public class JoltJsonTransformBuilder {
     }
 
     @SneakyThrows
-    private Map<String, Object> parseSpecOperationFromResourceTemplate(String resource) {
-        return loadResourceAsJson("/jolt/operations/" + resource + ".jolt.template");
-    }
-
-    private Object walkAndReplaceAll(Object o, HashMap<String, String> substitutions) {
-
-        if (o instanceof Map.Entry) {
-            var kvp = (Map.Entry<String,Object>) o;
-            var keyReplacement = substitutions.get(kvp.getKey());
-            if (keyReplacement != null) {
-                return new AbstractMap.SimpleEntry(keyReplacement, walkAndReplaceAll(kvp.getValue(), substitutions));
-            } else {
-                kvp.setValue(walkAndReplaceAll(kvp.getValue(), substitutions));
-                return kvp;
-            }
-        } else if (o instanceof Map) {
-            Map replacement = null;
-            for (var kvp : ((Map<String,Object>) o).entrySet()) {
-                var newKvp = (Map.Entry<String, Object>) walkAndReplaceAll(kvp, substitutions);
-                if (kvp != newKvp) {
-                    if (replacement == null) {
-                        // need to copy the map over
-                        replacement = new LinkedHashMap();
-                        for (var previouslySeenKvp : ((Map<String,Object>) o).entrySet()) {
-                            if (previouslySeenKvp.getKey().equals(kvp.getKey())) {
-                                break;
-                            } else {
-                                replacement.put(previouslySeenKvp.getKey(), previouslySeenKvp.getValue());
-                            }
-                        }
-                    }
-                }
-                if (replacement != null) {
-                    replacement.put(newKvp.getKey(), newKvp.getValue());
-                }
-            }
-            return replacement == null ? o : replacement;
-        } else if (o instanceof String) {
-            var replacement = substitutions.get(o);
-            return replacement == null ? o : replacement;
-        } else if (o.getClass().isArray()) {
-            var arr = (Object[]) o;
-            for (int i = 0; i < arr.length; ++i) {
-                arr[i] = walkAndReplaceAll(arr[i], substitutions);
-            }
-            return arr;
-        } else {
-            throw new RuntimeException("Unexpected node type " + o.getClass());
-        }
-    }
-
     private Map<String, Object> getOperationWithSubstitutions(OPERATION operation, String...substitutions) {
+        var path = "/jolt/operations/" + operation.value + ".jolt.template";
         assert substitutions.length == operation.numberOfTemplateSubstitutions;
-        var joltTransformTemplate = parseSpecOperationFromResourceTemplate(operation.value);
-        var replacementMap = new HashMap<String, String>();
-        for (int i=0; i<substitutions.length; ++i) {
-            replacementMap.put(getSubstitutionTemplate(i), substitutions[i]);
+        try (InputStream inputStream = JoltJsonTransformBuilder.class.getResourceAsStream(path)) {
+            var contentBytes = inputStream.readAllBytes();
+            var contentsStr = new String(contentBytes, StandardCharsets.UTF_8);
+            for (int i=0; i<substitutions.length; ++i) {
+                contentsStr = contentsStr.replaceAll(getSubstitutionTemplate(i), substitutions[i]);
+            }
+            return mapper.readValue(contentsStr, TYPE_REFERENCE_FOR_MAP_TYPE);
         }
-        return (Map<String, Object>) walkAndReplaceAll(joltTransformTemplate, replacementMap);
     }
 
     public JoltJsonTransformBuilder addHostSwitchOperation(String hostname) {

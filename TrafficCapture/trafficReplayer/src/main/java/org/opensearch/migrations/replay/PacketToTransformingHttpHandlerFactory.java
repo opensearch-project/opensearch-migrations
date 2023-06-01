@@ -23,7 +23,7 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
         this.sslContext = sslContext;
     }
 
-    IPacketFinalizingConsumer createNettyHandler() {
+    NettyPacketToHttpConsumer createNettyHandler() {
         return new NettyPacketToHttpConsumer(eventLoopGroup, serverUri, sslContext);
     }
 

@@ -113,8 +113,20 @@ public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<S
         }
     }
 
+    // This function manages the lifecycles of the objects in the liveStreams map.
+    // It will create a new Accumulation object when the first read of a request is
+    // discovered, which may be for the very first observation of a TrafficStream
+    // or it could be for the first read observation after the last response was
+    // received.  For the latter case, this will close out the old accumulation,
+    // recycling it from the liveStream map and into the response callback (by
+    // invoking the callback).
     private Accumulation getAccumulationForFirstRequestObservation(String id) {
         var accum = liveStreams.computeIfAbsent(id, k -> new Accumulation());
+        // If this was brand new or if we've already closed the item out and pushed
+        // the state to RESPONSE_SENT, we don't need to care about triggering the
+        // callback.  We only need to worry about this if we have yet to send the
+        // RESPONSE.  Notice that handleEndOfMessage will bump the state itself
+        // on the (soon to be recycled) accum object.
         if (accum.state == State.REQUEST_SENT) {
             handleEndOfMessage(id, accum);
             accum = new Accumulation();

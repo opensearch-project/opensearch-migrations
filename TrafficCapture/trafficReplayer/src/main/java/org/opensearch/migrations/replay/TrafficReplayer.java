@@ -144,7 +144,7 @@ public class TrafficReplayer {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
                 try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntriesFromFileOrStdin(params.inputFilename)) {
                     tr.runReplayWithIOStreams(closeableStream.stream(), bufferedOutputStream);
-                    log.info("beginning to close output stream");
+                    log.info("reached the end of the ingestion output stream");
                 }
             }
         }
