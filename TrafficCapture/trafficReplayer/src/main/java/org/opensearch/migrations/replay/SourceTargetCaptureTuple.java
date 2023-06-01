@@ -3,48 +3,42 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 import org.json.HTTP;
 import org.json.JSONObject;
-import org.opensearch.migrations.replay.TrafficReplayer.RequestResponsePacketPair;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.List;
 import java.util.Scanner;
-import java.util.stream.Collectors;
 
 @Slf4j
-public class RequestResponseResponseTriple {
+public class SourceTargetCaptureTuple {
     private RequestResponsePacketPair sourcePair;
     private List<byte[]> shadowResponseData;
     Duration shadowResponseDuration;
 
-    public RequestResponseResponseTriple(RequestResponsePacketPair sourcePair,
-                                         List<byte[]> shadowResponseData,
-                                         Duration shadowResponseDuration) {
+    public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
+                                    List<byte[]> shadowResponseData,
+                                    Duration shadowResponseDuration) {
         this.sourcePair = sourcePair;
         this.shadowResponseData = shadowResponseData;
         this.shadowResponseDuration = shadowResponseDuration;
     }
 
-    public static class TripleToFileWriter {
+    public static class TupleToFileWriter {
         OutputStream outputStream;
 
         private JSONObject jsonFromHttpData(List<byte[]> data) throws IOException {
 
-            SequenceInputStream collatedStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).collect(Collectors.toList())));
+            SequenceInputStream collatedStream = ReplayUtils.byteArraysToInputStream(data);
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
             String head = scanner.next();
             int header_length = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
             // SequenceInputStreams cannot be reset, so it's recreated from the original data.
-            SequenceInputStream bodyStream = new SequenceInputStream(Collections.enumeration(data.stream().map(b -> new ByteArrayInputStream(b)).collect(Collectors.toList())));
+            SequenceInputStream bodyStream = ReplayUtils.byteArraysToInputStream(data);
             bodyStream.skip(header_length);
 
             // There are several limitations introduced by using the HTTP.toJSONObject call.
@@ -65,7 +59,7 @@ public class RequestResponseResponseTriple {
             return message;
         }
 
-        private JSONObject toJSONObject(RequestResponseResponseTriple triple) throws IOException {
+        private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData));
             log.warn("TODO: These durations are not measuring the same values!");
@@ -77,7 +71,7 @@ public class RequestResponseResponseTriple {
             return meta;
         }
 
-        public TripleToFileWriter(OutputStream outputStream){
+        public TupleToFileWriter(OutputStream outputStream){
             this.outputStream = outputStream;
         }
 
@@ -115,7 +109,7 @@ public class RequestResponseResponseTriple {
          *
          * @param  triple  the RequestResponseResponseTriple object to be converted into json and written to the stream.
          */
-        public void writeJSON(RequestResponseResponseTriple triple) throws IOException {
+        public void writeJSON(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject jsonObject = toJSONObject(triple);
 
             outputStream.write(jsonObject.toString().getBytes(StandardCharsets.UTF_8));
@@ -123,4 +117,5 @@ public class RequestResponseResponseTriple {
             outputStream.flush();
         }
     }
+
 }

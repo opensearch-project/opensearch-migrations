@@ -12,34 +12,34 @@ option java_outer_classname = "TrafficCapture";
 //    bytes v6 = 2;
 //  }
 //}
-message Bind {
+message BindObservation {
   //InetAddr addr = 1;
 }
-message Connect {}
-message Read {
+message ConnectObservation {}
+message ReadObservation {
   bytes data = 1;
 }
-message ReadSegment {
+message ReadSegmentObservation {
   int32 count = 1;
   bytes data = 2;
 }
-message ProxyFinishesForwardingRequest {
+message ProxyFinishesForwardingRequestObservation {
   bool timedOut = 1;
 }
-message Write {
+message WriteObservation {
   bytes data = 1;
 }
-message WriteSegment {
+message WriteSegmentObservation {
   int32 count = 1;
   bytes data = 2;
 }
-message Close {}
-message Disconnect {}
-message Exception {
+message CloseObservation {}
+message DisconnectObservation {}
+message ConnectionExceptionObservation {
   string message = 1;
 }
-message EndOfSegments {}
-message EndOfMessageIndicator {
+message EndOfSegmentsIndication {}
+message EndOfMessageIndication {
   optional int32 firstLineByteLength = 1;
   optional int32 headersByteLength = 2;
 }
@@ -47,22 +47,22 @@ message EndOfMessageIndicator {
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
   oneof Capture {
-    Bind bind = 2;
-    Connect connect = 3;
-    Read read = 4;
-    ReadSegment readSegment = 5;
-    ProxyFinishesForwardingRequest requestReleasedDownstream = 6;
-    Write write = 8;
-    WriteSegment writeSegment = 9;
-    Disconnect disconnect = 10;
-    Close close = 11;
-    Exception exception = 12;
+    BindObservation bind = 2;
+    ConnectObservation connect = 3;
+    ReadObservation read = 4;
+    ReadSegmentObservation readSegment = 5;
+    ProxyFinishesForwardingRequestObservation requestReleasedDownstream = 6;
+    WriteObservation write = 8;
+    WriteSegmentObservation writeSegment = 9;
+    DisconnectObservation disconnect = 10;
+    CloseObservation close = 11;
+    ConnectionExceptionObservation exception = 12;
 
     // This seems a bit easier than adding a count of the number of segments that will be needed,
     // especially since the first segment might be smaller due to other observations already
     // having been committed to the stream.
-    EndOfSegments segmentEnd = 14;
-    EndOfMessageIndicator endOfMessageIndicator = 15;
+    EndOfSegmentsIndication segmentEnd = 14;
+    EndOfMessageIndication endOfMessageIndicator = 15;
   }
 }
 

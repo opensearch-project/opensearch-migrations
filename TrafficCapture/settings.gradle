@@ -15,6 +15,5 @@ include('captureOffloader',
         'trafficCaptureProxyServer',
         'trafficCaptureProxyServerTest',
         'trafficReplayer',
-        //'plugins:elasticsearch:loggable-transport-netty4',
-        //'plugins:opensearch:loggable-transport-netty4'
+        'captureEndToEndDocker'
 )

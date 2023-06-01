@@ -3,46 +3,40 @@ package org.opensearch.migrations.replay;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
-import com.google.common.io.CharSource;
-import com.google.common.primitives.Bytes;
 import lombok.extern.log4j.Log4j2;
-import org.opensearch.migrations.trafficcapture.protos.Read;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.transform.CompositeJsonTransformer;
+import org.opensearch.migrations.transform.JoltJsonTransformer;
+import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
 
-import javax.annotation.Nullable;
 import java.io.BufferedOutputStream;
-import java.io.DataInputStream;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.Reader;
 import java.net.URI;
-import java.nio.charset.Charset;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Log4j2
 public class TrafficReplayer {
 
-    private final NettyPacketToHttpHandlerFactory packetHandlerFactory;
+    private final PacketToTransformingProxyHandlerFactory packetHandlerFactory;
+    private Duration timeout = Duration.ofSeconds(20);
 
-    public TrafficReplayer(URI serverUri)
-    {
-        packetHandlerFactory = new NettyPacketToHttpHandlerFactory(serverUri);
+    public static JsonTransformer buildDefaultJsonTransformer(String newHostName) {
+        var joltJsonTransformer = JoltJsonTransformer.newBuilder()
+                .addHostSwitchOperation(newHostName)
+                .build();
+        return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer());
+    }
+
+    public TrafficReplayer(URI serverUri) {
+        var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost());
+        packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer);
     }
 
 
@@ -77,25 +71,6 @@ public class TrafficReplayer {
         }
     }
 
-    public static CloseableTrafficStreamWrapper getLogEntriesFromInputStream(InputStream is) throws IOException {
-        return CloseableTrafficStreamWrapper.generateTrafficStreamFromInputStream(is);
-    }
-
-    public static CloseableTrafficStreamWrapper getLogEntriesFromFile(String filename) throws IOException {
-        FileInputStream fis = new FileInputStream(filename);
-        try {
-            return getLogEntriesFromInputStream(fis);
-        } catch (Exception e) {
-            fis.close();
-            throw e;
-        }
-    }
-
-    public static CloseableTrafficStreamWrapper getLogEntriesFromFileOrStdin(String filename) throws IOException {
-        return filename == null ? getLogEntriesFromInputStream(System.in) :
-                getLogEntriesFromFile(filename);
-    }
-
     public static void main(String[] args) throws IOException, InterruptedException {
         var params = parseArgs(args);
         URI uri;
@@ -113,7 +88,7 @@ public class TrafficReplayer {
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (var closeableStream = getLogEntriesFromFileOrStdin(params.inputFilename)) {
+                try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntriesFromFileOrStdin(params.inputFilename)) {
                     runReplayWithIOStreams(tr, closeableStream.stream(), bufferedOutputStream);
                 }
             }
@@ -123,7 +98,7 @@ public class TrafficReplayer {
     private static void runReplayWithIOStreams(TrafficReplayer tr, Stream<TrafficStream> trafficChunkStream,
                                                BufferedOutputStream bufferedOutputStream)
             throws IOException, InterruptedException {
-        var tripleWriter = new RequestResponseResponseTriple.TripleToFileWriter(bufferedOutputStream);
+        var tripleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
                 triple -> {
                     try {
@@ -138,44 +113,32 @@ public class TrafficReplayer {
         tr.runReplay(trafficChunkStream, replayEngine);
     }
 
-    private static String aggregateByteStreamToString(Stream<byte[]> bStream) {
-        return new String(Bytes.concat(bStream.toArray(byte[][]::new)), Charset.defaultCharset());
-    }
-
-    static int nReceived = 0;
     private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
-                                       Consumer<RequestResponseResponseTriple> onResponseReceivedCallback) {
+                                       Consumer<SourceTargetCaptureTuple> onResponseReceivedCallback)
+    {
         try {
             log.debug("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
             for (var packetData : requestResponsePacketPair.requestData) {
                 packetHandler.consumeBytes(packetData);
             }
-            AtomicBoolean waiter = new AtomicBoolean(true);
-            packetHandler.finalizeRequest(summary-> {
-                log.info("Summary(#"+(nReceived++)+")="+summary);
-                RequestResponseResponseTriple requestResponseTriple = new RequestResponseResponseTriple(requestResponsePacketPair,
-                        summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
-                        summary.getResponseDuration()
-                );
-
+            var cf = packetHandler.finalizeRequest();
+            cf.whenComplete((summary, t) -> {
+                SourceTargetCaptureTuple requestResponseTriple;
+                if (t != null) {
+                    log.error("Got exception in CompletableFuture callback: ", t);
+                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
+                            new ArrayList<>(), Duration.ZERO
+                    );
+                } else {
+                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
+                            summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                            summary.getResponseDuration()
+                    );
+                }
                 onResponseReceivedCallback.accept(requestResponseTriple);
-
-                synchronized (waiter) {
-                    waiter.set(false);
-                    waiter.notify();
-                }
             });
-            synchronized (waiter) {
-                if (waiter.get()) {
-                    waiter.wait(20 * 1000);
-                }
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } catch (IPacketToHttpHandler.InvalidHttpStateException e) {
-            throw new RuntimeException(e);
-        } catch (InterruptedException e) {
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
@@ -190,105 +153,4 @@ public class TrafficReplayer {
         }
     }
 
-    public static class RequestResponsePacketPair {
-        Instant firstTimeStampForRequest;
-        Instant lastTimeStampForRequest;
-        Instant firstTimeStampForResponse;
-        Instant lastTimeStampForResponse;
-
-        final ArrayList<byte[]> requestData;
-        final ArrayList<byte[]> responseData;
-
-        public Duration getTotalRequestDuration() {
-            return Duration.between(firstTimeStampForRequest, lastTimeStampForRequest);
-        }
-        public Duration getTotalResponseDuration() {
-            return Duration.between(firstTimeStampForResponse, lastTimeStampForResponse);
-        }
-
-        public RequestResponsePacketPair() {
-            this.requestData = new ArrayList<>();
-            this.responseData = new ArrayList<>();
-        }
-
-        public void addRequestData(Instant packetTimeStamp, byte[] data) {
-            log.trace(()->(this+" Adding request data: "+new String(data, Charset.defaultCharset())));
-            requestData.add(data);
-            if (firstTimeStampForRequest == null) {
-                firstTimeStampForRequest = packetTimeStamp;
-            }
-            lastTimeStampForRequest = packetTimeStamp;
-        }
-        public void addResponseData(Instant packetTimeStamp, byte[] data) {
-            log.trace(()->(this+" Adding response data (len="+responseData.size()+"): "+
-                    new String(data, Charset.defaultCharset())));
-            responseData.add(data);
-            lastTimeStampForResponse = packetTimeStamp;
-        }
-
-        public Stream<byte[]> getRequestDataStream() {
-            return requestData.stream();
-        }
-
-        public Stream<byte[]> getResponseDataStream() {
-            return responseData.stream();
-        }
-    }
-
-    public static class ReplayEngine implements BiConsumer<String, TrafficObservation> {
-        private final Map<String, RequestResponsePacketPair> liveStreams;
-        private final Consumer<RequestResponsePacketPair> fullDataHandler;
-
-        public ReplayEngine(Consumer<RequestResponsePacketPair> fullDataHandler) {
-            liveStreams = new HashMap<>();
-            this.fullDataHandler = fullDataHandler;
-        }
-
-        @Override
-        public void accept(String id, TrafficObservation observation) {
-            boolean updateFirstResponseTimestamp = false;
-            RequestResponsePacketPair runningList = null;
-            var pbts = observation.getTs();
-            var timestamp = Instant.ofEpochSecond(pbts.getSeconds(), pbts.getNanos());
-            if (observation.hasEndOfMessageIndicator()) {
-                publishAndClear(id);
-            } else if (observation.hasRead()) {
-                runningList =
-                        liveStreams.putIfAbsent(id, new RequestResponsePacketPair());
-                if (runningList==null) {
-                    runningList = liveStreams.get(id);
-                    // TODO - eliminate the byte[] and use the underlying nio buffer
-                    runningList.addRequestData(timestamp, observation.getRead().getData().toByteArray());
-                }
-            } else if (observation.hasReadSegment()) {
-                throw new RuntimeException("Not implemented yet.");
-            } else if (observation.hasWrite()) {
-                updateFirstResponseTimestamp = true;
-                runningList = liveStreams.get(id);
-                if (runningList == null) {
-                    throw new RuntimeException("Apparent out of order exception - " +
-                            "found a purported write to a socket before a read!");
-                }
-                runningList.addResponseData(timestamp, observation.getWrite().toByteArray());
-            } else if (observation.hasWriteSegment()) {
-                updateFirstResponseTimestamp = true;
-                throw new RuntimeException("Not implemented yet.");
-            } else if (observation.hasRequestReleasedDownstream()) {
-                updateFirstResponseTimestamp = true;
-            }
-            if (updateFirstResponseTimestamp && runningList != null) {
-                if (runningList.firstTimeStampForResponse == null) {
-                    runningList.firstTimeStampForResponse = timestamp;
-                }
-            }
-        }
-
-        private void publishAndClear(String id) {
-            var priorBuffers = liveStreams.get(id);
-            if (priorBuffers != null) {
-                fullDataHandler.accept(priorBuffers);
-                liveStreams.remove(id);
-            }
-        }
-    }
 }

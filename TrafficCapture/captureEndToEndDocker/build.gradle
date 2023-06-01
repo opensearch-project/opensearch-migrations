@@ -1,0 +1,94 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id "com.avast.gradle.docker-compose" version "0.16.12"
+    id "com.bmuschko.docker-java-application" version "9.3.1"
+}
+
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+
+dependencies {
+    implementation project(':trafficCaptureProxyServer')
+    implementation project(':trafficReplayer')
+}
+
+
+def containerServices = [
+        "trafficCaptureProxyServer": "capture_proxy",
+        "trafficReplayer": "traffic_replayer"
+]
+containerServices.each { projectName, dockerImageName ->
+    def dockerBuildDir = "${project}/docker/${projectName}"
+    def artifactsDir = "${dockerBuildDir}/jars";
+    task("copyArtifact_${projectName}", type: Copy) {
+        dependsOn ":${projectName}:build"
+        dependsOn ":${projectName}:jar"
+        from { project(":${projectName}").configurations.findByName("runtimeClasspath").files }
+        from { project(":${projectName}").tasks.getByName('jar') }
+        into artifactsDir
+        include "*.jar"
+        duplicatesStrategy = DuplicatesStrategy.WARN
+    }
+
+    task "createDockerfile_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.Dockerfile) {
+        dependsOn "copyArtifact_${projectName}"
+        destFile = project.file("${dockerBuildDir}/Dockerfile")
+        from 'openjdk:11-jre'
+        copyFile("jars", "/jars")
+        // can't set the environment variable from the runtimeClasspath because the Dockerfile is
+        // constructed in the configuration phase and the classpath won't be realized until the
+        // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
+        // and it's simplest to pack that up into a helper script.
+        runCommand("echo \"java -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
+        runCommand("chmod +x /runJavaWithClasspath.sh")
+        // container stay-alive
+        defaultCommand('tail', '-f', '/dev/null')
+        //defaultCommand('/runJavaWithClasspath.sh', '...')
+    }
+
+    // Create a Docker image for the project
+    task "dockerBuildImage_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.DockerBuildImage) {
+        dependsOn "createDockerfile_${projectName}"
+        inputDir = project.file("${dockerBuildDir}")
+        images.add("migrations/${dockerImageName}:latest")
+    }
+//
+//    docker {
+//        dependsOn "copyArtifact${projectName}"
+//        javaApplication {
+//            baseImage = 'openjdk:11-jre'
+//            maintainer = '"OpenSearch Migrations"'
+//            tags = ["project$proj:latest"]
+//            jvmArgs = ['-Xmx512m']
+//            applicationName = "${projectName}"
+//            applicationJar = file("${projectDir}/artifacts${projectName}/project${projectName}.jar")
+//            // other settings as needed...
+//        }
+//    }
+
+
+//    task("buildImage_${projectName}", type: DockerBuildImage) {
+//        dependsOn "copyArtifact${projectName}"
+//        group = 'docker'
+//
+//        javaApplication {
+//            maintainer = 'OpenSearch Migrations'
+//            tags = ['latest']
+////            jvmArgs = ['-Xmx512m', '-Xms512m']
+////            args = ['arg1', 'arg2']
+//        }
+//        inputDir = file("src/main/docker/${projectName}/")
+//        dockerFile = file("src/main/docker/${projectName}/Dockerfile")
+//        images.add("migrations/${dockerImageName}:latest")
+//    }
+}
+
+dockerCompose {
+    useComposeFiles.add("src/main/docker/docker-compose.yml")
+}
+
+task buildAllDockerImages {
+    dependsOn dockerBuildImage_trafficReplayer
+    dependsOn dockerBuildImage_trafficCaptureProxyServer
+}
+
+tasks.getByName('composeUp').dependsOn(tasks.getByName('buildAllDockerImages'))
