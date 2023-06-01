@@ -47,6 +47,13 @@ public class TrafficReplayer {
     }
 
     public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
+            throws SSLException {
+        this(serverUri, authorizationHeader, allowInsecureConnections, 
+                buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader));
+    }
+    
+    public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections,
+                           JsonTransformer jsonTransformer)
             throws SSLException
     {
         if (serverUri.getPort() < 0) {
@@ -58,7 +65,6 @@ public class TrafficReplayer {
         if (serverUri.getScheme() == null) {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
-        var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader);
         packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer,
                 loadSslContext(serverUri, allowInsecureConnections));
     }
@@ -113,6 +119,7 @@ public class TrafficReplayer {
             System.err.println(e.getMessage());
             System.err.println("Got args: "+ String.join("; ", args));
             jCommander.usage();
+            System.exit(2);
             return null;
         }
     }
@@ -126,7 +133,7 @@ public class TrafficReplayer {
         } catch (Exception e) {
             System.err.println("Exception parsing "+params.targetUriString);
             System.err.println(e.getMessage());
-            System.exit(2);
+            System.exit(3);
             return;
         }
 
