@@ -64,7 +64,7 @@ services:
       - "10001:10001"
     depends_on:
       - opensearchtarget
-    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --insecure"
+    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value \"Basic YWRtaW46YWRtaW4=\" --insecure"
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:latest'

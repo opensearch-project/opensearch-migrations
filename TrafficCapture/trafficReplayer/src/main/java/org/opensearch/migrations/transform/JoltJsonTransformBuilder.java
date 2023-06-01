@@ -39,7 +39,7 @@ public class JoltJsonTransformBuilder {
     static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE =
             new TypeReference<LinkedHashMap<String, Object>>(){};
     public static final String RESOURCE_HOST_SWITCH_OPERATION = "hostSwitch.jolt";
-    public static final String ADD_ADMIN_AUTH_OPERATION = "addAdminAuth.jolt";
+    public static final String ADD_AUTHORIZATION_HEADER_OPERATION = "addAdminAuth.jolt";
     public static final String RESOURCE_PASS_THRU_OPERATION = "passThru.jolt";
 
     ObjectMapper mapper = new ObjectMapper();
@@ -68,15 +68,29 @@ public class JoltJsonTransformBuilder {
     }
 
     private Map<String, Object> getHostSwitchOperation(String targetClusterHostname) {
-        var jsonHostSwitchTemplateJson = parseSpecOperationFromResource(RESOURCE_HOST_SWITCH_OPERATION);
-        var specJson = (Map<String, Object>) jsonHostSwitchTemplateJson.get("spec");
+        var joltTransformTemplate = parseSpecOperationFromResource(RESOURCE_HOST_SWITCH_OPERATION);
+        var specJson = (Map<String, Object>) joltTransformTemplate.get("spec");
         var headersSpecJson = (Map<String, Object>) specJson.get("headers");
         headersSpecJson.put("host", targetClusterHostname);
-        return jsonHostSwitchTemplateJson;
+        return joltTransformTemplate;
     }
 
+
+    public Map<String, Object> getAddAuthorizationOperation(String authorizationHeader) {
+        var joltTransformTemplate = parseSpecOperationFromResource(ADD_AUTHORIZATION_HEADER_OPERATION);
+        var specJson = (Map<String, Object>) joltTransformTemplate.get("spec");
+        var headersSpecJson = (Map<String, Object>) specJson.get("headers");
+        headersSpecJson.put("authorization", authorizationHeader);
+        return joltTransformTemplate;
+    }
+
+
     public JoltJsonTransformBuilder addHostSwitchOperation(String hostname) {
-         return addOperationObject(getHostSwitchOperation(hostname));
+        return addOperationObject(getHostSwitchOperation(hostname));
+    }
+
+    public JoltJsonTransformBuilder addAuthorizationOperation(String hostname) {
+        return addOperationObject(getAddAuthorizationOperation(hostname));
     }
 
     public JoltJsonTransformBuilder addCannedOperation(CANNED_OPERATIONS operation) {

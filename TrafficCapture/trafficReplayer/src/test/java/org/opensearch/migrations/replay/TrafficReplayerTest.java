@@ -102,7 +102,7 @@ class TrafficReplayerTest {
 
     @Test
     public void testReader() throws IOException, URISyntaxException, InterruptedException {
-        var tr = new TrafficReplayer(new URI("http://localhost:9200"), false);
+        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         ReplayEngine re = new ReplayEngine(request -> {
             var bytesList = request.stream().collect(Collectors.toList());

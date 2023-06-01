@@ -43,7 +43,7 @@ class JsonTransformerTest {
         final String TEST_DOCUMENT = "{\"Hello\":\"world\"}";
         var documentJson = parseStringAsJson(TEST_DOCUMENT);
         var transformer = JoltJsonTransformer.newBuilder()
-                .addCannedOperation("passThru.jolt")
+                .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.PASS_THRU)
                 .build();
         var transformedDocument = transformer.transformJson(documentJson);
         var finalOutputStr = emitOrderedJson(transformedDocument);

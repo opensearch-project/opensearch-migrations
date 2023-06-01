@@ -79,14 +79,14 @@ public class HeaderTransformerTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(12, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformer(
-                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME), testPacketCapture);
+                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, "Basic YWRtaW46YWRtaW4="),  testPacketCapture);
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
                         "content-type: application/json\n" +
                         "content-length: " + contentLength + "\n" +
-                        "Authorization: Basic YWRtaW46YWRtaW4=\n");
+                        "authorization: Basic YWRtaW46YWRtaW4=\n");
     }
 
     /**
@@ -101,9 +101,8 @@ public class HeaderTransformerTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(12, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformer(
-                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME), testPacketCapture);
 
-
+        TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, null), testPacketCapture);
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)
