@@ -20,7 +20,7 @@ public class TypeMappingsExcisionTest {
     static ObjectMapper objectMapper = new ObjectMapper();
 
 
-    static InputStream getTypeMappingResourceStream(String resourceName) {
+    static InputStream getInputStreamForTypeMappingResource(String resourceName) {
         return TypeMappingsExcisionTest.class.getResourceAsStream("/sampleJsonDocuments/typeMappings/" +
                 resourceName);
     }
@@ -45,7 +45,7 @@ public class TypeMappingsExcisionTest {
 
     private static Object parseJsonFromResourceName(String resourceName) throws Exception {
         var jsonAccumulator = new JsonAccumulator();
-        try (var resourceStream = getTypeMappingResourceStream(resourceName);
+        try (var resourceStream = getInputStreamForTypeMappingResource(resourceName);
              var isr = new InputStreamReader(resourceStream, StandardCharsets.UTF_8)) {
             var expectedBytes = CharStreams.toString(isr).getBytes(StandardCharsets.UTF_8);
             return jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
