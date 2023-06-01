@@ -22,6 +22,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * This class does the remaining serialization of the contents coming into it into ByteBuf
+ * objects.  This handler may be called in cases where both the content needed to be
+ * reformatted OR the content is being passed through directly.
+ *
+ * ByteBufs that arrive here (because an earlier pipeline did a conversion) are simply passed
+ * to the next handler in the pipeline.  However, the headers that are remaining in the
+ * HttpJsonMessage and the HttpContents that may be coming in untouched from the original
+ * reconstructed request are converted to ByteBufs.  There is an attempt to match ByteBuf
+ * sizes to those that were found in the original request, using a simple policy to use the
+ * same sizes until we run out of data.  If we have more data than in the original request
+ * (headers), the number of additional ByteBuf packets and their size is an implementation
+ * detail.
+ */
 @Slf4j
 public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
     // TODO: Eventually, we can count up the size of all of the entries in the headers - but for now, I'm being lazy
@@ -67,16 +81,14 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
         channelUnregistered(ctx);
     }
 
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        if (cause instanceof DecoderException) {
-            super.exceptionCaught(ctx, cause);
-        } else {
-            super.exceptionCaught(ctx, cause);
-        }
-    }
-
     static final List<Integer> ZERO_LIST = List.of();
+
+    /**
+     * As discussed in the class javadoc, this function converts the HttpContent messages
+     * into ByteBufs that were the same size as the packets in the original request.
+     * @param ctx
+     * @param msg
+     */
     private void writeContentsIntoByteBufs(ChannelHandlerContext ctx, HttpContent msg) {
         var headerChunkSizes = sharedInProgressChunkSizes.size() > 1 ?
                 sharedInProgressChunkSizes.get(1) : ZERO_LIST;
@@ -105,6 +117,16 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    /**
+     * Same idea as writeContentsIntoByteBufs, but there's an extra step of serializing the
+     * headers first.  That's done by simply writing them to a ByteArray stream, then slicing
+     * the array into pieces.  Notice that the output of the headers will preserve ordering
+     * and capitalization.
+     *
+     * @param ctx
+     * @param httpJson
+     * @throws IOException
+     */
     private void writeHeadersIntoByteBufs(ChannelHandlerContext ctx,
                                           HttpJsonMessageWithFaultingPayload httpJson) throws IOException {
         var headerChunkSizes = sharedInProgressChunkSizes.get(0);

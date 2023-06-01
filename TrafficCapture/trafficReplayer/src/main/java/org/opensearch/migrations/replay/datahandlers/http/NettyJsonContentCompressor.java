@@ -97,13 +97,4 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         channelUnregistered(ctx);
     }
-
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        if (cause instanceof DecoderException) {
-            super.exceptionCaught(ctx, cause);
-        } else {
-            super.exceptionCaught(ctx, cause);
-        }
-    }
 }

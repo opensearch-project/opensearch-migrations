@@ -13,6 +13,13 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * This class is responsible for sending the ByteBufs to the downstream packet receiver,
+ * which in many cases will be the thing that sends the request over the network.
+ *
+ * Most of the logic within this class is to convert between ChannelFutures (netty's
+ * futures) and CompletableFutures (Java's construct that came after).
+ */
 @Slf4j
 public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandlerAdapter {
     final IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver;

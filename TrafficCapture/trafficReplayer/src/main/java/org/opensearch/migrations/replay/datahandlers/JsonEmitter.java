@@ -23,6 +23,12 @@ import java.util.Map;
 import java.util.Stack;
 import java.util.function.Supplier;
 
+/**
+ * This class writes a JSON object to a series of ByteBufs using Jackson's JsonGenerator.
+ * Those ByteBufs are returned by a generation function returned by getChunksAndContinuations.
+ * This block-based generator fits in well with our streaming pipeline, allowing us to minimize
+ * the memory load rather than expanding the working set for a large textual stream.
+ */
 @Slf4j
 public class JsonEmitter {
 
@@ -115,20 +121,51 @@ public class JsonEmitter {
         cursorStack = new Stack<>();
     }
 
+    /**
+     * This returns a ByteBuf block of serialized data plus a recursive generation function (Supplier)
+     * for the next block and continuation.  The size of the ByteBuf that will be returned can be
+     * controlled by minBytes and the NUM_SEGMENT_THRESHOLD value.  Once those watermarks are reached,
+     * the current CompositeByteBuffer that is consuming the serialized output will be returned along
+     * with the continuation.  Notice that minBytes and NUM_SEGMENT_THRESHOLD are generally lower
+     * bounds for the sizes of the ByteBufs, remaining true for all buffers returned aside from the last.
+     *
+     *
+     * @param object
+     * @param minBytes
+     * @return
+     * @throws IOException
+     */
     public PartialOutputAndContinuation getChunkAndContinuations(Object object, int minBytes) throws IOException {
         log.trace("getChunkAndContinuations(..., "+minBytes+")");
         return getChunkAndContinuationsHelper(walkTreeWithContinuations(object), minBytes);
     }
-    private PartialOutputAndContinuation getChunkAndContinuationsHelper(FragmentSupplier nextSupplier, int minBytes) {
+
+    /**
+     * This is a helper function to rotate the internal buffers out to the calling context that
+     * will be consuming the data that has been written.  It is also responsible for threading
+     * the PartialOutputAndContinuation supplier until there's no more data to serialize.
+     *
+     * Notice that this function is effectively wrapping an inner supplier (FragmentSupplier)
+     * that is performing side effects and supplying a recursive continuation with an outer
+     * supplier (PartialOutputAndContinuation) that is taking the side effects, packaging them
+     * up for the external calling context, and resetting the internal state for the next
+     * round of processing.
+     *
+     * @param nextFragmentSupplier
+     * @param minBytes
+     * @return
+     */
+    private PartialOutputAndContinuation getChunkAndContinuationsHelper(FragmentSupplier nextFragmentSupplier,
+                                                                        int minBytes) {
         var compositeByteBuf = outputStream.compositeByteBuf;
         if (compositeByteBuf.numComponents() > NUM_SEGMENT_THRESHOLD ||
                 compositeByteBuf.readableBytes() > minBytes) {
             var byteBuf = outputStream.recycleByteBufRetained();
             log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + continuation");
             return new PartialOutputAndContinuation(byteBuf,
-                    () -> getChunkAndContinuationsHelper(nextSupplier, minBytes));
+                    () -> getChunkAndContinuationsHelper(nextFragmentSupplier, minBytes));
         }
-        if (nextSupplier == null) {
+        if (nextFragmentSupplier == null) {
             try {
                 flush();
             } catch (IOException e) {
@@ -140,7 +177,7 @@ public class JsonEmitter {
         }
         log.trace("getChunkAndContinuationsHelper->recursing with " + outputStream.compositeByteBuf.readableBytes() +
                 " written bytes buffered");
-        return getChunkAndContinuationsHelper(nextSupplier.supplier.get(), minBytes);
+        return getChunkAndContinuationsHelper(nextFragmentSupplier.supplier.get(), minBytes);
     }
 
     private FragmentSupplier processStack() {
@@ -161,7 +198,21 @@ public class JsonEmitter {
         cursorStack.push(new LevelContext(it, onPopContinuation));
     }
 
-    public FragmentSupplier walkTreeWithContinuations(Object o) {
+    /**
+     * This maintains the json stack of elements encountered so far, along with a continuation
+     * to run when the item is popped from the stack.  Maintaining that stack outside of the
+     * callstack allows this to remain recursive, but fully reentrant.
+     *
+     * This function will be called repeatedly by processStack() so that additional array and
+     * object items will be processed after their prior siblings children have been fully
+     * emitted.
+     *
+     * Notice that the return statement for this function wraps processStack() in a
+     * continuation, creating the reentrant point for callers.
+     * @param o
+     * @return
+     */
+    private FragmentSupplier walkTreeWithContinuations(Object o) {
         log.trace("walkTree... "+o);
         if (o instanceof Map.Entry) {
             var kvp = (Map.Entry<String,Object>) o;
@@ -207,16 +258,16 @@ public class JsonEmitter {
 
 
     @SneakyThrows
-    public void writeFieldName(String fieldName) {
+    private void writeFieldName(String fieldName) {
         jsonGenerator.writeFieldName(fieldName);
     }
 
     @SneakyThrows
-    public void writeValue(Object s) {
+    private void writeValue(Object s) {
         objectMapper.writeValue(jsonGenerator, s);
     }
 
-    public void flush() throws IOException {
+    private void flush() throws IOException {
         jsonGenerator.flush();
         outputStream.flush();
     }

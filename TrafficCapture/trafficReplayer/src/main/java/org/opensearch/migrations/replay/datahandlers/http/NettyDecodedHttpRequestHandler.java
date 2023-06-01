@@ -111,15 +111,6 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        if (cause instanceof DecoderException) {
-            super.exceptionCaught(ctx, cause);
-        } else {
-            super.exceptionCaught(ctx, cause);
-        }
-    }
-
     private static HttpJsonMessageWithFaultingPayload parseHeadersIntoMessage(HttpRequest request) {
         var jsonMsg = new HttpJsonMessageWithFaultingPayload();
         jsonMsg.setUri(request.uri().toString());
