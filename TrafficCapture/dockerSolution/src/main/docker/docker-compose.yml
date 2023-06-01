@@ -1,7 +1,7 @@
 version: '3.7'
 services:
 
-  capture_proxy:
+  captureproxy:
     image: 'migrations/capture_proxy:latest'
     networks:
       - migrations
@@ -51,26 +51,23 @@ services:
     image: 'migrations/kafka_capture_puller:latest'
     networks:
       - migrations
-    command: /runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic | nc -v replayer 10001
     depends_on:
       - kafka
       - replayer
+    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic | nc -v replayer 10001"
 
   replayer:
     image: 'migrations/traffic_replayer:latest'
-    ports:
-      - "10001:10001"
     networks:
       - migrations
-    #command: nc -v -l -p 10001 | tee /dev/stderr | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200
-    #command: /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200
+    ports:
+      - "10001:10001"
+    depends_on:
+      - opensearchtarget
+    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --insecure"
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:latest'
-#    volumes:
-#      - "./opensearch/esnode-key.pem:/usr/share/opensearch/config/esnode-key.pem"
-#      - "./opensearch/esnode.pem:/usr/share/opensearch/config/root-ca.pem"
-#      - "./opensearch/esnode.pem:/usr/share/opensearch/config/esnode.pem"
     environment:
       - discovery.type=single-node
     networks:
@@ -81,8 +78,22 @@ services:
 #  traffic_comparator:
 #    image: ''
 
-#  opensearch-benchmarks:
-#    image: ''
+  opensearch-benchmarks:
+    image: 'migrations/open_search_benchmark:latest'
+    networks:
+      - migrations
+    command:
+      - /bin/sh
+      - -c
+      - >
+        echo "Running opensearch-benchmark w/ 'geonames' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+        echo "Running opensearch-benchmark w/ 'http_logs' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=http_logs --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+        echo "Running opensearch-benchmark w/ 'nested' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nested --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+        echo "Running opensearch-benchmark w/ 'nyc_taxis' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false"
 
 volumes:
   zookeeper_data:

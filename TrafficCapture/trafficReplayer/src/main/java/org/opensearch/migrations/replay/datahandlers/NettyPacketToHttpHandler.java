@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay.datahandlers;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -11,16 +10,17 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseDecoder;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslHandler;
 import lombok.extern.log4j.Log4j2;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 
-import java.io.IOException;
+import javax.net.ssl.SSLEngine;
 import java.net.URI;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 
 @Log4j2
 public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
@@ -29,7 +29,7 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
     AggregatedRawResponse.Builder responseBuilder;
     BacksideHttpWatcherHandler responseWatchHandler;
 
-    public NettyPacketToHttpHandler(NioEventLoopGroup eventLoopGroup, URI serverUri) {
+    public NettyPacketToHttpHandler(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext) {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
@@ -47,6 +47,11 @@ public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
                 // connection complete start to read first data
                 log.debug("Done setting up backend channel & it was successful");
                 var pipeline = future.channel().pipeline();
+                if (sslContext != null) {
+                    SSLEngine sslEngine = sslContext.newEngine(future.channel().alloc());
+                    sslEngine.setUseClientMode(true);
+                    pipeline.addFirst("ssl", new SslHandler(sslEngine));
+                }
                 pipeline.addLast(new HttpResponseDecoder());
                 // TODO - switch this out to use less memory.
                 // We only need to know when the response has been fully received, not the contents

@@ -32,7 +32,8 @@ dependencies {
 }
 
 def dockerFilesForExternalServices = [
-        "elasticsearchWithSearchGuard": "elasticsearch_searchguard"
+        "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
+        "openSearchBenchmark": "open_search_benchmark"
 ]
 // Create the static docker files that aren't hosting migrations java code from this repo
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
@@ -111,10 +112,11 @@ dockerCompose {
 
 task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
+    dependsOn buildDockerImage_openSearchBenchmark
 
+    dependsOn buildDockerImage_kafkaPrinter
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer
-    dependsOn buildDockerImage_kafkaPrinter
     //dependsOn buildDockerImage_
 }
 

@@ -3,6 +3,9 @@ package org.opensearch.migrations.replay;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.log4j.Log4j2;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.CompositeJsonTransformer;
@@ -11,6 +14,7 @@ import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
 
+import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -40,7 +44,7 @@ public class TrafficReplayer {
         return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer());
     }
 
-    public TrafficReplayer(URI serverUri) {
+    public TrafficReplayer(URI serverUri, boolean allowInsecureConnections) throws SSLException {
         if (serverUri.getPort() < 0) {
             throw new RuntimeException("Port not present for URI: "+serverUri);
         }
@@ -51,7 +55,20 @@ public class TrafficReplayer {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
         var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost());
-        packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer);
+        packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer,
+                loadSslContext(serverUri, allowInsecureConnections));
+    }
+
+    private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
+        if (serverUri.getScheme().toLowerCase().equals("https")) {
+            var sslContextBuilder = SslContextBuilder.forClient();
+            if (allowInsecureConnections) {
+                sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            }
+            return sslContextBuilder.build();
+        } else {
+            return null;
+        }
     }
 
 
@@ -60,6 +77,11 @@ public class TrafficReplayer {
                 arity = 1,
                 description = "URI of the target cluster/domain")
         String targetUriString;
+        @Parameter(required = false,
+                names = {"--insecure"},
+                arity = 0,
+                description = "Do not check the server's certificate")
+        boolean allowInsecureConnections;
         @Parameter(required = false,
                 names = {"-o", "--output"},
                 arity=1,
@@ -99,7 +121,7 @@ public class TrafficReplayer {
             return;
         }
 
-        var tr = new TrafficReplayer(uri);
+        var tr = new TrafficReplayer(uri, params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
