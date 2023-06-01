@@ -25,6 +25,17 @@ class Operations:
 
     pass
 
+    @staticmethod
+    def delete_document(endpoint, index_name, doc_id, auth=None, data=None):
+        response = requests.delete(f'{endpoint}/{index_name}/_doc/{doc_id}', auth=auth)
+        if response.status_code != 200:
+            print('Failed to delete document')
+            print(response.text)
+        else:
+            print('Deleted document successfully')
+            print(response.text)
+
+    pass
 
     @staticmethod
     def create_document(endpoint, index_name, doc_id, auth=None):
@@ -52,13 +63,15 @@ def main():
     username = '*'  # Enter master username and password
     password = '*'
     auth = (username, password)
-    endpoint = '*'   # Replace * with domain endpoint
+    endpoint = '*:443'  # Replace * with domain endpoint
     index = 'my_index'
     doc_id = '7'
 
     Operations.create_index(endpoint, index, auth)
     Operations.create_document(endpoint, index, doc_id, auth)
+    Operations.delete_document(endpoint, index, doc_id, auth)
     Operations.delete_index(endpoint, index, auth)
+
 
 
 if __name__ == "__main__":
