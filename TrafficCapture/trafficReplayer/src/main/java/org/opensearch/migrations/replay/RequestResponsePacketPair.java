@@ -10,45 +10,30 @@ import java.util.stream.Stream;
 
 @Slf4j
 public class RequestResponsePacketPair {
-    Instant firstTimeStampForRequest;
-    Instant lastTimeStampForRequest;
-    Instant firstTimeStampForResponse;
-    Instant lastTimeStampForResponse;
 
-    final ArrayList<byte[]> requestData;
-    final ArrayList<byte[]> responseData;
-
-    public Duration getTotalRequestDuration() {
-        return Duration.between(firstTimeStampForRequest, lastTimeStampForRequest);
-    }
-
-    public Duration getTotalResponseDuration() {
-        return Duration.between(firstTimeStampForResponse, lastTimeStampForResponse);
-    }
-
-    public RequestResponsePacketPair() {
-        this.requestData = new ArrayList<>();
-        this.responseData = new ArrayList<>();
-    }
+    HttpMessageAndTimestamp requestData;
+    HttpMessageAndTimestamp responseData;
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {
             log.trace(this + " Adding request data: " + new String(data, Charset.defaultCharset()));
         }
-        requestData.add(data);
-        if (firstTimeStampForRequest == null) {
-            firstTimeStampForRequest = packetTimeStamp;
+        if (requestData == null) {
+            requestData = new HttpMessageAndTimestamp(packetTimeStamp);
         }
-        lastTimeStampForRequest = packetTimeStamp;
+        requestData.add(data);
+        requestData.setLastPacketTimestamp(packetTimeStamp);
     }
 
     public void addResponseData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {
-            log.trace(this + " Adding response data (len=" + responseData.size() + "): " +
-                    new String(data, Charset.defaultCharset()));
+            log.trace(this + " Adding response data: " + new String(data, Charset.defaultCharset()));
+        }
+        if (responseData == null) {
+            responseData = new HttpMessageAndTimestamp(packetTimeStamp);
         }
         responseData.add(data);
-        lastTimeStampForResponse = packetTimeStamp;
+        responseData.setLastPacketTimestamp(packetTimeStamp);
     }
 
     public Stream<byte[]> getRequestDataStream() {

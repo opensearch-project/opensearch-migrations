@@ -6,6 +6,7 @@ import com.beust.jcommander.ParameterException;
 import lombok.extern.log4j.Log4j2;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.CompositeJsonTransformer;
+import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
@@ -17,7 +18,11 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.function.Consumer;
+import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -30,11 +35,21 @@ public class TrafficReplayer {
     public static JsonTransformer buildDefaultJsonTransformer(String newHostName) {
         var joltJsonTransformer = JoltJsonTransformer.newBuilder()
                 .addHostSwitchOperation(newHostName)
+                .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.ADD_ADMIN_AUTH)
                 .build();
         return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer());
     }
 
     public TrafficReplayer(URI serverUri) {
+        if (serverUri.getPort() < 0) {
+            throw new RuntimeException("Port not present for URI: "+serverUri);
+        }
+        if (serverUri.getHost() == null) {
+            throw new RuntimeException("Hostname not present for URI: "+serverUri);
+        }
+        if (serverUri.getScheme() == null) {
+            throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
+        }
         var jsonTransformer = buildDefaultJsonTransformer(serverUri.getHost());
         packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer);
     }
@@ -71,7 +86,7 @@ public class TrafficReplayer {
         }
     }
 
-    public static void main(String[] args) throws IOException, InterruptedException {
+    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
         var params = parseArgs(args);
         URI uri;
         System.err.println("Starting Traffic Replayer");
@@ -89,68 +104,94 @@ public class TrafficReplayer {
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
                 try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntriesFromFileOrStdin(params.inputFilename)) {
-                    runReplayWithIOStreams(tr, closeableStream.stream(), bufferedOutputStream);
+                    tr.runReplayWithIOStreams(closeableStream.stream(), bufferedOutputStream);
+                    log.info("beginning to close output stream");
                 }
             }
         }
     }
 
-    private static void runReplayWithIOStreams(TrafficReplayer tr, Stream<TrafficStream> trafficChunkStream,
-                                               BufferedOutputStream bufferedOutputStream)
-            throws IOException, InterruptedException {
+    private void runReplayWithIOStreams(Stream<TrafficStream> trafficChunkStream,
+                                        BufferedOutputStream bufferedOutputStream)
+            throws IOException, InterruptedException, ExecutionException {
         var tripleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
-        ReplayEngine replayEngine = new ReplayEngine(rp -> tr.writeToSocketAndClose(rp,
-                triple -> {
-                    try {
-                        tripleWriter.writeJSON(triple);
-                    } catch (IOException e) {
-                        log.error("Caught an IOException while writing triples output.");
-                        e.printStackTrace();
-                    }
+        ConcurrentHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>> requestFutureMap =
+                new ConcurrentHashMap<>();
+        ConcurrentHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>>
+                requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
+        ReplayEngine replayEngine = new ReplayEngine(
+                request -> requestFutureMap.put(request, writeToSocketAndClose(request)),
+                rrPair -> {
+                    log.warn("Done receiving captured stream for this "+rrPair.requestData);
+                    var resultantCf = requestFutureMap.get(rrPair.requestData)
+                            .handle((summary, t) -> {
+                                log.warn("done sending and finalizing data to the packet handler");
+                                SourceTargetCaptureTuple requestResponseTriple;
+                                if (t != null) {
+                                    log.error("Got exception in CompletableFuture callback: ", t);
+                                    requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
+                                            new ArrayList<>(), Duration.ZERO
+                                    );
+                                } else {
+                                    requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
+                                            summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                                            summary.getResponseDuration()
+                                    );
+                                }
+
+                                try {
+                                    tripleWriter.writeJSON(requestResponseTriple);
+                                } catch (IOException e) {
+                                    log.error("Caught an IOException while writing triples output.");
+                                    e.printStackTrace();
+                                    throw new CompletionException(e);
+                                }
+
+                                if (t!=null) { throw new CompletionException(t); }
+                                return summary;
+                            })
+                            .whenComplete((v,t) -> requestToFinalWorkFuturesMap.remove(rrPair.requestData));
+                    requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
                 }
-        )
         );
-        tr.runReplay(trafficChunkStream, replayEngine);
+        try {
+            runReplay(trafficChunkStream, replayEngine);
+        } finally {
+            replayEngine.close();
+            var allRemainingWorkArray = requestToFinalWorkFuturesMap.values().toArray(CompletableFuture[]::new);
+            log.info("All remaining work to wait on: " +
+                    Arrays.stream(allRemainingWorkArray).map(cf->cf.toString()).collect(Collectors.joining()));
+            CompletableFuture.allOf(allRemainingWorkArray)
+                    .whenComplete((t, v) -> {
+                        log.info("stopping packetHandlerFactory's group");
+                        packetHandlerFactory.stopGroup();
+                    })
+                    .get();
+            assert requestToFinalWorkFuturesMap.size() == 0 :
+                    "expected to wait for all of the in flight requests to fully flush and self destruct themselves";
+        }
     }
 
-    private void writeToSocketAndClose(RequestResponsePacketPair requestResponsePacketPair,
-                                       Consumer<SourceTargetCaptureTuple> onResponseReceivedCallback)
+    private CompletableFuture writeToSocketAndClose(HttpMessageAndTimestamp request)
     {
         try {
             log.debug("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create();
-            for (var packetData : requestResponsePacketPair.requestData) {
+            for (var packetData : request.packetBytes) {
+                log.debug("sending "+packetData.length+" bytes to the packetHandler");
                 packetHandler.consumeBytes(packetData);
             }
-            var cf = packetHandler.finalizeRequest();
-            cf.whenComplete((summary, t) -> {
-                SourceTargetCaptureTuple requestResponseTriple;
-                if (t != null) {
-                    log.error("Got exception in CompletableFuture callback: ", t);
-                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
-                            new ArrayList<>(), Duration.ZERO
-                    );
-                } else {
-                    requestResponseTriple = new SourceTargetCaptureTuple(requestResponsePacketPair,
-                            summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
-                            summary.getResponseDuration()
-                    );
-                }
-                onResponseReceivedCallback.accept(requestResponseTriple);
-            });
+            log.debug("done sending bytes, now finalizing the request");
+            return packetHandler.finalizeRequest();
         } catch (Exception e) {
+            log.debug("Caught exception in writeToSocketAndClose, so throwing");
             throw new RuntimeException(e);
         }
     }
 
     public void runReplay(Stream<TrafficStream> trafficChunkStream, ReplayEngine replayEngine) throws IOException, InterruptedException {
-        try {
-            trafficChunkStream
-                    .forEach(ts->ts.getSubStreamList().stream()
-                            .forEach(o->replayEngine.accept(ts.getId(), o)));
-        } finally {
-            packetHandlerFactory.stopGroup();
-        }
+        trafficChunkStream
+                .forEach(ts->ts.getSubStreamList().stream()
+                        .forEach(o->replayEngine.accept(ts.getId(), o)));
     }
-
 }

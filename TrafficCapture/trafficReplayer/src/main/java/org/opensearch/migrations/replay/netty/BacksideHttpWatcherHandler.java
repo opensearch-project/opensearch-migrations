@@ -11,7 +11,7 @@ import java.util.function.Consumer;
 @Log4j2
 public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<FullHttpResponse> {
 
-    private final AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
+    private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
     private boolean doneReadingRequest; // later, when connections are reused, switch this to a counter?
     Consumer<AggregatedRawResponse> responseCallback;
 
@@ -24,13 +24,22 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse msg) throws Exception {
         doneReadingRequest = true;
-        if (this.responseCallback != null) {
-            this.responseCallback.accept(aggregatedRawResponseBuilder.build());
-        }
+        triggerResponseCallbackAndRemoveCallback();
         super.channelReadComplete(ctx);
     }
 
+    private void triggerResponseCallbackAndRemoveCallback() {
+        if (this.responseCallback != null) {
+            this.responseCallback.accept(aggregatedRawResponseBuilder.build());
+            this.responseCallback = null;
+            aggregatedRawResponseBuilder = null;
+        }
+    }
+
     public void addCallback(Consumer<AggregatedRawResponse> callback) {
+        if (aggregatedRawResponseBuilder == null) {
+            throw new RuntimeException("Callback was already triggered for the aggregated response");
+        }
         if (doneReadingRequest) {
             callback.accept(aggregatedRawResponseBuilder.build());
         } else {
@@ -40,7 +49,9 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        doneReadingRequest = true;
         log.trace("inactive channel - closing");
+        triggerResponseCallbackAndRemoveCallback();
         super.channelInactive(ctx);
     }
 

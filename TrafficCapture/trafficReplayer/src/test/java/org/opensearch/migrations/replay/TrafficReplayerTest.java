@@ -10,6 +10,7 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -64,6 +65,15 @@ class TrafficReplayerTest {
                                 .setHeadersByteLength(72)
                                 .build())
                         .build())
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setWrite(WriteObservation.newBuilder()
+                                .setData(ByteString.copyFrom(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8)))
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setWrite(WriteObservation.newBuilder()
+                                .build())
+                        .build())
                 .build();
     }
 
@@ -94,14 +104,16 @@ class TrafficReplayerTest {
     public void testReader() throws IOException, URISyntaxException, InterruptedException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"));
         List<List<byte[]>> byteArrays = new ArrayList<>();
-        ReplayEngine re = new ReplayEngine(rrpp -> {
-            var bytesList = rrpp.getRequestDataStream().collect(Collectors.toList());
+        ReplayEngine re = new ReplayEngine(request -> {
+            var bytesList = request.stream().collect(Collectors.toList());
             byteArrays.add(bytesList);
             Assertions.assertEquals(FAKE_READ_PACKET_DATA,
                     bytesList.stream()
                             .map(ba->new String(ba, StandardCharsets.UTF_8))
                             .collect(Collectors.joining()));
-        });
+        },
+                fullPair -> {}
+                );
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 3);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
@@ -110,7 +122,7 @@ class TrafficReplayerTest {
             }
         }
         Assertions.assertEquals(3, byteArrays.size());
-        Assertions.assertEquals(1, byteArrays.get(0).size());
+        Assertions.assertTrue(byteArrays.stream().allMatch(ba->ba.size()==2));
     }
 
 }

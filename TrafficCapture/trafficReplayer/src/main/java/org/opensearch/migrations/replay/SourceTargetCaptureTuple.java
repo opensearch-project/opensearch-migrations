@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
 
 @Slf4j
@@ -30,7 +31,11 @@ public class SourceTargetCaptureTuple {
     public static class TupleToFileWriter {
         OutputStream outputStream;
 
-        private JSONObject jsonFromHttpData(List<byte[]> data) throws IOException {
+        public TupleToFileWriter(OutputStream outputStream){
+            this.outputStream = outputStream;
+        }
+
+        private JSONObject jsonFromHttpDataUnsafe(List<byte[]> data) throws IOException {
 
             SequenceInputStream collatedStream = ReplayUtils.byteArraysToInputStream(data);
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
@@ -53,6 +58,16 @@ public class SourceTargetCaptureTuple {
             return message;
         }
 
+        private JSONObject jsonFromHttpData(List<byte[]> data) {
+            try {
+                return jsonFromHttpDataUnsafe(data);
+            } catch (Exception e) {
+                log.warn("Putting what may be a bogus value in the output because transforming it " +
+                        "into json threw an exception");
+                return new JSONObject(Map.of("Exception", e.toString()));
+            }
+        }
+
         private JSONObject jsonFromHttpData(List<byte[]> data, Duration latency) throws IOException {
             JSONObject message = jsonFromHttpData(data);
             message.put("response_time_ms", latency.toMillis());
@@ -61,18 +76,14 @@ public class SourceTargetCaptureTuple {
 
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
-            meta.put("request", jsonFromHttpData(triple.sourcePair.requestData));
+            meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
             log.warn("TODO: These durations are not measuring the same values!");
-            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData,
-                    triple.sourcePair.getTotalResponseDuration()));
+            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
+                    triple.sourcePair.responseData.getTotalDuration()));
             meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
                     triple.shadowResponseDuration));
 
             return meta;
-        }
-
-        public TupleToFileWriter(OutputStream outputStream){
-            this.outputStream = outputStream;
         }
 
         /**
@@ -112,8 +123,8 @@ public class SourceTargetCaptureTuple {
         public void writeJSON(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject jsonObject = toJSONObject(triple);
 
-            outputStream.write(jsonObject.toString().getBytes(StandardCharsets.UTF_8));
-            outputStream.write("\n".getBytes(StandardCharsets.UTF_8));
+            log.warn("Writing json tuple to output stream");
+            outputStream.write((jsonObject.toString()+"\n").getBytes(StandardCharsets.UTF_8));
             outputStream.flush();
         }
     }
