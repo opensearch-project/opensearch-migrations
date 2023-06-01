@@ -4,20 +4,57 @@ plugins {
     id "com.bmuschko.docker-java-application" version "9.3.1"
 }
 
+import java.security.MessageDigest
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import com.bmuschko.gradle.docker.tasks.image.DockerTagImage
+
+def calculateHash(File file) {
+}
+
+def calculateDockerHash(String projectName) {
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    fileTree("src/main/docker/${projectName}")
+            .each( file ->
+            file.withInputStream { is ->
+                var buffer = new byte[1024]
+                int read
+                while ((read = is.read(buffer)) != -1) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+    )
+    return digest.digest().encodeHex().toString()
+}
 
 dependencies {
     implementation project(':trafficCaptureProxyServer')
     implementation project(':trafficReplayer')
 }
 
+def dockerFilesForExternalServices =
+        ["elasticsearchWithSearchGuard": "elasticsearch_searchguard"]
+// Create the static docker files that aren't hosting migrations java code from this repo
+dockerFilesForExternalServices.each { projectName, dockerImageName ->
+    task("dockerBuildImage_${projectName}", type: DockerBuildImage) {
+        println "making a task for dockerBuildImage_${projectName}"
+        def hash = calculateDockerHash(projectName)
+        println "in docker build - $projectName hash==$hash"
+        images.add("migrations/elasticsearch_searchguard:$hash")
+        images.add("migrations/elasticsearch_searchguard:latest")
+        inputDir = project.file("src/main/docker/${projectName}")
+    }
+}
 
 def containerServices = [
         "trafficCaptureProxyServer": "capture_proxy",
         "trafficReplayer": "traffic_replayer"
 ]
+def baseImageProjectOverrides = [
+        "trafficCaptureProxyServer": "elasticsearchWithSearchGuard"
+]
+
 containerServices.each { projectName, dockerImageName ->
-    def dockerBuildDir = "${project}/docker/${projectName}"
+    def dockerBuildDir = "build/docker/${projectName}"
     def artifactsDir = "${dockerBuildDir}/jars";
     task("copyArtifact_${projectName}", type: Copy) {
         dependsOn ":${projectName}:build"
@@ -32,7 +69,16 @@ containerServices.each { projectName, dockerImageName ->
     task "createDockerfile_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.Dockerfile) {
         dependsOn "copyArtifact_${projectName}"
         destFile = project.file("${dockerBuildDir}/Dockerfile")
-        from 'openjdk:11-jre'
+        def baseImageOverrideProjectName = baseImageProjectOverrides.get(projectName)
+        if (baseImageOverrideProjectName) {
+            def dependentDockerImageName = dockerFilesForExternalServices.get(baseImageOverrideProjectName)
+            def hashNonce = calculateDockerHash(baseImageOverrideProjectName)
+            from "migrations/${dependentDockerImageName}:${hashNonce}"
+            dependsOn "dockerBuildImage_${baseImageOverrideProjectName}"
+        } else {
+            from 'openjdk:11-jre'
+        }
+
         copyFile("jars", "/jars")
         // can't set the environment variable from the runtimeClasspath because the Dockerfile is
         // constructed in the configuration phase and the classpath won't be realized until the
@@ -45,41 +91,12 @@ containerServices.each { projectName, dockerImageName ->
         //defaultCommand('/runJavaWithClasspath.sh', '...')
     }
 
-    // Create a Docker image for the project
-    task "dockerBuildImage_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.DockerBuildImage) {
+    task "dockerBuildImage_${projectName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${projectName}"
         inputDir = project.file("${dockerBuildDir}")
+        images.add("migrations/${dockerImageName}:${version}")
         images.add("migrations/${dockerImageName}:latest")
     }
-//
-//    docker {
-//        dependsOn "copyArtifact${projectName}"
-//        javaApplication {
-//            baseImage = 'openjdk:11-jre'
-//            maintainer = '"OpenSearch Migrations"'
-//            tags = ["project$proj:latest"]
-//            jvmArgs = ['-Xmx512m']
-//            applicationName = "${projectName}"
-//            applicationJar = file("${projectDir}/artifacts${projectName}/project${projectName}.jar")
-//            // other settings as needed...
-//        }
-//    }
-
-
-//    task("buildImage_${projectName}", type: DockerBuildImage) {
-//        dependsOn "copyArtifact${projectName}"
-//        group = 'docker'
-//
-//        javaApplication {
-//            maintainer = 'OpenSearch Migrations'
-//            tags = ['latest']
-////            jvmArgs = ['-Xmx512m', '-Xms512m']
-////            args = ['arg1', 'arg2']
-//        }
-//        inputDir = file("src/main/docker/${projectName}/")
-//        dockerFile = file("src/main/docker/${projectName}/Dockerfile")
-//        images.add("migrations/${dockerImageName}:latest")
-//    }
 }
 
 dockerCompose {
@@ -89,6 +106,8 @@ dockerCompose {
 task buildAllDockerImages {
     dependsOn dockerBuildImage_trafficReplayer
     dependsOn dockerBuildImage_trafficCaptureProxyServer
+    dependsOn dockerBuildImage_elasticsearchWithSearchGuard
+    //dependsOn dockerBuildImage_
 }
 
 tasks.getByName('composeUp').dependsOn(tasks.getByName('buildAllDockerImages'))

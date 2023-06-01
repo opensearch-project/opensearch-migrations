@@ -1,5 +1,8 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 import com.google.protobuf.CodedOutputStream;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -17,6 +20,7 @@ import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
 import javax.net.ssl.SSLEngine;
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -25,11 +29,84 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 @Slf4j
 public class Main {
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
+
+    static class Parameters {
+        @Parameter(required = false,
+                names = {"--traceDirectory"},
+                arity = 1,
+                description = "Directory to store trace files in.")
+        String traceDirectory;
+        @Parameter(required = false,
+                names = {"--noCapture"},
+                arity = 0,
+                description = "Directory to store trace files in.")
+        boolean noCapture;
+        @Parameter(required = false,
+                names = {"--kafkaConfigFile"},
+                arity = 1,
+                description = "Kafka properties file")
+        String kafkaPropertiesFile;
+        @Parameter(required = false,
+                names = {"--kafkaClientId"},
+                arity = 1,
+                description = "clientId to use for interfacing with Kafka.")
+        String kafkaClientId = "KafkaLoggingProducer";
+        @Parameter(required = false,
+                names = {"--kafkaConnection"},
+                arity = 1,
+                description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        String kafkaConnection;
+        @Parameter(required = false,
+                names = {"--sslConfigFile"},
+                arity = 1,
+                description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
+        String sslConfigFilePath;
+        @Parameter(required = false,
+                names = {"--maxTrafficBufferSize"},
+                arity = 1,
+                description = "The maximum number of bytes that will be written to a single TrafficStream object.")
+        int maximumTrafficStreamSize = 1024*1024;
+        @Parameter(required = false,
+                names = {"--destinationHost"},
+                arity = 1,
+                description = "Hostname of the server that the proxy is capturing traffic for.")
+        String backsideHostname = "localhost";
+        @Parameter(required = true,
+                names = {"--destinationPort"},
+                arity = 1,
+                description = "Port of the server that the proxy is capturing traffic for.")
+        int backsidePort = 0;
+        @Parameter(required = true,
+                names = {"--listenPort"},
+                arity = 1,
+                description = "Port of the server that the proxy is capturing traffic for.")
+        int frontsidePort = 0;
+    }
+
+    public static Parameters parseArgs(String[] args) {
+        Parameters p = new Parameters();
+        JCommander jCommander = new JCommander(p);
+        try {
+            jCommander.parse(args);
+            if (Stream.of(p.traceDirectory, p.kafkaPropertiesFile, p.kafkaConnection, (p.noCapture?"":null))
+                    .mapToInt(s->s!=null?1:0).sum() != 1) {
+                throw new ParameterException("Expected exactly one of '--traceDirectory', '--kafkaConfigFile', " +
+                        "'--kafkaConnection', or '--noCapture' to be set");
+            }
+            return p;
+        } catch (ParameterException e) {
+            System.err.println(e.getMessage());
+            System.err.println("Got args: "+ String.join("; ", args));
+            jCommander.usage();
+            return null;
+        }
+    }
 
     @SneakyThrows
     private static Settings getSettings(@NonNull String configFile) {
@@ -44,56 +121,69 @@ public class Main {
                     });
         }
         builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
-        builder.put("path.home", configFile);
+        var configParentDirStr = Paths.get(configFile).toAbsolutePath().getParent();
+        builder.put("path.home", configParentDirStr);
         return builder.build();
     }
 
-    private static IConnectionCaptureFactory getTraceConnectionCaptureFactory(String traceLogsDirectory) {
-        if (traceLogsDirectory == null) {
-            System.err.println("No trace log directory specified.  Logging to /dev/null");
-            return new IConnectionCaptureFactory() {
-                @Override
-                public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
-                    return new StreamChannelConnectionCaptureSerializer(connectionId, () ->
-                            CodedOutputStream.newInstance(NullOutputStream.getInstance()),
-                            cos -> CompletableFuture.completedFuture(null));
-                }
-            };
-        } else {
-            return new FileConnectionCaptureFactory(traceLogsDirectory, 1024 * 1024 * 1024);
-        }
+    private static IConnectionCaptureFactory getNullConnectionCaptureFactory() {
+        System.err.println("No trace log directory specified.  Logging to /dev/null");
+        return connectionId -> new StreamChannelConnectionCaptureSerializer(connectionId, () ->
+                CodedOutputStream.newInstance(NullOutputStream.getInstance()),
+                cos -> CompletableFuture.completedFuture(null));
     }
 
-    private static IConnectionCaptureFactory getKafkaConnectionFactory(String kafkaPropsPath, int bufferSize) throws IOException {
+
+    private static IConnectionCaptureFactory getKafkaConnectionFactory(String kafkaPropsPath, int bufferSize)
+            throws IOException {
         Properties producerProps = new Properties();
-        try {
-            producerProps.load(new FileReader(kafkaPropsPath));
-        } catch (IOException e) {
-            log.error("Unable to locate provided Kafka producer properties file path: " + kafkaPropsPath);
-            throw e;
+        if (kafkaPropsPath != null) {
+            try {
+                producerProps.load(new FileReader(kafkaPropsPath));
+            } catch (IOException e) {
+                log.error("Unable to locate provided Kafka producer properties file path: " + kafkaPropsPath);
+                throw e;
+            }
         }
         return new KafkaCaptureFactory(new KafkaProducer<>(producerProps), bufferSize);
     }
 
-    private static IConnectionCaptureFactory getConnectionCaptureFactory(String kafkaPropsPath, int bufferSize) throws IOException {
-        //return new FileConnectionCaptureFactory("./traceLogs", 1024 * 1024 * 1024);
-        return getKafkaConnectionFactory(kafkaPropsPath, bufferSize);
+    private static IConnectionCaptureFactory getConnectionCaptureFactory(Parameters params) throws IOException {
+        // TODO - it might eventually be a requirement to do multiple types of offloading.
+        // Resist the urge for now though until it comes in as a request/need.
+        if (params.traceDirectory != null) {
+            return new FileConnectionCaptureFactory(params.traceDirectory, params.maximumTrafficStreamSize);
+        } else if (params.kafkaPropertiesFile != null) {
+            return getKafkaConnectionFactory(params.kafkaPropertiesFile, params.maximumTrafficStreamSize);
+        } else if (params.kafkaConnection != null) {
+            var kafkaProps = new Properties();
+            kafkaProps.put("bootstrap.servers", params.kafkaConnection);
+            kafkaProps.put("client.id", params.kafkaClientId);
+            kafkaProps.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+            kafkaProps.put("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+
+            return new KafkaCaptureFactory(new KafkaProducer<>(kafkaProps), params.maximumTrafficStreamSize);
+        } else if (params.noCapture) {
+            return getNullConnectionCaptureFactory();
+        } else {
+            throw new RuntimeException("Must specify some connection capture factory options");
+        }
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
 
-        String kafkaPropsPath = args[0];
+        var params = parseArgs(args);
+
         // This should be added to the argument parser when added in
-        int bufferSize = 1024 * 1024;
-        var sksOp = Optional.ofNullable(args.length <= 1 ? null : Optional.class)
-                .map(o->new DefaultSecurityKeyStore(getSettings(args[1]),
-                        args.length > 1 ? Paths.get(args[2]) : null));
+        var sksOp = Optional.ofNullable(params.sslConfigFilePath)
+                .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),
+                        Paths.get(sslConfigFile).toAbsolutePath().getParent()));
 
         sksOp.ifPresent(x->x.initHttpSSLConfig());
-        var proxy = new NettyScanningHttpProxy(sksOp.isPresent() ? 443 : 80);
+        var proxy = new NettyScanningHttpProxy(params.frontsidePort);
 
         try {
-            proxy.start("localhost", 9200,
+            proxy.start(params.backsideHostname, params.backsidePort,
                     sksOp.map(sks-> (Supplier<SSLEngine>) () -> {
                         try {
                             var sslEngine = sks.createHTTPSSLEngine();
@@ -101,7 +191,7 @@ public class Main {
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
-                    }).orElse(null), getConnectionCaptureFactory(kafkaPropsPath, bufferSize));
+                    }).orElse(null), getConnectionCaptureFactory(params));
         } catch (Exception e) {
             System.err.println(e);
             e.printStackTrace();

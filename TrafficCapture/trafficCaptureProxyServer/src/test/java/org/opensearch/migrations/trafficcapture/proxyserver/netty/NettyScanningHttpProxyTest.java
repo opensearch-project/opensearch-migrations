@@ -64,7 +64,8 @@ class NettyScanningHttpProxyTest {
         }
 
         Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
-        Thread.sleep(1000*10);
+        // TODO - replace this with a better signalling facility! (shame on me for writing it like this in the first place)
+        Thread.sleep(1000);
         var recordedStreams = captureFactory.getRecordedStreams();
         Assertions.assertEquals(1, recordedStreams.size());
         var recordedTrafficStreams =
