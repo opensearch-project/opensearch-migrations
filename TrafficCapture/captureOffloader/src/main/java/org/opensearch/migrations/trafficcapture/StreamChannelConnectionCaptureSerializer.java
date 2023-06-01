@@ -368,7 +368,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {
-        addStringMessage(TrafficObservation.EXCEPTION_FIELD_NUMBER, ConnectionExceptionObservation.MESSAGE_FIELD_NUMBER,
+        addStringMessage(TrafficObservation.CONNECTIONEXCEPTION_FIELD_NUMBER,
+                ConnectionExceptionObservation.MESSAGE_FIELD_NUMBER,
                 timestamp, t.getMessage());
     }
 

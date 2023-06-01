@@ -221,7 +221,7 @@ public class TrafficReplayer {
     }
 
     public void runReplay(Stream<TrafficStream> trafficChunkStream, ReplayEngine replayEngine) throws IOException, InterruptedException {
-        trafficChunkStream
+        trafficChunkStream//.filter(ts->"22fce2ab".equals(ts.getId()))
                 .forEach(ts->ts.getSubStreamList().stream()
                         .forEach(o->replayEngine.accept(ts.getId(), o)));
     }

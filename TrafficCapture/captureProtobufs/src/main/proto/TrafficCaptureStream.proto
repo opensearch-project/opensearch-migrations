@@ -56,7 +56,7 @@ message TrafficObservation {
     WriteSegmentObservation writeSegment = 9;
     DisconnectObservation disconnect = 10;
     CloseObservation close = 11;
-    ConnectionExceptionObservation exception = 12;
+    ConnectionExceptionObservation connectionException = 12;
 
     // This seems a bit easier than adding a count of the number of segments that will be needed,
     // especially since the first segment might be smaller due to other observations already

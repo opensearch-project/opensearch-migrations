@@ -47,16 +47,25 @@ class TrafficReplayerTest {
                                 .build())
                         .build())
                 .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                        .setRead(ReadObservation.newBuilder()
-                                .build())
-                        .build())
-                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                        .setException(ConnectionExceptionObservation.newBuilder().build().newBuilder()
+                        .setConnectionException(ConnectionExceptionObservation.newBuilder().build().newBuilder()
                                 .setMessage(FAKE_EXCEPTION_DATA)
                                 .build())
                         .build())
                 .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                        .setException(ConnectionExceptionObservation.newBuilder().build().newBuilder()
+                        .setRead(ReadObservation.newBuilder()
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setConnectionException(ConnectionExceptionObservation.newBuilder().build().newBuilder()
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setRead(ReadObservation.newBuilder()
+                                .setData(ByteString.copyFrom(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8)))
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setRead(ReadObservation.newBuilder()
                                 .build())
                         .build())
                 .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
@@ -72,6 +81,10 @@ class TrafficReplayerTest {
                         .build())
                 .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                         .setWrite(WriteObservation.newBuilder()
+                                .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
                                 .build())
                         .build())
                 .build();
@@ -104,16 +117,17 @@ class TrafficReplayerTest {
     public void testReader() throws IOException, URISyntaxException, InterruptedException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
-        ReplayEngine re = new ReplayEngine(request -> {
-            var bytesList = request.stream().collect(Collectors.toList());
-            byteArrays.add(bytesList);
-            Assertions.assertEquals(FAKE_READ_PACKET_DATA,
-                    bytesList.stream()
-                            .map(ba->new String(ba, StandardCharsets.UTF_8))
-                            .collect(Collectors.joining()));
-        },
-                fullPair -> {}
-                );
+        ReplayEngine re = new ReplayEngine(
+                request -> {
+                    var bytesList = request.stream().collect(Collectors.toList());
+                    byteArrays.add(bytesList);
+                    Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
+                },
+                fullPair -> {
+                    var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
+                    Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                }
+        );
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 3);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
@@ -123,6 +137,12 @@ class TrafficReplayerTest {
         }
         Assertions.assertEquals(3, byteArrays.size());
         Assertions.assertTrue(byteArrays.stream().allMatch(ba->ba.size()==2));
+    }
+
+    private static String collectBytesToUtf8String(List<byte[]> bytesList) {
+        return bytesList.stream()
+                .map(ba -> new String(ba, StandardCharsets.UTF_8))
+                .collect(Collectors.joining());
     }
 
 }
