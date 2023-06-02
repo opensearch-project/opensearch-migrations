@@ -80,12 +80,12 @@ public class Main {
         @Parameter(required = true,
                 names = {"--destinationPort"},
                 arity = 1,
-                description = "Port of the server that the proxy is capturing traffic for.")
+                description = "Port of the server that the proxy connects to.")
         int backsidePort = 0;
         @Parameter(required = true,
                 names = {"--listenPort"},
                 arity = 1,
-                description = "Port of the server that the proxy is capturing traffic for.")
+                description = "Exposed port for clients to connect to this proxy.")
         int frontsidePort = 0;
     }
 
@@ -94,6 +94,7 @@ public class Main {
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);
+            // Exactly one these 4 options are required.  See that exactly one is set by summing up their presence
             if (Stream.of(p.traceDirectory, p.kafkaPropertiesFile, p.kafkaConnection, (p.noCapture?"":null))
                     .mapToInt(s->s!=null?1:0).sum() != 1) {
                 throw new ParameterException("Expected exactly one of '--traceDirectory', '--kafkaConfigFile', " +

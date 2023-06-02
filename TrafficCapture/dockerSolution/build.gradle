@@ -6,10 +6,6 @@ plugins {
 
 import java.security.MessageDigest
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-import com.bmuschko.gradle.docker.tasks.image.DockerTagImage
-
-def calculateHash(File file) {
-}
 
 def calculateDockerHash(String projectName) {
     MessageDigest digest = MessageDigest.getInstance('SHA-256')

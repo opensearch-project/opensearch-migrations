@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
@@ -52,8 +52,8 @@ public class PayloadRepackingTest {
 
         var transformerBuilder = JoltJsonTransformer.newBuilder();
 
-        if (doGzip) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP); }
-        if (doChunked) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.MAKE_CHUNKED); }
+        if (doGzip) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.ADD_GZIP); }
+        if (doChunked) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.MAKE_CHUNKED); }
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
@@ -76,8 +76,9 @@ public class PayloadRepackingTest {
                                                List<String> stringParts,
                                                DefaultHttpHeaders expectedRequestHeaders,
                                                Function<StringBuilder,String> expectedOutputGenerator) throws Exception {
-        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), null);
-        var transformingHandler = new HttpJsonTransformer(transformer, testPacketCapture);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
+                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>()));
+        var transformingHandler = new HttpJsonTransformingConsumer(transformer, testPacketCapture);
 
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var headerString = "GET / HTTP/1.1\n" +
@@ -130,7 +131,7 @@ public class PayloadRepackingTest {
         ObjectMapper mapper = new ObjectMapper();
         var simpleTransform = mapper.readValue(simplePayloadTransform,
                 new TypeReference<LinkedHashMap<String, Object>>(){});
-        transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.PASS_THRU);
+        transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.PASS_THRU);
         transformerBuilder.addOperationObject(simpleTransform);
 
         var jsonPayload = "{\"top\": {\"A\": 1,\"B\": 2}}";

@@ -4,8 +4,9 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
+import org.opensearch.migrations.replay.AggregatedTransformedResponse;
 import org.opensearch.migrations.replay.Utils;
-import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
+import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.nio.charset.StandardCharsets;
@@ -36,7 +37,9 @@ import java.util.function.Function;
  * error was due to transformation, how would we be able to tell?
  */
 @Slf4j
-public class HttpJsonTransformer implements IPacketToHttpHandler {
+public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<AggregatedTransformedResponse> {
+    public static final int HTTP_MESSAGE_NUM_SEGMENTS = 2;
+    public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
     private final RequestPipelineOrchestrator pipelineOrchestrator;
     private final EmbeddedChannel channel;
     /**
@@ -51,10 +54,10 @@ public class HttpJsonTransformer implements IPacketToHttpHandler {
     // backed by the exact same byte[] arrays, so the memory consumption should already be absorbed.
     private final List<ByteBuf> chunks;
 
-    public HttpJsonTransformer(JsonTransformer transformer, IPacketToHttpHandler transformedPacketReceiver) {
-        chunkSizes = new ArrayList<>(2);
-        chunkSizes.add(new ArrayList<>(4));
-        chunks = new ArrayList<>(64);
+    public HttpJsonTransformingConsumer(JsonTransformer transformer, IPacketFinalizingConsumer transformedPacketReceiver) {
+        chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
+        chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
+        chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
         pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
@@ -66,31 +69,33 @@ public class HttpJsonTransformer implements IPacketToHttpHandler {
                 .orElse(null);
     }
 
+    @Override
     public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {
         chunks.add(nextRequestPacket.duplicate().readerIndex(0).retain());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
         if (log.isDebugEnabled()) {
             byte[] copy = new byte[nextRequestPacket.readableBytes()];
             nextRequestPacket.duplicate().readBytes(copy);
-            log.debug("Writing into embedded channel: " + new String(copy, StandardCharsets.UTF_8));
+            log.trace("Writing into embedded channel: " + new String(copy, StandardCharsets.UTF_8));
         }
         return CompletableFuture.completedFuture(null).thenAccept(x ->
                 channel.writeInbound(nextRequestPacket));
     }
 
-    public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
+    public CompletableFuture<AggregatedTransformedResponse> finalizeRequest() {
         var offloadingHandler = getOffloadingHandler();
         channel.close();
         if (offloadingHandler == null) {
             // the NettyDecodedHttpRequestHandler gave up and didn't bother installing the baseline handlers -
             // redrive the chunks
-            return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver);
+            return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver,
+                    null);
         }
         return offloadingHandler.getPacketReceiverCompletionFuture()
                 .handle((v, t) -> {
                     if (t != null) {
                         if (t instanceof NoContentException) {
-                            return redriveWithoutTransformation(offloadingHandler.packetReceiver);
+                            return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                         } else {
                             throw new CompletionException(t);
                         }
@@ -100,11 +105,16 @@ public class HttpJsonTransformer implements IPacketToHttpHandler {
                 }).thenCompose(Function.identity());
     }
 
-    private CompletableFuture<AggregatedRawResponse> redriveWithoutTransformation(IPacketToHttpHandler packetConsumer) {
+    private CompletableFuture<AggregatedTransformedResponse>
+    redriveWithoutTransformation(IPacketFinalizingConsumer<AggregatedRawResponse> packetConsumer, Throwable reason) {
         CompletableFuture<Void> consumptionChainedFuture =
                 chunks.stream().collect(
                         Utils.foldLeft(CompletableFuture.completedFuture(null),
                                 (cf, bb) -> cf.thenCompose(v -> packetConsumer.consumeBytes(bb))));
-        return consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest());
+        return consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest())
+                .thenApply(r->reason == null ?
+                        new AggregatedTransformedResponse(r,
+                                AggregatedTransformedResponse.HttpRequestTransformationStatus.SKIPPED) :
+                        new AggregatedTransformedResponse(r, reason));
     }
 }

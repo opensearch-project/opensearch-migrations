@@ -2,11 +2,14 @@ package org.opensearch.migrations.replay.datahandlers;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.concurrent.CompletableFuture;
 
-public interface IPacketToHttpHandler {
+/**
+ * This class consumes arrays of bytes or ByteBufs, potentially asynchronously,
+ * whose completion is signaled via the CompletableFuture that is returned.
+ */
+public interface IPacketConsumer {
 
     default CompletableFuture<Void> consumeBytes(byte[] nextRequestPacket) {
         var bb = Unpooled.wrappedBuffer(nextRequestPacket).retain();
@@ -14,6 +17,6 @@ public interface IPacketToHttpHandler {
         bb.release();
         return rval;
     }
+
     CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket);
-    CompletableFuture<AggregatedRawResponse> finalizeRequest();
 }

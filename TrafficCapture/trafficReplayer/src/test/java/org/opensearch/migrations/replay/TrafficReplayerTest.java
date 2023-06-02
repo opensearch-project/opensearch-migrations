@@ -4,7 +4,6 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datahandlers.IPacketToHttpHandler;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -22,8 +21,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -117,22 +114,23 @@ class TrafficReplayerTest {
     public void testReader() throws IOException, URISyntaxException, InterruptedException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
-        ReplayEngine re = new ReplayEngine(
-                request -> {
-                    var bytesList = request.stream().collect(Collectors.toList());
-                    byteArrays.add(bytesList);
-                    Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
-                },
-                fullPair -> {
-                    var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
-                    Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
-                }
-        );
+        CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
+                new CapturedTrafficToHttpTransactionAccumulator(
+                        request -> {
+                            var bytesList = request.stream().collect(Collectors.toList());
+                            byteArrays.add(bytesList);
+                            Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
+                        },
+                        fullPair -> {
+                            var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
+                            Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                        }
+                );
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 3);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var cssw = CloseableTrafficStreamWrapper.getCaptureEntriesFromInputStream(bais)) {
-                tr.runReplay(cssw.stream(), re);
+                tr.runReplay(cssw.stream(), trafficAccumulator);
             }
         }
         Assertions.assertEquals(3, byteArrays.size());

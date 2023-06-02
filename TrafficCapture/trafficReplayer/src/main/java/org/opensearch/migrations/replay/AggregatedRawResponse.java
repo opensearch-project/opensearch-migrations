@@ -15,17 +15,9 @@ import java.util.stream.Stream;
 
 public class AggregatedRawResponse implements Serializable {
 
-    public enum HttpRequestTransformationStatus {
-        SKIPPED, COMPLETED, ERROR
-    }
-
-    private final int responseSizeInBytes;
-    private final Duration responseDuration;
-    private final ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets;
-
-    @Getter
-    @Setter
-    private HttpRequestTransformationStatus transformationStatus;
+    protected final int responseSizeInBytes;
+    protected final Duration responseDuration;
+    protected final ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets;
 
     public static Builder builder(Instant i) {
         return new Builder(i);
@@ -58,23 +50,9 @@ public class AggregatedRawResponse implements Serializable {
 
     public AggregatedRawResponse(int responseSizeInBytes, Duration responseDuration,
                                  ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> packets) {
-        this(responseSizeInBytes, responseDuration, packets, HttpRequestTransformationStatus.SKIPPED);
-    }
-
-    public AggregatedRawResponse(int responseSizeInBytes, Duration responseDuration,
-                                 ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> packets,
-                                 HttpRequestTransformationStatus requestTransformationStatus) {
         this.responseSizeInBytes = responseSizeInBytes;
         this.responseDuration = responseDuration;
         this.responsePackets = packets;
-        this.transformationStatus = requestTransformationStatus;
-    }
-
-    public static AggregatedRawResponse addStatusIfPresent(AggregatedRawResponse existing,
-                                                           HttpRequestTransformationStatus status) {
-        return Optional.ofNullable(existing).map(o->
-                new AggregatedRawResponse(o.responseSizeInBytes, o.responseDuration, o.responsePackets, status))
-                .orElse(null);
     }
 
     int getResponseSizeInBytes() {

@@ -7,6 +7,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * This implements an ordered map of headers. The order is the same as the order that the keys were
+ * added.  We want to play them back in the same order. . LinkedHashMap is used to keep the objects
+ * so that we can maintain that original order.  However, we add an extra ability to keep key values
+ * (or header names) case insensitive.
+ */
 public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List<String>> {
     protected LinkedHashMap<String, SimpleEntry<String, List<String>>> lowerCaseToUpperCaseAndValueMap;
 

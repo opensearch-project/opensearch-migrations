@@ -2,7 +2,7 @@
   "operation": "modify-overwrite-beta",
   "spec": {
     "headers": {
-      "authorization": "Basic YWRtaW46YWRtaW4="
+      "authorization": "%%SUBSTITION_1%%"
     }
   }
 }

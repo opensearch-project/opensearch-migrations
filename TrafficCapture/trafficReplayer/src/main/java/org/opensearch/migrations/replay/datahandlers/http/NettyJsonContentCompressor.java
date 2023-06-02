@@ -2,8 +2,6 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.CompositeByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.DecoderException;
@@ -16,13 +14,8 @@ import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 @Slf4j
@@ -65,9 +58,9 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultablePayload) {
+        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
             var contentEncoding =
-                    ((HttpJsonMessageWithFaultablePayload) msg).headers().asStrictMap().get("content-encoding");
+                    ((HttpJsonMessageWithFaultingPayload) msg).headers().asStrictMap().get("content-encoding");
             if (contentEncoding != null && contentEncoding.contains(CONTENT_ENCODING_GZIP_VALUE)) {
                 activateCompressorComponents(ctx);
             }
@@ -103,14 +96,5 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         channelUnregistered(ctx);
-    }
-
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        if (cause instanceof DecoderException) {
-            super.exceptionCaught(ctx, cause);
-        } else {
-            super.exceptionCaught(ctx, cause);
-        }
     }
 }

@@ -11,8 +11,29 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 
 import java.nio.charset.StandardCharsets;
-import java.util.function.Consumer;
 
+/**
+ * This class is meant to be situated within a netty pipeline (see @RequestPipelineOrchestrator)
+ * that consumes an HttpJsonMessageWithFaultingPayload object that contains the headers, followed
+ * by HttpContent blocks.
+ *
+ * This class is responsible for determining how the HttpContent sequence should be packaged into
+ * the final HTTP request, deciding between using a chunked transfer encoding or a fixed length
+ * payload.  It uses the headers in the HttpJsonMessage to do that.  It will then convert the
+ * HttpContent sequence accordingly into ByteBuf objects containing whatever packaging is necessary
+ * and/or updating the headers to reflect the fixed length of the transfer.
+ *
+ * The HttpJsonMessage's headers will otherwise remain intact.  Another handler will take
+ * responsibility to serialize that for the final HTTP Request.
+ *
+ * Notice that this class will emit ByteBufs and the next handler in the pipeline,
+ * @NettyJsonToByteBufHandler will simply pass those ByteBufs through, while repackaging HttpContent
+ * messages, seemingly similar to what this class does!  However, these two handlers have slightly
+ * calling contexts.  This handler will only be utilized when there needed to be a material change
+ * on the incoming HttpContent objects from the original request.  The next handler will be called
+ * in cases where both the content needed to be reformatted OR the content is being passed through
+ * directly, hence the reason for the overlap.
+ */
 public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandlerAdapter {
     private static final String TRANSFER_ENCODING_CHUNKED_VALUE = "chunked";
     public static final String CONTENT_LENGTH_HEADER_NAME = "Content-Length";
@@ -24,12 +45,12 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     MODE streamMode = MODE.CHUNKED;
     int contentBytesReceived;
     CompositeByteBuf bufferedContents;
-    HttpJsonMessageWithFaultablePayload bufferedJsonMessage;
+    HttpJsonMessageWithFaultingPayload bufferedJsonMessage;
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultablePayload) {
-            bufferedJsonMessage = (HttpJsonMessageWithFaultablePayload) msg;
+        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
+            bufferedJsonMessage = (HttpJsonMessageWithFaultingPayload) msg;
             var transferEncoding =
                     bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
             streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE)) ?

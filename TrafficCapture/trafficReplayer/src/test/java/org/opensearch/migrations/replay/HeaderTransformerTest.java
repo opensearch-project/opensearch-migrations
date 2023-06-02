@@ -3,7 +3,7 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 
 import java.time.Duration;
@@ -26,20 +26,20 @@ public class HeaderTransformerTest {
     @Test
     public void testTransformer() throws Exception {
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null,
-                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null,
+                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var jsonHandler = JoltJsonTransformer.newBuilder()
                 .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
                 .build();
-        var transformingHandler = new HttpJsonTransformer(jsonHandler, testPacketCapture);
+        var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, testPacketCapture);
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
                         "content-length: " + contentLength + "\n");
     }
 
-    private void runRandomPayloadWithTransformer(HttpJsonTransformer transformingHandler,
+    private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer transformingHandler,
                                                  AggregatedRawResponse dummyAggregatedResponse,
                                                  TestCapturePacketToHttpHandler testPacketCapture,
                                                  Function<Integer,String> makeHeaders)
@@ -77,10 +77,10 @@ public class HeaderTransformerTest {
     public void testMalformedPayloadIsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedRawResponse(12, null,
-                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null,
+                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformingHandler = new HttpJsonTransformer(
+        var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, "Basic YWRtaW46YWRtaW4="),  testPacketCapture);
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
@@ -100,10 +100,10 @@ public class HeaderTransformerTest {
     public void testMalformedPayload_andTypeMappingUri_IsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedRawResponse(12, null,
-                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null,
+                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformingHandler = new HttpJsonTransformer(
+        var transformingHandler = new HttpJsonTransformingConsumer(
 
         TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, null), testPacketCapture);
 

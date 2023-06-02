@@ -22,8 +22,24 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * This class does the remaining serialization of the contents coming into it into ByteBuf
+ * objects.  This handler may be called in cases where both the content needed to be
+ * reformatted OR the content is being passed through directly.
+ *
+ * ByteBufs that arrive here (because an earlier pipeline did a conversion) are simply passed
+ * to the next handler in the pipeline.  However, the headers that are remaining in the
+ * HttpJsonMessage and the HttpContents that may be coming in untouched from the original
+ * reconstructed request are converted to ByteBufs.  There is an attempt to match ByteBuf
+ * sizes to those that were found in the original request, using a simple policy to use the
+ * same sizes until we run out of data.  If we have more data than in the original request
+ * (headers), the number of additional ByteBuf packets and their size is an implementation
+ * detail.
+ */
 @Slf4j
 public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
+    // TODO: Eventually, we can count up the size of all of the entries in the headers - but for now, I'm being lazy
+    public static final int MAX_HEADERS_BYTE_SIZE = 64 * 1024;
     List<List<Integer>> sharedInProgressChunkSizes;
     ByteBuf inProgressByteBuf;
     int payloadBufferIndex;
@@ -34,8 +50,8 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultablePayload) {
-            writeHeadersIntoByteBufs(ctx, (HttpJsonMessageWithFaultablePayload) msg);
+        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
+            writeHeadersIntoByteBufs(ctx, (HttpJsonMessageWithFaultingPayload) msg);
         } else if (msg instanceof ByteBuf) {
             ctx.fireChannelRead((ByteBuf) msg);
         } else if (msg instanceof HttpContent) {
@@ -65,16 +81,14 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
         channelUnregistered(ctx);
     }
 
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        if (cause instanceof DecoderException) {
-            super.exceptionCaught(ctx, cause);
-        } else {
-            super.exceptionCaught(ctx, cause);
-        }
-    }
-
     static final List<Integer> ZERO_LIST = List.of();
+
+    /**
+     * As discussed in the class javadoc, this function converts the HttpContent messages
+     * into ByteBufs that were the same size as the packets in the original request.
+     * @param ctx
+     * @param msg
+     */
     private void writeContentsIntoByteBufs(ChannelHandlerContext ctx, HttpContent msg) {
         var headerChunkSizes = sharedInProgressChunkSizes.size() > 1 ?
                 sharedInProgressChunkSizes.get(1) : ZERO_LIST;
@@ -103,13 +117,22 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    /**
+     * Same idea as writeContentsIntoByteBufs, but there's an extra step of serializing the
+     * headers first.  That's done by simply writing them to a ByteArray stream, then slicing
+     * the array into pieces.  Notice that the output of the headers will preserve ordering
+     * and capitalization.
+     *
+     * @param ctx
+     * @param httpJson
+     * @throws IOException
+     */
     private void writeHeadersIntoByteBufs(ChannelHandlerContext ctx,
-                                          HttpJsonMessageWithFaultablePayload httpJson) throws IOException {
+                                          HttpJsonMessageWithFaultingPayload httpJson) throws IOException {
         var headerChunkSizes = sharedInProgressChunkSizes.get(0);
         try {
             if (headerChunkSizes.size() > 1) {
-                 writeHeadersAsChunks(ctx, httpJson, headerChunkSizes,
-                        2 * headerChunkSizes.stream().mapToInt(x->x).sum());
+                 writeHeadersAsChunks(ctx, httpJson, headerChunkSizes, MAX_HEADERS_BYTE_SIZE);
                  return;
             }
         } catch (Exception e) {
@@ -123,37 +146,37 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
     }
 
     private static void writeHeadersAsChunks(ChannelHandlerContext ctx,
-                                             HttpJsonMessageWithFaultablePayload httpJson,
+                                             HttpJsonMessageWithFaultingPayload httpJson,
                                              List<Integer> headerChunkSizes,
                                              int maxLastBufferSize)
             throws IOException
     {
-        AtomicInteger counter = new AtomicInteger(headerChunkSizes.size());
+        AtomicInteger chunkIdx = new AtomicInteger(headerChunkSizes.size());
         var bufs = headerChunkSizes.stream()
-                .map(i -> ByteBufAllocator.DEFAULT.buffer(counter.decrementAndGet()==0?maxLastBufferSize:i).retain())
+                .map(i -> ByteBufAllocator.DEFAULT.buffer(chunkIdx.decrementAndGet()==0?maxLastBufferSize:i).retain())
                 .toArray(ByteBuf[]::new);
         var cbb = ByteBufAllocator.DEFAULT.compositeBuffer(bufs.length);
         ResourceLeakDetector<CompositeByteBuf> rld =
                 (ResourceLeakDetector<CompositeByteBuf>) ResourceLeakDetectorFactory.instance().newResourceLeakDetector(cbb.getClass());
         rld.track(cbb);
         cbb.addComponents(true, bufs);
-        log.info("cbb.refcnt="+cbb.refCnt());
+        log.debug("cbb.refcnt="+cbb.refCnt());
         try (var bbos = new ByteBufOutputStream(cbb)) {
             writeHeadersIntoStream(httpJson, bbos);
         }
-        log.info("post write cbb.refcnt="+cbb.refCnt());
+        log.debug("post write cbb.refcnt="+cbb.refCnt());
         int debugCounter = 0;
         for (var bb : bufs) {
-            log.info("bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
+            log.debug("bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
             ctx.fireChannelRead(bb);
             bb.release();
-            log.info("Post fire & decrement - bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
+            log.debug("Post fire & decrement - bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
             debugCounter++;
         }
         cbb.release();
     }
 
-    private static void writeHeadersIntoStream(HttpJsonMessageWithFaultablePayload httpJson,
+    private static void writeHeadersIntoStream(HttpJsonMessageWithFaultingPayload httpJson,
                                                OutputStream os) throws IOException {
         try (var osw = new OutputStreamWriter(os, StandardCharsets.UTF_8)) {
             osw.append(httpJson.method());
