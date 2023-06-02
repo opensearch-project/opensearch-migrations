@@ -80,12 +80,12 @@ public class Main {
         @Parameter(required = true,
                 names = {"--destinationPort"},
                 arity = 1,
-                description = "Port of the server that the proxy is capturing traffic for.")
+                description = "Port of the server that the proxy connects to.")
         int backsidePort = 0;
         @Parameter(required = true,
                 names = {"--listenPort"},
                 arity = 1,
-                description = "Port of that this process should listen on.")
+                description = "Exposed port for clients to connect to this proxy.")
         int frontsidePort = 0;
     }
 
