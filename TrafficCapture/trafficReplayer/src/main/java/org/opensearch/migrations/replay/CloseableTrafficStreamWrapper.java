@@ -7,6 +7,7 @@ import java.io.Closeable;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -16,6 +17,7 @@ public class CloseableTrafficStreamWrapper implements Closeable {
     private final Stream<TrafficStream> underlyingStream;
 
     public static CloseableTrafficStreamWrapper generateTrafficStreamFromInputStream(InputStream is) {
+        AtomicInteger trafficStreamsRead = new AtomicInteger();
         return new CloseableTrafficStreamWrapper(is, Stream.generate((Supplier) () -> {
             try {
                 var builder = TrafficStream.newBuilder();
@@ -23,9 +25,10 @@ public class CloseableTrafficStreamWrapper implements Closeable {
                     return null;
                 }
                 var ts = builder.build();
-                log.trace("Parsed traffic stream: "+ts);
+                log.debug("Parsed traffic stream #" + (trafficStreamsRead.incrementAndGet()) + ": "+ts);
                 return ts;
             } catch (IOException e) {
+                log.error("Got exception while reading input: "+e);
                 throw new RuntimeException(e);
             }
         }).takeWhile(s -> s != null));

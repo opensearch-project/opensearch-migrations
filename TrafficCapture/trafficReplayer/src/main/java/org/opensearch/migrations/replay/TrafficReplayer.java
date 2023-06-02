@@ -130,7 +130,6 @@ public class TrafficReplayer {
         var params = parseArgs(args);
         URI uri;
         System.err.println("Starting Traffic Replayer");
-        System.out.println("Starting Traffic Replayer2");
         System.err.println("Got args: "+ String.join("; ", args));
         try {
             uri = new URI(params.targetUriString);
@@ -254,7 +253,7 @@ public class TrafficReplayer {
     }
 
     public void runReplay(Stream<TrafficStream> trafficChunkStream, ReplayEngine replayEngine) throws IOException, InterruptedException {
-        trafficChunkStream//.filter(ts->"22fce2ab".equals(ts.getId()))
+        trafficChunkStream
                 .forEach(ts->ts.getSubStreamList().stream()
                         .forEach(o->replayEngine.accept(ts.getId(), o)));
     }
