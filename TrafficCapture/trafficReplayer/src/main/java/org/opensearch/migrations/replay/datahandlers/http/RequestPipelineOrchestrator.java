@@ -4,7 +4,6 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.logging.ByteBufFormat;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +12,7 @@ import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Consumer;
+import java.util.Optional;
 
 /**
  * This class is meant to be the single place for all pipeline manipulations for HttpRequests.
@@ -28,8 +27,11 @@ import java.util.function.Consumer;
  */
 @Slf4j
 public class RequestPipelineOrchestrator {
+    // Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler
+    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+    public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
     private final List<List<Integer>> chunkSizes;
-    private final IPacketToHttpHandler packetReceiver;
+    final IPacketToHttpHandler packetReceiver;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes, IPacketToHttpHandler packetReceiver) {
         this.chunkSizes = chunkSizes;
@@ -53,9 +55,7 @@ public class RequestPipelineOrchestrator {
         addContentParsingHandlers(pipeline, transformer);
     }
 
-    void addInitialHandlers(ChannelPipeline pipeline,
-                            JsonTransformer transformer,
-                            Consumer<HTTP_CONSUMPTION_STATUS> statusWatcher) {
+    void addInitialHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
         pipeline.addFirst(new HttpRequestDecoder());
         // IN:  Netty HttpRequest(1) + HttpContent(1) blocks (which may be compressed)
         // OUT: ByteBufs(1) OR Netty HttpRequest(1) + HttpJsonMessage(1) with only headers PLUS + HttpContent(1) blocks
@@ -65,7 +65,8 @@ public class RequestPipelineOrchestrator {
         // Note2: This handler may remove itself and all other handlers and replace the pipeline ONLY with the
         //        "baseline" handlers.  In that case, the pipeline will be processing only ByteBufs, hence the
         //        reason that there's some branching in the types that different handlers consume..
-        pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, packetReceiver, statusWatcher));
+        pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, packetReceiver));
+        addLoggingHandler(pipeline, "A");
     }
 
     void addContentParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
@@ -77,6 +78,7 @@ public class RequestPipelineOrchestrator {
             log.warn("Adding JSON handlers to pipeline");
             //  IN: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) blocks
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
+            addLoggingHandler(pipeline, "B");
             pipeline.addLast(new NettyJsonBodyAccumulateHandler());
             //  IN: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(3) with headers AND payload (transformed)
@@ -84,23 +86,33 @@ public class RequestPipelineOrchestrator {
             // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers AND payload
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
             pipeline.addLast(new NettyJsonBodySerializeHandler());
+            addLoggingHandler(pipeline, "E");
         }
         // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
         pipeline.addLast(new NettyJsonContentCompressor());
+        addLoggingHandler(pipeline, "F");
         // IN:  Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + ByteBufs(2)
         pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
+        addLoggingHandler(pipeline, "G");
         addBaselineHandlers(pipeline);
     }
 
     void addBaselineHandlers(ChannelPipeline pipeline) {
+        addLoggingHandler(pipeline, "H");
         //  IN: ByteBufs(2) + HttpJsonMessage(4) with headers only + HttpContent(1) (if the repackaging handlers were skipped)
         // OUT: ByteBufs(3) which are sized similarly to how they were received
         pipeline.addLast(new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes)));
-        //pipeline.addLast(new LoggingHandler(LogLevel.INFO, ByteBufFormat.HEX_DUMP));
         // IN:  ByteBufs(3)
         // OUT: nothing - terminal!  ByteBufs are routed to the packet handler!
-        pipeline.addLast(new NettySendByteBufsToPacketHandlerHandler(packetReceiver));
+        addLoggingHandler(pipeline, "I");
+        pipeline.addLast(OFFLOADING_HANDLER_NAME, new NettySendByteBufsToPacketHandlerHandler(packetReceiver));
     }
+
+    private void addLoggingHandler(ChannelPipeline pipeline, String name) {
+        PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler(name, logLevel)));
+    }
+
+
 }

@@ -6,10 +6,12 @@ import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 
 import java.nio.charset.StandardCharsets;
+import java.util.function.Consumer;
 
 public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandlerAdapter {
     private static final String TRANSFER_ENCODING_CHUNKED_VALUE = "chunked";
@@ -77,6 +79,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
         // make this a singleton
         var lastChunkByteBuf = Unpooled.wrappedBuffer("0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
         ctx.fireChannelRead(lastChunkByteBuf);
+        ctx.fireChannelRead(DefaultLastHttpContent.EMPTY_LAST_CONTENT);
     }
 
     private void finalizeFixedContentStream(ChannelHandlerContext ctx) {
@@ -84,7 +87,6 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
         ctx.fireChannelRead(bufferedJsonMessage);
         bufferedJsonMessage = null;
         ctx.fireChannelRead(bufferedContents);
+        ctx.fireChannelRead(DefaultLastHttpContent.EMPTY_LAST_CONTENT);
     }
-
-
 }

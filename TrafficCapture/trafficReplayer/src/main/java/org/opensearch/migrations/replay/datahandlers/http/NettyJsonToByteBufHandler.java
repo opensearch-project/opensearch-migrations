@@ -24,8 +24,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
-    public static final int MAX_CHUNK_SIZE = 1024 * 1024;
-    //private final HttpJsonTransformerHandler httpJsonTransformerHandler;
     List<List<Integer>> sharedInProgressChunkSizes;
     ByteBuf inProgressByteBuf;
     int payloadBufferIndex;
@@ -46,6 +44,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
                 ctx.fireChannelRead(inProgressByteBuf);
                 inProgressByteBuf = null;
                 ++payloadBufferIndex;
+                ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
             }
         } else {
             super.channelRead(ctx, msg);

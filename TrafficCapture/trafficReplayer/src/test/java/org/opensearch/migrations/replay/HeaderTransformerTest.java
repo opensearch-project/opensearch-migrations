@@ -26,7 +26,8 @@ public class HeaderTransformerTest {
     @Test
     public void testTransformer() throws Exception {
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null,
+                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var jsonHandler = JoltJsonTransformer.newBuilder()
                 .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
@@ -76,7 +77,8 @@ public class HeaderTransformerTest {
     public void testMalformedPayloadIsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedRawResponse(12, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(12, null,
+                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, "Basic YWRtaW46YWRtaW4="),  testPacketCapture);
@@ -98,7 +100,8 @@ public class HeaderTransformerTest {
     public void testMalformedPayload_andTypeMappingUri_IsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedRawResponse(12, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(12, null,
+                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformer(
 

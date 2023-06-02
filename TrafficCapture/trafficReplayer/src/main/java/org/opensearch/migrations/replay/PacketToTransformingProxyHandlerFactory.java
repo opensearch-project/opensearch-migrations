@@ -28,7 +28,7 @@ public class PacketToTransformingProxyHandlerFactory {
         return new NettyPacketToHttpHandler(eventLoopGroup, serverUri, sslContext);
     }
 
-    public IPacketToHttpHandler create() {
+    public HttpJsonTransformer create() {
         return new HttpJsonTransformer(jsonTransformer, createNettyHandler());
     }
 

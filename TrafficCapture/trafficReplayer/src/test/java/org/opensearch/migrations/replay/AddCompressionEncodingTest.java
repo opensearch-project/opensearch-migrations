@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
 import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
-import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -29,7 +28,8 @@ public class AddCompressionEncodingTest {
     public void addingCompressionRequestHeaderCompressesPayload() throws ExecutionException, InterruptedException, IOException {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null,
+                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var compressingTransformer = new HttpJsonTransformer(
                 JoltJsonTransformer.newBuilder()

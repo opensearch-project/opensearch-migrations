@@ -2,7 +2,9 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.LastHttpContent;
 import lombok.SneakyThrows;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
