@@ -76,9 +76,9 @@ class Operations:
 
 def main():
 
-    username = os.getenv('USERNAME')
-    password = os.getenv('PASSWORD')
-    endpoint = os.getenv('ENDPOINT') # Dont forget port number.
+    username = os.getenv('USERNAME', '')
+    password = os.getenv('PASSWORD', '')
+    endpoint = os.getenv('ENDPOINT')  # Dont forget port number.
 
     auth = (username, password)
     index = 'my_index'
