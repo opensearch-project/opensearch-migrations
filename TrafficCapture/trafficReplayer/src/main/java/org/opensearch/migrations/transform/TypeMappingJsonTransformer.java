@@ -82,7 +82,6 @@ public class TypeMappingJsonTransformer implements JsonTransformer {
     private void exciseMappingsType(Map<String, Object> mappingsParent, Map<String, Object> mappingsValue) {
         var firstMappingOp = mappingsValue.entrySet().stream().findFirst();
         firstMappingOp.ifPresent(firstMapping -> {
-            mappingsParent.clear();
             mappingsParent.put(MAPPINGS_KEYNAME, firstMapping.getValue());
         });
     }
