@@ -9,8 +9,8 @@ RUN git clone https://github.com/opensearch-project/opensearch-migrations.git
 
 FROM openjdk:17-jdk-slim
 
-ARG KAFKA_BOOTSTRAP_SERVER
-ENV KAFKA_BOOTSTRAP_SERVER ${KAFKA_BOOTSTRAP_SERVER}
+ARG KAFKA_BOOTSTRAP_SERVERS
+ENV KAFKA_BOOTSTRAP_SERVERS ${KAFKA_BOOTSTRAP_SERVERS}
 
 ARG KAFKA_TOPIC_NAME
 ENV KAFKA_TOPIC_NAME ${KAFKA_TOPIC_NAME}
@@ -24,5 +24,5 @@ RUN ./gradlew build
 
 COPY run_app.sh .
 
-CMD ./run_app.sh ${KAFKA_BOOTSTRAP_SERVER} ${KAFKA_TOPIC_NAME}
+CMD ./run_app.sh ${KAFKA_BOOTSTRAP_SERVERS} ${KAFKA_TOPIC_NAME}
 #CMD ./run_app.sh http://host.docker.internal:9200
