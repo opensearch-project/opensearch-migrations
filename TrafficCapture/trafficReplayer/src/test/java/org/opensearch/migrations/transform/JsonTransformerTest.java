@@ -31,7 +31,7 @@ class JsonTransformerTest {
         }
     }
 
-    private String emitOrderedJson(Object transformedDocument) throws JsonProcessingException {
+    private String emitJson(Object transformedDocument) throws JsonProcessingException {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true); //optional
         return mapper.writeValueAsString(transformedDocument);
@@ -42,11 +42,10 @@ class JsonTransformerTest {
         final String TEST_DOCUMENT = "{\"Hello\":\"world\"}";
         var documentJson = parseStringAsJson(TEST_DOCUMENT);
         var transformer = JoltJsonTransformer.newBuilder()
-                .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.PASS_THRU)
+                .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.PASS_THRU)
                 .build();
         var transformedDocument = transformer.transformJson(documentJson);
-        var finalOutputStr = emitOrderedJson(transformedDocument);
-        log.error("final document: "+finalOutputStr);
+        var finalOutputStr = emitJson(transformedDocument);
 
         Assertions.assertEquals(TEST_DOCUMENT, finalOutputStr);
     }
@@ -59,7 +58,7 @@ class JsonTransformerTest {
                 .addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING)
                 .build();
         var transformedDocument = transformer.transformJson(documentJson);
-        String transformedJsonOutputStr = emitOrderedJson(transformedDocument);
+        String transformedJsonOutputStr = emitJson(transformedDocument);
         log.error("transformed json document: "+transformedJsonOutputStr);
         Assertions.assertTrue(transformedJsonOutputStr.contains(DUMMY_HOSTNAME_TEST_STRING));
     }

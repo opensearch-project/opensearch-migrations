@@ -23,13 +23,13 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
 @Log4j2
-public class NettyPacketToHttpHandler implements IPacketToHttpHandler {
+public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
 
     ChannelFuture outboundChannelFuture;
     AggregatedRawResponse.Builder responseBuilder;
     BacksideHttpWatcherHandler responseWatchHandler;
 
-    public NettyPacketToHttpHandler(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext) {
+    public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext) {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         responseBuilder = AggregatedRawResponse.builder(Instant.now());

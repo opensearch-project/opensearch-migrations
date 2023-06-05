@@ -1,7 +1,7 @@
 package org.opensearch.migrations.transform;
 
-import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultablePayload;
+import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -11,9 +11,17 @@ import java.util.regex.Pattern;
  * to excise index type mappings for relevant operations.
  */
 public class TypeMappingJsonTransformer implements JsonTransformer {
-    final static Pattern PATH3_CAPTURING_SIDES_PATTERN =
+    /**
+     * This is used to match a URI of the form /INDEX/TYPE/foo... so that it can be
+     * transformed into /INDEX/foo...
+     */
+    final static Pattern TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES =
             Pattern.compile("^(\\/[^\\/]*)\\/[^\\/]*(\\/[^\\/]*)$");
-    final static Pattern PATH1_CAPTURING_FIRST_PATTERN =
+
+    /**
+     * This is used to match a URI of the form /foo...
+     */
+    final static Pattern SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE =
             Pattern.compile("^(\\/[^\\/]*)$");
     public static final String SEARCH_URI_COMPONENT = "/_search";
     public static final String DOC_URI_COMPONENT = "/_doc";
@@ -29,7 +37,7 @@ public class TypeMappingJsonTransformer implements JsonTransformer {
     }
 
     private Object transformHttpMessage(Map<String, Object> httpMsg) {
-        var incomingMethod = httpMsg.get(HttpJsonMessageWithFaultablePayload.METHOD);
+        var incomingMethod = httpMsg.get(HttpJsonMessageWithFaultingPayload.METHOD);
         if ("GET".equals(incomingMethod)) {
             processGet(httpMsg);
         } else if ("PUT".equals(incomingMethod)) {
@@ -39,29 +47,31 @@ public class TypeMappingJsonTransformer implements JsonTransformer {
     }
 
     private void processGet(Map<String, Object> httpMsg) {
-        var incomingUri = (String) httpMsg.get(HttpJsonMessageWithFaultablePayload.URI);
-        var matchedUri = PATH3_CAPTURING_SIDES_PATTERN.matcher(incomingUri);
+        var incomingUri = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI);
+        var matchedUri = TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES.matcher(incomingUri);
         if (matchedUri.matches()) {
             var operationStr = matchedUri.group(2);
             if (operationStr.equals(SEARCH_URI_COMPONENT)) {
-                httpMsg.put(HttpJsonMessageWithFaultablePayload.URI, matchedUri.group(1) + operationStr);
+                httpMsg.put(HttpJsonMessageWithFaultingPayload.URI, matchedUri.group(1) + operationStr);
             }
         }
     }
 
     private void processPut(Map<String, Object> httpMsg) {
-        final var uriStr = (String) httpMsg.get(HttpJsonMessageWithFaultablePayload.URI);
-        var matchedTriple = PATH3_CAPTURING_SIDES_PATTERN.matcher(uriStr);
+        final var uriStr = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI);
+        var matchedTriple = TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES.matcher(uriStr);
         if (matchedTriple.matches()) {
-            httpMsg.put(HttpJsonMessageWithFaultablePayload.URI,
+            // TODO: Add support for multiple type mappings per index (something possible with
+            // versions before ES7)
+            httpMsg.put(HttpJsonMessageWithFaultingPayload.URI,
                     matchedTriple.group(1) + DOC_URI_COMPONENT + matchedTriple.group(2));
             return;
         }
-        var matchedSingle = PATH1_CAPTURING_FIRST_PATTERN.matcher(uriStr);
+        var matchedSingle = SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE.matcher(uriStr);
         if (matchedSingle.matches()) {
             var topPayloadElement =
-                    (Map<String, Object>) ((Map<String, Object>) httpMsg.get(HttpJsonMessageWithFaultablePayload.PAYLOAD))
-                            .get(PayloadFaultMap.INLINED_JSON_BODY_DOCUMENT_KEY);
+                    (Map<String, Object>) ((Map<String, Object>) httpMsg.get(HttpJsonMessageWithFaultingPayload.PAYLOAD))
+                            .get(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY);
             var mappingsValue = (Map<String, Object>) topPayloadElement.get(MAPPINGS_KEYNAME);
             if (mappingsValue != null) {
                 exciseMappingsType(topPayloadElement, mappingsValue);
@@ -72,7 +82,6 @@ public class TypeMappingJsonTransformer implements JsonTransformer {
     private void exciseMappingsType(Map<String, Object> mappingsParent, Map<String, Object> mappingsValue) {
         var firstMappingOp = mappingsValue.entrySet().stream().findFirst();
         firstMappingOp.ifPresent(firstMapping -> {
-            mappingsParent.clear();
             mappingsParent.put(MAPPINGS_KEYNAME, firstMapping.getValue());
         });
     }

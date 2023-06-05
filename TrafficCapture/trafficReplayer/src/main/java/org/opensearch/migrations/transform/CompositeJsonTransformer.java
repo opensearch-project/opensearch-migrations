@@ -1,7 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import com.beust.ah.A;
-
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 

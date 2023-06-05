@@ -6,6 +6,9 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 public class Utils {
+    /**
+     * See https://en.wikipedia.org/wiki/Fold_(higher-order_function)
+     */
     public static <A, B> Collector<A, ?, B>
     foldLeft(final B seedValue, final BiFunction<? super B, ? super A, ? extends B> f) {
         return Collectors.collectingAndThen(

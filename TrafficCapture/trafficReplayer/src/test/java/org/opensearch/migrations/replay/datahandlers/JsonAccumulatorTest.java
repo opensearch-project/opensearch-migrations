@@ -27,8 +27,6 @@ import java.util.Random;
 public class JsonAccumulatorTest {
 
     public static final String TOY = "toy";
-    public static final String MEDIUM = "medium";
-    public static final String LARGE = "large";
 
     private static Object readJson(byte[] testFileBytes, int chunkBound) throws IOException {
         var jsonParser = new JsonAccumulator();
@@ -54,25 +52,20 @@ public class JsonAccumulatorTest {
         switch (key) {
             case TOY:
                 return "{\"name\":\"John\", \"age\":30}".getBytes(StandardCharsets.UTF_8);
-            case MEDIUM:
-                try (FileInputStream fis = new FileInputStream("FILLMEIN");
-                     BufferedInputStream bis = new BufferedInputStream(fis)) {
-                    return bis.readAllBytes();
-                }
-            case LARGE:
-                try (FileInputStream fis = new FileInputStream("FILLMEIN");
-                     BufferedInputStream bis = new BufferedInputStream(fis)) {
-                    return bis.readAllBytes();
-                }
             default:
                 throw new RuntimeException("Unknown key: "+key);
         }
     }
+
+    /**
+     * TODO - run these tests with different sized trees.  I'd like to generate some random json
+     * data of various sizes and to push those through.
+     * @param dataName
+     * @param chunkBound
+     * @throws IOException
+     */
     @ParameterizedTest
-    @CsvSource({"toy,2", "toy,20000",
-            //"medium,2","medium,20000",
-            //"large,2","large,20000"
-    })
+    @CsvSource({"toy,2", "toy,20000"})
     public void testAccumulation(String dataName, int chunkBound) throws IOException {
         var testFileBytes = getData(dataName);
         var outputJson = readJson(testFileBytes, 2);

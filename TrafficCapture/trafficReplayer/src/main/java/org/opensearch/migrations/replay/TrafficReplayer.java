@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import com.beust.ah.A;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -34,8 +33,7 @@ import java.util.stream.Stream;
 @Log4j2
 public class TrafficReplayer {
 
-    private final PacketToTransformingProxyHandlerFactory packetHandlerFactory;
-    private Duration timeout = Duration.ofSeconds(20);
+    private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
 
     public static JsonTransformer buildDefaultJsonTransformer(String newHostName,
                                                               String authorizationHeader) {
@@ -67,7 +65,7 @@ public class TrafficReplayer {
         if (serverUri.getScheme() == null) {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
-        packetHandlerFactory = new PacketToTransformingProxyHandlerFactory(serverUri, jsonTransformer,
+        packetHandlerFactory = new PacketToTransformingHttpHandlerFactory(serverUri, jsonTransformer,
                 loadSslContext(serverUri, allowInsecureConnections));
     }
 
@@ -146,7 +144,7 @@ public class TrafficReplayer {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
                 try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntriesFromFileOrStdin(params.inputFilename)) {
                     tr.runReplayWithIOStreams(closeableStream.stream(), bufferedOutputStream);
-                    log.info("beginning to close output stream");
+                    log.info("reached the end of the ingestion output stream");
                 }
             }
         }
@@ -157,34 +155,35 @@ public class TrafficReplayer {
             throws IOException, InterruptedException, ExecutionException {
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger exceptionCount = new AtomicInteger();
-        var tripleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
+        var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         ConcurrentHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>> requestFutureMap =
                 new ConcurrentHashMap<>();
         ConcurrentHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>>
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
-        ReplayEngine replayEngine = new ReplayEngine(
-                request -> requestFutureMap.put(request, writeToSocketAndClose(request)),
-                rrPair -> {
-                    log.warn("Done receiving captured stream for this "+rrPair.requestData);
-                    var resultantCf = requestFutureMap.get(rrPair.requestData)
-                            .handle((summary, t) -> {
-                                try {
-                                    var rval = packageAndWriteResponse(tripleWriter, rrPair, summary, t);
-                                    successCount.incrementAndGet();
-                                    return rval;
-                                } catch (Exception e) {
-                                    exceptionCount.incrementAndGet();
-                                    throw e;
-                                }
-                            })
-                            .whenComplete((v,t) -> requestToFinalWorkFuturesMap.remove(rrPair.requestData));
-                    requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
-                }
+        CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
+                new CapturedTrafficToHttpTransactionAccumulator(
+                        request -> requestFutureMap.put(request, writeToSocketAndClose(request)),
+                        rrPair -> {
+                            log.warn("Done receiving captured stream for this "+rrPair.requestData);
+                            var resultantCf = requestFutureMap.get(rrPair.requestData)
+                                    .handle((summary, t) -> {
+                                        try {
+                                            var rval = packageAndWriteResponse(tupleWriter, rrPair, summary, t);
+                                            successCount.incrementAndGet();
+                                            return rval;
+                                        } catch (Exception e) {
+                                            exceptionCount.incrementAndGet();
+                                            throw e;
+                                        }
+                                    })
+                                    .whenComplete((v,t) -> requestToFinalWorkFuturesMap.remove(rrPair.requestData));
+                            requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
+                        }
         );
         try {
-            runReplay(trafficChunkStream, replayEngine);
+            runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } finally {
-            replayEngine.close();
+            trafficToHttpTransactionAccumulator.close();
             var allRemainingWorkArray = requestToFinalWorkFuturesMap.values().toArray(CompletableFuture[]::new);
             log.info("All remaining work to wait on: " +
                     Arrays.stream(allRemainingWorkArray).map(cf->cf.toString()).collect(Collectors.joining()));
@@ -252,9 +251,10 @@ public class TrafficReplayer {
         }
     }
 
-    public void runReplay(Stream<TrafficStream> trafficChunkStream, ReplayEngine replayEngine) throws IOException, InterruptedException {
+    public void runReplay(Stream<TrafficStream> trafficChunkStream,
+                          CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         trafficChunkStream
                 .forEach(ts->ts.getSubStreamList().stream()
-                        .forEach(o->replayEngine.accept(ts.getId(), o)));
+                        .forEach(o-> trafficToHttpTransactionAccumulator.accept(ts.getId(), o)));
     }
 }

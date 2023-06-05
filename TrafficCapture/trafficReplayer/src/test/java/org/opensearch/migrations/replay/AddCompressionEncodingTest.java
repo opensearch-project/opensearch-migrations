@@ -4,7 +4,7 @@ import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformer;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 
@@ -28,12 +28,12 @@ public class AddCompressionEncodingTest {
     public void addingCompressionRequestHeaderCompressesPayload() throws ExecutionException, InterruptedException, IOException {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null,
-                null, AggregatedRawResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null,
+                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var compressingTransformer = new HttpJsonTransformer(
+        var compressingTransformer = new HttpJsonTransformingConsumer(
                 JoltJsonTransformer.newBuilder()
-                        .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATIONS.ADD_GZIP)
+                        .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.ADD_GZIP)
                         .build(), testPacketCapture);
 
         final var payloadPartSize = 511;
@@ -51,7 +51,7 @@ public class AddCompressionEncodingTest {
         for (int i=numParts; i>0; --i) {
             tail = tail.thenCompose(v->compressingTransformer.consumeBytes(payloadPart));
         }
-        CompletableFuture<AggregatedRawResponse> fullyProcessedResponse =
+        var fullyProcessedResponse =
                 tail.thenCompose(v->compressingTransformer.finalizeRequest());
         fullyProcessedResponse.get();
         try (var bais = new ByteArrayInputStream(testPacketCapture.getBytesCaptured());

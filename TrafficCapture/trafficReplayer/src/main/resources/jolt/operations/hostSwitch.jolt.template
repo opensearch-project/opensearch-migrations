@@ -2,7 +2,7 @@
   "operation": "modify-overwrite-beta",
   "spec": {
     "headers": {
-      "Host": {}
+      "Host": "%%SUBSTITION_1%%"
     }
   }
 }

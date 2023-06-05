@@ -8,6 +8,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * The underlying case-insensitive headers map allows for headers to be stored as a multimap,
+ * with a list of values.  However, this class spares callers (and third party packages) the
+ * difficulty of working with a multimap when they might just have a single value.
+ *
+ * This is a kludge to provide that.  Note that this code doesn't do conversions such as joining
+ * or splitting.  If more control is required, callers should use the multimap interfaces.
+ */
 public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String,Object> {
     protected final StrictCaseInsensitiveHttpHeadersMap strictHeadersMap;
 
@@ -42,32 +50,12 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
         return strictHeadersMap.put(key, strList);
     }
 
+    /**
+     * This is just casting the underlying object's entrySet.  An old git commit will show this unrolled,
+     * but this should be significantly more efficient.
+     */
     @Override
     public Set<Entry<String, Object>> entrySet() {
-        return new AbstractSet() {
-            @Override
-            public Iterator<Entry<String, Object>> iterator() {
-                return new Iterator<Entry<String, Object>>() {
-                    Iterator<Entry<String,List<String>>> backingIterator =
-                            strictHeadersMap.entrySet().iterator();
-
-                    @Override
-                    public boolean hasNext() {
-                        return backingIterator.hasNext();
-                    }
-
-                    @Override
-                    public Entry<String, Object> next() {
-                        var backingEntry = backingIterator.next();
-                        return backingEntry == null ? null : (Entry) backingEntry;
-                    }
-                };
-            }
-
-            @Override
-            public int size() {
-                return strictHeadersMap.size();
-            }
-        };
+        return (Set<Entry<String, Object>>) (Object) strictHeadersMap.entrySet();
     }
 }

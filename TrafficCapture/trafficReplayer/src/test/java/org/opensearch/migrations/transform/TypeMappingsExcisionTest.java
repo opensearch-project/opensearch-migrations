@@ -1,17 +1,12 @@
 package org.opensearch.migrations.transform;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.CharStreams;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
-import org.opensearch.migrations.replay.datahandlers.PayloadFaultMap;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultablePayload;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
@@ -25,7 +20,7 @@ public class TypeMappingsExcisionTest {
     static ObjectMapper objectMapper = new ObjectMapper();
 
 
-    static InputStream getTypeMappingResourceStream(String resourceName) {
+    static InputStream getInputStreamForTypeMappingResource(String resourceName) {
         return TypeMappingsExcisionTest.class.getResourceAsStream("/sampleJsonDocuments/typeMappings/" +
                 resourceName);
     }
@@ -50,7 +45,7 @@ public class TypeMappingsExcisionTest {
 
     private static Object parseJsonFromResourceName(String resourceName) throws Exception {
         var jsonAccumulator = new JsonAccumulator();
-        try (var resourceStream = getTypeMappingResourceStream(resourceName);
+        try (var resourceStream = getInputStreamForTypeMappingResource(resourceName);
              var isr = new InputStreamReader(resourceStream, StandardCharsets.UTF_8)) {
             var expectedBytes = CharStreams.toString(isr).getBytes(StandardCharsets.UTF_8);
             return jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
