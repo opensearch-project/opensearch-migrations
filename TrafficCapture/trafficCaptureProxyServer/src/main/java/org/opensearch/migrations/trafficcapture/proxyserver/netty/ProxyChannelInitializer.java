@@ -51,7 +51,6 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
         ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader,
                 this::shouldGuaranteeMessageOffloading));
-        //ch.pipeline().addLast(new ConditionallyReliableWireLoggingHandler(x->true, offloader));
         //ch.pipeline().addLast(new LoggingHandler("POST", LogLevel.ERROR));
         ch.pipeline().addLast(new FrontsideHandler(host, port));
     }

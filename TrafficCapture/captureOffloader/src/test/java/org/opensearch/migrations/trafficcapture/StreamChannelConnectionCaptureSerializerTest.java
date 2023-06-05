@@ -6,9 +6,9 @@ import com.google.protobuf.Timestamp;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndicator;
-import org.opensearch.migrations.trafficcapture.protos.Exception;
-import org.opensearch.migrations.trafficcapture.protos.Read;
+import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -31,50 +31,35 @@ class StreamChannelConnectionCaptureSerializerTest {
     private final static String FAKE_READ_PACKET_DATA = "ABCDEFGHIJKLMNOP";
     public static final String TEST_TRAFFIC_STREAM_ID_STRING = "Test";
 
+
     private static TrafficStream makeSampleTrafficStream(Instant t) {
+        var fixedTimestamp = Timestamp.newBuilder()
+                .setSeconds(t.getEpochSecond())
+                .setNanos(t.getNano())
+                .build();
         return TrafficStream.newBuilder()
                 .setId(TEST_TRAFFIC_STREAM_ID_STRING)
                 .setNumberOfThisLastChunk(1)
-                .addSubStream(TrafficObservation.newBuilder()
-                        .setTs(Timestamp.newBuilder()
-                                .setSeconds(t.getEpochSecond())
-                                .setNanos(t.getNano())
-                                .build())
-                        .setRead(Read.newBuilder()
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setRead(ReadObservation.newBuilder()
                                 .setData(ByteString.copyFrom(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8)))
                                 .build())
                         .build())
-                .addSubStream(TrafficObservation.newBuilder()
-                        .setTs(Timestamp.newBuilder()
-                                .setSeconds(t.getEpochSecond())
-                                .setNanos(t.getNano())
-                                .build())
-                        .setRead(Read.newBuilder()
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setRead(ReadObservation.newBuilder()
                                 .build())
                         .build())
-                .addSubStream(TrafficObservation.newBuilder()
-                        .setTs(Timestamp.newBuilder()
-                                .setSeconds(t.getEpochSecond())
-                                .setNanos(t.getNano())
-                                .build())
-                        .setException(Exception.newBuilder()
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setConnectionException(ConnectionExceptionObservation.newBuilder()
                                 .setMessage(FAKE_EXCEPTION_DATA)
                                 .build())
                         .build())
-                .addSubStream(TrafficObservation.newBuilder()
-                        .setTs(Timestamp.newBuilder()
-                                .setSeconds(t.getEpochSecond())
-                                .setNanos(t.getNano())
-                                .build())
-                        .setException(Exception.newBuilder()
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setConnectionException(ConnectionExceptionObservation.newBuilder()
                                 .build())
                         .build())
-                .addSubStream(TrafficObservation.newBuilder()
-                        .setTs(Timestamp.newBuilder()
-                                .setSeconds(t.getEpochSecond())
-                                .setNanos(t.getNano())
-                                .build())
-                        .setEndOfMessageIndicator(EndOfMessageIndicator.newBuilder()
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
                                 .setFirstLineByteLength(17)
                                 .setHeadersByteLength(72)
                                 .build())

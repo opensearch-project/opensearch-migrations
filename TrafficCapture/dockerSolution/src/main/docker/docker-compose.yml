@@ -1,0 +1,111 @@
+version: '3.7'
+services:
+
+  captureproxy:
+    image: 'migrations/capture_proxy:latest'
+    networks:
+      - migrations
+    ports:
+      - "9200:9200"
+    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main  --kafkaConnection kafka:9092 --destinationHost  elasticsearch --destinationPort 9200 --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
+    depends_on:
+      - kafka
+      - elasticsearch
+
+  elasticsearch:
+    image: 'migrations/elasticsearch_searchguard:latest'
+    networks:
+      - migrations
+    ports:
+      - '19200:9200'
+
+  zookeeper:
+    image: docker.io/bitnami/zookeeper:3.8
+    networks:
+      - migrations
+    ports:
+      - "2181:2181"
+    volumes:
+      - "zookeeper_data:/bitnami"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    image: docker.io/bitnami/kafka:3.4
+    networks:
+      - migrations
+    ports:
+      - "9092:9092"
+    volumes:
+      - "kafka_data:/bitnami"
+    environment:
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_ENABLE_KRAFT=no
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+    depends_on:
+      - zookeeper
+
+  traffic_capture_puller:
+    image: 'migrations/kafka_capture_puller:latest'
+    networks:
+      - migrations
+    depends_on:
+      - kafka
+      - replayer
+    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic | nc -v replayer 10001"
+
+  replayer:
+    image: 'migrations/traffic_replayer:latest'
+    networks:
+      - migrations
+    ports:
+      - "10001:10001"
+    depends_on:
+      - opensearchtarget
+    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure"
+
+  opensearchtarget:
+    image: 'opensearchproject/opensearch:latest'
+    environment:
+      - discovery.type=single-node
+    networks:
+      - migrations
+    ports:
+      - "29200:9200"
+
+#  traffic_comparator:
+#    image: 'migrations/opensearch_migrations_comparator:latest'
+
+  opensearch-benchmarks:
+    image: 'migrations/open_search_benchmark:latest'
+    networks:
+      - migrations
+    depends_on:
+      - captureproxy
+    command:
+      - /bin/sh
+      - -c
+      - >
+        echo "Running opensearch-benchmark w/ 'geonames' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+        echo "Running opensearch-benchmark w/ 'http_logs' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=http_logs --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+        echo "Running opensearch-benchmark w/ 'nested' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nested --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+        echo "Running opensearch-benchmark w/ 'nyc_taxis' workload..." &&
+        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false"
+
+volumes:
+  zookeeper_data:
+    driver: local
+  kafka_data:
+    driver: local
+  traffic_comparator:
+
+
+networks:
+  migrations:
+    driver: bridge

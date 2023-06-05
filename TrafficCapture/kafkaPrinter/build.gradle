@@ -1,0 +1,54 @@
+plugins {
+    id 'org.opensearch.migrations.java-application-conventions'
+    id 'java'
+    id 'application'
+    id "io.freefair.lombok" version "8.0.1"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
+    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.4.0'
+
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+
+    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.6'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    testImplementation project(":captureProtobufs")
+    testImplementation 'org.projectlombok:lombok:1.18.26'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+
+application {
+    // Define the main class for the application.
+    mainClass = 'org.opensearch.migrations.KafkaPrinter'
+}
+
+
+task unzip(type: Copy) {
+    def zipFile = file('build/distributions/KafkaPrinter.zip')
+    def outputDir = file("extracted")
+
+    from zipTree(zipFile)
+    into outputDir
+}
+
+task cleanUp(type: Delete) {
+    delete 'extracted'
+}
+
+build.finalizedBy(unzip)
+clean.finalizedBy(cleanUp)

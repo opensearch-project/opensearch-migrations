@@ -5,14 +5,15 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndicator;
-import org.opensearch.migrations.trafficcapture.protos.Exception;
-import org.opensearch.migrations.trafficcapture.protos.Read;
-import org.opensearch.migrations.trafficcapture.protos.ReadSegment;
+
+import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
+import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.protos.Write;
-import org.opensearch.migrations.trafficcapture.protos.WriteSegment;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
+import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -233,13 +234,13 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         int segmentFieldNumber,segmentCountFieldNumber,segmentDataFieldNumber;
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
             segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
-            segmentCountFieldNumber = ReadSegment.COUNT_FIELD_NUMBER;
-            segmentDataFieldNumber = ReadSegment.DATA_FIELD_NUMBER;
+            segmentCountFieldNumber = ReadSegmentObservation.COUNT_FIELD_NUMBER;
+            segmentDataFieldNumber = ReadSegmentObservation.DATA_FIELD_NUMBER;
         }
         else {
             segmentFieldNumber = TrafficObservation.WRITESEGMENT_FIELD_NUMBER;
-            segmentCountFieldNumber = WriteSegment.COUNT_FIELD_NUMBER;
-            segmentDataFieldNumber = WriteSegment.DATA_FIELD_NUMBER;
+            segmentCountFieldNumber = WriteSegmentObservation.COUNT_FIELD_NUMBER;
+            segmentDataFieldNumber = WriteSegmentObservation.DATA_FIELD_NUMBER;
         }
 
         // The message bytes here are not optimizing for space and instead are calculated on the worst case estimate of
@@ -265,7 +266,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         while(byteBuffer.position() < byteBuffer.limit()) {
             int availableCOSSpace = getOrCreateCodedOutputStream().spaceLeft();
             int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : byteBuffer.limit() - byteBuffer.position();
-            ByteBuffer bb = byteBuffer.slice(byteBuffer.position(), chunkBytes);
+            ByteBuffer bb = byteBuffer.slice();
+            bb.limit(chunkBytes);
+            bb = bb.slice();
             byteBuffer.position(byteBuffer.position() + chunkBytes);
             addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, ++dataCount, timestamp, bb);
             // 1 to N-1 chunked messages
@@ -310,12 +313,12 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public void addReadEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addDataMessage(TrafficObservation.READ_FIELD_NUMBER, Read.DATA_FIELD_NUMBER, timestamp, buffer);
+        addDataMessage(TrafficObservation.READ_FIELD_NUMBER, ReadObservation.DATA_FIELD_NUMBER, timestamp, buffer);
     }
 
     @Override
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
-        addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, Write.DATA_FIELD_NUMBER, timestamp, buffer);
+        addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, WriteObservation.DATA_FIELD_NUMBER, timestamp, buffer);
     }
 
     @Override
@@ -365,7 +368,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {
-        addStringMessage(TrafficObservation.EXCEPTION_FIELD_NUMBER, Exception.MESSAGE_FIELD_NUMBER,
+        addStringMessage(TrafficObservation.CONNECTIONEXCEPTION_FIELD_NUMBER,
+                ConnectionExceptionObservation.MESSAGE_FIELD_NUMBER,
                 timestamp, t.getMessage());
     }
 
@@ -388,12 +392,12 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     }
 
     private void writeEndOfHttpMessage(Instant timestamp) throws IOException {
-        int eomPairSize = CodedOutputStream.computeInt32Size(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength) +
-                CodedOutputStream.computeInt32Size(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+        int eomPairSize = CodedOutputStream.computeInt32Size(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength) +
+                CodedOutputStream.computeInt32Size(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
         int eomDataSize = eomPairSize + CodedOutputStream.computeInt32SizeNoTag(eomPairSize);
         beginWritingObservationToCurrentStream(timestamp, TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER, eomDataSize);
         getOrCreateCodedOutputStream().writeUInt32NoTag(eomPairSize);
-        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndicator.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
-        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndicator.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
+        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
     }
 }

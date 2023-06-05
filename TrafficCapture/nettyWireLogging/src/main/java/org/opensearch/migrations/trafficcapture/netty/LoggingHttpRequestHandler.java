@@ -18,7 +18,7 @@ import java.util.List;
 
 @Slf4j
 public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
-    public static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
+    static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
          * Override to broaden the visibility.
          *
@@ -65,17 +65,29 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
                 .map(o -> (DefaultHttpRequest) o)
                 .findAny()
                 .ifPresent(req -> this.currentHttpRequest = req);
-        return HttpCaptureSerializerUtil.addHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
+        return HttpCaptureSerializerUtil.addRelevantHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
     }
 
     private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
         var bb = msg;
         bb.markReaderIndex();
         // todo - move this into a pool
+        var rval = HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
         var parsedMsgs = new ArrayList<>(4);
-        httpDecoder.decode(ctx, bb, parsedMsgs);
+        while (bb.readableBytes() > 0) {
+            var lastIdx = bb.readerIndex();
+            log.warn("Parsing from idx="+lastIdx+" readableBytes="+ bb.readableBytes());
+            httpDecoder.decode(ctx, bb, parsedMsgs);
+            rval = onHttpObjectsDecoded(parsedMsgs);
+            if (rval == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE || // got what we needed
+                    lastIdx == bb.readerIndex()) { // no progress
+                break;
+            }
+            parsedMsgs.clear();
+        }
+        log.trace("Resetting index");
         bb.resetReaderIndex();
-        return onHttpObjectsDecoded(parsedMsgs);
+        return rval;
     }
 
     @Override

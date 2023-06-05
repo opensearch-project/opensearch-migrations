@@ -8,13 +8,14 @@
  */
 
 rootProject.name = 'LoggingProxy'
-include('captureOffloader',
-        'captureKafkaOffloader',
+include('captureKafkaOffloader',
+        'captureOffloader',
         'captureProtobufs',
+        'kafkaPrinter',
         'nettyWireLogging',
         'trafficCaptureProxyServer',
-        'trafficCaptureProxyServerTest',
         'trafficReplayer',
-        //'plugins:elasticsearch:loggable-transport-netty4',
-        //'plugins:opensearch:loggable-transport-netty4'
+
+        'dockerSolution',
+        'trafficCaptureProxyServerTest'
 )
