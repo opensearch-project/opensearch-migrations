@@ -5,6 +5,8 @@ import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.ResourceLeakDetector;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureOffloader;
@@ -30,6 +32,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Slf4j
 class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
     @Test
@@ -65,7 +68,8 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         var trafficStream = TrafficStream.parseFrom(outputByteBuffer.get());
         Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 &&
                 trafficStream.getSubStream(0).hasRead());
-        var combinedTrafficPacketsSteam = new SequenceInputStream(Collections.enumeration(trafficStream.getSubStreamList().stream()
+        var combinedTrafficPacketsSteam =
+                new SequenceInputStream(Collections.enumeration(trafficStream.getSubStreamList().stream()
                 .filter(to->to.hasRead())
                 .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
                 .collect(Collectors.toList())));
@@ -73,7 +77,7 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         Assertions.assertEquals(1, flushCount.get());
     }
 
-    //@Test
+    @Test
     public void testThatTinyPacketsPostBlocks() throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
         writeMessageAndVerify(fullTrafficBytes, w -> {
