@@ -17,7 +17,7 @@ do
   done
   sleep 30
 
-  java -cp build/libs/KafkaPrinter.jar:"$jars" org.opensearch.KafkaPrinter -b "$bootstrap_servers" -t "$topic_name" | tee /dev/stderr | nc -v localhost 9210
+  java -cp kafkaPrinter.jar:"$jars" org.opensearch.migrations.KafkaPrinter -b "$bootstrap_servers" -t "$topic_name" -g "default-logging-group" | tee /dev/stderr | nc -v localhost 9210
   >&2 echo "Command has encountered error. Restarting now ..."
   sleep 1
 done
