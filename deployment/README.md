@@ -4,8 +4,33 @@ This directory is aimed at housing deployment/distribution methods for various m
 It is worth noting that there is not a hard divide between these subdirectories and deployments such as [opensearch-service-migration](./cdk/opensearch-service-migration) will use Dockerfiles in the [docker](./docker) directory for some of its container deployments.
 
 
-#### TODO Improvements
-* Currently some of our Dockerfiles such as the [traffic-replayer]("./docker/traffic-replayer/Dockerfile") Dockerfile are still pulling from this public repository to get the relevant codebase for which to create an image. This will ignore any local changes that are not committed on the pulled repo. It would be nice to be able to easily build this image with local changes included. This can get a bit tricky to manage, though, as Docker has a concept of a build context which will limit the files available to access from the Dockerfile to the current directory. This could potentially be managed with a build script which would handle using any local directory, but there is also the usage in the [opensearch-service-migration](./cdk/opensearch-service-migration) which only accepts a Dockerfile location to be considered as well. 
+### Deploying Migration solution to AWS
+
+**Note**: These features are still under development and subject to change
+
+Detailed instructions for deploying the CDK and setting up its prerequisites can be found in the opensearch-service-migration [README](./cdk/opensearch-service-migration/README.md). This could involve setting CDK context parameters to customize your OpenSearch Service Domain and VPC as well as setting needed migration parameters. A sample **testing** `cdk.context.json` for an E2E migration setup could be:
+```
+{
+  "engineVersion": "OS_1.3",
+  "domainName": "aos-test-domain",
+  "dataNodeCount": 2,
+  "vpcEnabled": true,
+  "availabilityZoneCount": 2,
+  "openAccessPolicyEnabled": true,
+  "domainRemovalPolicy": "DESTROY",
+  "migrationAssistanceEnabled": true,
+  "MSKARN": "arn:aws:kafka:us-east-1:123456789123:cluster/logging-msk-cluster/123456789-12bd-4f34-932b-52060474aa0f-7",
+  "MSKBrokers": [
+    "b-2-public.loggingmskcluster.abc123.c7.kafka.us-east-1.amazonaws.com:9198",
+    "b-1-public.loggingmskcluster.abc123.c7.kafka.us-east-1.amazonaws.com:9198"
+  ],
+  "MSKTopic": "logging-traffic-topic"
+}
+```
 
 
-* Create `docker-compose` files to mimic the existing [CDK](./cdk/opensearch-service-migration) infrastructure for Docker use cases
+
+Once prerequisites are met and context parameters are set, deploying the resources to AWS can be done simply by running the following command:
+```
+cdk deploy "*"
+```
