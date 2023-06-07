@@ -1,4 +1,5 @@
 from operations import create_index, check_index, create_document, delete_document, get_document, delete_index
+from operations import check_document
 from http import HTTPStatus
 import unittest
 import os
@@ -35,10 +36,14 @@ class E2ETests(unittest.TestCase):
         source_response = create_index(source_endpoint, index, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
+        sleep(3)
+
         target_response = check_index(target_endpoint, index, auth)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
 
         # TODO: check comparator's results here.
+
+        sleep(3)
 
         source_response = delete_index(source_endpoint, index, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
@@ -73,16 +78,21 @@ class E2ETests(unittest.TestCase):
         # TODO: check comparator's results here.
         # TODO: compare two documents below instead of just confirming they exist
 
-        source_response = get_document(source_endpoint, index, doc_id, auth)
+        source_response = check_document(source_endpoint, index, doc_id, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        target_response = get_document(target_endpoint, index, doc_id, auth)
+        target_response = check_document(target_endpoint, index, doc_id, auth)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
+
+        source_content = get_document(source_endpoint, index, doc_id, auth)
+        target_content = get_document(target_endpoint, index, doc_id, auth)
+        self.assertEqual(source_content, target_content)
 
         source_response = delete_document(source_endpoint, index, doc_id, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        target_response = get_document(target_endpoint, index, doc_id, auth)
+        target_response = check_document(target_endpoint, index, doc_id, auth)
+
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
 
         source_response = delete_index(source_endpoint, index, auth)
