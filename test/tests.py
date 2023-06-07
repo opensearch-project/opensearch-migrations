@@ -4,11 +4,27 @@ from http import HTTPStatus
 import unittest
 import os
 import logging
-from time import sleep
+import time
 
 logger = logging.getLogger(__name__)
 
 # Tests will say which line the test failed at and what was the result of the execution, but better logging can be done.
+
+
+def retry_request(request, args=(), max_attempts=10, delay=0.5, expectedStatusCode=None):
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = request(*args)
+            if result.status_code == expectedStatusCode:
+                return result
+            else:
+                logger.error(f"Status code returned: {result.status_code} did not"
+                             f" match the expected status code: {expectedStatusCode}")
+        except Exception:
+            logger.error(f"Trying again in {delay} seconds")
+            time.sleep(delay)
+
+    raise Exception(f"All {max_attempts} attempts failed.")
 
 
 class E2ETests(unittest.TestCase):
@@ -44,28 +60,28 @@ class E2ETests(unittest.TestCase):
         proxy_response = create_index(proxy_endpoint, index, auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        sleep(3)
-
-        target_response = check_index(target_endpoint, index, auth)
+        target_response = retry_request(check_index, args=(target_endpoint, index, auth),
+                                        expectedStatusCode=HTTPStatus.OK)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
-        source_response = check_index(source_endpoint, index, auth)
+        source_response = retry_request(check_index, args=(source_endpoint, index, auth),
+                                        expectedStatusCode=HTTPStatus.OK)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
         # TODO: check comparator's results here.
 
-        sleep(3)
-
-        proxy_response = delete_index(proxy_endpoint, index, auth)
+        proxy_response = retry_request(delete_index, args=(proxy_endpoint, index, auth),
+                                       expectedStatusCode=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
         # Add a stall here maybe? Sometimes the check index function is performed before the delete request is replayed
         # on the target cluster, so the check will find the index and return a code 200 instead of 404.
 
         # TODO: check comparator's results here.
 
-        sleep(3)
-        target_response = check_index(target_endpoint, index, auth)
+        target_response = retry_request(check_index, args=(target_endpoint, index, auth),
+                                        expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
-        source_response = check_index(source_endpoint, index, auth)
+        source_response = retry_request(check_index, args=(source_endpoint, index, auth),
+                                        expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
     def test_002_document(self):
@@ -106,9 +122,11 @@ class E2ETests(unittest.TestCase):
         proxy_response = delete_document(proxy_endpoint, index, doc_id, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        target_response = check_document(target_endpoint, index, doc_id, auth)
+        target_response = retry_request(check_document, args=(target_endpoint, index, doc_id, auth),
+                                        expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
-        source_response = check_document(source_endpoint, index, doc_id, auth)
+        source_response = retry_request(check_document, args=(source_endpoint, index, doc_id, auth),
+                                        expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
         proxy_response = delete_index(proxy_endpoint, index, auth)
@@ -116,9 +134,11 @@ class E2ETests(unittest.TestCase):
 
         # TODO: check comparator's results here.
 
-        target_response = check_index(target_endpoint, index, auth)
+        target_response = retry_request(check_index, args=(target_endpoint, index, auth),
+                                        expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
-        source_response = check_index(source_endpoint, index, auth)
+        source_response = retry_request(check_index, args=(source_endpoint, index, auth),
+                                        expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
     def test_003_unsupported_transformation(self):
