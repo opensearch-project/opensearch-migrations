@@ -13,10 +13,6 @@ logger = logging.getLogger(__name__)
 
 class E2ETests(unittest.TestCase):
     def setUp(self):
-        # This is not necessarily a test, but if a test fails for whatever reason, it can cause next tests to fail even
-        # though they could've passed, due to a previous test e.g failing at a point where it creates the index, but it
-        # never gets to the point where it gets deleted.
-        # The final state of the script should be cleaning up after each test run.
         proxy_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:9200')
         username = os.getenv('username', 'admin')
         password = os.getenv('password', 'admin')
@@ -27,10 +23,6 @@ class E2ETests(unittest.TestCase):
         delete_document(proxy_endpoint, index, doc_id, auth)
 
     def tearDown(self):
-        # This is not necessarily a test, but if a test fails for whatever reason, it can cause next tests to fail even
-        # though they could've passed, due to a previous test e.g failing at a point where it creates the index, but it
-        # never gets to the point where it gets deleted.
-        # The final state of the script should be cleaning up after each test run.
         proxy_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:9200')
         username = os.getenv('username', 'admin')
         password = os.getenv('password', 'admin')
