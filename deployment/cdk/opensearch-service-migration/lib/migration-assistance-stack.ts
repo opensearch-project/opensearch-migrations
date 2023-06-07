@@ -86,7 +86,8 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create MSK Consumer Container
         const MSKConsumerImage = new DockerImageAsset(this, "MSKConsumerImage", {
-            directory: join(__dirname, "../../..", "docker/kafka-puller")
+            directory: join(__dirname, "../../../../TrafficCapture"),
+            file: join("kafkaPrinter/docker/Dockerfile")
         });
         const MSKConsumerContainer = migrationFargateTask.addContainer("MSKConsumerContainer", {
             image: ContainerImage.fromDockerImageAsset(MSKConsumerImage),
@@ -98,9 +99,25 @@ export class MigrationAssistanceStack extends Stack {
             logging: LogDrivers.awsLogs({ streamPrefix: 'msk-consumer-container-lg', logRetention: 30 })
         });
 
+        // Create Traffic Replayer Container
+        const trafficReplayerImage = new DockerImageAsset(this, "TrafficReplayerImage", {
+            directory: join(__dirname, "../../../../TrafficCapture"),
+            file: join("trafficReplayer/docker/Dockerfile")
+        });
+        const trafficReplayerContainer = migrationFargateTask.addContainer("TrafficReplayerContainer", {
+            image: ContainerImage.fromDockerImageAsset(trafficReplayerImage),
+            // Add in region and stage
+            containerName: "traffic-replayer",
+            environment: {"TARGET_CLUSTER_ENDPOINT": "http://" + props.targetEndpoint + ":80"},
+            logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-replayer-container-lg', logRetention: 30 })
+        });
+
         // Create Traffic Comparator Container
         const trafficComparatorImage = new DockerImageAsset(this, "TrafficComparatorImage", {
             directory: join(__dirname, "../../..", "docker/traffic-comparator")
+            // For local traffic comparator usage, replace directory path with own fs path
+            //directory: "../../../../../mikayla-forks/traffic-comparator",
+            //file: "docker/Dockerfile-trafficcomparator"
         });
         const trafficComparatorContainer = migrationFargateTask.addContainer("TrafficComparatorContainer", {
             image: ContainerImage.fromDockerImageAsset(trafficComparatorImage),
@@ -111,17 +128,35 @@ export class MigrationAssistanceStack extends Stack {
             logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-comparator-container-lg', logRetention: 30 })
         });
 
-        // Create Traffic Replayer Container
-        const trafficReplayerImage = new DockerImageAsset(this, "TrafficReplayerImage", {
-            directory: join(__dirname, "../../..", "docker/traffic-replayer")
-        });
-        const trafficReplayerContainer = migrationFargateTask.addContainer("TrafficReplayerContainer", {
-            image: ContainerImage.fromDockerImageAsset(trafficReplayerImage),
-            // Add in region and stage
-            containerName: "traffic-replayer",
-            environment: {"TARGET_CLUSTER_ENDPOINT": "http://" + props.targetEndpoint + ":80"},
-            logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-replayer-container-lg', logRetention: 30 })
-        });
+        // To create Jupyter notebook container from local traffic comparator, replace directory path with own fs path
+        // const trafficComparatorJupyterImage = new DockerImageAsset(this, "TrafficComparatorJupyterImage", {
+        //     directory: "../../../../../mikayla-forks/traffic-comparator",
+        //     file: "docker/Dockerfile-trafficcomparator-jupyter"
+        // });
+        // const trafficComparatorJupyterContainer = migrationFargateTask.addContainer("TrafficComparatorJupyterContainer", {
+        //     image: ContainerImage.fromDockerImageAsset(trafficComparatorJupyterImage),
+        //     // Add in region and stage
+        //     containerName: "traffic-comparator-jupyter",
+        //     environment: {},
+        //     portMappings: [{containerPort: 8888}],
+        //     logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-comparator-container-jupyter-lg', logRetention: 30 })
+        // });
+        //
+        // trafficComparatorContainer.addMountPoints({
+        //     containerPath: '/shared',
+        //     sourceVolume: 'shared-traffic-comparator-volume',
+        //     readOnly: false,
+        // });
+        // trafficComparatorJupyterContainer.addMountPoints({
+        //     containerPath: '/shared',
+        //     sourceVolume: 'shared-traffic-comparator-volume',
+        //     readOnly: false,
+        // });
+        //
+        // // Mount the shared volume to the container
+        // migrationFargateTask.addVolume({
+        //     name: 'shared-traffic-comparator-volume',
+        // });
 
         // Create Fargate Service
         const migrationFargateService = new FargateService(this, "migrationFargateService", {
