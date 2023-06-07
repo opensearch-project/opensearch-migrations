@@ -117,3 +117,9 @@ task buildDockerImages {
 }
 
 tasks.getByName('composeUp').dependsOn(tasks.getByName('buildDockerImages'))
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(11) // Locks supported Java version to 11
+    }
+}

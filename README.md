@@ -16,6 +16,10 @@ Developers must run the "install_githooks.sh" script in order to add the pre-com
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 
+## Compatibility
+
+The Java version currently supported by the tools in this repo is Java 11.
+
 ## License
 
 This project is licensed under the Apache-2.0 License.
