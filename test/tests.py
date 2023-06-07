@@ -3,9 +3,10 @@ from operations import check_document
 from http import HTTPStatus
 import unittest
 import os
-
+import logging
 from time import sleep
 
+logger = logging.getLogger(__name__)
 
 # Tests will say which line the test failed at and what was the result of the execution, but better logging can be done.
 
@@ -39,7 +40,7 @@ class E2ETests(unittest.TestCase):
         delete_index(proxy_endpoint, index, auth)
         delete_document(proxy_endpoint, index, doc_id, auth)
 
-    def test_index(self):
+    def test_001_index(self):
         proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
         source_endpoint = os.getenv('SOURCE_ENDPOINT', 'http://localhost:19200')
         target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
@@ -75,7 +76,7 @@ class E2ETests(unittest.TestCase):
         source_response = check_index(source_endpoint, index, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
-    def test_document(self):
+    def test_002_document(self):
         proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
         source_endpoint = os.getenv('SOURCE_ENDPOINT', 'http://localhost:19200')
         target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
@@ -128,10 +129,10 @@ class E2ETests(unittest.TestCase):
         source_response = check_index(source_endpoint, index, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
-    def test_unsupported_transformation(self):
+    def test_003_unsupported_transformation(self):
         self.assertTrue(True)
 
-    def test_supported_transformation(self):
+    def test_004_supported_transformation(self):
         self.assertTrue(True)
 
 
