@@ -79,7 +79,7 @@ public class SourceTargetCaptureTuple {
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
             log.warn("TODO: These durations are not measuring the same values!");
             meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
-                    triple.sourcePair.responseData.getTotalDuration()));
+                Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(), triple.sourcePair.responseData.getLastPacketTimestamp())));
             meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
                     triple.shadowResponseDuration));
 

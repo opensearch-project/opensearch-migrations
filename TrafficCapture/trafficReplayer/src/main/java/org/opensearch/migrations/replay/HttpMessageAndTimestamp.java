@@ -24,10 +24,6 @@ public class HttpMessageAndTimestamp {
         this.packetBytes = new ArrayList<>();
     }
 
-    public Duration getTotalDuration() {
-        return Duration.between(firstPacketTimestamp, lastPacketTimestamp);
-    }
-
     public void add(byte[] b) {
         packetBytes.add(b);
     }
