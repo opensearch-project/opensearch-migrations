@@ -116,10 +116,15 @@ task buildDockerImages {
     //dependsOn buildDockerImage_
 }
 
-tasks.getByName('composeUp').dependsOn(tasks.getByName('buildDockerImages'))
+tasks.getByName('composeUp').dependsOn(tasks.getByName('buildDockerImages').dependsOn('configureJavaVersion'))
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(11) // Locks supported Java version to 11
+tasks.register('configureJavaVersion') {
+    doFirst {
+        def requiredJavaVersion = JavaVersion.toVersion('11')
+        def currentJavaVersion = JavaVersion.current()
+
+        if (currentJavaVersion != requiredJavaVersion) {
+            throw new GradleException("Java version ${requiredJavaVersion} is required to run dockerSolution, but you are using Java version ${currentJavaVersion}.")
+        }
     }
 }
