@@ -17,12 +17,14 @@ ENV KAFKA_BOOTSTRAP_SERVERS ${KAFKA_BOOTSTRAP_SERVERS}
 ARG KAFKA_TOPIC_NAME
 ENV KAFKA_TOPIC_NAME ${KAFKA_TOPIC_NAME}
 
-RUN apt-get update && apt-get install -y netcat
+RUN apt-get update && apt-get install -y netcat && apt-get install -y curl
 RUN apt-get install -y expect
 
 COPY --from=builder kafkaPrinter/build/libs/kafkaPrinter.jar .
 COPY --from=builder kafkaPrinter/extracted ./extracted
 COPY kafkaPrinter/docker/run_app.sh .
+
+EXPOSE 9209
 
 CMD ./run_app.sh ${KAFKA_BOOTSTRAP_SERVERS} ${KAFKA_TOPIC_NAME}
 #CMD ./run_app.sh http://host.docker.internal:9200

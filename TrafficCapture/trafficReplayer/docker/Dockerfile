@@ -18,11 +18,13 @@ ENV TARGET_CLUSTER_ENDPOINT ${TARGET_CLUSTER_ENDPOINT}
 
 WORKDIR ./replay-app
 
-RUN apt-get update && apt-get install -y netcat
+RUN apt-get update && apt-get install -y netcat && apt-get install -y curl
 RUN apt-get install -y expect
 
 COPY --from=builder trafficReplayer/build/libs/*.jar .
 COPY trafficReplayer/docker/run_app.sh .
+
+EXPOSE 9210
 
 CMD ./run_app.sh ${TARGET_CLUSTER_ENDPOINT}
 #CMD ./run_app.sh http://host.docker.internal:9200
