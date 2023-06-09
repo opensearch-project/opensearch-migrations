@@ -2,15 +2,27 @@
 Copilot is a tool for deploying containerized applications on AWS ECS. Official documentation can be found [here](https://aws.github.io/copilot-cli/docs/overview/).
 
 ### Initial Setup
-When initially setting up Copilot; apps, services, and environments need to be initialized. If an existing `manifest.yml` is present (as is the case here), that configuration will be picked up and used after preliminary input is given.
+
+#### Setting up Copilot CLI
+If you are on Mac the following Homebrew command can be ran to set up the Copilot CLI:
+```
+brew install aws/tap/copilot-cli
+```
+Otherwise please follow the manual instructions [here](https://aws.github.io/copilot-cli/docs/getting-started/install/)
+
+#### Setting up existing Copilot infrastructure
+
+When initially setting up Copilot; apps, services, and environments need to be initialized. Although a bit confusing, when initializing already defined (having a `manifest.yml`) environments and resources, Copilot will still prompt for input which will ultimately get ignored in favor of the existing `manifest.yml` file.
 
 If using temporary environment credentials, any input can be given to prompt, but be sure to specify the proper region when asked.
 
 ```
-// Initialize app
+// Initialize app (may not be necessary need to verify with clean slate)
 copilot app init
 
 // Initialize env
+// If using temporary credentials, when prompted select 'Temporary Credentials' and press `enter` for each default value as these can be ignored
+// Be cautious to specify the proper region as this will dictate where resources are deployed
 copilot env init --name test
 
 // Initialize services
@@ -25,12 +37,20 @@ copilot svc init --name traffic-comparator-jupyter
 
 ```
 // Deploy service to a configured environment
+copilot svc deploy --name kafka-puller --env test
+copilot svc deploy --name traffic-replayer --env test
 copilot svc deploy --name traffic-comparator --env test
+copilot svc deploy --name traffic-comparator-jupyter --env test
 ```
 
-### Executing commands on a deployed Service
+### Executing Commands on a Deployed Service
 
 Commands can be executed on a service if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
 ```
 copilot svc exec traffic-comparator --container traffic-comparator --command "bash"
 ```
+
+### Useful Commands
+
+`copilot app show`: Provides details on the current app \
+`copilot svc show`: Provides details on a particular service
