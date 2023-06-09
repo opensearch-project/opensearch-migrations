@@ -1,7 +1,5 @@
 import requests
 import json
-import os
-
 from typing import Optional, Tuple
 
 
@@ -61,23 +59,3 @@ def get_document(endpoint: str, index_name: str, doc_id: str, auth: Optional[Tup
     content = document['_source']
 
     return content
-
-
-def main():
-
-    username = os.getenv('USERNAME', 'admin')
-    password = os.getenv('PASSWORD', 'admin')
-    endpoint = os.getenv('ENDPOINT', 'https://localhost:9200')  # Dont forget port number.
-
-    auth = (username, password)
-    index = 'my_index'
-    doc_id = '7'
-
-    create_index(endpoint, index, auth)
-    create_document(endpoint, index, doc_id, auth)
-    delete_document(endpoint, index, doc_id, auth)
-    delete_index(endpoint, index, auth)
-
-
-if __name__ == "__main__":
-    main()

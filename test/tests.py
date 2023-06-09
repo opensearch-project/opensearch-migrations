@@ -5,6 +5,7 @@ import unittest
 import os
 import logging
 import time
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +68,9 @@ class E2ETests(unittest.TestCase):
                                         expectedStatusCode=HTTPStatus.OK)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        # TODO: check comparator's results here.
-
         proxy_response = retry_request(delete_index, args=(proxy_endpoint, index, auth),
                                        expectedStatusCode=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
-        # Add a stall here maybe? Sometimes the check index function is performed before the delete request is replayed
-        # on the target cluster, so the check will find the index and return a code 200 instead of 404.
-
-        # TODO: check comparator's results here.
 
         target_response = retry_request(check_index, args=(target_endpoint, index, auth),
                                         expectedStatusCode=HTTPStatus.NOT_FOUND)
@@ -94,6 +89,7 @@ class E2ETests(unittest.TestCase):
         index = "my_index"
         doc_id = '7'
 
+        # Creating an index, then asserting that the index was created on both targets.
         proxy_response = create_index(proxy_endpoint, index, auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
@@ -102,12 +98,9 @@ class E2ETests(unittest.TestCase):
         source_response = check_index(source_endpoint, index, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        # TODO: check comparator's results here.
-
+        # Creating a document, then asserting that the document was created on both targets.
         proxy_response = create_document(proxy_endpoint, index, doc_id, auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
-        # TODO: check comparator's results here.
-        # TODO: compare two documents below instead of just confirming they exist
 
         source_response = check_document(source_endpoint, index, doc_id, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
@@ -115,10 +108,12 @@ class E2ETests(unittest.TestCase):
         target_response = check_document(target_endpoint, index, doc_id, auth)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
 
+        # Comparing the document's content on both targets, asserting that they match.
         source_content = get_document(source_endpoint, index, doc_id, auth)
         target_content = get_document(target_endpoint, index, doc_id, auth)
         self.assertEqual(source_content, target_content)
 
+        # Deleting the document that was created then asserting that it was deleted on both targets.
         proxy_response = delete_document(proxy_endpoint, index, doc_id, auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
@@ -129,10 +124,9 @@ class E2ETests(unittest.TestCase):
                                         expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
+        # Deleting the index that was created then asserting that it was deleted on both targets.
         proxy_response = delete_index(proxy_endpoint, index, auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
-
-        # TODO: check comparator's results here.
 
         target_response = retry_request(check_index, args=(target_endpoint, index, auth),
                                         expectedStatusCode=HTTPStatus.NOT_FOUND)
@@ -141,12 +135,13 @@ class E2ETests(unittest.TestCase):
                                         expectedStatusCode=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
-    def test_003_unsupported_transformation(self):
-        self.assertTrue(True)
-
-    def test_004_supported_transformation(self):
-        self.assertTrue(True)
+    def test_003_jupyterAwake(self):
+        # Making sure that the Jupyter notebook is up and can be reached.
+        jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
+        response = requests.get(jupyter_endpoint)
+        self.assertEqual(response.status_code, HTTPStatus.OK)
 
 
 if __name__ == '__main__':
     unittest.main()
+
