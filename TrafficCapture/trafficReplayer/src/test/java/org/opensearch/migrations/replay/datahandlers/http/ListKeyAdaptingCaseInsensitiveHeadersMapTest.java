@@ -7,8 +7,6 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class ListKeyAdaptingCaseInsensitiveHeadersMapTest {
 
     private static final String COOKIE = "cookie";
