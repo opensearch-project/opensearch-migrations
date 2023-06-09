@@ -15,6 +15,7 @@ public class JsonAccumulatorTest {
     public static final String TINY = "tiny";
     public static final String MEDIUM = "medium";
     public static final String LARGE = "large";
+    public static final String LARGE_PACKED = "largeAndPacked";
     GenerateRandomNestedJsonObject randomJsonGenerator = new GenerateRandomNestedJsonObject();
 
     private static Object readJson(byte[] testFileBytes, int chunkBound) throws IOException {
@@ -45,7 +46,10 @@ public class JsonAccumulatorTest {
                 return randomJsonGenerator.getRandomTreeFormattedAsString(false, 2, 200, 50)
                         .getBytes(StandardCharsets.UTF_8);
             case LARGE:
-                return randomJsonGenerator.getRandomTreeFormattedAsString(true, 2, 2000, 400)
+                return randomJsonGenerator.getRandomTreeFormattedAsString(true, 3, 2000, 400)
+                        .getBytes(StandardCharsets.UTF_8);
+            case LARGE_PACKED:
+                return randomJsonGenerator.getRandomTreeFormattedAsString(false, 4, 2000, 400)
                         .getBytes(StandardCharsets.UTF_8);
             default:
                 throw new RuntimeException("Unknown key: "+key);
@@ -62,7 +66,8 @@ public class JsonAccumulatorTest {
     @ParameterizedTest
     @CsvSource({"tiny,2", "tiny,20000",
             "medium,2", "medium,20000",
-            "large,2", "large,20000"
+            "large,2", "large,20000",
+            "largeAndPacked,2", "largeAndPacked,20000"
     })
     public void testAccumulation(String dataName, int chunkBound) throws IOException {
         var testFileBytes = getData(dataName);

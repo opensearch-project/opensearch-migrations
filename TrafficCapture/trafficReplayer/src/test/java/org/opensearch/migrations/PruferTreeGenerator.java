@@ -4,15 +4,12 @@ import lombok.Builder;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.Random;
-import java.util.Stack;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -21,7 +18,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
- * See https://en.wikipedia.org/wiki/Pr%C3%BCfer_sequence.
+ * See https://en.wikipedia.org/wiki/Prufer_sequence
  * @param <T>
  */
 @Slf4j
@@ -49,33 +46,6 @@ public class PruferTreeGenerator<T> {
     public interface Visitor<T> {
         void pushTreeNode(SimpleNode<T> node);
         void popTreeNode(SimpleNode<T> node);
-    }
-
-    public static void main(String[] args) {
-        PruferTreeGenerator ptg = new PruferTreeGenerator<String>();
-        //var edges = new int[]{7,5,7,7,5,1};
-        Random random = new Random(5);
-        final int numNodes = 5;
-        var edges = IntStream.range(0, numNodes-2).map(x->random.nextInt(numNodes)+1).toArray();
-        var tree = ptg.makeTree(vn -> Integer.toString(vn), edges);
-        ptg.printTree(System.out, tree);
-    }
-
-    private void printTree(PrintStream out, SimpleNode<T> tree) {
-        preOrderVisitTree(tree, new Visitor<T>() {
-            int nodeDepth;
-            @Override
-            public void pushTreeNode(SimpleNode<T> node) {
-                out.println(" ".repeat(nodeDepth++) + node.value + (node.hasChildren() ? ": {" : ""));
-            }
-            @Override
-            public void popTreeNode(SimpleNode<T> node) {
-                nodeDepth--;
-                if (node.hasChildren()) {
-                    out.println(" ".repeat(nodeDepth) + "}");
-                }
-            }
-        });
     }
 
     public void preOrderVisitTree(SimpleNode<T> treeNode, Visitor visitor) {
@@ -155,10 +125,14 @@ public class PruferTreeGenerator<T> {
         for (int i = 0; i < pruferLen; i++) {
             var parent = pruferSequenceArray[i];
             var child = nodesWithOneLinkLeft.poll();
-            log.trace("Adding link from {} -> {}", child, parent);
+            if (log.isTraceEnabled()) {
+                log.trace("Adding link from {} -> {}", child, parent);
+            }
             edges.add(Link.builder().from(child).to(parent).build());
             removeLinkForNode(parent, nodeDegrees, nodesWithOneLinkLeft);
-            log.trace("degrees: "+ arrayAsString(nodeDegrees));
+            if (log.isTraceEnabled()) {
+                log.trace("degrees: " + arrayAsString(nodeDegrees));
+            }
         }
 
         edges.add(Link.builder().from(nodesWithOneLinkLeft.poll()).to(nodesWithOneLinkLeft.poll()).build());
