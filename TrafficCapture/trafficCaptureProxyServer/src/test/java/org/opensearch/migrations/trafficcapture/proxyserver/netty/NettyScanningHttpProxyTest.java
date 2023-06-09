@@ -29,6 +29,7 @@ import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.IntStream;
 
 import static java.lang.Math.abs;
 
@@ -137,6 +138,19 @@ class NettyScanningHttpProxyTest {
         for (var httpMessage : coalescedTrafficList) {
             Assertions.assertEquals(expectedMessages[(counter++)%2],
                     normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8)));
+        }
+
+        var observations = recordedTrafficStreams[0].getSubStreamList();
+        var eomIndices = IntStream.range(0, observations.size())
+                .filter(i->observations.get(i).hasEndOfMessageIndicator())
+                .toArray();
+        Assertions.assertEquals(NUM_INTERACTIONS, eomIndices.length);
+        for (int eomIndex : eomIndices) {
+            Assertions.assertTrue(observations.get(eomIndex-1).hasRead());
+            Assertions.assertTrue(observations.get(eomIndex+1).hasWrite());
+            var eom = observations.get(eomIndex).getEndOfMessageIndicator();
+            Assertions.assertEquals(14, eom.getFirstLineByteLength());
+            Assertions.assertEquals(676, eom.getHeadersByteLength());
         }
     }
 

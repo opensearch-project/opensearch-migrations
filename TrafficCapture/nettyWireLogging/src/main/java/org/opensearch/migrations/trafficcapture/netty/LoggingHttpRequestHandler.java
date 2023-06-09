@@ -6,6 +6,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpMessage;
+import io.netty.handler.codec.http.HttpMessageDecoderResult;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpRequestDecoder;
@@ -129,12 +130,20 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        var timestamp = Instant.now();
         var bb = (ByteBuf) msg;
-        trafficOffloader.addReadEvent(Instant.now(), bb);
+        trafficOffloader.addReadEvent(timestamp, bb);
 
         var httpProcessedState = parseHttpMessageParts(bb);
         if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
             var httpRequest = getHandlerThatHoldsParsedHttpRequest().resetCurrentRequest();
+            var decoderResultLoose = httpRequest.decoderResult();
+            if (decoderResultLoose instanceof HttpMessageDecoderResult) {
+                var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
+                trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
+                trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+            }
+            trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
             channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
         } else {
             super.channelRead(ctx, msg);
