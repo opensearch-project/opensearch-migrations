@@ -34,13 +34,16 @@ copilot svc init --name traffic-comparator-jupyter
 ```
 
 ### Deploying Services to an Environment
+Currently, it seems that Copilot does not support deploying all services at once or creating dependencies between separate services. In light of this, services need to be deployed one at a time as show below.
+
+**Note**: Currently these services require an existing MSK instance and EFS filesystem to be functional, but this is subject to change
 
 ```
 // Deploy service to a configured environment
-copilot svc deploy --name kafka-puller --env test
-copilot svc deploy --name traffic-replayer --env test
-copilot svc deploy --name traffic-comparator --env test
 copilot svc deploy --name traffic-comparator-jupyter --env test
+copilot svc deploy --name traffic-comparator --env test
+copilot svc deploy --name traffic-replayer --env test
+copilot svc deploy --name kafka-puller --env test
 ```
 
 ### Executing Commands on a Deployed Service
