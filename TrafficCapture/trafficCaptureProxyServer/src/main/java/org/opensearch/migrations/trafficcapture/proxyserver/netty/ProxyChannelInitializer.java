@@ -5,6 +5,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpObjectDecoder;
+import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslHandler;
@@ -32,7 +33,7 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         this.connectionCaptureFactory = connectionCaptureFactory;
     }
 
-    public boolean shouldGuaranteeMessageOffloading(DefaultHttpRequest httpRequest) {
+    public boolean shouldGuaranteeMessageOffloading(HttpRequest httpRequest) {
         return (httpRequest != null &&
                 (httpRequest.method().equals(HttpMethod.POST) ||
                         httpRequest.method().equals(HttpMethod.PUT) ||

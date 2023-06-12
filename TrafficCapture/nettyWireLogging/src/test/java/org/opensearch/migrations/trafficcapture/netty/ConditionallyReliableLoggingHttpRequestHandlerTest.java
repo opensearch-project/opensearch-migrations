@@ -1,34 +1,25 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
-import com.google.common.primitives.Bytes;
 import com.google.protobuf.CodedOutputStream;
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureOffloader;
-import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
@@ -65,7 +56,8 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         var trafficStream = TrafficStream.parseFrom(outputByteBuffer.get());
         Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 &&
                 trafficStream.getSubStream(0).hasRead());
-        var combinedTrafficPacketsSteam = new SequenceInputStream(Collections.enumeration(trafficStream.getSubStreamList().stream()
+        var combinedTrafficPacketsSteam =
+                new SequenceInputStream(Collections.enumeration(trafficStream.getSubStreamList().stream()
                 .filter(to->to.hasRead())
                 .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
                 .collect(Collectors.toList())));
@@ -73,7 +65,7 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         Assertions.assertEquals(1, flushCount.get());
     }
 
-    //@Test
+    @Test
     public void testThatTinyPacketsPostBlocks() throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
         writeMessageAndVerify(fullTrafficBytes, w -> {

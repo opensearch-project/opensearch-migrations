@@ -3,40 +3,31 @@ package org.opensearch.migrations.trafficcapture.netty;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpMessage;
+import io.netty.handler.codec.http.HttpMessageDecoderResult;
 import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.codec.http.LastHttpContent;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
 public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
-         * Override to broaden the visibility.
-         *
-         * @param ctx    the {@link ChannelHandlerContext} which this {@link ByteToMessageDecoder} belongs to
-         * @param buffer the {@link ByteBuf} from which to read data
-         * @param out    the {@link List} to which decoded messages should be added
-         * @throws Exception
+         * Override this so that the HttpHeaders object can be a cheaper one.  PassThruHeaders
+         * only stores a handful of headers that are required for parsing the payload portion
+         * of an HTTP Message.
          */
-        @Override
-        public void decode(ChannelHandlerContext ctx, ByteBuf buffer, List<Object> out) throws Exception {
-            super.decode(ctx, buffer, out);
-        }
-
-        @Override
-        public void decodeLast(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
-            super.decodeLast(ctx, in, out);
-        }
-
         @Override
         public HttpMessage createMessage(String[] initialLine) throws Exception {
             return new DefaultHttpRequest(HttpVersion.valueOf(initialLine[2]),
@@ -46,48 +37,60 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    static class SimpleDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter {
+        @Getter
+        private HttpRequest currentRequest;
+        boolean isDone;
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            if (msg instanceof HttpRequest) {
+                currentRequest = (HttpRequest) msg;
+            } else if (msg instanceof LastHttpContent) {
+                isDone = true;
+            }
+            super.channelRead(ctx, msg);
+        }
+
+        public HttpRequest resetCurrentRequest() {
+            isDone = false;
+            var old = currentRequest;
+            currentRequest = null;
+            return old;
+        }
+    }
+
     protected final IChannelConnectionCaptureSerializer trafficOffloader;
 
-    protected final SimpleHttpRequestDecoder httpDecoder;
+    protected final EmbeddedChannel httpDecoderChannel;
+    protected final SimpleHttpRequestDecoder requestDecoder;
 
-    private DefaultHttpRequest currentHttpRequest;
 
     public LoggingHttpRequestHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
-        httpDecoder = new SimpleHttpRequestDecoder();
-        currentHttpRequest = null;
+        requestDecoder = new SimpleHttpRequestDecoder(); // as a field for easier debugging
+        httpDecoderChannel = new EmbeddedChannel(
+                requestDecoder,
+                new SimpleDecodedHttpRequestHandler()
+        );
     }
 
-    protected HttpCaptureSerializerUtil.HttpProcessedState
-    onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
-        parsedMsgs.stream()
-                .filter(o -> o instanceof DefaultHttpRequest)
-                .map(o -> (DefaultHttpRequest) o)
-                .findAny()
-                .ifPresent(req -> this.currentHttpRequest = req);
-        return HttpCaptureSerializerUtil.addRelevantHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
-    }
-
-    private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
+    private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ByteBuf msg) throws Exception {
         var bb = msg;
+        // Preserve ownership of this ByteBuf because the HttpRequestDecoder will take ownership of the
+        // ByteBuf, releasing it once the data has been copied into its cumulation buffer.  However,
+        // this handler still fires ByteBufs through the pipeline.  It's up to a future handler to perform
+        // the release, as it would have been if this method was implemented any other way.
+        bb.retain();
         bb.markReaderIndex();
-        // todo - move this into a pool
-        var rval = HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
-        var parsedMsgs = new ArrayList<>(4);
-        while (bb.readableBytes() > 0) {
-            var lastIdx = bb.readerIndex();
-            log.warn("Parsing from idx="+lastIdx+" readableBytes="+ bb.readableBytes());
-            httpDecoder.decode(ctx, bb, parsedMsgs);
-            rval = onHttpObjectsDecoded(parsedMsgs);
-            if (rval == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE || // got what we needed
-                    lastIdx == bb.readerIndex()) { // no progress
-                break;
-            }
-            parsedMsgs.clear();
-        }
-        log.trace("Resetting index");
+        httpDecoderChannel.writeInbound(bb);
         bb.resetReaderIndex();
-        return rval;
+        return getHandlerThatHoldsParsedHttpRequest().isDone ?
+                HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE :
+                HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
+    }
+
+    private SimpleDecodedHttpRequestHandler getHandlerThatHoldsParsedHttpRequest() {
+        return (SimpleDecodedHttpRequestHandler) httpDecoderChannel.pipeline().last();
     }
 
     @Override
@@ -121,18 +124,26 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         super.channelInactive(ctx);
     }
 
-    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, DefaultHttpRequest httpRequest) throws Exception {
+    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
         super.channelRead(ctx, msg);
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        trafficOffloader.addReadEvent(Instant.now(), (ByteBuf) msg);
+        var timestamp = Instant.now();
+        var bb = (ByteBuf) msg;
+        trafficOffloader.addReadEvent(timestamp, bb);
 
-        var httpProcessedState = parseHttpMessageParts(ctx, (ByteBuf) msg);
+        var httpProcessedState = parseHttpMessageParts(bb);
         if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
-            var httpRequest = currentHttpRequest;
-            currentHttpRequest = null;
+            var httpRequest = getHandlerThatHoldsParsedHttpRequest().resetCurrentRequest();
+            var decoderResultLoose = httpRequest.decoderResult();
+            if (decoderResultLoose instanceof HttpMessageDecoderResult) {
+                var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
+                trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
+                trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+            }
+            trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
             channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
         } else {
             super.channelRead(ctx, msg);
@@ -157,6 +168,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
+        httpDecoderChannel.close();
         super.exceptionCaught(ctx, cause);
     }
 
