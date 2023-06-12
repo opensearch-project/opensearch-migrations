@@ -140,4 +140,3 @@ class E2ETests(unittest.TestCase):
         jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
         response = requests.get(jupyter_endpoint)
         self.assertEqual(response.status_code, HTTPStatus.OK)
-
