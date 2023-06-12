@@ -141,7 +141,3 @@ class E2ETests(unittest.TestCase):
         response = requests.get(jupyter_endpoint)
         self.assertEqual(response.status_code, HTTPStatus.OK)
 
-
-if __name__ == '__main__':
-    unittest.main()
-
