@@ -37,32 +37,32 @@ import static java.lang.Math.abs;
 class NettyScanningHttpProxyTest {
 
     private final static String EXPECTED_REQUEST_STRING =
-    "GET / HTTP/1.1\r\n" +
-            "Host: localhost\r\n" +
-            "DumbAndLongHeaderValue-0: 0\r\n" +
-            "DumbAndLongHeaderValue-1: 1\r\n" +
-            "DumbAndLongHeaderValue-2: 2\r\n" +
-            "DumbAndLongHeaderValue-3: 3\r\n" +
-            "DumbAndLongHeaderValue-4: 4\r\n" +
-            "DumbAndLongHeaderValue-5: 5\r\n" +
-            "DumbAndLongHeaderValue-6: 6\r\n" +
-            "DumbAndLongHeaderValue-7: 7\r\n" +
-            "DumbAndLongHeaderValue-8: 8\r\n" +
-            "DumbAndLongHeaderValue-9: 9\r\n" +
-            "DumbAndLongHeaderValue-10: 10\r\n" +
-            "DumbAndLongHeaderValue-11: 11\r\n" +
-            "DumbAndLongHeaderValue-12: 12\r\n" +
-            "DumbAndLongHeaderValue-13: 13\r\n" +
-            "DumbAndLongHeaderValue-14: 14\r\n" +
-            "DumbAndLongHeaderValue-15: 15\r\n" +
-            "DumbAndLongHeaderValue-16: 16\r\n" +
-            "DumbAndLongHeaderValue-17: 17\r\n" +
-            "DumbAndLongHeaderValue-18: 18\r\n" +
-            "DumbAndLongHeaderValue-19: 19\r\n" +
-            "Connection: Keep-Alive\r\n" +
-            "User-Agent: Apache-HttpClient/4.5.13 (Java/17.0.7)\r\n" +
-            "Accept-Encoding: gzip,deflate\r\n" +
-            "\r\n";
+            "GET / HTTP/1.1\r\n" +
+                    "Host: localhost\r\n" +
+                    "DumbAndLongHeaderValue-0: 0\r\n" +
+                    "DumbAndLongHeaderValue-1: 1\r\n" +
+                    "DumbAndLongHeaderValue-2: 2\r\n" +
+                    "DumbAndLongHeaderValue-3: 3\r\n" +
+                    "DumbAndLongHeaderValue-4: 4\r\n" +
+                    "DumbAndLongHeaderValue-5: 5\r\n" +
+                    "DumbAndLongHeaderValue-6: 6\r\n" +
+                    "DumbAndLongHeaderValue-7: 7\r\n" +
+                    "DumbAndLongHeaderValue-8: 8\r\n" +
+                    "DumbAndLongHeaderValue-9: 9\r\n" +
+                    "DumbAndLongHeaderValue-10: 10\r\n" +
+                    "DumbAndLongHeaderValue-11: 11\r\n" +
+                    "DumbAndLongHeaderValue-12: 12\r\n" +
+                    "DumbAndLongHeaderValue-13: 13\r\n" +
+                    "DumbAndLongHeaderValue-14: 14\r\n" +
+                    "DumbAndLongHeaderValue-15: 15\r\n" +
+                    "DumbAndLongHeaderValue-16: 16\r\n" +
+                    "DumbAndLongHeaderValue-17: 17\r\n" +
+                    "DumbAndLongHeaderValue-18: 18\r\n" +
+                    "DumbAndLongHeaderValue-19: 19\r\n" +
+                    "Connection: Keep-Alive\r\n" +
+                    "User-Agent: Apache-HttpClient/4.5.13 (Java/17.0.7)\r\n" +
+                    "Accept-Encoding: gzip,deflate\r\n" +
+                    "\r\n";
     private final static String EXPECTED_RESPONSE_STRING =
             "HTTP/1.1 200 OK\r\n" +
                     "Content-transfer-encoding: chunked\r\n" +
@@ -90,7 +90,7 @@ class NettyScanningHttpProxyTest {
                 r.accept(Integer.valueOf(port));
                 return port;
             } catch (Exception e) {
-                System.err.println("Exception: "+e);
+                System.err.println("Exception: " + e);
                 e.printStackTrace();
                 Assumptions.assumeTrue(++numTries <= MAX_PORT_TRIES);
             }
@@ -102,13 +102,13 @@ class NettyScanningHttpProxyTest {
         final int NUM_EXPECTED_TRAFFIC_STREAMS = 1;
         final int NUM_INTERACTIONS = 3;
         CountDownLatch interactionsCapturedCountdown = new CountDownLatch(NUM_EXPECTED_TRAFFIC_STREAMS);
-        var captureFactory = new InMemoryConnectionCaptureFactory(1024*1024,
+        var captureFactory = new InMemoryConnectionCaptureFactory(1024 * 1024,
                 () -> interactionsCapturedCountdown.countDown());
         var servers = startServers(captureFactory);
 
         try (var client = HttpClientBuilder.create().build()) {
             var nettyEndpoint = URI.create("http://localhost:" + servers.v1().getProxyPort() + "/");
-            for (int i=0; i<NUM_INTERACTIONS; ++i) {
+            for (int i = 0; i < NUM_INTERACTIONS; ++i) {
                 var responseBody = makeTestRequestViaClient(client, nettyEndpoint);
                 Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
             }
@@ -118,7 +118,7 @@ class NettyScanningHttpProxyTest {
         Assertions.assertEquals(1, recordedStreams.size());
         var recordedTrafficStreams =
                 recordedStreams.stream()
-                        .map(rts-> {
+                        .map(rts -> {
                             try {
                                 return TrafficStream.parseFrom(rts.data);
                             } catch (InvalidProtocolBufferException e) {
@@ -129,25 +129,25 @@ class NettyScanningHttpProxyTest {
         Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
         log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
         var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
-        Assertions.assertEquals(NUM_INTERACTIONS*2, coalescedTrafficList.size());
+        Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
         int counter = 0;
         final var expectedMessages = new String[]{
                 normalizeMessage(EXPECTED_REQUEST_STRING),
                 normalizeMessage(EXPECTED_RESPONSE_STRING)
         };
         for (var httpMessage : coalescedTrafficList) {
-            Assertions.assertEquals(expectedMessages[(counter++)%2],
+            Assertions.assertEquals(expectedMessages[(counter++) % 2],
                     normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8)));
         }
 
         var observations = recordedTrafficStreams[0].getSubStreamList();
         var eomIndices = IntStream.range(0, observations.size())
-                .filter(i->observations.get(i).hasEndOfMessageIndicator())
+                .filter(i -> observations.get(i).hasEndOfMessageIndicator())
                 .toArray();
         Assertions.assertEquals(NUM_INTERACTIONS, eomIndices.length);
         for (int eomIndex : eomIndices) {
-            Assertions.assertTrue(observations.get(eomIndex-1).hasRead());
-            Assertions.assertTrue(observations.get(eomIndex+1).hasWrite());
+            Assertions.assertTrue(observations.get(eomIndex - 1).hasRead());
+            Assertions.assertTrue(observations.get(eomIndex + 1).hasWrite());
             var eom = observations.get(eomIndex).getEndOfMessageIndicator();
             Assertions.assertEquals(14, eom.getFirstLineByteLength());
             // Fudge factor - allow for variance of +/- 2 byte
@@ -206,14 +206,14 @@ class NettyScanningHttpProxyTest {
             upstreamTestServer.set(createAndStartTestServer(port.intValue()));
         });
         var underlyingPort = upstreamTestServer.get().getAddress().getPort();
-        System.out.println("underlying port = "+underlyingPort);
+        System.out.println("underlying port = " + underlyingPort);
 
         retryWithNewPortUntilNoThrow(port -> {
             nshp.set(new NettyScanningHttpProxy(port.intValue()));
             try {
                 nshp.get().start(LOCALHOST, upstreamTestServer.get().getAddress().getPort(), null,
                         connectionCaptureFactory);
-                System.out.println("proxy port = "+port.intValue());
+                System.out.println("proxy port = " + port.intValue());
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -233,7 +233,7 @@ class NettyScanningHttpProxyTest {
                 headers.set("Content-Transfer-Encoding", "chunked");
                 httpExchange.sendResponseHeaders(200, 0);
                 var response = UPSTREAM_SERVER_RESPONSE_BODY;
-                for (int i=0; i<1; ++i) {
+                for (int i = 0; i < 1; ++i) {
                     httpExchange.getResponseBody().write(response.getBytes());
                     httpExchange.getResponseBody().flush();
                 }
