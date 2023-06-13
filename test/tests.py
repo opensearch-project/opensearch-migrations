@@ -19,13 +19,14 @@ def retry_request(request, args=(), max_attempts=10, delay=0.5, expectedStatusCo
             if result.status_code == expectedStatusCode:
                 return result
             else:
-                logger.error(f"Status code returned: {result.status_code} did not"
-                             f" match the expected status code: {expectedStatusCode}")
+                logger.warning(f"Status code returned: {result.status_code} did not"
+                               f" match the expected status code: {expectedStatusCode}."
+                               f" Trying again in {delay} seconds.")
+                time.sleep(delay)
         except Exception:
-            logger.error(f"Trying again in {delay} seconds")
-            time.sleep(delay)
-
-    raise Exception(f"All {max_attempts} attempts failed.")
+            logger.error(f"All {max_attempts} attempts failed.")
+            raise Exception(f"Couldn't get the expected status code: {expectedStatusCode} even after attempting to"
+                            f"retry the request {max_attempts} times.")
 
 
 class E2ETests(unittest.TestCase):
