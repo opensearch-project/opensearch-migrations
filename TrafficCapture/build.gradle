@@ -8,6 +8,5 @@ allprojects {
     }
     test {
         jvmArgs '-ea'
-        ignoreFailures = true
     }
 }
