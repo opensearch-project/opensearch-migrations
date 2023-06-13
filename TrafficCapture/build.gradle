@@ -6,4 +6,7 @@ allprojects {
             languageVersion = JavaLanguageVersion.of(11)
         }
     }
+    test {
+        jvmArgs '-ea'
+    }
 }
