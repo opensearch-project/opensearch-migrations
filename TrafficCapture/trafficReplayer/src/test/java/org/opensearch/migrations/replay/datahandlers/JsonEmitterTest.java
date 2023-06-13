@@ -5,14 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
-import java.util.function.Supplier;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 @Slf4j
 class JsonEmitterTest {

@@ -6,6 +6,20 @@ plugins {
 
 import java.security.MessageDigest
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import org.apache.tools.ant.taskdefs.condition.Os
+
+def getTrafficComparatorDirectory() {
+    String overrideTrafficComparatorDirectory = System.getenv(TRAFFIC_COMPARATOR_DIRECTORY_ENV)
+    String rval = overrideTrafficComparatorDirectory != null ?
+            overrideTrafficComparatorDirectory : TRAFFIC_COMPARATOR_REPO_DIRECTORY;
+    return rval
+}
+
+ext {
+    TRAFFIC_COMPARATOR_REPO_DIRECTORY = "build/traffic-comparator"
+    TRAFFIC_COMPARATOR_DIRECTORY_ENV = "TRAFFIC_COMPARATOR_DIRECTORY"
+    REALIZED_TRAFFIC_COMPARATOR_DIRECTORY = project.file(getTrafficComparatorDirectory())
+ }
 
 def calculateDockerHash(String projectName) {
     MessageDigest digest = MessageDigest.getInstance('SHA-256')
@@ -27,6 +41,17 @@ dependencies {
     implementation project(':trafficReplayer')
 }
 
+task cloneComparatorRepoIfNeeded(type: Exec) {
+    String comparatorDirectory = project.file(REALIZED_TRAFFIC_COMPARATOR_DIRECTORY);
+    String repo = 'https://github.com/opensearch-project/traffic-comparator.git'
+    onlyIf {
+        !(new File(comparatorDirectory).exists())
+    }
+    commandLine = Os.isFamily(Os.FAMILY_WINDOWS) ?
+            ['git', 'clone', repo, TRAFFIC_COMPARATOR_REPO_DIRECTORY ] :
+            ['/bin/sh', '-c', "git clone ${repo} ${TRAFFIC_COMPARATOR_REPO_DIRECTORY}"]
+}
+
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
         "openSearchBenchmark": "open_search_benchmark"
@@ -41,7 +66,32 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
     }
 }
 
-def containerServices = [
+def trafficComparatorServices = [
+        "trafficComparator": "traffic_comparator",
+        "jupyterNotebook": "jupyter_notebook"
+]
+trafficComparatorServices.forEach {projectName, dockerImageName ->
+    def dockerBuildDir = "build/docker/${projectName}"
+    task("copyArtifact_${projectName}", type: Copy) {
+        dependsOn(tasks.getByName('cloneComparatorRepoIfNeeded'))
+        from REALIZED_TRAFFIC_COMPARATOR_DIRECTORY
+        into dockerBuildDir
+        include 'setup.py'
+    }
+
+    task "createDockerfile_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.Dockerfile) {
+        dependsOn "copyArtifact_${projectName}"
+        destFile = project.file("${dockerBuildDir}/Dockerfile")
+        from 'python:3.10.10'
+        runCommand("apt-get update && apt-get install -y netcat lsof")
+        copyFile("setup.py", "/setup.py")
+        runCommand("pip3 install --editable \".[data]\"")
+        // container stay-alive
+        defaultCommand('tail', '-f', '/dev/null')
+    }
+}
+
+def javaContainerServices = [
         "trafficCaptureProxyServer": "capture_proxy",
         "kafkaPrinter": "kafka_capture_puller",
         "trafficReplayer": "traffic_replayer"
@@ -50,7 +100,7 @@ def baseImageProjectOverrides = [
         "trafficCaptureProxyServer": "elasticsearchWithSearchGuard"
 ]
 
-containerServices.each { projectName, dockerImageName ->
+javaContainerServices.each { projectName, dockerImageName ->
     def dockerBuildDir = "build/docker/${projectName}"
     def artifactsDir = "${dockerBuildDir}/jars";
     task("copyArtifact_${projectName}", type: Copy) {
@@ -93,7 +143,10 @@ containerServices.each { projectName, dockerImageName ->
         defaultCommand('tail', '-f', '/dev/null')
         //defaultCommand('/runJavaWithClasspath.sh', '...')
     }
+}
 
+(javaContainerServices + trafficComparatorServices).forEach { projectName, dockerImageName ->
+    def dockerBuildDir = "build/docker/${projectName}"
     task "buildDockerImage_${projectName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${projectName}"
         inputDir = project.file("${dockerBuildDir}")
@@ -103,6 +156,11 @@ containerServices.each { projectName, dockerImageName ->
 }
 
 dockerCompose {
+        String overrideTrafficComparatorDirectory = System.getenv(TRAFFIC_COMPARATOR_DIRECTORY_ENV)
+        if (overrideTrafficComparatorDirectory == null) {
+            environment.put(TRAFFIC_COMPARATOR_DIRECTORY_ENV, REALIZED_TRAFFIC_COMPARATOR_DIRECTORY)
+            exposeAsEnvironment(this)
+        }
     useComposeFiles.add("src/main/docker/docker-compose.yml")
 }
 
@@ -113,7 +171,10 @@ task buildDockerImages {
     dependsOn buildDockerImage_kafkaPrinter
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer
-    //dependsOn buildDockerImage_
+    dependsOn buildDockerImage_trafficComparator
+    dependsOn buildDockerImage_jupyterNotebook
 }
 
-tasks.getByName('composeUp').dependsOn(tasks.getByName('buildDockerImages'))
+tasks.getByName('composeUp')
+        .dependsOn(tasks.getByName('buildDockerImages'))
+        .dependsOn(tasks.getByName('cloneComparatorRepoIfNeeded'))

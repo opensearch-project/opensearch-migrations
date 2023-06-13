@@ -61,11 +61,14 @@ services:
     image: 'migrations/traffic_replayer:latest'
     networks:
       - migrations
+    depends_on:
+      opensearchtarget:
+        condition: service_started
+      trafficcomparator:
+        condition: service_healthy
     ports:
       - "10001:10001"
-    depends_on:
-      - opensearchtarget
-    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure"
+    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure | nc trafficcomparator 9220"
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:latest'
@@ -76,35 +79,59 @@ services:
     ports:
       - "29200:9200"
 
-#  traffic_comparator:
-#    image: 'migrations/opensearch_migrations_comparator:latest'
-
-  opensearch-benchmarks:
-    image: 'migrations/open_search_benchmark:latest'
+  trafficcomparator:
+    image: 'migrations/traffic_comparator:latest'
     networks:
       - migrations
-    depends_on:
-      - captureproxy
-    command:
-      - /bin/sh
-      - -c
-      - >
-        echo "Running opensearch-benchmark w/ 'geonames' workload..." &&
-        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
-        echo "Running opensearch-benchmark w/ 'http_logs' workload..." &&
-        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=http_logs --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
-        echo "Running opensearch-benchmark w/ 'nested' workload..." &&
-        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nested --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
-        echo "Running opensearch-benchmark w/ 'nyc_taxis' workload..." &&
-        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false"
+    ports:
+      - "9220:9220"
+    healthcheck:
+      test: "lsof -i -P -n"
+    volumes:
+      - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
+      - sharedComparatorSqlResults:/shared
+    command: /bin/sh -c "cd trafficComparator && pip3 install --editable . && nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -vv stream | trafficcomparator dump-to-sqlite --db /shared/comparisons.db"
+
+  jupyter_notebook:
+    image: 'migrations/jupyter_notebook:latest'
+    networks:
+      - migrations
+    ports:
+      - "8888:8888"
+    volumes:
+      - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
+      - sharedComparatorSqlResults:/shared
+    environment:
+      # this needs to match the output db that traffic_comparator writes to
+      - COMPARISONS_DB_LOCATION=/shared/comparisons.db
+    command: /bin/sh -c 'cd trafficComparator && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'
+
+#  opensearch-benchmarks:
+#    image: 'migrations/open_search_benchmark:latest'
+#    networks:
+#      - migrations
+#    depends_on:
+#      - captureproxy
+#    command:
+#      - /bin/sh
+#      - -c
+#      - >
+#        echo "Running opensearch-benchmark w/ 'geonames' workload..." &&
+#        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+#        echo "Running opensearch-benchmark w/ 'http_logs' workload..." &&
+#        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=http_logs --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+#        echo "Running opensearch-benchmark w/ 'nested' workload..." &&
+#        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nested --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false" &&
+#        echo "Running opensearch-benchmark w/ 'nyc_taxis' workload..." &&
+#        opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://captureproxy:9200 --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options="use_ssl:true,verify_certs:false"
 
 volumes:
   zookeeper_data:
     driver: local
   kafka_data:
     driver: local
-  traffic_comparator:
-
+  sharedComparatorSqlResults:
+    driver: local
 
 networks:
   migrations:

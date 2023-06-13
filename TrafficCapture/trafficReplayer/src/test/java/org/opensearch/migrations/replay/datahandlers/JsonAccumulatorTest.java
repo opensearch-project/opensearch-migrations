@@ -1,32 +1,22 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.core.async.ByteBufferFeeder;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
 
-import java.io.BufferedInputStream;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.StringReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Random;
 
 public class JsonAccumulatorTest {
-
-    public static final String TOY = "toy";
+    public static final String TINY = "tiny";
+    public static final String MEDIUM = "medium";
+    public static final String LARGE = "large";
+    public static final String LARGE_PACKED = "largeAndPacked";
+    GenerateRandomNestedJsonObject randomJsonGenerator = new GenerateRandomNestedJsonObject();
 
     private static Object readJson(byte[] testFileBytes, int chunkBound) throws IOException {
         var jsonParser = new JsonAccumulator();
@@ -50,8 +40,17 @@ public class JsonAccumulatorTest {
 
     byte[] getData(String key) throws IOException {
         switch (key) {
-            case TOY:
+            case TINY:
                 return "{\"name\":\"John\", \"age\":30}".getBytes(StandardCharsets.UTF_8);
+            case MEDIUM:
+                return randomJsonGenerator.getRandomTreeFormattedAsString(false, 2, 200, 50)
+                        .getBytes(StandardCharsets.UTF_8);
+            case LARGE:
+                return randomJsonGenerator.getRandomTreeFormattedAsString(true, 3, 2000, 400)
+                        .getBytes(StandardCharsets.UTF_8);
+            case LARGE_PACKED:
+                return randomJsonGenerator.getRandomTreeFormattedAsString(false, 4, 2000, 400)
+                        .getBytes(StandardCharsets.UTF_8);
             default:
                 throw new RuntimeException("Unknown key: "+key);
         }
@@ -65,7 +64,11 @@ public class JsonAccumulatorTest {
      * @throws IOException
      */
     @ParameterizedTest
-    @CsvSource({"toy,2", "toy,20000"})
+    @CsvSource({"tiny,2", "tiny,20000",
+            "medium,2", "medium,20000",
+            "large,2", "large,20000",
+            "largeAndPacked,2", "largeAndPacked,20000"
+    })
     public void testAccumulation(String dataName, int chunkBound) throws IOException {
         var testFileBytes = getData(dataName);
         var outputJson = readJson(testFileBytes, 2);

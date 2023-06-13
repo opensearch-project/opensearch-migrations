@@ -21,9 +21,11 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
 
     @Getter
     ConcurrentLinkedQueue<RecordedTrafficStream> recordedStreams = new ConcurrentLinkedQueue<>();
+    Runnable onCaptureClosedCallback;
 
-    public InMemoryConnectionCaptureFactory(int bufferSize) {
+    public InMemoryConnectionCaptureFactory(int bufferSize, Runnable onCaptureClosedCallback) {
         this.bufferSize = bufferSize;
+        this.onCaptureClosedCallback = onCaptureClosedCallback;
     }
 
     private CompletableFuture closeHandler(ByteBuffer byteBuffer) {
@@ -48,6 +50,7 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
             CompletableFuture cf = closeHandler(codedStreamToByteBufferMap.get(codedOutputStream));
             codedStreamToByteBufferMap.remove(codedOutputStream);
             singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
+            cf.whenComplete((v,t)->onCaptureClosedCallback.run());
             return singleAggregateCfRef[0];
         });
     }
