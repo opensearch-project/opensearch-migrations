@@ -1,3 +1,9 @@
+## Running the Docker Solution
+
+While in the TrafficCapture directory, run the following command:
+
+`./gradlew :dockerSolution:composeUp`
+
 ## Compatibility
 
 Must have Java version 11 installed.
