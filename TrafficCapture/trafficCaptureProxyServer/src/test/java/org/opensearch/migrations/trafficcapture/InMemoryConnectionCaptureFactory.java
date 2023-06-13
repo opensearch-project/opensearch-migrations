@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFactory {
 
     private final int bufferSize;
+    private final String nodeId;
 
     @AllArgsConstructor
     public static class RecordedTrafficStream {
@@ -23,8 +24,9 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     ConcurrentLinkedQueue<RecordedTrafficStream> recordedStreams = new ConcurrentLinkedQueue<>();
     Runnable onCaptureClosedCallback;
 
-    public InMemoryConnectionCaptureFactory(int bufferSize, Runnable onCaptureClosedCallback) {
+    public InMemoryConnectionCaptureFactory(String nodeId, int bufferSize, Runnable onCaptureClosedCallback) {
         this.bufferSize = bufferSize;
+        this.nodeId = nodeId;
         this.onCaptureClosedCallback = onCaptureClosedCallback;
     }
 
@@ -41,7 +43,7 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBufferMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(connectionId, () -> {
+        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, () -> {
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
             var cos = CodedOutputStream.newInstance(bb);
             codedStreamToByteBufferMap.put(cos, bb);

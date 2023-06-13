@@ -36,7 +36,7 @@ import java.util.function.Consumer;
  * responses may not have been completely received.
  */
 @Slf4j
-public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<String, TrafficObservation> {
+public class CapturedTrafficToHttpTransactionAccumulator {
 
     private final TrafficStreamMap liveStreams;
     private final Consumer<HttpMessageAndTimestamp> requestHandler;
@@ -49,31 +49,24 @@ public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<S
         this.fullDataHandler = fullDataHandler;
     }
 
-    @Override
-    public void accept(String id, TrafficObservation observation) {
-        log.error("Stream: " + id + " Consuming observation: " + observation);
+    public void accept(String nodeId, String connectionId, TrafficObservation observation) {
+        log.error("Stream: " + connectionId + " Consuming observation: " + observation);
         var timestamp =
                 Optional.of(observation.getTs()).map(t->Instant.ofEpochSecond(t.getSeconds(), t.getNanos())).get();
         if (observation.hasEndOfMessageIndicator()) {
-            var accum = liveStreams.get(id);
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
             if (accum == null) {
                 log.warn("Received EOM w/out an accumulated value, assuming an empty server interaction and " +
                         "NOT reproducing this to the target cluster (TODO - do something better?)");
                 return;
             }
-            handleEndOfMessage(id, accum);
+            handleEndOfMessage(nodeId, connectionId, accum);
         } else if (observation.hasRead()) {
-            var accum = getAccumulationForFirstRequestObservation(id);
+            var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
             assert accum.state == Accumulation.State.NOTHING_SENT;
-            var runningList = accum.rrPair;
-            // TODO - eliminate the byte[] and use the underlying nio buffer
-            runningList.addRequestData(timestamp, observation.getRead().getData().toByteArray());
-        } else if (observation.hasReadSegment()) {
-            var accum = getAccumulationForFirstRequestObservation(id);
-            assert accum.state == Accumulation.State.NOTHING_SENT;
-            throw new RuntimeException("Not implemented yet.");
+            accum.rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
         } else if (observation.hasWrite()) {
-            var accum = liveStreams.get(id);
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
             var runningList = accum.rrPair;
             if (runningList == null) {
@@ -81,14 +74,18 @@ public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<S
                         "found a purported write to a socket before a read!");
             }
             runningList.addResponseData(timestamp, observation.getWrite().getData().toByteArray());
+        } else if (observation.hasReadSegment()) {
+            var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
+            assert accum.state == Accumulation.State.NOTHING_SENT;
+            throw new RuntimeException("Not implemented yet.");
         } else if (observation.hasWriteSegment()) {
-            var accum = liveStreams.get(id);
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
             var runningList = accum.rrPair;
             throw new RuntimeException("Not implemented yet.");
         } else if (observation.hasConnectionException()) {
-            var accum = liveStreams.remove(id);
-            log.warn("Removing accumulated traffic pair for " + id);
+            var accum = liveStreams.remove(nodeId, connectionId);
+            log.warn("Removing accumulated traffic pair for " + connectionId);
             log.debug("Accumulated object: " + accum);
         } else {
             log.warn("unaccounted for observation type " + observation);
@@ -102,27 +99,28 @@ public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<S
     // received.  For the latter case, this will close out the old accumulation,
     // recycling it from the liveStream map and into the response callback (by
     // invoking the callback).
-    private Accumulation getAccumulationForFirstRequestObservation(String id) {
-        var accum = liveStreams.computeIfAbsent(id, k -> new Accumulation());
+    private Accumulation getAccumulationForFirstRequestObservation(String nodeId,
+                                                                   String connectionId,
+                                                                   Instant timestamp) {
+        var accum = liveStreams.getOrCreate(nodeId, connectionId, timestamp);
         // If this was brand new or if we've already closed the item out and pushed
         // the state to RESPONSE_SENT, we don't need to care about triggering the
         // callback.  We only need to worry about this if we have yet to send the
         // RESPONSE.  Notice that handleEndOfMessage will bump the state itself
         // on the (soon to be recycled) accum object.
         if (accum.state == Accumulation.State.REQUEST_SENT) {
-            handleEndOfMessage(id, accum);
-            accum = new Accumulation();
-            liveStreams.put(id, accum);
+            handleEndOfMessage(nodeId, connectionId, accum);
+            liveStreams.reset(nodeId, connectionId, timestamp);
         }
         return accum;
     }
 
     /**
-     * @param id
+     * @param connectionId
      * @param accumulation
      * @return true if there are still callbacks remaining to be called
      */
-    private boolean handleEndOfMessage(String id, Accumulation accumulation) {
+    private boolean handleEndOfMessage(String nodeId, String connectionId, Accumulation accumulation) {
         switch (accumulation.state) {
             case NOTHING_SENT:
                 requestHandler.accept(accumulation.rrPair.requestData);
@@ -131,7 +129,7 @@ public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<S
             case REQUEST_SENT:
                 fullDataHandler.accept(accumulation.rrPair);
                 accumulation.state = Accumulation.State.RESPONSE_SENT;
-                liveStreams.remove(id);
+                liveStreams.remove(nodeId, connectionId);
         }
         return false;
     }

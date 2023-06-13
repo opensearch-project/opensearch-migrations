@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -16,7 +17,7 @@ public class RequestResponsePacketPair {
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {
-            log.trace(this + " Adding request data: " + new String(data, Charset.defaultCharset()));
+            log.trace(this + " Adding request data: " + new String(data, StandardCharsets.UTF_8));
         }
         if (requestData == null) {
             requestData = new HttpMessageAndTimestamp(packetTimeStamp);
@@ -27,21 +28,13 @@ public class RequestResponsePacketPair {
 
     public void addResponseData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {
-            log.trace(this + " Adding response data: " + new String(data, Charset.defaultCharset()));
+            log.trace(this + " Adding response data: " + new String(data, StandardCharsets.UTF_8));
         }
         if (responseData == null) {
             responseData = new HttpMessageAndTimestamp(packetTimeStamp);
         }
         responseData.add(data);
         responseData.setLastPacketTimestamp(packetTimeStamp);
-    }
-
-    public Stream<byte[]> getRequestDataStream() {
-        return requestData.stream();
-    }
-
-    public Stream<byte[]> getResponseDataStream() {
-        return responseData.stream();
     }
 
     @Override

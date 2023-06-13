@@ -255,6 +255,7 @@ public class TrafficReplayer {
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         trafficChunkStream
                 .forEach(ts->ts.getSubStreamList().stream()
-                        .forEach(o-> trafficToHttpTransactionAccumulator.accept(ts.getId(), o)));
+                        .forEach(o->
+                                trafficToHttpTransactionAccumulator.accept(ts.getNodeId(), ts.getConnectionId(), o)));
     }
 }

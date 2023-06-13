@@ -64,19 +64,23 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
     private final Function<CodedOutputStream, CompletableFuture> closeHandler;
-    private final String idString;
+    private final String nodeIdString;
+    private final String connectionIdString;
     private CodedOutputStream currentCodedOutputStreamOrNull;
     private int numFlushesSoFar;
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
 
-    public StreamChannelConnectionCaptureSerializer(String id,
+    public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
                                                     Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
-        assert (id.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_SIZE);
-        this.idString = id;
+        assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId)) +
+                CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId)
+                <= MAX_ID_SIZE;
+        this.connectionIdString = connectionId;
+        this.nodeIdString = nodeId;
     }
 
     private static int getWireTypeForFieldIndex(Descriptors.Descriptor d, int fieldNumber) {
@@ -89,7 +93,10 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         } else {
             currentCodedOutputStreamOrNull = codedOutputStreamSupplier.get();
             // i.e. 1: "1234ABCD"
-            currentCodedOutputStreamOrNull.writeString(TrafficStream.ID_FIELD_NUMBER, idString);
+            currentCodedOutputStreamOrNull.writeString(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionIdString);
+            if (nodeIdString != null) {
+                currentCodedOutputStreamOrNull.writeString(TrafficStream.NODEID_FIELD_NUMBER, nodeIdString);
+            }
             return currentCodedOutputStreamOrNull;
         }
     }

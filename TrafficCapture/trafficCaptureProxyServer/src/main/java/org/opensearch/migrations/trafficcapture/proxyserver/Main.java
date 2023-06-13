@@ -27,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -129,13 +130,15 @@ public class Main {
 
     private static IConnectionCaptureFactory getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
-        return connectionId -> new StreamChannelConnectionCaptureSerializer(connectionId, () ->
+        return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId, () ->
                 CodedOutputStream.newInstance(NullOutputStream.getInstance()),
                 cos -> CompletableFuture.completedFuture(null));
     }
 
 
-    private static IConnectionCaptureFactory getKafkaConnectionFactory(String kafkaPropsPath, int bufferSize)
+    private static IConnectionCaptureFactory getKafkaConnectionFactory(String nodeId,
+                                                                       String kafkaPropsPath,
+                                                                       int bufferSize)
             throws IOException {
         Properties producerProps = new Properties();
         if (kafkaPropsPath != null) {
@@ -146,16 +149,21 @@ public class Main {
                 throw e;
             }
         }
-        return new KafkaCaptureFactory(new KafkaProducer<>(producerProps), bufferSize);
+        return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(producerProps), bufferSize);
+    }
+
+    private static String getNodeId(Parameters params) {
+        return UUID.randomUUID().toString();
     }
 
     private static IConnectionCaptureFactory getConnectionCaptureFactory(Parameters params) throws IOException {
+        var nodeId = getNodeId(params);
         // TODO - it might eventually be a requirement to do multiple types of offloading.
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
-            return new FileConnectionCaptureFactory(params.traceDirectory, params.maximumTrafficStreamSize);
+            return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
         } else if (params.kafkaPropertiesFile != null) {
-            return getKafkaConnectionFactory(params.kafkaPropertiesFile, params.maximumTrafficStreamSize);
+            return getKafkaConnectionFactory(nodeId, params.kafkaPropertiesFile, params.maximumTrafficStreamSize);
         } else if (params.kafkaConnection != null) {
             var kafkaProps = new Properties();
             kafkaProps.put("bootstrap.servers", params.kafkaConnection);
@@ -163,7 +171,7 @@ public class Main {
             kafkaProps.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
             kafkaProps.put("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
 
-            return new KafkaCaptureFactory(new KafkaProducer<>(kafkaProps), params.maximumTrafficStreamSize);
+            return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(kafkaProps), params.maximumTrafficStreamSize);
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
         } else {

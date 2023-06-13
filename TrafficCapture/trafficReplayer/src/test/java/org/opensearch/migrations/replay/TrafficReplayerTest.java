@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 
 class TrafficReplayerTest {
 
+    public static final String TEST_NODE_ID_STRING = "test_node_id";
     private static String TEST_TRAFFIC_STREAM_ID_STRING = "testId";
     private static String FAKE_READ_PACKET_DATA = "Useless packet data for test";
     private static String FAKE_EXCEPTION_DATA = "Mock Exception Message for testing";
@@ -36,7 +37,8 @@ class TrafficReplayerTest {
                 .setNanos(t.getNano())
                 .build();
         return TrafficStream.newBuilder()
-                .setId(TEST_TRAFFIC_STREAM_ID_STRING)
+                .setNodeId(TEST_NODE_ID_STRING)
+                .setConnectionId(TEST_TRAFFIC_STREAM_ID_STRING)
                 .setNumberOfThisLastChunk(1)
                 .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                         .setRead(ReadObservation.newBuilder()
