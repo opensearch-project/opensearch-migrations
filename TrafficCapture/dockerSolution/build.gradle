@@ -82,7 +82,6 @@ trafficComparatorServices.forEach {projectName, dockerImageName ->
         if (projectName == 'jupyterNotebook') {
             include 'ResultsRepository.ipynb'
         }
-        System.out.println("Setting up copy of setup.py into " + projectDir + " from " + REALIZED_TRAFFIC_COMPARATOR_DIRECTORY)
     }
 
     task "createDockerfile_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.Dockerfile) {
@@ -170,7 +169,6 @@ javaContainerServices.each { projectName, dockerImageName ->
 dockerCompose {
         String overrideTrafficComparatorDirectory = System.getenv(TRAFFIC_COMPARATOR_DIRECTORY_ENV)
         if (overrideTrafficComparatorDirectory == null) {
-            System.out.println("setting environment variable ${TRAFFIC_COMPARATOR_DIRECTORY_ENV}=${overrideTrafficComparatorDirectory}")
             environment.put(TRAFFIC_COMPARATOR_DIRECTORY_ENV, REALIZED_TRAFFIC_COMPARATOR_DIRECTORY)
             exposeAsEnvironment(this)
         }

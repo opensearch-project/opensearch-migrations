@@ -39,6 +39,7 @@ class NettyScanningHttpProxyTest {
     private final static String EXPECTED_REQUEST_STRING =
     "GET / HTTP/1.1\r\n" +
             "Host: localhost\r\n" +
+            "User-Agent: UnitTest\r\n" +
             "DumbAndLongHeaderValue-0: 0\r\n" +
             "DumbAndLongHeaderValue-1: 1\r\n" +
             "DumbAndLongHeaderValue-2: 2\r\n" +
@@ -60,13 +61,12 @@ class NettyScanningHttpProxyTest {
             "DumbAndLongHeaderValue-18: 18\r\n" +
             "DumbAndLongHeaderValue-19: 19\r\n" +
             "Connection: Keep-Alive\r\n" +
-            "User-Agent: Apache-HttpClient/4.5.13 (Java/17.0.7)\r\n" +
             "Accept-Encoding: gzip,deflate\r\n" +
             "\r\n";
     private final static String EXPECTED_RESPONSE_STRING =
             "HTTP/1.1 200 OK\r\n" +
                     "Content-transfer-encoding: chunked\r\n" +
-                    "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n" +
+                    "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n" + // This should be OK since it's always the same length
                     "Transfer-encoding: chunked\r\n" +
                     "Content-type: text/plain\r\n" +
                     "Funtime: checkIt!\r\n" +
@@ -150,13 +150,12 @@ class NettyScanningHttpProxyTest {
             Assertions.assertTrue(observations.get(eomIndex+1).hasWrite());
             var eom = observations.get(eomIndex).getEndOfMessageIndicator();
             Assertions.assertEquals(14, eom.getFirstLineByteLength());
-            Assertions.assertEquals(676, eom.getHeadersByteLength());
+            Assertions.assertEquals(646, eom.getHeadersByteLength());
         }
     }
 
     private static String normalizeMessage(String s) {
-        return s.replaceAll("Date: .*", "Date: SOMETHING")
-                .replaceAll("User-Agent: .*", "User-Agent: Something");
+        return s.replaceAll("Date: .*", "Date: SOMETHING");
     }
 
     private List<byte[]> coalesceObservations(TrafficStream recordedTrafficStream) throws IOException {
@@ -188,6 +187,7 @@ class NettyScanningHttpProxyTest {
         var request = new HttpGet(nettyEndpoint);
         request.setProtocolVersion(new ProtocolVersion("HTTP", 1, 1));
         request.setHeader("Host", "localhost");
+        request.setHeader("User-Agent", "UnitTest");
         for (int i = 0; i < 20; i++) {
             request.setHeader("DumbAndLongHeaderValue-" + i, "" + i);
         }
