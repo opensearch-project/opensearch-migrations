@@ -1,9 +1,9 @@
-# The manifest for the "kafka-puller" service.
+# The manifest for the "kafka-zookeeper" service.
 # Read the full specification for the "Backend Service" type at:
 #  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
 
 # Your service name will be used in naming your resources like log groups, ECS services, etc.
-name: kafka-puller
+name: kafka-zookeeper
 type: Backend Service
 
 # Allow service-to-service communication with ECS Service Connect
@@ -12,27 +12,23 @@ network:
 
 # Configuration for your containers and service.
 image:
-  # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
-  build:
-    dockerfile: ../TrafficCapture/dockerSolution/build/docker/kafkaPrinter/Dockerfile
-  # This port is not currently used, but having a port specified was a requirement for using Service Connect
-  port: 9209
-
-command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --topic-name logging-traffic-topic | nc -v traffic-replayer 10001"
+  location: docker.io/bitnami/zookeeper:3.8
+  port: 2181
 
 cpu: 256       # Number of CPU units for the task.
 memory: 512    # Amount of memory in MiB used by the task.
 count: 1       # Number of tasks that should be running in your service.
 exec: true     # Enable running commands in your container.
 
+variables:                    # Pass environment variables as key value pairs.
+  ALLOW_ANONYMOUS_LOGIN: yes
+
+
 # storage:
   # readonly_fs: true       # Limit to read-only access to mounted root filesystems.
 
 # Optional fields for more advanced use-cases.
 #
-#variables:                    # Pass environment variables as key value pairs.
-#  LOG_LEVEL: info
-
 #secrets:                      # Pass secrets from AWS Systems Manager (SSM) Parameter Store.
 #  GITHUB_TOKEN: GITHUB_TOKEN  # The key is the name of the environment variable, the value is the name of the SSM parameter.
 
@@ -41,4 +37,4 @@ environments:
   test:
     count: 1               # Number of tasks to run for the "test" environment.
     deployment:            # The deployment strategy for the "test" environment.
-       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.
+      rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.

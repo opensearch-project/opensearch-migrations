@@ -11,7 +11,7 @@ http:
   # Requests to this path will be forwarded to your service.
   # To match all requests you can use the "/" path.
   path: '/'
-  # You can specify a custom health check path. The default is "/".
+  # Bogus health check to pass startup
   healthcheck:
     path: '/'
     port: 8888
@@ -22,19 +22,18 @@ http:
     timeout: 10s
     grace_period: 60s
 
-# Allow service-to-service communication with ECS Connect
 network:
-  connect: true
+  vpc:
+    security_groups: [ "${MIGRATION_EFS_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
   # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
   build:
-    #dockerfile: ../TrafficCapture/trafficReplayer/docker/Dockerfile
-    #context: ../TrafficCapture
-    dockerfile: ../../../mikayla-forks/traffic-comparator/docker/Dockerfile-trafficcomparator-jupyter
-    context: ../../../mikayla-forks/traffic-comparator
+    dockerfile: ../TrafficCapture/dockerSolution/build/docker/jupyterNotebook/Dockerfile
   port: 8888
+
+command: /bin/sh -c 'cd containerTC && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'
 
 storage:
   volumes:
@@ -42,7 +41,7 @@ storage:
       path: '/shared'
       read_only: false
       efs:
-        id: fs-0349c9409501badc6
+        id: ${MIGRATION_EFS_ID}
 
 cpu: 256       # Number of CPU units for the task.
 memory: 512    # Amount of memory in MiB used by the task.
@@ -66,7 +65,3 @@ environments:
     count: 1               # Number of tasks to run for the "test" environment.
     deployment:            # The deployment strategy for the "test" environment.
       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.
-  wave1:
-    count: 1
-    deployment:
-      rolling: 'recreate'

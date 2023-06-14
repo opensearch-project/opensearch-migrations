@@ -10,12 +10,27 @@ brew install aws/tap/copilot-cli
 ```
 Otherwise please follow the manual instructions [here](https://aws.github.io/copilot-cli/docs/getting-started/install/)
 
+
+#### Importing values from CDK
+While not a requirement, the typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) and then deploy the desired Copilot services, which will use these resources, afterwards
+
+The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
+```
+export MIGRATION_VPC_ID=vpc-123;
+export MIGRATION_PUBLIC_SUBNET_1=subnet-123;
+export MIGRATION_PUBLIC_SUBNET_2=subnet-124;
+export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_EFS_ID=fs-123;
+export MIGRATION_KAFKA_BROKER_IDS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
+```
+
 #### Setting up existing Copilot infrastructure
 
 When initially setting up Copilot; apps, services, and environments need to be initialized. Although a bit confusing, when initializing already defined (having a `manifest.yml`) environments and resources, Copilot will still prompt for input which will ultimately get ignored in favor of the existing `manifest.yml` file.
 
 If using temporary environment credentials, any input can be given to prompt, but be sure to specify the proper region when asked.
 
+**Note**: This app also contains `kafka-broker` and `kafka-zookeeper` services which are currently experimental and usage of MSK is preferred
 ```
 // Initialize app (may not be necessary need to verify with clean slate)
 copilot app init
@@ -35,8 +50,6 @@ copilot svc init --name traffic-comparator-jupyter
 
 ### Deploying Services to an Environment
 Currently, it seems that Copilot does not support deploying all services at once or creating dependencies between separate services. In light of this, services need to be deployed one at a time as show below.
-
-**Note**: Currently these services require an existing MSK instance and EFS filesystem to be functional, but this is subject to change
 
 ```
 // Deploy service to a configured environment

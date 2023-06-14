@@ -17,24 +17,24 @@ Resources:
       Description: Allow Fargate container to consume from MSK
       PolicyDocument:
         Version: '2012-10-17'
+        # We should enhance IAM policy here to further restrict the Resource
         Statement:
           - Action:
               - kafka-cluster:AlterCluster
               - kafka-cluster:Connect
               - kafka-cluster:DescribeCluster
             Effect: Allow
-            Resource: arn:aws:kafka:us-east-1:730935383469:cluster/logging-msk-cluster/1d379895-43bd-4f96-932b-52060474aa0f-7
+            Resource: "*"
           - Action:
               - kafka-cluster:*Topic*
               - kafka-cluster:ReadData
-              - kafka-cluster:WriteData
             Effect: Allow
-            Resource: arn:aws:kafka:us-east-1:730935383469:topic/logging-msk-cluster/*
+            Resource: "*"
           - Action:
               - kafka-cluster:AlterGroup
               - kafka-cluster:DescribeGroup
             Effect: Allow
-            Resource: arn:aws:kafka:us-east-1:730935383469:group/logging-msk-cluster/*
+            Resource: "*"
 
 Outputs:
   # 1. You need to output the IAM ManagedPolicy so that Copilot can add it as a managed policy to your ECS task role.

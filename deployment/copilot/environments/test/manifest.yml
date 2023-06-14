@@ -9,14 +9,11 @@ type: Environment
 # Import your own VPC and subnets or configure how they should be created.
 network:
  vpc:
-   id: vpc-0d34c97164adfb631
+   id: ${MIGRATION_VPC_ID}
    subnets:
      public:
-       - id: subnet-07e159cb30d78691d
-       - id: subnet-03714050c9680359e
-     private:
-       - id: subnet-0f674044b025bc5e8
-       - id: subnet-029bcb2c2a24bdf35
+       - id: ${MIGRATION_PUBLIC_SUBNET_1}
+       - id: ${MIGRATION_PUBLIC_SUBNET_2}
 
 
 # Configure the load balancers in your environment, once created.

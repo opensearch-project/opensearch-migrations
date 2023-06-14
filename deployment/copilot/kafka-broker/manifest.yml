@@ -1,46 +1,44 @@
-# The manifest for the "traffic-comparator" service.
-# Read the full specification for the "Backend Service" type at:
-#  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
+# The manifest for the "kafka-broker" service.
+# Read the full specification for the "Load Balanced Web Service" type at:
+#  https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/
 
 # Your service name will be used in naming your resources like log groups, ECS services, etc.
-name: traffic-comparator
-type: Backend Service
+name: kafka-broker
+#type: Backend Service
+type: Load Balanced Web Service
 
+## Distribute traffic to your service.
+http: false
+nlb:
+  port: 9092
+  
 # Allow service-to-service communication with ECS Connect
 network:
   connect: true
-  vpc:
-    security_groups: [ "${MIGRATION_EFS_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
-  # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
-  build:
-    dockerfile: ../TrafficCapture/dockerSolution/build/docker/trafficComparator/Dockerfile
-  port: 9220
-
-command: /bin/sh -c "cd containerTC && pip3 install --editable . && nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -vv stream | trafficcomparator dump-to-sqlite --db /shared/comparisons.db"
-
-storage:
-  volumes:
-    sharedSQLVolume: # This is a variable key and can be set to an arbitrary string.
-      path: '/shared'
-      read_only: false
-      efs:
-        id: ${MIGRATION_EFS_ID}
+  location: docker.io/bitnami/kafka:3.4
+  # Port exposed through your container to route traffic to it.
+  port: 9092
 
 cpu: 256       # Number of CPU units for the task.
-memory: 512    # Amount of memory in MiB used by the task.
+memory: 2048    # Amount of memory in MiB used by the task.
 count: 1       # Number of tasks that should be running in your service.
 exec: true     # Enable running commands in your container.
 
 # storage:
   # readonly_fs: true       # Limit to read-only access to mounted root filesystems.
-
+ 
 # Optional fields for more advanced use-cases.
 #
-#variables:                    # Pass environment variables as key value pairs.
-#  LOG_LEVEL: info
+variables:                    # Pass environment variables as key value pairs.
+  ALLOW_PLAINTEXT_LISTENER: yes
+  KAFKA_ENABLE_KRAFT: no
+  KAFKA_ZOOKEEPER_CONNECT: kafka-zookeeper:2181
+  KAFKA_LISTENERS: PLAINTEXT://:9092
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+  KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092
 
 #secrets:                      # Pass secrets from AWS Systems Manager (SSM) Parameter Store.
 #  GITHUB_TOKEN: GITHUB_TOKEN  # The key is the name of the environment variable, the value is the name of the SSM parameter.

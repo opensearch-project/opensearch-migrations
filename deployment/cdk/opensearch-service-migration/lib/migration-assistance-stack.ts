@@ -1,4 +1,4 @@
-import {Stack, StackProps} from "aws-cdk-lib";
+import {CfnOutput, Stack, StackProps} from "aws-cdk-lib";
 import {
     Instance,
     InstanceClass,
@@ -9,11 +9,9 @@ import {
     SecurityGroup,
     SubnetType
 } from "aws-cdk-lib/aws-ec2";
+import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
-import {Cluster, ContainerImage, FargateService, FargateTaskDefinition, LogDrivers} from "aws-cdk-lib/aws-ecs";
-import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
-import {join} from "path";
-import {Effect, PolicyDocument, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
 
 export interface migrationStackProps extends StackProps {
     readonly vpc: IVpc,
@@ -29,140 +27,119 @@ export class MigrationAssistanceStack extends Stack {
     constructor(scope: Construct, id: string, props: migrationStackProps) {
         super(scope, id, props);
 
-        // Create IAM policy to connect to cluster
-        const MSKConsumerPolicyConnect = new PolicyStatement({
-            effect: Effect.ALLOW,
-            actions: ["kafka-cluster:Connect",
-                "kafka-cluster:AlterCluster",
-                "kafka-cluster:DescribeCluster"],
-            resources: [props.MSKARN]
+        // Create MSK cluster config
+        const mskClusterConfig = new CfnConfiguration(this, "MigrationMSKClusterConfig", {
+            name: 'migration-msk-config',
+            serverProperties: `
+                auto.create.topics.enable=true
+            `
         })
 
-        // Create IAM policy to read/write from kafka topics on the cluster
-        const policyRegex1 = /([^//]+$)/gi
-        const policyRegex2 = /:(cluster)/gi
-        const policyShortARN = props.MSKARN.replace(policyRegex1, "*");
-        const topicARN = policyShortARN.replace(policyRegex2, ":topic");
-
-        const MSKConsumerPolicyReadAndWrite = new PolicyStatement({
-            effect: Effect.ALLOW,
-            actions: ["kafka-cluster:*Topic*",
-                "kafka-cluster:WriteData",
-                "kafka-cluster:ReadData"],
-            resources: [topicARN]
-        })
-
-        // Create IAM policy to join Kafka consumer groups
-        let groupARN = policyShortARN.replace(policyRegex2, ":group");
-        const MSKConsumerPolicyGroup = new PolicyStatement({
-            effect: Effect.ALLOW,
-            actions: ["kafka-cluster:AlterGroup",
-                "kafka-cluster:DescribeGroup"],
-            resources: [groupARN]
-        })
-
-        const MSKConsumerAccessDoc = new PolicyDocument({
-            statements: [MSKConsumerPolicyConnect, MSKConsumerPolicyReadAndWrite, MSKConsumerPolicyGroup]
-        })
-
-        // Create IAM Role for Fargate Task to read from MSK Topic
-        const MSKConsumerRole = new Role(this, 'MSKConsumerRole', {
-            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
-            description: 'Allow Fargate container to consume from MSK',
-            inlinePolicies: {
-                ReadMSKTopic: MSKConsumerAccessDoc,
+        // Create an MSK cluster
+        const mskCluster = new CfnCluster(this, 'MigrationMSKCluster', {
+            clusterName: 'migration-msk-cluster',
+            kafkaVersion: '2.8.1',
+            numberOfBrokerNodes: 2,
+            brokerNodeGroupInfo: {
+                instanceType: 'kafka.m5.large',
+                clientSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}).subnetIds,
+                connectivityInfo: {
+                    // Public access cannot be enabled on cluster creation
+                    publicAccess: {
+                        type: "DISABLED"
+                    }
+                },
             },
+            configurationInfo: {
+                arn: mskClusterConfig.attrArn,
+                // This is temporary, need way to dynamically get latest
+                revision: 1
+            },
+            encryptionInfo: {
+                encryptionInTransit: {
+                    clientBroker: 'TLS',
+                    inCluster: true
+                },
+            },
+            enhancedMonitoring: 'DEFAULT',
+            clientAuthentication: {
+                sasl: {
+                    iam: {
+                        enabled: true
+                    }
+                },
+                unauthenticated: {
+                    enabled: false
+                }
+            }
         });
+        mskCluster.addDependency(mskClusterConfig)
 
-        const ecsCluster = new Cluster(this, "ecsMigrationCluster", {
-            vpc: props.vpc
-        });
-
-        const migrationFargateTask = new FargateTaskDefinition(this, "migrationFargateTask", {
-            memoryLimitMiB: 2048,
-            cpu: 512,
-            taskRole: MSKConsumerRole
-        });
-
-        // Create MSK Consumer Container
-        const MSKConsumerImage = new DockerImageAsset(this, "MSKConsumerImage", {
-            directory: join(__dirname, "../../../../TrafficCapture"),
-            file: join("kafkaPrinter/docker/Dockerfile")
-        });
-        const MSKConsumerContainer = migrationFargateTask.addContainer("MSKConsumerContainer", {
-            image: ContainerImage.fromDockerImageAsset(MSKConsumerImage),
-            // Add in region and stage
-            containerName: "msk-consumer",
-            environment: {"KAFKA_BOOTSTRAP_SERVERS": props.MSKBrokers.toString(),
-                "KAFKA_TOPIC_NAME": props.MSKTopic},
-            // portMappings: [{containerPort: 9210}],
-            logging: LogDrivers.awsLogs({ streamPrefix: 'msk-consumer-container-lg', logRetention: 30 })
-        });
-
-        // Create Traffic Replayer Container
-        const trafficReplayerImage = new DockerImageAsset(this, "TrafficReplayerImage", {
-            directory: join(__dirname, "../../../../TrafficCapture"),
-            file: join("trafficReplayer/docker/Dockerfile")
-        });
-        const trafficReplayerContainer = migrationFargateTask.addContainer("TrafficReplayerContainer", {
-            image: ContainerImage.fromDockerImageAsset(trafficReplayerImage),
-            // Add in region and stage
-            containerName: "traffic-replayer",
-            environment: {"TARGET_CLUSTER_ENDPOINT": "http://" + props.targetEndpoint + ":80"},
-            logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-replayer-container-lg', logRetention: 30 })
-        });
-
-        // Create Traffic Comparator Container
-        const trafficComparatorImage = new DockerImageAsset(this, "TrafficComparatorImage", {
-            directory: join(__dirname, "../../..", "docker/traffic-comparator")
-            // For local traffic comparator usage, replace directory path with own fs path
-            //directory: "../../../../../mikayla-forks/traffic-comparator",
-            //file: "docker/Dockerfile-trafficcomparator"
-        });
-        const trafficComparatorContainer = migrationFargateTask.addContainer("TrafficComparatorContainer", {
-            image: ContainerImage.fromDockerImageAsset(trafficComparatorImage),
-            // Add in region and stage
-            containerName: "traffic-comparator",
-            environment: {},
-            // portMappings: [{containerPort: 9220}],
-            logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-comparator-container-lg', logRetention: 30 })
-        });
-
-        // To create Jupyter notebook container from local traffic comparator, replace directory path with own fs path
-        // const trafficComparatorJupyterImage = new DockerImageAsset(this, "TrafficComparatorJupyterImage", {
-        //     directory: "../../../../../mikayla-forks/traffic-comparator",
-        //     file: "docker/Dockerfile-trafficcomparator-jupyter"
-        // });
-        // const trafficComparatorJupyterContainer = migrationFargateTask.addContainer("TrafficComparatorJupyterContainer", {
-        //     image: ContainerImage.fromDockerImageAsset(trafficComparatorJupyterImage),
-        //     // Add in region and stage
-        //     containerName: "traffic-comparator-jupyter",
-        //     environment: {},
-        //     portMappings: [{containerPort: 8888}],
-        //     logging: LogDrivers.awsLogs({ streamPrefix: 'traffic-comparator-container-jupyter-lg', logRetention: 30 })
-        // });
+        // WIP Custom Resources to enable public endpoint for MSK and get the bootstrap broker urls, these may get
+        // combined into an actual lambda implementation in the future
         //
-        // trafficComparatorContainer.addMountPoints({
-        //     containerPath: '/shared',
-        //     sourceVolume: 'shared-traffic-comparator-volume',
-        //     readOnly: false,
-        // });
-        // trafficComparatorJupyterContainer.addMountPoints({
-        //     containerPath: '/shared',
-        //     sourceVolume: 'shared-traffic-comparator-volume',
-        //     readOnly: false,
-        // });
-        //
-        // // Mount the shared volume to the container
-        // migrationFargateTask.addVolume({
-        //     name: 'shared-traffic-comparator-volume',
+        // const crPolicyStatement = new PolicyStatement({
+        //     effect: Effect.ALLOW,
+        //     actions: ["ec2:DescribeSubnets",
+        //         "ec2:DescribeVpcs",
+        //         "ec2:DescribeSecurityGroups",
+        //         "ec2:DescribeRouteTables",
+        //         "ec2:DescribeVpcEndpoints",
+        //         "ec2:DescribeVpcAttribute",
+        //         "ec2:DescribeNetworkAcls",
+        //         "kafka:*"],
+        //     resources: ["*"]
+        // })
+        // const crPolicy = AwsCustomResourcePolicy.fromStatements([crPolicyStatement])
+        // const mskPublicEndpointCustomResource = new AwsCustomResource(this, 'MigrationMSKPublicEndpointCR', {
+        //     onCreate: {
+        //         service: 'Kafka',
+        //         action: 'updateConnectivity',
+        //         parameters: {
+        //             ClusterArn: mskCluster.attrArn,
+        //             CurrentVersion: "K3P5ROKL5A1OLE",
+        //             ConnectivityInfo: {
+        //                 PublicAccess: {
+        //                     Type: 'SERVICE_PROVIDED_EIPS'
+        //                 }
+        //             }
+        //         },
+        //         physicalResourceId: PhysicalResourceId.of(Date.now().toString())
+        //     },
+        //     policy: crPolicy,
+        //     vpc: props.vpc
+        // })
+
+        // const mskPublicEndpointCustomResource = new AwsCustomResource(this, 'MigrationMSKPublicEndpointCR', {
+        //     onCreate: {
+        //         service: 'Kafka',
+        //         action: 'getBootstrapBrokers',
+        //         parameters: {
+        //             ClusterArn: mskCluster.attrArn,
+        //             Outputs: {
+        //                 CustomOutput: 'customOutputValue'
+        //             }
+        //         },
+        //         physicalResourceId: PhysicalResourceId.of(Date.now().toString())
+        //     },
+        //     policy: AwsCustomResourcePolicy.fromSdkCalls({resources: [mskCluster.attrArn]}),
+        //     vpc: props.vpc
+        // })
+
+        // new CfnOutput(this, 'MSKBrokerOutput', {
+        //     value: mskPublicEndpointCustomResource.getResponseField("Outputs.CustomOutput")
         // });
 
-        // Create Fargate Service
-        const migrationFargateService = new FargateService(this, "migrationFargateService", {
-            cluster: ecsCluster,
-            taskDefinition: migrationFargateTask,
-            desiredCount: 1
+        const efsSecurityGroup = new SecurityGroup(this, 'efsSecurityGroup', {
+            vpc: props.vpc,
+            allowAllOutbound: true,
+        });
+        efsSecurityGroup.addIngressRule(efsSecurityGroup, Port.allTraffic());
+
+        // Create an EFS file system for the traffic-comparator
+        const fileSystem = new FileSystem(this, 'MigrationEFS', {
+            vpc: props.vpc,
+            securityGroup: efsSecurityGroup
         });
 
         // Creates a security group with open access via ssh
@@ -179,8 +156,25 @@ export class MigrationAssistanceStack extends Stack {
             instanceType: InstanceType.of(InstanceClass.T2, InstanceSize.MICRO),
             machineImage: MachineImage.latestAmazonLinux(),
             securityGroup: oinoSecurityGroup,
-            // Manually created for now, to be automated soon
-            keyName: "es-node-key"
+            // Manually created for now, to be automated in future
+            //keyName: "es-node-key"
         });
+
+        // This is a temporary fragile piece to help with importing values from CDK to Copilot. It assumes the provided VPC has two public subnets and
+        // does not currently provide the MSK broker endpoints as a future Custom Resource is needed to accomplish this
+        const exports = [
+            `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
+            `export MIGRATION_PUBLIC_SUBNET_1=${props.vpc.publicSubnets[0].subnetId}`,
+            `export MIGRATION_PUBLIC_SUBNET_2=${props.vpc.publicSubnets[1].subnetId}`,
+            `export MIGRATION_DOMAIN_ENDPOINT=${props.targetEndpoint}`,
+            `export MIGRATION_EFS_ID=${fileSystem.fileSystemId}`,
+            `export MIGRATION_EFS_SG_ID=${efsSecurityGroup.securityGroupId}`,
+            `export MIGRATION_KAFKA_BROKER_ENDPOINTS=`]
+
+        const cfnOutput = new CfnOutput(this, 'CopilotExports', {
+            value: exports.join(";"),
+            description: 'Exported resource values created by CDK that are needed by Copilot container deployments',
+        });
+
     }
 }
