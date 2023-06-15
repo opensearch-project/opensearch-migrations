@@ -210,9 +210,9 @@ class NettyScanningHttpProxyTest {
         retryWithNewPortUntilNoThrow(port -> {
             nshp.set(new NettyScanningHttpProxy(port.intValue()));
             try {
-                URI testServer = new URI("http", null, LOCALHOST, upstreamTestServer.get().getAddress().getPort(),
+                URI testServerUri = new URI("http", null, LOCALHOST, upstreamTestServer.get().getAddress().getPort(),
                     null, null, null);
-                nshp.get().start(testServer,null, null, connectionCaptureFactory);
+                nshp.get().start(testServerUri,null, null, connectionCaptureFactory);
                 System.out.println("proxy port = "+port.intValue());
             } catch (InterruptedException | URISyntaxException e) {
                 throw new RuntimeException(e);
