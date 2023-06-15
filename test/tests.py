@@ -31,7 +31,7 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, d
 
 class E2ETests(unittest.TestCase):
     def common_functionality(self):
-        self.proxy_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:9200')
+        self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
         self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'http://localhost:19200')
         self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
         self.username = os.getenv('username', 'admin')
@@ -51,7 +51,12 @@ class E2ETests(unittest.TestCase):
         delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
 
     def test_001_index(self):
+        # This test will verify that an index will be created (then deleted) on the target cluster when one is created
+        # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
+        # proxy and that the traffic reaches the source cluster, replays said traffic to the target cluster by the
+        # replayer.
 
+        # Creating an index, then asserting that the index was created on both targets.
         proxy_response = create_index(self.proxy_endpoint, self.index, self.auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
@@ -74,6 +79,11 @@ class E2ETests(unittest.TestCase):
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
     def test_002_document(self):
+        # This test will verify that a document will be created (then deleted) on the target cluster when one is created
+        # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
+        # proxy and that the traffic reaches the source cluster, replays said traffic to the target cluster by the
+        # replayer.
+
         # Creating an index, then asserting that the index was created on both targets.
         proxy_response = create_index(self.proxy_endpoint, self.index, self.auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
