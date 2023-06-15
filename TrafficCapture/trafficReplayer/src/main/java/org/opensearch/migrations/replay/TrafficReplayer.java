@@ -107,6 +107,12 @@ public class TrafficReplayer {
                 arity=1,
                 description = "input file to read the request/response traces for the source cluster")
         String inputFilename;
+        @Parameter(required = false,
+                names = {"-t", "--packet-timeout-seconds"},
+                arity = 1,
+                description = "assume that connections were terminated after this many " +
+                        "seconds of inactivity observed in the captured stream")
+        int observedPacketConnectionTimeout = 30;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -143,14 +149,16 @@ public class TrafficReplayer {
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
                 try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntriesFromFileOrStdin(params.inputFilename)) {
-                    tr.runReplayWithIOStreams(closeableStream.stream(), bufferedOutputStream);
+                    tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                            closeableStream.stream(), bufferedOutputStream);
                     log.info("reached the end of the ingestion output stream");
                 }
             }
         }
     }
 
-    private void runReplayWithIOStreams(Stream<TrafficStream> trafficChunkStream,
+    private void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
+                                        Stream<TrafficStream> trafficChunkStream,
                                         BufferedOutputStream bufferedOutputStream)
             throws IOException, InterruptedException, ExecutionException {
         AtomicInteger successCount = new AtomicInteger();
@@ -161,7 +169,7 @@ public class TrafficReplayer {
         ConcurrentHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>>
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(
+                new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         request -> requestFutureMap.put(request, writeToSocketAndClose(request)),
                         rrPair -> {
                             log.warn("Done receiving captured stream for this "+rrPair.requestData);

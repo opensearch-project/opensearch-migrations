@@ -17,6 +17,9 @@ public class HttpMessageAndTimestamp {
     @Setter
     private Instant lastPacketTimestamp;
 
+    /**
+     * TODO - handle out-of-order inserts by making this a radix map
+     */
     public final ArrayList<byte[]> packetBytes;
 
     public HttpMessageAndTimestamp(Instant firstPacketTimestamp) {

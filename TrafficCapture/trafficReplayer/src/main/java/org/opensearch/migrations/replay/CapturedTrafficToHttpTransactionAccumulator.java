@@ -3,10 +3,9 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 
+import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.Optional;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -38,19 +37,20 @@ import java.util.function.Consumer;
 @Slf4j
 public class CapturedTrafficToHttpTransactionAccumulator {
 
-    private final TrafficStreamMap liveStreams;
+    private final ExpiringTrafficStreamMap liveStreams;
     private final Consumer<HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
-    public CapturedTrafficToHttpTransactionAccumulator(Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
+    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
+                                                       Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler) {
-        liveStreams = new TrafficStreamMap();
+        liveStreams = new ExpiringTrafficStreamMap(minTimeout);
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
     }
 
     public void accept(String nodeId, String connectionId, TrafficObservation observation) {
-        log.error("Stream: " + connectionId + " Consuming observation: " + observation);
+        log.error("Stream: " + nodeId + "/" + connectionId + " Consuming observation: " + observation);
         var timestamp =
                 Optional.of(observation.getTs()).map(t->Instant.ofEpochSecond(t.getSeconds(), t.getNanos())).get();
         if (observation.hasEndOfMessageIndicator()) {

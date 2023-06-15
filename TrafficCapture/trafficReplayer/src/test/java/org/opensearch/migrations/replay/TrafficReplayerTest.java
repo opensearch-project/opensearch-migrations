@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -117,7 +118,7 @@ class TrafficReplayerTest {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(
+                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
                         request -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);

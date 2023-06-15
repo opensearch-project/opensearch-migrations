@@ -35,7 +35,8 @@ import java.util.function.Supplier;
  * representation of this Protobuf format to be used as a guide as fields are written. An example TrafficStream can
  * also be visualized below for reference.
  *
- * 1: "86e2414c"
+ * 1: "91ba4f3a-0b34-11ee-be56-0242ac120002"
+ * 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
  * 2 {
  *   1 {
  *     1: 1683655127
@@ -60,7 +61,7 @@ import java.util.function.Supplier;
 @Slf4j
 public class StreamChannelConnectionCaptureSerializer implements IChannelConnectionCaptureSerializer, Closeable {
 
-    private final static int MAX_ID_SIZE = 32;
+    private final static int MAX_ID_SIZE = 96;
 
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
     private final Function<CodedOutputStream, CompletableFuture> closeHandler;
