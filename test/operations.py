@@ -40,7 +40,7 @@ def create_document(endpoint: str, index_name: str, doc_id: str, auth: Optional[
     return response
 
 
-def check_document(endpoint: str, index_name: str, doc_id: str, auth: Optional[Tuple[str, str]] = None):
+def get_document(endpoint: str, index_name: str, doc_id: str, auth: Optional[Tuple[str, str]] = None):
     url = f'{endpoint}/{index_name}/_doc/{doc_id}'
     headers = {'Content-Type': 'application/json'}
 

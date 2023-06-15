@@ -1,5 +1,5 @@
 from operations import create_index, check_index, create_document,\
-    delete_document, delete_index, check_document
+    delete_document, delete_index, get_document
 from http import HTTPStatus
 from typing import Tuple, Callable
 import unittest
@@ -11,6 +11,10 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+# The following "retry_request" function's purpose is to retry a certain request for "max_attempts"
+# times every "delay" seconds IF the requests returned a status code other than what's expected.
+# So this "retry_request" function's arguments are a request function's name and whatever arguments that function
+# expects, and the status code the request function is expecting to get.
 def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, delay: float = 0.5,
                   expected_status_code: HTTPStatus = None):
     for attempt in range(1, max_attempts + 1):
@@ -30,7 +34,7 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, d
 
 
 class E2ETests(unittest.TestCase):
-    def common_functionality(self):
+    def set_common_values(self):
         self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
         self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'http://localhost:19200')
         self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
@@ -41,12 +45,11 @@ class E2ETests(unittest.TestCase):
         self.doc_id = '7'
 
     def setUp(self):
-        self.common_functionality()
+        self.set_common_values()
         delete_index(self.proxy_endpoint, self.index, self.auth)
         delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
 
     def tearDown(self):
-        self.common_functionality()
         delete_index(self.proxy_endpoint, self.index, self.auth)
         delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
 
@@ -97,10 +100,10 @@ class E2ETests(unittest.TestCase):
         proxy_response = create_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
-        source_response = check_document(self.source_endpoint, self.index, self.doc_id, self.auth)
+        source_response = get_document(self.source_endpoint, self.index, self.doc_id, self.auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        target_response = check_document(self.target_endpoint, self.index, self.doc_id, self.auth)
+        target_response = get_document(self.target_endpoint, self.index, self.doc_id, self.auth)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
 
         # Comparing the document's content on both endpoints, asserting that they match.
@@ -114,10 +117,10 @@ class E2ETests(unittest.TestCase):
         proxy_response = delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        target_response = retry_request(check_document, args=(self.target_endpoint, self.index, self.doc_id, self.auth),
+        target_response = retry_request(get_document, args=(self.target_endpoint, self.index, self.doc_id, self.auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
-        source_response = retry_request(check_document, args=(self.source_endpoint, self.index, self.doc_id, self.auth),
+        source_response = retry_request(get_document, args=(self.source_endpoint, self.index, self.doc_id, self.auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
