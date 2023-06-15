@@ -28,7 +28,7 @@ export class MigrationAssistanceStack extends Stack {
         super(scope, id, props);
 
         // Create MSK cluster config
-        const mskClusterConfig = new CfnConfiguration(this, "MigrationMSKClusterConfig", {
+        const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
             name: 'migration-msk-config',
             serverProperties: `
                 auto.create.topics.enable=true
@@ -36,7 +36,7 @@ export class MigrationAssistanceStack extends Stack {
         })
 
         // Create an MSK cluster
-        const mskCluster = new CfnCluster(this, 'MigrationMSKCluster', {
+        const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
             clusterName: 'migration-msk-cluster',
             kafkaVersion: '2.8.1',
             numberOfBrokerNodes: 2,
@@ -130,16 +130,16 @@ export class MigrationAssistanceStack extends Stack {
         //     value: mskPublicEndpointCustomResource.getResponseField("Outputs.CustomOutput")
         // });
 
-        const efsSecurityGroup = new SecurityGroup(this, 'efsSecurityGroup', {
+        const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
             vpc: props.vpc,
             allowAllOutbound: true,
         });
-        efsSecurityGroup.addIngressRule(efsSecurityGroup, Port.allTraffic());
+        comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
 
         // Create an EFS file system for the traffic-comparator
-        const fileSystem = new FileSystem(this, 'MigrationEFS', {
+        const comparatorSQLiteEFS = new FileSystem(this, 'comparatorSQLiteEFS', {
             vpc: props.vpc,
-            securityGroup: efsSecurityGroup
+            securityGroup: comparatorSQLiteSG
         });
 
         // Creates a security group with open access via ssh
@@ -167,8 +167,8 @@ export class MigrationAssistanceStack extends Stack {
             `export MIGRATION_PUBLIC_SUBNET_1=${props.vpc.publicSubnets[0].subnetId}`,
             `export MIGRATION_PUBLIC_SUBNET_2=${props.vpc.publicSubnets[1].subnetId}`,
             `export MIGRATION_DOMAIN_ENDPOINT=${props.targetEndpoint}`,
-            `export MIGRATION_EFS_ID=${fileSystem.fileSystemId}`,
-            `export MIGRATION_EFS_SG_ID=${efsSecurityGroup.securityGroupId}`,
+            `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
+            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`,
             `export MIGRATION_KAFKA_BROKER_ENDPOINTS=`]
 
         const cfnOutput = new CfnOutput(this, 'CopilotExports', {

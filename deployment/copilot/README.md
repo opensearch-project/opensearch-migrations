@@ -3,8 +3,24 @@ Copilot is a tool for deploying containerized applications on AWS ECS. Official 
 
 ### Initial Setup
 
+#### Install Prerequisites
+
+###### Docker
+Docker is used by Copilot to build container images. If not installed, follow the steps [here](https://docs.docker.com/engine/install/) to set up. Later versions are recommended.
+###### Git
+Git is used by the opensearch-migrations repo to fetch associated repositories (such as the traffic-comparator repo) for constructing their respective Dockerfiles. Steps to set up can be found [here](https://github.com/git-guides/install-git).
+###### Java 11
+Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 11.
+
+#### Creating Dockerfiles
+This project needs to build the required Dockerfiles that Copilot will use in its services. From the `TrafficCapture` directory the following command can be ran to build these files
+```
+./gradlew :dockerSolution:buildDockerImages
+```
+More details can be found [here](../../TrafficCapture/dockerSolution/README.md)
+
 #### Setting up Copilot CLI
-If you are on Mac the following Homebrew command can be ran to set up the Copilot CLI:
+If you are on Mac the following Homebrew command can be run to set up the Copilot CLI:
 ```
 brew install aws/tap/copilot-cli
 ```
@@ -20,19 +36,20 @@ export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_PUBLIC_SUBNET_1=subnet-123;
 export MIGRATION_PUBLIC_SUBNET_2=subnet-124;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
-export MIGRATION_EFS_ID=fs-123;
+export MIGRATION_COMPARATOR_EFS_ID=fs-123;
+export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
 export MIGRATION_KAFKA_BROKER_IDS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
 ```
 
 #### Setting up existing Copilot infrastructure
 
-When initially setting up Copilot; apps, services, and environments need to be initialized. Although a bit confusing, when initializing already defined (having a `manifest.yml`) environments and resources, Copilot will still prompt for input which will ultimately get ignored in favor of the existing `manifest.yml` file.
+When initially setting up Copilot; apps, services, and environments need to be initialized. Beware when initializing an environment in Copilot, it will prompt you for values even if you've defined them in manifest.yml though values input at the prompt are ignored in favor of what was specified in the file.
 
-If using temporary environment credentials, any input can be given to prompt, but be sure to specify the proper region when asked.
+If using temporary environment credentials when initializing an environment, Copilot will prompt you to enter each variable (AWS Access Key ID, AWS Secret Access Key, AWS Session Token). If you have another means for exporting these variables to your environment, these three prompts can be `enter`'d through in favor of using another means. The last prompt will ask for the desired deployment region and should be filled out as Copilot will store this internally.
 
-**Note**: This app also contains `kafka-broker` and `kafka-zookeeper` services which are currently experimental and usage of MSK is preferred
+**Note**: This app also contains `kafka-broker` and `kafka-zookeeper` services which are currently experimental and usage of MSK is preferred. These services do not need to be deployed, and as so are not listed below.
 ```
-// Initialize app (may not be necessary need to verify with clean slate)
+// Initialize app
 copilot app init
 
 // Initialize env
@@ -49,6 +66,8 @@ copilot svc init --name traffic-comparator-jupyter
 ```
 
 ### Deploying Services to an Environment
+When deploying a service with the Copilot CLI, a status bar will be displayed that gets updated as the deployment progresses. The command will complete when the specific service has all its resources created and health checks are passing on the deployed containers.
+
 Currently, it seems that Copilot does not support deploying all services at once or creating dependencies between separate services. In light of this, services need to be deployed one at a time as show below.
 
 ```
@@ -61,10 +80,16 @@ copilot svc deploy --name kafka-puller --env test
 
 ### Executing Commands on a Deployed Service
 
-Commands can be executed on a service if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
+A command shell can be opened in the service's container if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
 ```
 copilot svc exec traffic-comparator --container traffic-comparator --command "bash"
 ```
+
+### Addons
+
+Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. An example of this can be seen in the [kafka-puller](kafka-puller/addons/taskRole.yml) service which has an `addons` directory and yaml file which adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK.
+
+Official documentation on Addons can be found [here](https://aws.github.io/copilot-cli/docs/developing/addons/workload/).
 
 ### Useful Commands
 
