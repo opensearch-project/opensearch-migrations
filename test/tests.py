@@ -10,7 +10,9 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, delay: float = 0.5, expected_status_code: HTTPStatus = None):
+
+def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, delay: float = 0.5,
+                  expected_status_code: HTTPStatus = None):
     for attempt in range(1, max_attempts + 1):
 
         result = request(*args)
@@ -24,7 +26,7 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, d
 
     logger.error(f"All {max_attempts} attempts failed.")
     logger.error(f"Couldn't get the expected status code: {expected_status_code} while making the request:"
-                     f"{request.__name__} using the following arguments: {args} ")
+                 f"{request.__name__} using the following arguments: {args} ")
 
 
 class E2ETests(unittest.TestCase):
@@ -37,7 +39,6 @@ class E2ETests(unittest.TestCase):
         self.auth = (self.username, self.password)
         self.index = "my_index"
         self.doc_id = '7'
-
 
     def setUp(self):
         self.common_functionality()
@@ -92,8 +93,6 @@ class E2ETests(unittest.TestCase):
         target_response = check_document(self.target_endpoint, self.index, self.doc_id, self.auth)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
 
-
-
         # Comparing the document's content on both endpoints, asserting that they match.
         source_document = source_response.json()
         source_content = source_document['_source']
@@ -115,8 +114,6 @@ class E2ETests(unittest.TestCase):
         # Deleting the index that was created then asserting that it was deleted on both targets.
         proxy_response = delete_index(self.proxy_endpoint, self.index, self.auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
-
-
 
         target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
