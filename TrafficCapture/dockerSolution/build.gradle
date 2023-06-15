@@ -76,11 +76,10 @@ trafficComparatorServices.forEach {projectName, dockerImageName ->
         dependsOn(tasks.getByName('cloneComparatorRepoIfNeeded'))
         from REALIZED_TRAFFIC_COMPARATOR_DIRECTORY
         into dockerBuildDir
-        include 'setup.py'
-        include 'cli.py'
-        include 'traffic_comparator/*.py'
+        include '*.py'
+        include '/traffic_comparator/*'
         if (projectName == 'jupyterNotebook') {
-            include 'ResultsRepository.ipynb'
+            include '*.ipynb'
         }
     }
 
@@ -90,12 +89,7 @@ trafficComparatorServices.forEach {projectName, dockerImageName ->
         from 'python:3.10.10'
         runCommand("apt-get update && apt-get install -y netcat lsof")
         copyFile("setup.py", "/setup.py")
-        copyFile("setup.py", "containerTC/setup.py")
-        copyFile("cli.py", "containerTC/cli.py")
-        copyFile("traffic_comparator", "containerTC/traffic_comparator")
-        if (projectName == 'jupyterNotebook') {
-            copyFile("ResultsRepository.ipynb", "containerTC/ResultsRepository.ipynb")
-        }
+        copyFile(".", "/containerTC/")
         runCommand("pip3 install --editable \".[data]\"")
         // container stay-alive
         defaultCommand('tail', '-f', '/dev/null')
