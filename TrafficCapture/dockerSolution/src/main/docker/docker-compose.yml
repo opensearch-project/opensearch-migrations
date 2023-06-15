@@ -7,7 +7,7 @@ services:
       - migrations
     ports:
       - "9200:9200"
-    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main  --kafkaConnection kafka:9092 --destinationHost  elasticsearch --destinationPort 9200 --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
+    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main  --kafkaConnection kafka:9092 --destinationUri  http://elasticsearch:9200 --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
     depends_on:
       - kafka
       - elasticsearch
