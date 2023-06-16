@@ -7,6 +7,7 @@ import os
 import logging
 import time
 import requests
+from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +19,31 @@ logger = logging.getLogger(__name__)
 def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, delay: float = 0.5,
                   expected_status_code: HTTPStatus = None):
     for attempt in range(1, max_attempts + 1):
-
-        result = request(*args)
-        if result.status_code == expected_status_code:
-            return result
-        else:
-            logger.warning(f"Status code returned: {result.status_code} did not"
-                           f" match the expected status code: {expected_status_code}."
-                           f" Trying again in {delay} seconds.")
+        try:
+            result = request(*args)
+            if result.status_code == expected_status_code:
+                return result
+            else:
+                logger.warning(f"Status code returned: {result.status_code} did not"
+                               f" match the expected status code: {expected_status_code}."
+                               f" Trying again in {delay} seconds.")
+                time.sleep(delay)
+        except ConnectionError as e:
+            logger.error(f"Received exception: {e}. Unable to connect to server. Please check all containers are up"
+                         f" and ports are setup properly")
+            logger.warning(f"Trying again in {delay} seconds.")
             time.sleep(delay)
-
+            continue
+        except SSLError as e:
+            logger.error(f"Received exception: {e}. Unable to connect to server. Please check all containers are up"
+                         f"and ports are setup properly")
+            logger.warning(f"Trying again in {delay} seconds.")
+            time.sleep(delay)
+            continue
     logger.error(f"All {max_attempts} attempts failed.")
     logger.error(f"Couldn't get the expected status code: {expected_status_code} while making the request:"
                  f"{request.__name__} using the following arguments: {args} ")
+    return None
 
 
 class E2ETests(unittest.TestCase):
@@ -38,6 +51,7 @@ class E2ETests(unittest.TestCase):
         self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
         self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'http://localhost:19200')
         self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
+        self.jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
         self.username = os.getenv('username', 'admin')
         self.password = os.getenv('password', 'admin')
         self.auth = (self.username, self.password)
@@ -46,8 +60,10 @@ class E2ETests(unittest.TestCase):
 
     def setUp(self):
         self.set_common_values()
-        delete_index(self.proxy_endpoint, self.index, self.auth)
-        delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
+        retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.auth),
+                      expected_status_code=HTTPStatus.NOT_FOUND)
+        retry_request(delete_document, args=(self.target_endpoint, self.index, self.auth),
+                      expected_status_code=HTTPStatus.NOT_FOUND)
 
     def tearDown(self):
         delete_index(self.proxy_endpoint, self.index, self.auth)
@@ -60,7 +76,8 @@ class E2ETests(unittest.TestCase):
         # replayer.
 
         # Creating an index, then asserting that the index was created on both targets.
-        proxy_response = create_index(self.proxy_endpoint, self.index, self.auth)
+        proxy_response = retry_request(create_index, args=(self.proxy_endpoint, self.index, self.auth),
+                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
         target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
@@ -88,12 +105,15 @@ class E2ETests(unittest.TestCase):
         # replayer.
 
         # Creating an index, then asserting that the index was created on both targets.
-        proxy_response = create_index(self.proxy_endpoint, self.index, self.auth)
+        proxy_response = retry_request(create_index, args=(self.proxy_endpoint, self.index, self.auth),
+                                       expected_status_code=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        target_response = check_index(self.target_endpoint, self.index, self.auth)
+        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
+                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
-        source_response = check_index(self.source_endpoint, self.index, self.auth)
+        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.auth),
+                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
         # Creating a document, then asserting that the document was created on both targets.
@@ -137,6 +157,5 @@ class E2ETests(unittest.TestCase):
 
     def test_003_jupyterAwake(self):
         # Making sure that the Jupyter notebook is up and can be reached.
-        jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
-        response = requests.get(jupyter_endpoint)
+        response = requests.get(self.jupyter_endpoint)
         self.assertEqual(response.status_code, HTTPStatus.OK)
