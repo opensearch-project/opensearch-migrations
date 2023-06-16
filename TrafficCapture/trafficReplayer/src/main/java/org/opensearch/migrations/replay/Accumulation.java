@@ -9,8 +9,8 @@ public class Accumulation {
     final AtomicLong newestPacketTimestampInMillis;
     State state = State.NOTHING_SENT;
 
-    public Accumulation(Instant timestamp) {
-        newestPacketTimestampInMillis = new AtomicLong(timestamp.toEpochMilli());
+    public Accumulation() {
+        newestPacketTimestampInMillis = new AtomicLong(0);
     }
 
     @Override

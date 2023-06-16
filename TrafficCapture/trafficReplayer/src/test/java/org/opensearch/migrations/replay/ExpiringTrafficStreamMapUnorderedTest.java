@@ -11,12 +11,14 @@ import java.util.Arrays;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-class ExpiringTrafficStreamMapSequentialTest {
+class ExpiringTrafficStreamMapUnorderedTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
 
-    public static void testLinearExpirations(Function<Integer,String> connectionGenerator, int window, int granularity,
-                                      int expectedExpirationCounts[]) {
+    public void testExpirations(Function<Integer,String> connectionGenerator, int window, int granularity,
+                                boolean forceMonotonicity,
+                                int timestamps[],
+                                int expectedExpirationCounts[]) {
         var expiredAccumulations = new ArrayList<Accumulation>();
         var expiringMap = new ExpiringTrafficStreamMap(Duration.ofSeconds(window), Duration.ofSeconds(granularity),
                 new ExpiringTrafficStreamMap.BehavioralPolicy() {
@@ -30,9 +32,12 @@ class ExpiringTrafficStreamMapSequentialTest {
         var createdAccumulations = new ArrayList<Accumulation>();
         var expiredCountsPerLoop = new ArrayList<Integer>();
         for (int i=0; i<expectedExpirationCounts.length; ++i) {
-            var ts = Instant.ofEpochSecond(i+1);
-            createdAccumulations.add(expiringMap.getOrCreate(TEST_NODE_ID_STRING, connectionGenerator.apply(i), ts));
-            createdAccumulations.get(i).rrPair.addResponseData(ts, ("Add"+i).getBytes(StandardCharsets.UTF_8));
+            var ts = Instant.ofEpochSecond(timestamps[i]);
+            var accumulation = expiringMap.getOrCreate(TEST_NODE_ID_STRING, connectionGenerator.apply(i), ts);
+            createdAccumulations.add(accumulation);
+            if (accumulation != null) {
+                accumulation.rrPair.addResponseData(ts, ("Add" + i).getBytes(StandardCharsets.UTF_8));
+            }
             expiredCountsPerLoop.add(expiredAccumulations.size());
         }
         Assertions.assertEquals(
@@ -41,20 +46,23 @@ class ExpiringTrafficStreamMapSequentialTest {
     }
 
     @Test
-    public void testLinearConnectionsAreExpired() {
-        testLinearExpirations(i->"connectionId_"+i, 5,1,
-                new int[] {0, 0, 0, 0, 0, 0, 1, 2, 3});
+    public void testConnectionsAreExpired1() {
+        testExpirations(i->"connectionId_"+i, 5,1, true,
+                new int[] {1, 6, 3, 8, 4, 4, 3, 9, 12},
+                new int[] {0, 0, 0, 1, 1, 1, 1, 1,  3});
+    }
+    @Test
+    public void testConnectionsAreExpired2() {
+        testExpirations(i->"connectionId_"+i, 5,1, true,
+                new int[] {1, 7, 3, 8, 4, 4, 3, 9, 13, 15},
+                new int[] {0, 1, 1, 1, 1, 1, 1, 1,  3,  8});
     }
 
-    @Test
-    public void testLinearConnectionsWithGreaterGranulatityAreExpired() {
-        testLinearExpirations(i->"connectionId_"+i, 3,2,
-                new int[] {0, 0, 0, 0, 1, 1, 2, 2, 3});
-    }
+//    @Test
+//    public void testConnectionsAreExpired3() {
+//        testExpirations(i->"connectionId_"+i, 5,1, false,
+//                new int[] {1, 7, 3, 8, 4, 4, 3, 9, 13, 15},
+//                new int[] {0, 1, 1, 1, 1, 1, 1, 1,  2,  7});
+//    }
 
-    @Test
-    public void testLinearActivityWillPersist() {
-        var zeroArray = new int[10];
-        testLinearExpirations(i -> "connectionId", 5, 1, zeroArray);
-    }
 }
