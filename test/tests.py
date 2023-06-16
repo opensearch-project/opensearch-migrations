@@ -40,10 +40,9 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, d
             logger.warning(f"Trying again in {delay} seconds.")
             time.sleep(delay)
             continue
-    logger.error(f"All {max_attempts} attempts failed.")
     logger.error(f"Couldn't get the expected status code: {expected_status_code} while making the request:"
-                 f"{request.__name__} using the following arguments: {args} ")
-    return None
+                 f"{request.__name__} using the following arguments: {args}.")
+    raise Exception(f"All {max_attempts} retry attempts failed. Please check the logs for more information.")
 
 
 class E2ETests(unittest.TestCase):
@@ -62,7 +61,7 @@ class E2ETests(unittest.TestCase):
         self.set_common_values()
         retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
-        retry_request(delete_document, args=(self.target_endpoint, self.index, self.auth),
+        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
 
     def tearDown(self):
