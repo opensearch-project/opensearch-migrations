@@ -37,6 +37,7 @@ import java.util.function.Consumer;
 @Slf4j
 public class CapturedTrafficToHttpTransactionAccumulator {
 
+    public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
     private final ExpiringTrafficStreamMap liveStreams;
     private final Consumer<HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
@@ -44,7 +45,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
                                                        Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler) {
-        liveStreams = new ExpiringTrafficStreamMap(minTimeout);
+        liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
+                new ExpiringTrafficStreamMap.BehavioralPolicy() {
+                    @Override
+                    public void onExpireAccumulation(String partitionId,
+                                                     String connectionId,
+                                                     Accumulation accumulation) {
+                        fireAccumulationsCallbacks(accumulation);
+                    }
+                });
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
     }
@@ -135,17 +144,19 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void close() {
-        liveStreams.values().forEach(accumulation-> {
-            switch (accumulation.state) {
-                case NOTHING_SENT:
-                    requestHandler.accept(accumulation.rrPair.requestData);
-                    accumulation.state = Accumulation.State.REQUEST_SENT;
-                    // fall through
-                case REQUEST_SENT:
-                    fullDataHandler.accept(accumulation.rrPair);
-                    accumulation.state = Accumulation.State.RESPONSE_SENT;
-            }
-        });
+        liveStreams.values().forEach(this::fireAccumulationsCallbacks);
         liveStreams.clear();
+    }
+
+    private void fireAccumulationsCallbacks(Accumulation accumulation) {
+        switch (accumulation.state) {
+            case NOTHING_SENT:
+                requestHandler.accept(accumulation.rrPair.requestData);
+                accumulation.state = Accumulation.State.REQUEST_SENT;
+                // fall through
+            case REQUEST_SENT:
+                fullDataHandler.accept(accumulation.rrPair);
+                accumulation.state = Accumulation.State.RESPONSE_SENT;
+        }
     }
 }

@@ -113,6 +113,10 @@ public class ExpiringTrafficStreamMap {
         public boolean forceTimestampMonotonicityForPacketSequences() {
             return true;
         }
+
+        public void onExpireAccumulation(String partitionId, String connectionId, Accumulation accumulation) {
+            // do nothing by default
+        }
     }
 
     @AllArgsConstructor
@@ -128,11 +132,20 @@ public class ExpiringTrafficStreamMap {
      * This is a sequence of (concurrent) hashmaps segmented by time.  Each element in the sequence is
      * composed of a timestamp and a map.  The timestamp at each element is guaranteed to be greater
      * than all items within all maps that preceded it.
+     *
+     * Notice that this class DOES use some values from the surrounding class (granularity)
      */
     private class ExpiringKeyQueue extends
             ConcurrentSkipListMap<EpochMillis,ConcurrentHashMap<String,Boolean>> {
-        ExpiringKeyQueue(EpochMillis startingTimestamp) {
+        private final String partitionId;
+
+        ExpiringKeyQueue(String partitionId, EpochMillis startingTimestamp) {
+            this.partitionId = partitionId;
             addNewSet(startingTimestamp);
+        }
+
+        public Instant getLatestPossibleKeyValue() {
+            return lastKey().toInstant().plus(granularity);
         }
 
         private ConcurrentHashMap<String,Boolean> addNewSet(EpochMillis timestampMillis) {
@@ -153,7 +166,7 @@ public class ExpiringTrafficStreamMap {
                     .map(kvp-> {
                         var shiftedKey = kvp.getKey().toInstant().plus(granularity);
                         if (timestamp.test(shiftedKey, (boundary, ref) -> boundary>=ref)) {
-                            expireOldSlots();
+                            expireOldSlots(timestamp);
                             return createNewSlot(timestamp, kvp.getKey());
                         }
                         return kvp.getValue();
@@ -180,16 +193,37 @@ public class ExpiringTrafficStreamMap {
             return priorMap == null ? newMap : priorMap;
         }
 
-        public Instant getLatestPossibleKeyValue() {
-            return lastKey().toInstant().plus(granularity);
+        private void expireOldSlots(EpochMillis largestCurrentObservedTimestamp) {
+            var startOfWindow =
+                    new EpochMillis(largestCurrentObservedTimestamp.toInstant().minus(minimumGuaranteedLifetime));
+            for (var kvp = firstEntry();
+                 kvp.getKey().test(startOfWindow, (first, windowStart)->first<windowStart);
+                 kvp = firstEntry()) {
+                expireItemsBefore(kvp.getValue(), startOfWindow);
+                remove(kvp.getKey());
+            }
+        }
+
+        private void expireItemsBefore(ConcurrentHashMap<String, Boolean> keyMap, EpochMillis earlierTimesToPreserve) {
+            for (var connectionId : keyMap.keySet()) {
+                var key = new ScopedConnectionIdKey(partitionId, connectionId);
+                var accumulation = connectionAccumulationMap.get(key);
+                if (accumulation != null &&
+                        accumulation.newestPacketTimestampInMillis.get() < earlierTimesToPreserve.millis) {
+                    var priorValue = connectionAccumulationMap.remove(key);
+                    if (priorValue != null) {
+                        behavioralPolicy.onExpireAccumulation(partitionId, connectionId, accumulation);
+                    }
+                }
+            }
         }
     }
 
-    final AccumulatorMap connectionAccumulationMap;
-    final ConcurrentHashMap<String, ExpiringKeyQueue> nodeToExpiringBucketMap;
-    final Duration minimumGuaranteedLifetime;
-    final Duration granularity;
-    final BehavioralPolicy behavioralPolicy;
+    protected final AccumulatorMap connectionAccumulationMap;
+    protected final ConcurrentHashMap<String, ExpiringKeyQueue> nodeToExpiringBucketMap;
+    protected final Duration minimumGuaranteedLifetime;
+    protected final Duration granularity;
+    protected final BehavioralPolicy behavioralPolicy;
 
     public ExpiringTrafficStreamMap(Duration minimumGuaranteedLifetime) {
         this(minimumGuaranteedLifetime, Duration.ofSeconds(1), new BehavioralPolicy());
@@ -206,13 +240,9 @@ public class ExpiringTrafficStreamMap {
     }
 
     private ExpiringKeyQueue getOrCreateNodeMap(String partitionId, EpochMillis timestamp) {
-        var newMap = new ExpiringKeyQueue(timestamp);
+        var newMap = new ExpiringKeyQueue(partitionId, timestamp);
         var priorMap = nodeToExpiringBucketMap.putIfAbsent(partitionId, newMap);
         return priorMap == null ? newMap : priorMap;
-    }
-
-    private void expireOldSlots() {
-        log.error("Not implemented yet");
     }
 
     /**
