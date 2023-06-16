@@ -77,7 +77,7 @@ class E2ETests(unittest.TestCase):
 
         # Creating an index, then asserting that the index was created on both targets.
         proxy_response = retry_request(create_index, args=(self.proxy_endpoint, self.index, self.auth),
-                                        expected_status_code=HTTPStatus.OK)
+                                       expected_status_code=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
         target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
