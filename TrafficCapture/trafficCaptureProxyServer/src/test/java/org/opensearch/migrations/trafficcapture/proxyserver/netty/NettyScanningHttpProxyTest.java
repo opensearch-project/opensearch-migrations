@@ -22,6 +22,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -209,10 +210,11 @@ class NettyScanningHttpProxyTest {
         retryWithNewPortUntilNoThrow(port -> {
             nshp.set(new NettyScanningHttpProxy(port.intValue()));
             try {
-                nshp.get().start(LOCALHOST, upstreamTestServer.get().getAddress().getPort(), null,
-                        connectionCaptureFactory);
+                URI testServerUri = new URI("http", null, LOCALHOST, upstreamTestServer.get().getAddress().getPort(),
+                    null, null, null);
+                nshp.get().start(testServerUri,null, null, connectionCaptureFactory);
                 System.out.println("proxy port = "+port.intValue());
-            } catch (InterruptedException e) {
+            } catch (InterruptedException | URISyntaxException e) {
                 throw new RuntimeException(e);
             }
         });
