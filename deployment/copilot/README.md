@@ -24,11 +24,11 @@ If you are on Mac the following Homebrew command can be run to set up the Copilo
 ```
 brew install aws/tap/copilot-cli
 ```
-Otherwise please follow the manual instructions [here](https://aws.github.io/copilot-cli/docs/getting-started/install/)
+Otherwise, please follow the manual instructions [here](https://aws.github.io/copilot-cli/docs/getting-started/install/)
 
 
 #### Importing values from CDK
-While not a requirement, the typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) and then deploy the desired Copilot services, which will use these resources, afterwards
+The typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) and then deploy the desired Copilot services, which will use these resources.
 
 The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
 ```
@@ -43,21 +43,25 @@ export MIGRATION_KAFKA_BROKER_IDS=b-1-public.loggingmskcluster.123.45.kafka.us-e
 
 #### Setting up existing Copilot infrastructure
 
-When initially setting up Copilot; apps, services, and environments need to be initialized. Beware when initializing an environment in Copilot, it will prompt you for values even if you've defined them in manifest.yml though values input at the prompt are ignored in favor of what was specified in the file.
+It is **important** to run any `copilot` commands from within this directory. When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a test environment, which should be used for proper operation.
 
-If using temporary environment credentials when initializing an environment, Copilot will prompt you to enter each variable (AWS Access Key ID, AWS Secret Access Key, AWS Session Token). If you have another means for exporting these variables to your environment, these three prompts can be `enter`'d through in favor of using another means. The last prompt will ask for the desired deployment region and should be filled out as Copilot will store this internally.
+When initially setting up Copilot, each component (apps, services, and environments) need to be initialized. Beware when initializing an environment in Copilot, it will prompt you for values even if you've defined them in the `manifest.yml`, though values input at the prompt are ignored in favor of what was specified in the file.
+
+If using temporary environment credentials when initializing an environment:
+* Copilot will prompt you to enter each variable (AWS Access Key ID, AWS Secret Access Key, AWS Session Token). If these variables are already available in your environment, these three prompts can be `enter`'d through and ignored. 
+* When prompted ` Would you like to use the default configuration for a new environment?` select `Yes, use default.` as this will ultimately get ignored for what has been configured in the existing `manifest.yml`
+* The last prompt will ask for the desired deployment region and should be filled out as Copilot will store this internally.
 
 **Note**: This app also contains `kafka-broker` and `kafka-zookeeper` services which are currently experimental and usage of MSK is preferred. These services do not need to be deployed, and as so are not listed below.
 ```
 // Initialize app
 copilot app init
 
-// Initialize env
-// If using temporary credentials, when prompted select 'Temporary Credentials' and press `enter` for each default value as these can be ignored
+// Initialize env with required "test" name
 // Be cautious to specify the proper region as this will dictate where resources are deployed
 copilot env init --name test
 
-// Initialize services
+// Initialize services with their respective required name
 copilot svc init --name kafka-puller
 copilot svc init --name traffic-replayer
 copilot svc init --name traffic-comparator
@@ -68,10 +72,13 @@ copilot svc init --name traffic-comparator-jupyter
 ### Deploying Services to an Environment
 When deploying a service with the Copilot CLI, a status bar will be displayed that gets updated as the deployment progresses. The command will complete when the specific service has all its resources created and health checks are passing on the deployed containers.
 
-Currently, it seems that Copilot does not support deploying all services at once or creating dependencies between separate services. In light of this, services need to be deployed one at a time as show below.
+Currently, it seems that Copilot does not support deploying all services at once (issue [here](https://github.com/aws/copilot-cli/issues/3474)) or creating dependencies between separate services. In light of this, services need to be deployed one at a time as show below.
 
 ```
-// Deploy service to a configured environment
+// Deploy environment
+copilot env deploy --name test
+
+// Deploy services to a deployed environment
 copilot svc deploy --name traffic-comparator-jupyter --env test
 copilot svc deploy --name traffic-comparator --env test
 copilot svc deploy --name traffic-replayer --env test
@@ -82,7 +89,10 @@ copilot svc deploy --name kafka-puller --env test
 
 A command shell can be opened in the service's container if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
 ```
+copilot svc exec traffic-comparator-jupyter --container traffic-comparator-jupyter --command "bash"
 copilot svc exec traffic-comparator --container traffic-comparator --command "bash"
+copilot svc exec traffic-replayer --container traffic-replayer --command "bash"
+copilot svc exec kafka-puller --container kafka-puller --command "bash"
 ```
 
 ### Addons

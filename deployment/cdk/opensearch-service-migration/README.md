@@ -4,18 +4,34 @@ This repo contains an IaC CDK solution for deploying an OpenSearch Service Domai
 
 ### Getting Started
 
-If this is your first time using CDK in this region, will need to `cdk bootstrap` to setup required CDK resources for deployment
+#### First time using CDK?
 
-Also ensure you have configured the desired [AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites), as these will dictate the region and account used for deployment
+You can install the CDK CLI tool by running:
+```
+npm install -g aws-cdk
+```
 
-A `CDK_DEPLOYMENT_STAGE` environment variable should also be set to assist in naming resources and preventing collisions. Typically, this would be set to values such as `dev`, `gamma`, `Wave1`, `PROD` and will be used to distinguish AWS resources for a given region and deployment stage. For example the CloudFormation stack may be named like `OSServiceDomain-dev-us-east-1`. This stage environment variable should only be used for the disambiguation of user resources.
+You then will need to configure the desired [AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites), as these will dictate the region and account used for deployment.
+
+Next if you have not run CDK previously in the configured region of you account, it is necessary to run the following command to set up a small CloudFormation stack of resources that CDK needs to function within your account
+```
+cdk bootstrap
+```
+
+Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
+
+#### Additional one-time required setup
+
+It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
+
+A `CDK_DEPLOYMENT_STAGE` environment variable must be set to assist in naming resources and preventing collisions. Typically, this would be set to a value such as `dev`, `gamma`, `Wave1`, `PROD` and will be used to distinguish AWS resources for a given region and deployment stage. For example the CloudFormation stack may be named like `OSServiceDomain-dev-us-east-1`. This stage environment variable should only be used for the disambiguation of user resources.
 
 ### Deploying your CDK
 Before deploying your CDK you should fill in any desired context parameters that will dictate the composition of your OpenSearch Service Domain
 
 This can be accomplished by providing these options in a `cdk.context.json` file
 
-As well as by passing the context options you want to change as options in the CDK CLI
+Or by passing the context options you want to change as options in the CDK CLI
 ```
 cdk deploy "*" --c domainName="os-service-domain" --c engineVersion="OS_1_3_6" --c dataNodeType="r6g.large.search" --c dataNodeCount=1
 ```
