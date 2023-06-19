@@ -4,6 +4,9 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.google.protobuf.CodedOutputStream;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +14,6 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
@@ -20,9 +22,10 @@ import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
 import javax.net.ssl.SSLEngine;
-import java.io.File;
+import javax.net.ssl.SSLException;
 import java.io.FileReader;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
@@ -73,15 +76,15 @@ public class Main {
                 description = "The maximum number of bytes that will be written to a single TrafficStream object.")
         int maximumTrafficStreamSize = 1024*1024;
         @Parameter(required = false,
-                names = {"--destinationHost"},
-                arity = 1,
-                description = "Hostname of the server that the proxy is capturing traffic for.")
-        String backsideHostname = "localhost";
+            names = {"--insecureDestination"},
+            arity = 0,
+            description = "Do not check the destination server's certificate")
+        boolean allowInsecureConnectionsToBackside;
         @Parameter(required = true,
-                names = {"--destinationPort"},
+                names = {"--destinationUri"},
                 arity = 1,
-                description = "Port of the server that the proxy connects to.")
-        int backsidePort = 0;
+                description = "URI of the server that the proxy is capturing traffic for.")
+        String backsideUriString;
         @Parameter(required = true,
                 names = {"--listenPort"},
                 arity = 1,
@@ -171,11 +174,48 @@ public class Main {
         }
     }
 
+    // Utility method for converting uri string to an actual URI object. Similar logic is placed in the trafficReplayer
+    // module: TrafficReplayer.java
+    private static URI convertStringToUri(String uriString) {
+        URI serverUri;
+        try {
+            serverUri = new URI(uriString);
+        } catch (Exception e) {
+            System.err.println("Exception parsing URI string: " + uriString);
+            System.err.println(e.getMessage());
+            System.exit(3);
+            return null;
+        }
+        if (serverUri.getPort() < 0) {
+            throw new RuntimeException("Port not present for URI: " + serverUri);
+        }
+        if (serverUri.getHost() == null) {
+            throw new RuntimeException("Hostname not present for URI: " + serverUri);
+        }
+        if (serverUri.getScheme() == null) {
+            throw new RuntimeException("Scheme (http|https) is not present for URI: " + serverUri);
+        }
+        return serverUri;
+    }
+
+    private static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections) throws
+        SSLException {
+        if (serverUri.getScheme().equalsIgnoreCase("https")) {
+            var sslContextBuilder = SslContextBuilder.forClient();
+            if (allowInsecureConnections) {
+                sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            }
+            return sslContextBuilder.build();
+        } else {
+            return null;
+        }
+    }
+
     public static void main(String[] args) throws InterruptedException, IOException {
 
         var params = parseArgs(args);
+        var backsideUri = convertStringToUri(params.backsideUriString);
 
-        // This should be added to the argument parser when added in
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),
                         Paths.get(sslConfigFile).toAbsolutePath().getParent()));
@@ -184,7 +224,7 @@ public class Main {
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
 
         try {
-            proxy.start(params.backsideHostname, params.backsidePort,
+            proxy.start(backsideUri, loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside),
                     sksOp.map(sks-> (Supplier<SSLEngine>) () -> {
                         try {
                             var sslEngine = sks.createHTTPSSLEngine();

@@ -8,26 +8,29 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOption;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslHandler;
 import lombok.extern.slf4j.Slf4j;
+
+import javax.net.ssl.SSLEngine;
+import java.net.URI;
 
 @Slf4j
 public class FrontsideHandler extends ChannelInboundHandlerAdapter {
 
     private Channel outboundChannel;
 
-    private final String host;
-    private final int port;
+    private final URI backsideUri;
+    private final SslContext backsideSslContext;
 
     /**
      * Create a handler that sets the autoreleases flag
-     * @param host
-     * @param port
+     * @param backsideUri
+     * @param backsideSslContext
      */
-    public FrontsideHandler(String host, int port) {
-        this.host = host;
-        this.port = port;
+    public FrontsideHandler(URI backsideUri, SslContext backsideSslContext) {
+        this.backsideUri = backsideUri;
+        this.backsideSslContext = backsideSslContext;
     }
 
     @Override
@@ -40,7 +43,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                 .handler(new BacksideHandler(inboundChannel))
                 .option(ChannelOption.AUTO_READ, false);
         log.debug("Active - setting up backend connection");
-        var f = b.connect(host, port);
+        var f = b.connect(backsideUri.getHost(), backsideUri.getPort());
         outboundChannel = f.channel();
         f.addListener(new ChannelFutureListener() {
             @Override
@@ -48,6 +51,12 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                 if (future.isSuccess()) {
                     // connection complete start to read first data
                     log.debug("Done setting up backend channel & it was successful");
+                    if (backsideSslContext != null) {
+                        var pipeline = future.channel().pipeline();
+                        SSLEngine sslEngine = backsideSslContext.newEngine(future.channel().alloc());
+                        sslEngine.setUseClientMode(true);
+                        pipeline.addFirst("ssl", new SslHandler(sslEngine));
+                    }
                     inboundChannel.read();
                 } else {
                     // Close the connection if the connection attempt has failed.
