@@ -78,7 +78,7 @@ public class Main {
         @Parameter(required = false,
             names = {"--insecureDestination"},
             arity = 0,
-            description = "Do not check the backside server's certificate")
+            description = "Do not check the destination server's certificate")
         boolean allowInsecureConnectionsToBackside;
         @Parameter(required = true,
                 names = {"--destinationUri"},
@@ -174,6 +174,8 @@ public class Main {
         }
     }
 
+    // Utility method for converting uri string to an actual URI object. Similar logic is placed in the trafficReplayer
+    // module: TrafficReplayer.java
     private static URI convertStringToUri(String uriString) {
         URI serverUri;
         try {
