@@ -76,7 +76,8 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
         if (log.isDebugEnabled()) {
             byte[] copy = new byte[nextRequestPacket.readableBytes()];
             nextRequestPacket.duplicate().readBytes(copy);
-            log.trace("Writing into embedded channel: " + new String(copy, StandardCharsets.UTF_8));
+            log.trace("HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
+                    + new String(copy, StandardCharsets.UTF_8));
         }
         return CompletableFuture.completedFuture(null).thenAccept(x ->
                 channel.writeInbound(nextRequestPacket));

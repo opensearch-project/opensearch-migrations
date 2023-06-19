@@ -333,22 +333,16 @@ public class ExpiringTrafficStreamMap {
     }
 
     Accumulation remove(String partitionId, String id) {
-        return connectionAccumulationMap.remove(new ScopedConnectionIdKey(partitionId, id));
+        var accum = connectionAccumulationMap.remove(new ScopedConnectionIdKey(partitionId, id));
+        if (accum != null) {
+            accum.newestPacketTimestampInMillis.set(ACCUMULATION_DEAD_SENTINEL);
+        }
+        return accum;
         // Once the accumulations are gone from the connectionAccumulationMap map, upon the normal expiration
         // sweep, we'll dispose all the keys in the expired bucket anyway, so there's no reason to be too
         // proactive to strike it now.  Doing it now would require us to find out which bucket it's in.
         // TODO: Verify with profiling that this isn't going to be an impediment (notice that 20K active
         // connections would take up 1MB of key characters + map overhead)
-    }
-
-    Accumulation reset(String partitionId, String connectionId, Instant timestamp) {
-        var accumulation = new Accumulation();
-        try {
-            return connectionAccumulationMap.put(new ScopedConnectionIdKey(partitionId, connectionId),
-                    accumulation);
-        } finally {
-            updateExpirationTrackers(partitionId, connectionId, new EpochMillis(timestamp), accumulation, 0);
-        }
     }
 
     Stream<Accumulation> values() {

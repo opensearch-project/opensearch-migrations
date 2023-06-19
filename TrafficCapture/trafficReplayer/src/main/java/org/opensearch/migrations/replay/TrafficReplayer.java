@@ -190,6 +190,9 @@ public class TrafficReplayer {
         );
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
+        } catch (Exception e) {
+            log.warn("Terminating runReplay due to", e);
+            throw e;
         } finally {
             trafficToHttpTransactionAccumulator.close();
             var allRemainingWorkArray = requestToFinalWorkFuturesMap.values().toArray(CompletableFuture[]::new);
@@ -254,8 +257,8 @@ public class TrafficReplayer {
             log.debug("done sending bytes, now finalizing the request");
             return packetHandler.finalizeRequest();
         } catch (Exception e) {
-            log.debug("Caught exception in writeToSocketAndClose, so throwing");
-            throw new RuntimeException(e);
+            log.debug("Caught exception in writeToSocketAndClose, so failing future");
+            return CompletableFuture.failedFuture(e);
         }
     }
 

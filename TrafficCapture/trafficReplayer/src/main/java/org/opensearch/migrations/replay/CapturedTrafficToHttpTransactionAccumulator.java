@@ -51,6 +51,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     public void onExpireAccumulation(String partitionId,
                                                      String connectionId,
                                                      Accumulation accumulation) {
+                        log.error("firing accumulation for accum=[" + connectionId + "]=" + accumulation);
                         fireAccumulationsCallbacks(accumulation);
                     }
                 });
@@ -59,7 +60,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void accept(String nodeId, String connectionId, TrafficObservation observation) {
-        log.error("Stream: " + nodeId + "/" + connectionId + " Consuming observation: " + observation);
+        log.debug("Stream: " + nodeId + "/" + connectionId + " Consuming observation: " + observation);
         var timestamp =
                 Optional.of(observation.getTs()).map(t->Instant.ofEpochSecond(t.getSeconds(), t.getNanos())).get();
         if (observation.hasEndOfMessageIndicator()) {
@@ -73,7 +74,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         } else if (observation.hasRead()) {
             var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
             assert accum.state == Accumulation.State.NOTHING_SENT;
+            log.error("Adding request data for accum[" + connectionId + "]=" + accum);
             accum.rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
+            log.error("Added request data for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasWrite()) {
             var accum = liveStreams.get(nodeId, connectionId, timestamp);
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
@@ -82,16 +85,37 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 throw new RuntimeException("Apparent out of order exception - " +
                         "found a purported write to a socket before a read!");
             }
+            log.error("Adding response data for accum[" + connectionId + "]=" + accum);
             runningList.addResponseData(timestamp, observation.getWrite().getData().toByteArray());
+            log.error("Added response data for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasReadSegment()) {
             var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
             assert accum.state == Accumulation.State.NOTHING_SENT;
-            throw new RuntimeException("Not implemented yet.");
+            log.error("Adding request segment for accum[" + connectionId + "]=" + accum);
+            if (accum.rrPair.requestData == null) {
+                accum.rrPair.requestData = new HttpMessageAndTimestamp(timestamp);
+            }
+            accum.rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
+            log.error("Added request segment for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasWriteSegment()) {
             var accum = liveStreams.get(nodeId, connectionId, timestamp);
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
-            var runningList = accum.rrPair;
-            throw new RuntimeException("Not implemented yet.");
+            log.error("Adding response segment for accum[" + connectionId + "]=" + accum);
+            if (accum.rrPair.responseData == null) {
+                accum.rrPair.responseData = new HttpMessageAndTimestamp(timestamp);
+            }
+            accum.rrPair.responseData.addSegment(observation.getWrite().getData().toByteArray());
+            log.error("Added response segment for accum[" + connectionId + "]=" + accum);
+        } else if (observation.hasSegmentEnd()) {
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
+            assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
+            if (accum.rrPair.requestData.hasInProgressSegment()) {
+                accum.rrPair.requestData.finalizeRequestSegments(timestamp);
+            } else if (accum.rrPair.responseData.hasInProgressSegment()) {
+                accum.rrPair.responseData.finalizeRequestSegments(timestamp);
+            } else {
+                throw new RuntimeException("Got an end of segment indicator, but no segments are in progress");
+            }
         } else if (observation.hasConnectionException()) {
             var accum = liveStreams.remove(nodeId, connectionId);
             log.warn("Removing accumulated traffic pair for " + connectionId);
@@ -118,8 +142,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         // RESPONSE.  Notice that handleEndOfMessage will bump the state itself
         // on the (soon to be recycled) accum object.
         if (accum.state == Accumulation.State.REQUEST_SENT) {
+            log.error("Resetting accum[" + connectionId + "]=" + accum);
             handleEndOfMessage(nodeId, connectionId, accum);
-            liveStreams.reset(nodeId, connectionId, timestamp);
+            // We shouldn't need to check the state again - it should be NOT_SENT, but in case
+            // this code goes multi-threaded, this might be a bit safer.
+            // TODO - reevaluate once the packet assembly code is more mature
+            return getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
         }
         return accum;
     }
