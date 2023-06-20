@@ -74,9 +74,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         } else if (observation.hasRead()) {
             var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
             assert accum.state == Accumulation.State.NOTHING_SENT;
-            log.error("Adding request data for accum[" + connectionId + "]=" + accum);
+            log.trace("Adding request data for accum[" + connectionId + "]=" + accum);
             accum.rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
-            log.error("Added request data for accum[" + connectionId + "]=" + accum);
+            log.trace("Added request data for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasWrite()) {
             var accum = liveStreams.get(nodeId, connectionId, timestamp);
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
@@ -85,27 +85,27 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 throw new RuntimeException("Apparent out of order exception - " +
                         "found a purported write to a socket before a read!");
             }
-            log.error("Adding response data for accum[" + connectionId + "]=" + accum);
+            log.trace("Adding response data for accum[" + connectionId + "]=" + accum);
             runningList.addResponseData(timestamp, observation.getWrite().getData().toByteArray());
-            log.error("Added response data for accum[" + connectionId + "]=" + accum);
+            log.trace("Added response data for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasReadSegment()) {
             var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
             assert accum.state == Accumulation.State.NOTHING_SENT;
-            log.error("Adding request segment for accum[" + connectionId + "]=" + accum);
+            log.trace("Adding request segment for accum[" + connectionId + "]=" + accum);
             if (accum.rrPair.requestData == null) {
                 accum.rrPair.requestData = new HttpMessageAndTimestamp(timestamp);
             }
             accum.rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
-            log.error("Added request segment for accum[" + connectionId + "]=" + accum);
+            log.trace("Added request segment for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasWriteSegment()) {
             var accum = liveStreams.get(nodeId, connectionId, timestamp);
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
-            log.error("Adding response segment for accum[" + connectionId + "]=" + accum);
+            log.trace("Adding response segment for accum[" + connectionId + "]=" + accum);
             if (accum.rrPair.responseData == null) {
                 accum.rrPair.responseData = new HttpMessageAndTimestamp(timestamp);
             }
             accum.rrPair.responseData.addSegment(observation.getWrite().getData().toByteArray());
-            log.error("Added response segment for accum[" + connectionId + "]=" + accum);
+            log.trace("Added response segment for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasSegmentEnd()) {
             var accum = liveStreams.get(nodeId, connectionId, timestamp);
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
@@ -142,7 +142,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         // RESPONSE.  Notice that handleEndOfMessage will bump the state itself
         // on the (soon to be recycled) accum object.
         if (accum.state == Accumulation.State.REQUEST_SENT) {
-            log.error("Resetting accum[" + connectionId + "]=" + accum);
+            if (log.isDebugEnabled()) {
+                log.debug("Resetting accum[" + connectionId + "]=" + accum);
+            }
             handleEndOfMessage(nodeId, connectionId, accum);
             // We shouldn't need to check the state again - it should be NOT_SENT, but in case
             // this code goes multi-threaded, this might be a bit safer.

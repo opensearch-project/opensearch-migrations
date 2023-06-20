@@ -172,7 +172,9 @@ public class TrafficReplayer {
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         request -> requestFutureMap.put(request, writeToSocketAndClose(request)),
                         rrPair -> {
-                            log.warn("Done receiving captured stream for this "+rrPair.requestData);
+                            if (log.isTraceEnabled()) {
+                                log.trace("Done receiving captured stream for this "+rrPair.requestData);
+                            }
                             var resultantCf = requestFutureMap.get(rrPair.requestData)
                                     .handle((summary, t) -> {
                                         try {
@@ -219,7 +221,7 @@ public class TrafficReplayer {
     }
 
     private static AggregatedRawResponse packageAndWriteResponse(SourceTargetCaptureTuple.TupleToFileWriter tripleWriter, RequestResponsePacketPair rrPair, AggregatedRawResponse summary, Throwable t) {
-        log.warn("done sending and finalizing data to the packet handler");
+        log.trace("done sending and finalizing data to the packet handler");
         SourceTargetCaptureTuple requestResponseTriple;
         if (t != null) {
             log.error("Got exception in CompletableFuture callback: ", t);
