@@ -215,6 +215,13 @@ public class TrafficReplayer {
             } else {
                 log.info(successCount.get() + " requests were successfully processed.");
             }
+            log.info("# of connections created: {}; # of requests on reused keep-alive connections: {}; " +
+                            "# of expired connections: {}; # of connections closed: {}",
+                    trafficToHttpTransactionAccumulator.numberOfConnectionsCreated(),
+                    trafficToHttpTransactionAccumulator.numberOfRequestsOnReusedConnections(),
+                    trafficToHttpTransactionAccumulator.numberOfConnectionsExpired(),
+                    trafficToHttpTransactionAccumulator.numberOfConnectionsClosed()
+            );
             assert requestToFinalWorkFuturesMap.size() == 0 :
                     "expected to wait for all of the in flight requests to fully flush and self destruct themselves";
         }
@@ -267,8 +274,11 @@ public class TrafficReplayer {
     public void runReplay(Stream<TrafficStream> trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         trafficChunkStream
-                .forEach(ts->ts.getSubStreamList().stream()
-                        .forEach(o->
-                                trafficToHttpTransactionAccumulator.accept(ts.getNodeId(), ts.getConnectionId(), o)));
+//                .filter(ts->ts.getConnectionId().equals("0242acfffe150008-00000009-00000019-36de434c8bbbf67d-7242ec9c"))
+//                .limit(4)
+                .forEach(ts-> ts.getSubStreamList().stream()
+                        .forEach(o ->
+                                trafficToHttpTransactionAccumulator.accept(ts.getNodeId(), ts.getConnectionId(), o))
+                );
     }
 }

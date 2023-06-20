@@ -6,6 +6,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -42,6 +43,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final Consumer<HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
+    private final AtomicInteger newConnectionCounter = new AtomicInteger();
+    private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
+    private final AtomicInteger closedConnectionCounter = new AtomicInteger();
+    private final AtomicInteger expiredCounter = new AtomicInteger();
+
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
                                                        Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler) {
@@ -51,6 +57,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     public void onExpireAccumulation(String partitionId,
                                                      String connectionId,
                                                      Accumulation accumulation) {
+                        expiredCounter.incrementAndGet();
                         log.error("firing accumulation for accum=[" + connectionId + "]=" + accumulation);
                         fireAccumulationsCallbacks(accumulation);
                     }
@@ -58,6 +65,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
     }
+
+    public int numberOfConnectionsCreated() { return newConnectionCounter.get(); }
+    public int numberOfRequestsOnReusedConnections() { return reusedKeepAliveCounter.get(); }
+    public int numberOfConnectionsClosed() { return closedConnectionCounter.get(); }
+    public int numberOfConnectionsExpired() { return numberOfConnectionsExpired(); }
 
     public void accept(String nodeId, String connectionId, TrafficObservation observation) {
         log.debug("Stream: " + nodeId + "/" + connectionId + " Consuming observation: " + observation);
@@ -117,6 +129,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 throw new RuntimeException("Got an end of segment indicator, but no segments are in progress");
             }
         } else if (observation.hasConnectionException()) {
+            closedConnectionCounter.incrementAndGet();
             var accum = liveStreams.remove(nodeId, connectionId);
             log.warn("Removing accumulated traffic pair for " + connectionId);
             log.debug("Accumulated object: " + accum);
@@ -142,6 +155,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         // RESPONSE.  Notice that handleEndOfMessage will bump the state itself
         // on the (soon to be recycled) accum object.
         if (accum.state == Accumulation.State.REQUEST_SENT) {
+            reusedKeepAliveCounter.incrementAndGet();
             if (log.isDebugEnabled()) {
                 log.debug("Resetting accum[" + connectionId + "]=" + accum);
             }
@@ -150,6 +164,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             // this code goes multi-threaded, this might be a bit safer.
             // TODO - reevaluate once the packet assembly code is more mature
             return getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
+        } else if (accum.state == Accumulation.State.NOTHING_SENT) {
+            newConnectionCounter.incrementAndGet();
         }
         return accum;
     }

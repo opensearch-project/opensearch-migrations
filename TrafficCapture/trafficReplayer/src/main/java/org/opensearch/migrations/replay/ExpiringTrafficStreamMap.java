@@ -31,7 +31,7 @@ public class ExpiringTrafficStreamMap {
     public static final int ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL = 0;
 
     @EqualsAndHashCode
-    public class EpochMillis implements Comparable<EpochMillis> {
+    public static class EpochMillis implements Comparable<EpochMillis> {
         final long millis;
         public EpochMillis(Instant i) {
             millis = i.toEpochMilli();
@@ -119,7 +119,7 @@ public class ExpiringTrafficStreamMap {
 
     @AllArgsConstructor
     @EqualsAndHashCode
-    private class ScopedConnectionIdKey {
+    private static class ScopedConnectionIdKey {
         public final String nodeId;
         public final String connectionId;
     }
