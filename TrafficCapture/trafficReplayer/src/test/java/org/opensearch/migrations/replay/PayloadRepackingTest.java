@@ -11,6 +11,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
@@ -87,16 +89,18 @@ public class PayloadRepackingTest {
                 "content-length: " + contentLength + "\n\n";
         var referenceStringBuilder = new StringBuilder();
         var allConsumesFuture = TestUtils.chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,
-                stringParts, referenceStringBuilder, headerString);
+                        stringParts, referenceStringBuilder, headerString);
 
         var innermostFinalizeCallCount = new AtomicInteger();
-        var finalizationFuture = allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest());
-        finalizationFuture.whenComplete((aggregatedRawResponse, t) -> {
+        DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> finalizationFuture =
+                allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest(),
+                        ()->"PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture");
+        finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse, t) -> {
             Assertions.assertNull(t);
             Assertions.assertNotNull(aggregatedRawResponse);
             // do nothing but check connectivity between the layers in the bottom most handler
             innermostFinalizeCallCount.incrementAndGet();
-        });
+        }), ()->"PayloadRepackingTest.runPipelineAndValidate.assertCheck");
         finalizationFuture.get();
 
         TestUtils.verifyCapturedResponseMatchesExpectedPayload(testPacketCapture.getBytesCaptured(),

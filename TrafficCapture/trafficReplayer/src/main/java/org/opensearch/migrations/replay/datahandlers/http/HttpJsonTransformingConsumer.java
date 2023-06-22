@@ -7,6 +7,8 @@ import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.AggregatedTransformedResponse;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.nio.charset.StandardCharsets;
@@ -15,7 +17,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.function.Function;
 
 /**
  * This class implements a packet consuming interface by using an EmbeddedChannel to write individual
@@ -83,7 +84,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                 channel.writeInbound(nextRequestPacket));
     }
 
-    public CompletableFuture<AggregatedTransformedResponse> finalizeRequest() {
+    public DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse> finalizeRequest() {
         var offloadingHandler = getOffloadingHandler();
         channel.close();
         if (offloadingHandler == null) {
@@ -101,21 +102,24 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                             throw new CompletionException(t);
                         }
                     } else {
-                        return CompletableFuture.completedFuture(v);
+                        return StringTrackableCompletableFuture.completedFuture(v, ()->"");
                     }
-                }).thenCompose(Function.identity());
+                }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
     }
 
-    private CompletableFuture<AggregatedTransformedResponse>
+    private DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>
     redriveWithoutTransformation(IPacketFinalizingConsumer<AggregatedRawResponse> packetConsumer, Throwable reason) {
-        CompletableFuture<Void> consumptionChainedFuture =
-                chunks.stream().collect(
+        DiagnosticTrackableCompletableFuture<String,Void> consumptionChainedFuture =
+                new DiagnosticTrackableCompletableFuture<String,Void>(chunks.stream().collect(
                         Utils.foldLeft(CompletableFuture.completedFuture(null),
-                                (cf, bb) -> cf.thenCompose(v -> packetConsumer.consumeBytes(bb))));
-        return consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest())
-                .thenApply(r->reason == null ?
-                        new AggregatedTransformedResponse(r,
-                                AggregatedTransformedResponse.HttpRequestTransformationStatus.SKIPPED) :
-                        new AggregatedTransformedResponse(r, reason));
+                                (cf, bb) -> cf.thenCompose(v -> packetConsumer.consumeBytes(bb)))),
+                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.");
+        return consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
+                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()")
+                .map(f->f.thenApply(r->reason == null ?
+                                new AggregatedTransformedResponse(r,
+                                        AggregatedTransformedResponse.HttpRequestTransformationStatus.SKIPPED) :
+                                new AggregatedTransformedResponse(r, reason)),
+                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }
 }

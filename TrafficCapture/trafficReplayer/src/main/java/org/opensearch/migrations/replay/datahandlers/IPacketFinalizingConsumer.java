@@ -1,10 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import lombok.NonNull;
-
-import java.util.concurrent.CompletableFuture;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 /**
  * This class consumes arrays of bytes or ByteBufs, potentially asynchronously,
@@ -15,5 +12,5 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface IPacketFinalizingConsumer<R> extends IPacketConsumer {
 
-    CompletableFuture<R> finalizeRequest();
+    DiagnosticTrackableCompletableFuture<String,R> finalizeRequest();
 }

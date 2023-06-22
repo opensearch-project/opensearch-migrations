@@ -16,6 +16,8 @@ import lombok.extern.log4j.Log4j2;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import javax.net.ssl.SSLEngine;
 import java.net.URI;
@@ -137,10 +139,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     @Override
-    public CompletableFuture<AggregatedRawResponse>
+    public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
     finalizeRequest() {
         var future = new CompletableFuture();
         responseWatchHandler.addCallback(arr -> future.complete(arr));
-        return future;
+        return new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,
+                ()->"NettyPacketToHttpConsumer.finalizeRequest()");
     }
 }

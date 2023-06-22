@@ -14,6 +14,8 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -22,7 +24,6 @@ import java.util.AbstractMap;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
@@ -48,24 +49,25 @@ public class TestUtils {
                 .toString();
     }
 
-    static CompletableFuture<Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
-                                                     IPacketConsumer transformingHandler) {
+    static DiagnosticTrackableCompletableFuture<String,Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
+                                                                               IPacketConsumer transformingHandler) {
         log.info("Sending string to transformer: "+s);
         referenceStringBuilder.append(s);
         var bytes = s.getBytes(StandardCharsets.UTF_8);
         return transformingHandler.consumeBytes(bytes);
     }
 
-    static CompletableFuture<Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketConsumer packetConsumer,
-                                                                               List<String> stringParts,
-                                                                               StringBuilder referenceStringAccumulator,
-                                                                               String headers) {
+    static DiagnosticTrackableCompletableFuture<String,Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketConsumer packetConsumer,
+                                                                                                  List<String> stringParts,
+                                                                                                  StringBuilder referenceStringAccumulator,
+                                                                                                  String headers) {
         return stringParts.stream().collect(
                 Utils.foldLeft(packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
-                        (cf, s) -> cf.thenCompose(v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer))));
+                        (cf, s) -> cf.thenCompose(v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer),
+                        ()->"TestUtils.chainedWriteHeadersAndDualWritePayloadParts")));
     }
 
-    public static CompletableFuture<Void>
+    public static DiagnosticTrackableCompletableFuture<String,Void>
     chainedDualWriteHeaderAndPayloadParts(IPacketConsumer packetConsumer,
                                           List<String> stringParts,
                                           StringBuilder referenceStringAccumulator,

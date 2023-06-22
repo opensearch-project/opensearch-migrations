@@ -6,6 +6,8 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -54,11 +56,12 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     }
 
     @Override
-    public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
+    public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse> finalizeRequest() {
         numFinalizations.incrementAndGet();
         Assertions.assertEquals(1, numFinalizations.get());
         bytesCaptured = byteArrayOutputStream.toByteArray();
-        return CompletableFuture.completedFuture(dummyAggregatedResponse);
+        return StringTrackableCompletableFuture.completedFuture(dummyAggregatedResponse,
+                ()->"TestCapturePacketToHttpHandler.dummy");
     }
 
     public String getCapturedAsString() {

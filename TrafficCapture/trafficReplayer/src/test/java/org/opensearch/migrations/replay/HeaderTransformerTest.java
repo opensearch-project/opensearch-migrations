@@ -4,13 +4,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 
 import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -50,7 +51,7 @@ public class HeaderTransformerTest {
                 .collect(Collectors.toList());
 
         var referenceStringBuilder = new StringBuilder();
-        CompletableFuture<Void> allConsumesFuture =
+        DiagnosticTrackableCompletableFuture<String,Void> allConsumesFuture =
                 TestUtils.chainedDualWriteHeaderAndPayloadParts(transformingHandler,
                         stringParts,
                         referenceStringBuilder,
@@ -58,14 +59,15 @@ public class HeaderTransformerTest {
                 );
 
         var innermostFinalizeCallCount = new AtomicInteger();
-        var finalizationFuture = allConsumesFuture.thenCompose(v->transformingHandler.finalizeRequest());
-        finalizationFuture.whenComplete((aggregatedRawResponse,t)->{
+        var finalizationFuture = allConsumesFuture.thenCompose(v->transformingHandler.finalizeRequest(),
+                ()->"HeaderTransformerTest.runRandomPayloadWithTransformer.allConsumes");
+        finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse,t)->{
             Assertions.assertNull(t);
             Assertions.assertNotNull(aggregatedRawResponse);
             // do nothing but check connectivity between the layers in the bottom most handler
             innermostFinalizeCallCount.incrementAndGet();
             Assertions.assertEquals(dummyAggregatedResponse, aggregatedRawResponse);
-        });
+        }), ()->"HeaderTransformerTest.runRandomPayloadWithTransformer.assertionCheck");
         finalizationFuture.get();
         Assertions.assertEquals(TestUtils.resolveReferenceString(referenceStringBuilder,
                         List.of(new AbstractMap.SimpleEntry(SOURCE_CLUSTER_NAME, SILLY_TARGET_CLUSTER_NAME))),
@@ -111,7 +113,7 @@ public class HeaderTransformerTest {
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)
                 .collect(Collectors.toList());
 
-        CompletableFuture<Void> allConsumesFuture =
+        DiagnosticTrackableCompletableFuture<String,Void> allConsumesFuture =
                 TestUtils.chainedDualWriteHeaderAndPayloadParts(transformingHandler,
                         stringParts,
                         referenceStringBuilder,
@@ -121,7 +123,8 @@ public class HeaderTransformerTest {
                                 "content-length: " + contentLength + "\n"
                 );
 
-        var finalizationFuture = allConsumesFuture.thenCompose(v->transformingHandler.finalizeRequest());
+        var finalizationFuture = allConsumesFuture.thenCompose(v->transformingHandler.finalizeRequest(),
+                ()->"HeaderTransformTest.testMalformedPayload_andTypeMappingUri_IsPassedThrough");
         Assertions.assertThrows(Exception.class, ()->finalizationFuture.get());
     }
 }

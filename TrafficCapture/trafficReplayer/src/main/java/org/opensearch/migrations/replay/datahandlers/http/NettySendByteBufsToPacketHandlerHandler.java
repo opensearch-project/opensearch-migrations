@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.AggregatedTransformedResponse;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -61,7 +63,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
             var transformationStatus = v1.booleanValue() ?
                     AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED :
                     AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR;
-            packetReceiver.finalizeRequest()
+            packetReceiver.finalizeRequest().map(f->f
                     .whenComplete((v2, t2) -> {
                         if (t1 != null) {
                             packetReceiverCompletionFuture.completeExceptionally(t1);
@@ -73,16 +75,19 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                                             .map(r->new AggregatedTransformedResponse(r,  transformationStatus))
                                             .orElse(null));
                         }
-                    });
+                    }),
+                    ()->"NettySendByteBufsToPacketHandlerHandler.handlerRemoved()");
         });
         log.trace("HR: new currentFuture="+currentFuture);
         super.handlerRemoved(ctx);
     }
 
-    public CompletableFuture<AggregatedTransformedResponse> getPacketReceiverCompletionFuture() {
+    public DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> getPacketReceiverCompletionFuture() {
         assert packetReceiverCompletionFutureRef.get() != null :
                 "expected close() to have removed the handler and for this to be non-null";
-        return packetReceiverCompletionFutureRef.get();
+        return new DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>(
+                packetReceiverCompletionFutureRef.get(),
+                ()->"NettySendByteBufsToPacketHandlerHandler.getPacketReceiverCompletionFuture()");
     }
 
     @Override

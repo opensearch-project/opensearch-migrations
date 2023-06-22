@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 
@@ -15,8 +17,8 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPInputStream;
 
 @Slf4j
@@ -43,16 +45,19 @@ public class AddCompressionEncodingTest {
                 "host: localhost\n" +
                 "content-length: " + (numParts*payloadPartSize) + "\n";
 
-        CompletableFuture<Void> tail =
+        DiagnosticTrackableCompletableFuture<String,Void> tail =
                 compressingTransformer.consumeBytes(sourceHeaders.getBytes(StandardCharsets.UTF_8))
-                        .thenCompose(v-> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)));
+                        .thenCompose(v-> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
+                                ()->"AddCompressionEncodingTest.compressingTransformer");
         final byte[] payloadPart = new byte[payloadPartSize];
         Arrays.fill(payloadPart, BYTE_FILL_VALUE);
-        for (int i=numParts; i>0; --i) {
-            tail = tail.thenCompose(v->compressingTransformer.consumeBytes(payloadPart));
+        for (var i = new AtomicInteger(numParts); i.get()>0; i.decrementAndGet()) {
+            tail = tail.thenCompose(v->compressingTransformer.consumeBytes(payloadPart),
+                    ()->"AddCompressionEncodingTest.consumeBytes:"+i.get());
         }
         var fullyProcessedResponse =
-                tail.thenCompose(v->compressingTransformer.finalizeRequest());
+                tail.thenCompose(v->compressingTransformer.finalizeRequest(),
+                        ()->"AddCompressionEncodingTest.fullyProcessedResponse");
         fullyProcessedResponse.get();
         try (var bais = new ByteArrayInputStream(testPacketCapture.getBytesCaptured());
              var unzipStream = new GZIPInputStream(bais);
