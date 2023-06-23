@@ -28,7 +28,7 @@ Otherwise, please follow the manual instructions [here](https://aws.github.io/co
 
 
 #### Importing values from CDK
-The typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) and then deploy the desired Copilot services, which will use these resources.
+The typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) that Copilot requires, and then deploy the desired Copilot services. Documentation for setting up and deploying these resources can be found in the CDK [README](../cdk/opensearch-service-migration/README.md).
 
 The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
 ```
@@ -38,12 +38,12 @@ export MIGRATION_PUBLIC_SUBNET_2=subnet-124;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
-export MIGRATION_KAFKA_BROKER_IDS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
+export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
 ```
 
 #### Setting up existing Copilot infrastructure
 
-It is **important** to run any `copilot` commands from within this directory. When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a test environment, which should be used for proper operation.
+It is **important** to run any `copilot` commands from within this directory (`deployment/copilot`). When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a test environment, which should be used for proper operation.
 
 When initially setting up Copilot, each component (apps, services, and environments) need to be initialized. Beware when initializing an environment in Copilot, it will prompt you for values even if you've defined them in the `manifest.yml`, though values input at the prompt are ignored in favor of what was specified in the file.
 

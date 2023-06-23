@@ -20,7 +20,7 @@ cdk bootstrap
 
 Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
 
-#### Additional one-time required setup
+#### Project required setup
 
 It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
