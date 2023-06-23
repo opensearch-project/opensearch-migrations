@@ -16,7 +16,7 @@ jobs:
           distribution: 'adopt'
 
       - name: Run Gradle Build
-        run: ./gradlew assemble
+        run: ./gradlew build
         working-directory: TrafficCapture
 
       - name: Run Tests with Coverage
