@@ -56,6 +56,12 @@ each and every test where additions made to the endpoints are deleted, *mostly* 
 as we log all operations going through the proxy (which is capturing the traffic), those are only being 
 deleted after the Docker solution is shut down.
 
+## Deploying to AWS with Copilot
+
+The containerized services that this repo uses can be deployed to AWS with the use of [Copilot](https://aws.github.io/copilot-cli/)
+
+Documentation for getting started and deploying these services can be found [here](deployment/copilot/README.md)
+
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
