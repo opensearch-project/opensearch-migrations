@@ -11,24 +11,18 @@ from tests import test_constants
 # Constants
 TEST_KEY = "test_key"
 BASE_CONFIG_SECTION = {
-    TEST_KEY: [("invalid_plugin1", None), ("invalid_plugin2", {})]
+    TEST_KEY: [{"invalid_plugin1": {"key": "val"}}, {"invalid_plugin2": {}}]
 }
 
 
 # Utility method to create a test plugin config
 def create_plugin_config(host_list: list[str],
-                         ssl: Optional[bool] = None,
                          user: Optional[str] = None,
                          password: Optional[str] = None) -> dict:
     config = dict()
-    if len(host_list) == 1:
-        config["hosts"] = host_list[0]
-    else:
-        config["hosts"] = host_list
-    if ssl:
-        config["ssl"] = ssl
+    config["hosts"] = host_list
     if user:
-        config["user"] = user
+        config["username"] = user
     if password:
         config["password"] = password
     return config
@@ -36,7 +30,8 @@ def create_plugin_config(host_list: list[str],
 
 # Utility method to creat a test config section
 def create_config_section(plugin_config: dict) -> dict:
-    valid_plugin = (random.choice(main.SUPPORTED_ENDPOINTS), plugin_config)
+    valid_plugin = dict()
+    valid_plugin[random.choice(main.SUPPORTED_ENDPOINTS)] = plugin_config
     config_section = copy.deepcopy(BASE_CONFIG_SECTION)
     config_section[TEST_KEY].append(valid_plugin)
     return config_section
@@ -45,53 +40,50 @@ def create_config_section(plugin_config: dict) -> dict:
 class TestMain(unittest.TestCase):
     # Run before each test
     def setUp(self) -> None:
-        with open(test_constants.LOGSTASH_PICKLE_FILE_PATH, "rb") as f:
-            self.loaded_logstash_config = pickle.load(f)
+        with open(test_constants.PIPELINE_CONFIG_PICKLE_FILE_PATH, "rb") as f:
+            self.loaded_pipeline_config = pickle.load(f)
 
     def test_get_auth_returns_none(self):
         # The following inputs should not return an auth tuple:
         # - Empty input
         # - user without password
         # - password without user
-        input_list = [{}, {"user": "test"}, {"password": "test"}]
+        input_list = [{}, {"username": "test"}, {"password": "test"}]
         for test_input in input_list:
             self.assertIsNone(main.get_auth(test_input))
 
     def test_get_auth_for_valid_input(self):
         # Test valid input
-        result = main.get_auth({"user": "user", "password": "pass"})
+        result = main.get_auth({"username": "user", "password": "pass"})
         self.assertEqual(tuple, type(result))
         self.assertEqual("user", result[0])
         self.assertEqual("pass", result[1])
 
     def test_get_endpoint_info(self):
+        host_input = "test"
+        expected_endpoint = "test/"
         test_user = "user"
         test_password = "password"
         # Simple base case
-        test_config = create_plugin_config(["test"])
+        test_config = create_plugin_config([host_input])
         result = main.get_endpoint_info(test_config)
-        self.assertEqual("http://test/", result[0])
+        self.assertEqual(expected_endpoint, result[0])
         self.assertIsNone(result[1])
-        # SSL enabled
-        test_config = create_plugin_config(["test"], True)
+        # Invalid auth config
+        test_config = create_plugin_config([host_input], test_user)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual("https://test/", result[0])
+        self.assertEqual(expected_endpoint, result[0])
         self.assertIsNone(result[1])
-        # SSL disabled, invalid auth config
-        test_config = create_plugin_config(["test"], False, test_user)
+        # Valid auth config
+        test_config = create_plugin_config([host_input], user=test_user, password=test_password)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual("http://test/", result[0])
-        self.assertIsNone(result[1])
-        # SSL disabled, valid auth config
-        test_config = create_plugin_config(["test"], user=test_user, password=test_password)
-        result = main.get_endpoint_info(test_config)
-        self.assertEqual("http://test/", result[0])
+        self.assertEqual(expected_endpoint, result[0])
         self.assertEqual(test_user, result[1][0])
         self.assertEqual(test_password, result[1][1])
         # Array of hosts uses the first entry
-        test_config = create_plugin_config(["test1", "test2"], True, test_user, test_password)
+        test_config = create_plugin_config([host_input, "other_host"], test_user, test_password)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual("https://test1/", result[0])
+        self.assertEqual(expected_endpoint, result[0])
         self.assertEqual(test_user, result[1][0])
         self.assertEqual(test_password, result[1][1])
 
@@ -184,22 +176,24 @@ class TestMain(unittest.TestCase):
         self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
 
     def test_validate_plugin_config_happy_case(self):
-        plugin_config = create_plugin_config(["host"], True, "user", "password")
+        plugin_config = create_plugin_config(["host"], "user", "password")
         test_data = create_config_section(plugin_config)
         # Should complete without errors
         main.validate_plugin_config(test_data, TEST_KEY)
 
-    def test_validate_logstash_config_missing_required_keys(self):
+    def test_validate_pipeline_config_missing_required_keys(self):
         # Test cases:
         # - Empty input
         # - missing output
         # - missing input
         bad_configs = [{}, {"input": ()}, {"output": ()}]
         for config in bad_configs:
-            self.assertRaises(ValueError, main.validate_logstash_config, config)
+            self.assertRaises(ValueError, main.validate_pipeline_config, config)
 
-    def test_validate_logstash_config_happy_case(self):
-        main.validate_logstash_config(self.loaded_logstash_config)
+    def test_validate_pipeline_config_happy_case(self):
+        # Get top level value
+        test_config = next(iter(self.loaded_pipeline_config.values()))
+        main.validate_pipeline_config(test_config)
 
     @patch('main.print_report')
     @patch('index_operations.create_indices')
@@ -222,10 +216,11 @@ class TestMain(unittest.TestCase):
         index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
         # Fetch indices is called first for source, then for target
         mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
-        main.run(test_constants.LOGSTASH_RAW_FILE_PATH)
+        main.run(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH)
         mock_create_indices.assert_called_once_with(expected_create_payload, test_constants.TARGET_ENDPOINT, ANY)
         mock_print_report.assert_called_once_with(expected_diff)
 
 
 if __name__ == '__main__':
     unittest.main()
+

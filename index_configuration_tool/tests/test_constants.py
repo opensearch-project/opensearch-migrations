@@ -2,8 +2,8 @@
 from os.path import dirname
 
 TEST_RESOURCES_SUBPATH = "/resources/"
-LOGSTASH_RAW_FILE_PATH = dirname(__file__) + TEST_RESOURCES_SUBPATH + "logstash_test_input.conf"
-LOGSTASH_PICKLE_FILE_PATH = dirname(__file__) + TEST_RESOURCES_SUBPATH + "expected_parse_output.pickle"
+PIPELINE_CONFIG_RAW_FILE_PATH = dirname(__file__) + TEST_RESOURCES_SUBPATH + "test_pipeline_input.yaml"
+PIPELINE_CONFIG_PICKLE_FILE_PATH = dirname(__file__) + TEST_RESOURCES_SUBPATH + "expected_parse_output.pickle"
 
 INDEX1_NAME = "index1"
 INDEX2_NAME = "index2"
@@ -51,6 +51,6 @@ BASE_INDICES_DATA = {
         }
     }
 }
-# Based on the contents of logstash_test_input.conf
+# Based on the contents of test_pipeline_input.yaml
 SOURCE_ENDPOINT = "http://host1/"
 TARGET_ENDPOINT = "https://os_host/"
