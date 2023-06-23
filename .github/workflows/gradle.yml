@@ -26,6 +26,11 @@ jobs:
       - name: Upload to Codecov
         uses: codecov/codecov-action@v3
         with:
-          file: ./TrafficCapture/*/build/reports/jacoco/test/jacocoTestReport.xml
+          files: TrafficCapture/captureKafkaOffloader/build/reports/jacoco/test/jacocoTestReport.xml,
+            TrafficCapture/captureOffloader/build/reports/jacoco/test/jacocoTestReport.xml,
+            TrafficCapture/KafkaPrinter/build/reports/jacoco/test/jacocoTestReport.xml,
+            TrafficCapture/nettyWireLogging/build/reports/jacoco/test/jacocoTestReport.xml,
+            TrafficCapture/trafficCaptureProxyServer/build/reports/jacoco/test/jacocoTestReport.xml,
+            TrafficCapture/trafficReplayer/build/reports/jacoco/test/jacocoTestReport.xml
           flags: unittests
-          fail_ci_if_error: true
+          fail_ci_if_error: false
