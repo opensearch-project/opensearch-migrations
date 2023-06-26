@@ -13,6 +13,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.FileInputStream;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
@@ -36,6 +38,15 @@ public class KafkaPrinter {
                 names = {"-g", "--group-id"},
                 description = "Client id that should be used when communicating with the Kafka broker.")
         String clientGroupId;
+        @Parameter(required = false,
+                names = {"-m", "--enable-msk-client"},
+                description = "Enables properties required for connecting to an MSK public endpoint.")
+        Boolean isMSKPublic = false;
+        @Parameter(required = false,
+                names = {"--kafkaConfigFile"},
+                arity = 1,
+                description = "Kafka properties file")
+        String kafkaPropertiesFile;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -65,16 +76,28 @@ public class KafkaPrinter {
         String topic = params.topicName;
 
         Properties properties = new Properties();
-        properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        properties.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-        properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-        properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        if (params.kafkaPropertiesFile != null) {
+            try (InputStream input = new FileInputStream(params.kafkaPropertiesFile)) {
+                properties.load(input);
+            } catch (IOException ex) {
+                log.error("Unable to load properties from kafka.properties file.");
+                return;
+            }
+        }
+        else {
+            properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+            properties.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+            properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
+            properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+            properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        }
         // Required for using SASL auth with MSK public endpoint
-        //properties.setProperty("security.protocol", "SASL_SSL");
-        //properties.setProperty("sasl.mechanism", "AWS_MSK_IAM");
-        //properties.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
-        //properties.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
+        if (params.isMSKPublic){
+            properties.setProperty("security.protocol", "SASL_SSL");
+            properties.setProperty("sasl.mechanism", "AWS_MSK_IAM");
+            properties.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
+            properties.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
+        }
 
         KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties);
 
