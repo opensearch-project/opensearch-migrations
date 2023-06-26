@@ -10,6 +10,8 @@ from tests import test_constants
 
 # Constants
 TEST_KEY = "test_key"
+INSECURE_KEY = "insecure"
+CONNECTION_KEY = "connection"
 BASE_CONFIG_SECTION = {
     TEST_KEY: [{"invalid_plugin1": {"key": "val"}}, {"invalid_plugin2": {}}]
 }
@@ -42,6 +44,21 @@ class TestMain(unittest.TestCase):
     def setUp(self) -> None:
         with open(test_constants.PIPELINE_CONFIG_PICKLE_FILE_PATH, "rb") as f:
             self.loaded_pipeline_config = pickle.load(f)
+
+    def test_is_insecure_default_value(self):
+        self.assertFalse(main.is_insecure({}))
+
+    def test_is_insecure_top_level_key(self):
+        test_input = {"key": 123, INSECURE_KEY: True}
+        self.assertTrue(main.is_insecure(test_input))
+
+    def test_is_insecure_nested_key(self):
+        test_input = {"key1": 123, CONNECTION_KEY: {"key2": "val", INSECURE_KEY: True}}
+        self.assertTrue(main.is_insecure(test_input))
+
+    def test_is_insecure_missing_nested(self):
+        test_input = {"key1": 123, CONNECTION_KEY: {"key2": "val"}}
+        self.assertFalse(main.is_insecure(test_input))
 
     def test_get_auth_returns_none(self):
         # The following inputs should not return an auth tuple:

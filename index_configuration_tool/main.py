@@ -12,6 +12,18 @@ SINK_KEY = "sink"
 HOSTS_KEY = "hosts"
 USER_KEY = "username"
 PWD_KEY = "password"
+INSECURE_KEY = "insecure"
+CONNECTION_KEY = "connection"
+
+
+# This config key may be either directly in the main dict (for sink)
+# or inside a nested dict (for source). The default value is False.
+def is_insecure(config: dict) -> bool:
+    if INSECURE_KEY in config:
+        return bool(config[INSECURE_KEY])
+    elif CONNECTION_KEY in config and INSECURE_KEY in config[CONNECTION_KEY]:
+        return bool(config[CONNECTION_KEY][INSECURE_KEY])
+    return False
 
 
 # TODO Only supports basic auth for now
@@ -30,7 +42,9 @@ def get_endpoint_info(plugin_config: dict) -> tuple:
 
 def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
     endpoint, auth_tuple = get_endpoint_info(plugin_config)
-    return index_operations.fetch_all_indices(endpoint, auth_tuple)
+    # verify boolean will be the inverse of the insecure SSL key, if present
+    should_verify = not is_insecure(plugin_config)
+    return index_operations.fetch_all_indices(endpoint, auth_tuple, should_verify)
 
 
 def check_supported_endpoint(config: dict) -> Optional[tuple]:
