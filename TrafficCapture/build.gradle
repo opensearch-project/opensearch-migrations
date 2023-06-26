@@ -18,7 +18,4 @@ allprojects {
         }
     }
 }
-
-test {
-    finalizedBy 'jacocoTestReport'
-}
+TrafficCapture/*/build/reports/jacoco/test/jacocoTestReport.xml
