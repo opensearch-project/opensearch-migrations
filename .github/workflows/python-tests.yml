@@ -1,6 +1,13 @@
 name: python-tests
 
-on: [push, pull_request]
+on:
+  [push, pull_request]:
+    paths:
+      - 'cluster_migration_core/**'
+      - 'cluster_traffic_capture/**'
+      - 'index_configuration_tool/**'
+      - 'test/**'
+      - 'upgrades/**'
 
 jobs:
   test-linux:
