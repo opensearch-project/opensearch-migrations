@@ -16,11 +16,11 @@ jobs:
           distribution: 'adopt'
 
       - name: Run Gradle Build
-        run: ./gradlew build
+        run: ./gradlew build -x test
         working-directory: TrafficCapture
 
       - name: Run Tests with Coverage
-        run: ./gradlew test jacocoTestReport
+        run: ./gradlew test jacocoTestReport --info
         working-directory: TrafficCapture
 
       - name: Upload to Codecov
