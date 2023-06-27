@@ -20,9 +20,9 @@ CONNECTION_KEY = "connection"
 # or inside a nested dict (for source). The default value is False.
 def is_insecure(config: dict) -> bool:
     if INSECURE_KEY in config:
-        return bool(config[INSECURE_KEY])
+        return config[INSECURE_KEY]
     elif CONNECTION_KEY in config and INSECURE_KEY in config[CONNECTION_KEY]:
-        return bool(config[CONNECTION_KEY][INSECURE_KEY])
+        return config[CONNECTION_KEY][INSECURE_KEY]
     return False
 
 
