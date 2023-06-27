@@ -22,6 +22,11 @@ import java.util.stream.Stream;
  * This doesn't use more typical out-of-the-box LRU mechanisms.  Our requirements are a little bit different.
  * First, we're fine buffering a variable number of items and secondly, this should be threadsafe an able to
  * be used in highly concurrent contexts.
+ * 
+ *  TODO - there will be a race condition in the ExpiringTrafficStream maps/sets where items
+ *  could be expunged from the collections while they're still in use.  Adding refCounts to
+ *  the collection items that can be checked atomically before purging would mitigate this
+ *  situation
  */
 @Slf4j
 public class ExpiringTrafficStreamMap {
@@ -243,9 +248,15 @@ public class ExpiringTrafficStreamMap {
     }
 
     private ExpiringKeyQueue getOrCreateNodeMap(String partitionId, EpochMillis timestamp) {
-        var newMap = new ExpiringKeyQueue(partitionId, timestamp);
-        var priorMap = nodeToExpiringBucketMap.putIfAbsent(partitionId, newMap);
-        return priorMap == null ? newMap : priorMap;
+        // optimistic get - if it's already there, proceed with it.
+        var ekq = nodeToExpiringBucketMap.get(partitionId);
+        if (ekq != null) {
+            return ekq;
+        } else {
+            var newMap = new ExpiringKeyQueue(partitionId, timestamp);
+            var priorMap = nodeToExpiringBucketMap.putIfAbsent(partitionId, newMap);
+            return priorMap == null ? newMap : priorMap;
+        }
     }
 
     /**
