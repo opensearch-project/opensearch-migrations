@@ -1,13 +1,12 @@
 name: CI
 
 on:
-  [push, pull_request]:
+  push:
     paths:
-      - 'cluster_migration_core/**'
-      - 'cluster_traffic_capture/**'
-      - 'index_configuration_tool/**'
-      - 'test/**'
-      - 'upgrades/**'
+      - '**.py'
+  pull_request:
+    paths:
+      - '**.py'
 
 jobs:
   lint:
