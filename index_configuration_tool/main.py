@@ -84,8 +84,10 @@ def validate_plugin_config(config: dict, key: str):
 
 
 def validate_pipeline_config(config: dict):
-    if SOURCE_KEY not in config or SINK_KEY not in config:
-        raise ValueError("Missing source or sink configuration in Data Prepper pipeline YAML")
+    if SOURCE_KEY not in config:
+        raise ValueError("Missing source configuration in Data Prepper pipeline YAML")
+    if SINK_KEY not in config:
+        raise ValueError("Missing sink configuration in Data Prepper pipeline YAML")
     validate_plugin_config(config, SOURCE_KEY)
     validate_plugin_config(config, SINK_KEY)
 

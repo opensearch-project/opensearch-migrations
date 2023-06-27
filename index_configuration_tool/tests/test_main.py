@@ -203,7 +203,7 @@ class TestMain(unittest.TestCase):
         # - Empty input
         # - missing output
         # - missing input
-        bad_configs = [{}, {"input": ()}, {"output": ()}]
+        bad_configs = [{}, {"source": {}}, {"sink": {}}]
         for config in bad_configs:
             self.assertRaises(ValueError, main.validate_pipeline_config, config)
 
