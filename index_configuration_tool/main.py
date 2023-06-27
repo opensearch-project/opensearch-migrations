@@ -15,6 +15,9 @@ USER_KEY = "username"
 PWD_KEY = "password"
 INSECURE_KEY = "insecure"
 CONNECTION_KEY = "connection"
+INDICES_KEY = "indices"
+INCLUDE_KEY = "include"
+INDEX_NAME_KEY = "index_name_regex"
 
 
 # This config key may be either directly in the main dict (for sink)
@@ -98,6 +101,15 @@ def validate_pipeline_config(config: dict):
 
 
 def write_output(yaml_data: dict, new_indices: set, output_path: str):
+    pipeline_config = next(iter(yaml_data.values()))
+    # Endpoint is a tuple of (type, config)
+    source_config = get_supported_endpoint(pipeline_config, SOURCE_KEY)[1]
+    source_indices = source_config.get(INDICES_KEY, dict())
+    included_indices = source_indices.get(INCLUDE_KEY, list())
+    for index in new_indices:
+        included_indices.append({INDEX_NAME_KEY: index})
+    source_indices[INCLUDE_KEY] = included_indices
+    source_config[INDICES_KEY] = source_indices
     with open(output_path, 'w') as out_file:
         yaml.dump(yaml_data, out_file)
     print("Wrote output YAML pipeline to: " + output_path)
