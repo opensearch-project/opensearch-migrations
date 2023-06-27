@@ -55,12 +55,14 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     // backed by the exact same byte[] arrays, so the memory consumption should already be absorbed.
     private final List<ByteBuf> chunks;
 
-    public HttpJsonTransformingConsumer(JsonTransformer transformer, IPacketFinalizingConsumer transformedPacketReceiver) {
+    public HttpJsonTransformingConsumer(JsonTransformer transformer,
+                                        IPacketFinalizingConsumer transformedPacketReceiver,
+                                        String diagnosticLabel) {
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
-        pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver);
+        pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver, diagnosticLabel);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
     }
 
@@ -94,7 +96,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                     null);
         }
         return offloadingHandler.getPacketReceiverCompletionFuture()
-                .handle((v, t) -> {
+                .composeHandleApplication((v, t) -> {
                     if (t != null) {
                         if (t instanceof NoContentException) {
                             return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
@@ -102,7 +104,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                             throw new CompletionException(t);
                         }
                     } else {
-                        return StringTrackableCompletableFuture.completedFuture(v, ()->"");
+                        return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                     }
                 }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
     }

@@ -5,11 +5,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Accumulation {
-    RequestResponsePacketPair rrPair = new RequestResponsePacketPair();
+    RequestResponsePacketPair rrPair;
     final AtomicLong newestPacketTimestampInMillis;
     State state = State.NOTHING_SENT;
 
-    public Accumulation() {
+    public Accumulation(String connectionId) {
+         rrPair = new RequestResponsePacketPair(connectionId);
         newestPacketTimestampInMillis = new AtomicLong(0);
     }
 

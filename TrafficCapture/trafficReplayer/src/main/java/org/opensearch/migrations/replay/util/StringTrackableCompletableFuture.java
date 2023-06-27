@@ -1,20 +1,18 @@
 package org.opensearch.migrations.replay.util;
 
+import lombok.NonNull;
+
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 public class StringTrackableCompletableFuture<T>
         extends DiagnosticTrackableCompletableFuture<String, T> {
-    public StringTrackableCompletableFuture(CompletableFuture<T> future, RecursiveImmutableChain<Supplier<String>> diagnosticSupplierChain) {
-        super(future, diagnosticSupplierChain);
-    }
-
-    public StringTrackableCompletableFuture(CompletableFuture<T> future, Supplier<String> diagnosticSupplier) {
+    public StringTrackableCompletableFuture(@NonNull CompletableFuture<T> future, Supplier<String> diagnosticSupplier) {
         super(future, diagnosticSupplier);
     }
 
-    public StringTrackableCompletableFuture(CompletableFuture<T> future, String label) {
+    public StringTrackableCompletableFuture(@NonNull CompletableFuture<T> future, String label) {
         super(future, ()->label);
     }
 

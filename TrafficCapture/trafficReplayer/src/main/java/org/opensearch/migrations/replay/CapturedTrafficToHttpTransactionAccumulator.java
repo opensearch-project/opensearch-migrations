@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -40,16 +41,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
     private final ExpiringTrafficStreamMap liveStreams;
-    private final Consumer<HttpMessageAndTimestamp> requestHandler;
+    private final BiConsumer<String, HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
     private final AtomicInteger newConnectionCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
     private final AtomicInteger closedConnectionCounter = new AtomicInteger();
-    private final AtomicInteger expiredCounter = new AtomicInteger();
+    private final AtomicInteger connectionsExpiredCounter = new AtomicInteger();
+    private final AtomicInteger requestsTerminatedUponAccumulatorCloseCounter = new AtomicInteger();
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
-                                                       Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
+                                                       BiConsumer<String,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new ExpiringTrafficStreamMap.BehavioralPolicy() {
@@ -57,9 +59,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     public void onExpireAccumulation(String partitionId,
                                                      String connectionId,
                                                      Accumulation accumulation) {
-                        expiredCounter.incrementAndGet();
+                        connectionsExpiredCounter.incrementAndGet();
                         log.error("firing accumulation for accum=[" + connectionId + "]=" + accumulation);
-                        fireAccumulationsCallbacks(accumulation);
+                        fireAccumulationsCallbacks(connectionId, accumulation);
                     }
                 });
         this.requestHandler = requestReceivedHandler;
@@ -69,7 +71,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public int numberOfConnectionsCreated() { return newConnectionCounter.get(); }
     public int numberOfRequestsOnReusedConnections() { return reusedKeepAliveCounter.get(); }
     public int numberOfConnectionsClosed() { return closedConnectionCounter.get(); }
-    public int numberOfConnectionsExpired() { return numberOfConnectionsExpired(); }
+    public int numberOfConnectionsExpired() { return connectionsExpiredCounter.get(); }
+    public int numberOfRequestsTerminatedUponAccumulatorClose() {
+        return requestsTerminatedUponAccumulatorCloseCounter.get();
+    }
 
     public void accept(String nodeId, String connectionId, TrafficObservation observation) {
         log.debug("Stream: " + nodeId + "/" + connectionId + " Consuming observation: " + observation);
@@ -178,7 +183,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private boolean handleEndOfMessage(String nodeId, String connectionId, Accumulation accumulation) {
         switch (accumulation.state) {
             case NOTHING_SENT:
-                requestHandler.accept(accumulation.rrPair.requestData);
+                requestHandler.accept(connectionId, accumulation.rrPair.requestData);
                 accumulation.state = Accumulation.State.REQUEST_SENT;
                 return true;
             case REQUEST_SENT:
@@ -190,14 +195,19 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void close() {
-        liveStreams.values().forEach(this::fireAccumulationsCallbacks);
+        liveStreams.entries().forEach(kvp -> {
+            if (kvp.getValue().state != Accumulation.State.RESPONSE_SENT) {
+                requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
+            }
+            fireAccumulationsCallbacks(kvp.getKey().connectionId, kvp.getValue());
+        });
         liveStreams.clear();
     }
 
-    private void fireAccumulationsCallbacks(Accumulation accumulation) {
+    private void fireAccumulationsCallbacks(String connectionId, Accumulation accumulation) {
         switch (accumulation.state) {
             case NOTHING_SENT:
-                requestHandler.accept(accumulation.rrPair.requestData);
+                requestHandler.accept(connectionId, accumulation.rrPair.requestData);
                 accumulation.state = Accumulation.State.REQUEST_SENT;
                 // fall through
             case REQUEST_SENT:

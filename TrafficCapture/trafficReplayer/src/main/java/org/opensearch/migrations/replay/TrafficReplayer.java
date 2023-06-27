@@ -6,7 +6,8 @@ import com.beust.jcommander.ParameterException;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import lombok.extern.log4j.Log4j2;
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -14,6 +15,7 @@ import org.opensearch.migrations.transform.CompositeJsonTransformer;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
 import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
+import org.slf4j.event.Level;
 
 import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
@@ -28,11 +30,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@Log4j2
+@Slf4j
 public class TrafficReplayer {
 
     private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
@@ -172,26 +175,29 @@ public class TrafficReplayer {
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
-                        request -> requestFutureMap.put(request, writeToSocketAndClose(request)),
+                        (connId,request) -> requestFutureMap.put(request, writeToSocketAndClose(request, connId)),
                         rrPair -> {
                             if (log.isTraceEnabled()) {
                                 log.trace("Done receiving captured stream for this "+rrPair.requestData);
                             }
                             DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse> resultantCf =
-                                    requestFutureMap.get(rrPair.requestData).map(f->
-                                    f.handle((summary, t) -> {
-                                        try {
-                                            AggregatedRawResponse rval =
-                                                    packageAndWriteResponse(tupleWriter, rrPair, summary, t);
-                                            successCount.incrementAndGet();
-                                            return rval;
-                                        } catch (Exception e) {
-                                            exceptionCount.incrementAndGet();
-                                            throw e;
-                                        }
-                                    })
-                                    .whenComplete((v,t) -> requestToFinalWorkFuturesMap.remove(rrPair.requestData)),
-                                            ()->"TrafficReplayer.runReplayWithIOStreams");
+                                    requestFutureMap.get(rrPair.requestData)
+                                            .map(f->
+                                                    f.handle((summary, t) -> {
+                                                        try {
+                                                            AggregatedRawResponse rval =
+                                                                    packageAndWriteResponse(tupleWriter, rrPair, summary, t);
+                                                            successCount.incrementAndGet();
+                                                            return rval;
+                                                        } catch (Exception e) {
+                                                            exceptionCount.incrementAndGet();
+                                                            throw e;
+                                                        } finally {
+                                                            log.error("removing rrPair.requestData for " +
+                                                                    rrPair.connectionId);
+                                                            requestToFinalWorkFuturesMap.remove(rrPair.requestData);
+                                                        }
+                                                    }), ()->"TrafficReplayer.runReplayWithIOStreams.progressTracker");
                             requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
                         }
         );
@@ -202,19 +208,19 @@ public class TrafficReplayer {
             throw e;
         } finally {
             trafficToHttpTransactionAccumulator.close();
-            var allRemainingWorkArray =
-                    requestToFinalWorkFuturesMap.values().toArray(DiagnosticTrackableCompletableFuture[]::new);
-            log.info("All remaining work to wait on: " +
-                    Arrays.stream(allRemainingWorkArray).map(cf->cf.toString()).collect(Collectors.joining("\n")));
-            // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
-            // and were removed from the live map (hopefully)
-            StringTrackableCompletableFuture.allOf(allRemainingWorkArray, ()->"TrafficReplayer.AllWorkFinished")
-                    .handle((t, v) -> {
-                        log.info("stopping packetHandlerFactory's group");
-                        packetHandlerFactory.stopGroup();
-                        return null; // squash exceptions for individual requests
-                    }, ()->"TrafficReplayer.PacketHandlerFactory->stopGroup")
-                    .get();
+            var PRIMARY_LOG_LEVEL = Level.INFO;
+            var SECONDARY_LOG_LEVEL = Level.INFO;
+            var logLevel = PRIMARY_LOG_LEVEL;
+            for (var timeout = Duration.ofSeconds(1); ; timeout = timeout.multipliedBy(2)) {
+                try {
+                    waitForRemainingWork(logLevel, timeout, requestToFinalWorkFuturesMap);
+                    logLevel = SECONDARY_LOG_LEVEL;
+                    break;
+                } catch (TimeoutException e) {
+                    log.atLevel(logLevel).log("Caught timeout exception while waiting for the remaining " +
+                            "requests to be finalized.");
+                }
+            }
             if (exceptionCount.get() > 0) {
                 log.warn(exceptionCount.get() + " requests to the target threw an exception; " +
                         successCount.get() + " requests were successfully processed.");
@@ -222,14 +228,46 @@ public class TrafficReplayer {
                 log.info(successCount.get() + " requests were successfully processed.");
             }
             log.info("# of connections created: {}; # of requests on reused keep-alive connections: {}; " +
-                            "# of expired connections: {}; # of connections closed: {}",
+                            "# of expired connections: {}; # of connections closed: {}; " +
+                            "# of connections terminated upon accumulator termination: {}",
                     trafficToHttpTransactionAccumulator.numberOfConnectionsCreated(),
                     trafficToHttpTransactionAccumulator.numberOfRequestsOnReusedConnections(),
                     trafficToHttpTransactionAccumulator.numberOfConnectionsExpired(),
-                    trafficToHttpTransactionAccumulator.numberOfConnectionsClosed()
+                    trafficToHttpTransactionAccumulator.numberOfConnectionsClosed(),
+                    trafficToHttpTransactionAccumulator.numberOfRequestsTerminatedUponAccumulatorClose()
             );
             assert requestToFinalWorkFuturesMap.size() == 0 :
                     "expected to wait for all of the in flight requests to fully flush and self destruct themselves";
+        }
+    }
+
+    private void
+    waitForRemainingWork(Level logLevel, @NonNull Duration timeout,
+                         @NonNull ConcurrentHashMap<HttpMessageAndTimestamp,
+                                 DiagnosticTrackableCompletableFuture<String, ? extends AggregatedRawResponse>>
+                                 requestToFinalWorkFuturesMap)
+            throws ExecutionException, InterruptedException, TimeoutException {
+        var allRemainingWorkArray =
+                requestToFinalWorkFuturesMap.values().toArray(DiagnosticTrackableCompletableFuture[]::new);
+        log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length + " items: " +
+                Arrays.stream(allRemainingWorkArray).map(cf->cf.toString()).collect(Collectors.joining("\n")));
+
+
+        // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
+        // and were removed from the live map (hopefully)
+        var allWorkFuture =
+                StringTrackableCompletableFuture.allOf(allRemainingWorkArray, ()->"TrafficReplayer.AllWorkFinished");
+        try {
+            allWorkFuture.composeHandleApplication((t, v) -> {
+                        log.info("stopping packetHandlerFactory's group");
+                        packetHandlerFactory.stopGroup();
+                        // squash exceptions for individual requests
+                        return StringTrackableCompletableFuture.completedFuture(null, () -> "finished all work");
+                    }, () -> "TrafficReplayer.PacketHandlerFactory->stopGroup")
+                    .get(timeout);
+        } catch (TimeoutException e) {
+            allWorkFuture.future.cancel(true);
+
         }
     }
 
@@ -265,11 +303,11 @@ public class TrafficReplayer {
     }
 
     private DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>
-    writeToSocketAndClose(HttpMessageAndTimestamp request)
+    writeToSocketAndClose(HttpMessageAndTimestamp request, String diagnosticLabel)
     {
         try {
             log.debug("Assembled request/response - starting to write to socket");
-            var packetHandler = packetHandlerFactory.create();
+            var packetHandler = packetHandlerFactory.create(diagnosticLabel);
             for (var packetData : request.packetBytes) {
                 log.debug("sending "+packetData.length+" bytes to the packetHandler");
                 packetHandler.consumeBytes(packetData);

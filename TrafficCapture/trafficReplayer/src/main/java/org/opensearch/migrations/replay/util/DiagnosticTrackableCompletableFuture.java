@@ -1,8 +1,16 @@
 package org.opensearch.migrations.replay.util;
 
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
+
+import java.time.Duration;
+import java.util.AbstractMap;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -11,9 +19,10 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+@Slf4j
 public class DiagnosticTrackableCompletableFuture<D, T> {
     public final CompletableFuture<T> future;
-    private final RecursiveImmutableChain<Supplier<D>> diagnosticSupplierChain;
+    private final RecursiveImmutableChain<AbstractMap.SimpleEntry<CompletableFuture,Supplier<D>>> diagnosticSupplierChain;
 
     /**
      * This factory class is here so that subclasses can write their own versions that return objects
@@ -39,40 +48,74 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         }
     }
 
-    public DiagnosticTrackableCompletableFuture(CompletableFuture<T> future,
-                                                RecursiveImmutableChain<Supplier<D>> diagnosticSupplierChain) {
+    private DiagnosticTrackableCompletableFuture(
+            @NonNull CompletableFuture<T> future,
+            RecursiveImmutableChain<AbstractMap.SimpleEntry<CompletableFuture,Supplier<D>>> diagnosticSupplierChain) {
         this.future = future;
         this.diagnosticSupplierChain = diagnosticSupplierChain;
     }
 
-    public DiagnosticTrackableCompletableFuture(CompletableFuture<T> future, Supplier<D> diagnosticSupplier) {
-        this(future, new RecursiveImmutableChain(diagnosticSupplier, null));
+    public DiagnosticTrackableCompletableFuture(@NonNull CompletableFuture<T> future, Supplier<D> diagnosticSupplier) {
+        this(future, new RecursiveImmutableChain(makePair(future, diagnosticSupplier), null));
+    }
+
+    private static <T,D> AbstractMap.SimpleEntry<CompletableFuture,Supplier<D>>
+    makePair(CompletableFuture<T> future, Supplier<D> diagnosticSupplier) {
+        return new AbstractMap.SimpleEntry(future, diagnosticSupplier);
     }
 
     public <U> DiagnosticTrackableCompletableFuture<D, U>
     map(Function<CompletableFuture<T>, CompletableFuture<U>> fn, Supplier<D> diagnosticSupplier) {
-        return new DiagnosticTrackableCompletableFuture<>(fn.apply(future),
-                this.diagnosticSupplierChain.chain(diagnosticSupplier));
+        var newCf = fn.apply(future);
+        return new DiagnosticTrackableCompletableFuture<>(newCf,
+                this.diagnosticSupplierChain.chain(makePair(newCf, diagnosticSupplier)));
     }
 
     public <U> DiagnosticTrackableCompletableFuture<D, U>
-    thenCompose(Function<? super T, ? extends DiagnosticTrackableCompletableFuture<D, U>> fn, Supplier<D> diagnosticSupplier) {
-        return new DiagnosticTrackableCompletableFuture<>(this.future.thenCompose(v->fn.apply(v).future),
-                this.diagnosticSupplierChain.chain(diagnosticSupplier));
+    thenCompose(Function<? super T, ? extends DiagnosticTrackableCompletableFuture<D, U>> fn,
+                Supplier<D> diagnosticSupplier) {
+        var newCf = this.future.thenCompose(v->fn.apply(v).future);
+        return new DiagnosticTrackableCompletableFuture<>(newCf,
+                this.diagnosticSupplierChain.chain(makePair(newCf, diagnosticSupplier)));
     }
 
+    /**
+     * Run handle(), which can take care of either value completions or Exceptions by sending
+     * those through the fn argument.  This returns the DiagnosticTrackableCompletableFuture
+     * that the application of fn will yield.
+     *
+     * NB/TODO - I can't yet figure out how to enforce type-checking on the incoming fn parameter.
+     * For example, I can pass a fn as a lambda which returns a String or an integer and the
+     * compiler doesn't give an error.
+     * @param fn
+     * @param diagnosticSupplier
+     * @return
+     * @param <U>
+     */
     public <U> DiagnosticTrackableCompletableFuture<D, U>
-    handle(BiFunction<? super T, Throwable, ? extends DiagnosticTrackableCompletableFuture<D, U>> fn,
-           Supplier<D> diagnosticSupplier) {
-        return new DiagnosticTrackableCompletableFuture<>(this.future.handle((v, t)->fn.apply(v,t))
-                .thenCompose(wcf->wcf.future), this.diagnosticSupplierChain.chain(diagnosticSupplier));
+    composeHandleApplication(BiFunction<? super T, Throwable, ? extends DiagnosticTrackableCompletableFuture<D, U>> fn,
+                             Supplier<D> diagnosticSupplier) {
+        CompletableFuture<? extends DiagnosticTrackableCompletableFuture<D, U>> handledFuture =
+                this.future.handle((v, t)->fn.apply(v,t));
+        var newCf = handledFuture.thenCompose(wcf->{
+            log.error("Got wcf = " + wcf);
+            return wcf.future;
+        });
+        return new DiagnosticTrackableCompletableFuture<>(newCf,
+                this.diagnosticSupplierChain.chain(makePair(newCf, diagnosticSupplier)));
     }
 
     public T get() throws ExecutionException, InterruptedException {
         return future.get();
     }
 
-    public Stream<Supplier<D>> diagnosticStream() {
+    public T get(Duration timeout) throws ExecutionException, InterruptedException, TimeoutException {
+        var millis = timeout.toMillis() +
+                (timeout.minusNanos(timeout.toNanosPart()).equals(timeout) ? 0 : 1); // round up
+        return future.get(millis, TimeUnit.MILLISECONDS);
+    }
+
+    public Stream<AbstractMap.SimpleEntry<CompletableFuture,Supplier<D>>> diagnosticStream() {
         var chainHeadReference = new AtomicReference<>(this.diagnosticSupplierChain);
         return IntStream.generate(()->chainHeadReference.get()!=null?1:0)
                 .takeWhile(x->x==1)
@@ -87,6 +130,12 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
 
     @Override
     public String toString() {
-        return diagnosticStream().map(s->s.get().toString()).collect(Collectors.joining("->"));
+        var strList = diagnosticStream().map(kvp->formatDiagnostics(kvp)).collect(Collectors.toList());
+        Collections.reverse(strList);
+        return strList.stream().collect(Collectors.joining("->"));
+    }
+
+    protected String formatDiagnostics(AbstractMap.SimpleEntry<CompletableFuture, Supplier<D>> kvp) {
+        return "" + kvp.getValue().get() + (kvp.getKey().isDone() ? "[^]" : "[…]");
     }
 }

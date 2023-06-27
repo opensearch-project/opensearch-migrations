@@ -119,7 +119,7 @@ class TrafficReplayerTest {
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
-                        request -> {
+                        (id,request) -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));

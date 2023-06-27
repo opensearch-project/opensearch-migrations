@@ -29,10 +29,12 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
     // TODO - make this threadsafe.  calls may come in on different threads
     CompletableFuture<Boolean> currentFuture;
     private AtomicReference<CompletableFuture<AggregatedTransformedResponse>> packetReceiverCompletionFutureRef;
+    String diagnosticLabel;
 
-    public NettySendByteBufsToPacketHandlerHandler(IPacketFinalizingConsumer packetReceiver) {
+    public NettySendByteBufsToPacketHandlerHandler(IPacketFinalizingConsumer packetReceiver, String diagnosticLabel) {
         this.packetReceiver = packetReceiver;
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();
+        this.diagnosticLabel = diagnosticLabel;
         currentFuture = CompletableFuture.completedFuture(null);
     }
 
@@ -87,7 +89,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                 "expected close() to have removed the handler and for this to be non-null";
         return new DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>(
                 packetReceiverCompletionFutureRef.get(),
-                ()->"NettySendByteBufsToPacketHandlerHandler.getPacketReceiverCompletionFuture()");
+                ()->"NettySendByteBufsToPacketHandlerHandler.getPacketReceiverCompletionFuture() for "+diagnosticLabel);
     }
 
     @Override

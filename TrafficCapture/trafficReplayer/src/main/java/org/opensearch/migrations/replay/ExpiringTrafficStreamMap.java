@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -117,11 +118,15 @@ public class ExpiringTrafficStreamMap {
         }
     }
 
-    @AllArgsConstructor
     @EqualsAndHashCode
-    private static class ScopedConnectionIdKey {
+    public static class ScopedConnectionIdKey {
         public final String nodeId;
         public final String connectionId;
+
+        private ScopedConnectionIdKey(String nodeId, String connectionId) {
+            this.nodeId = nodeId;
+            this.connectionId = connectionId;
+        }
     }
 
     private static class AccumulatorMap extends ConcurrentHashMap<ScopedConnectionIdKey, Accumulation> {}
@@ -324,7 +329,7 @@ public class ExpiringTrafficStreamMap {
 
     Accumulation getOrCreate(String partitionId, String connectionId, Instant timestamp) {
         var key = new ScopedConnectionIdKey(partitionId, connectionId);
-        var accumulation = connectionAccumulationMap.computeIfAbsent(key, k->new Accumulation());
+        var accumulation = connectionAccumulationMap.computeIfAbsent(key, k->new Accumulation(connectionId));
         if (!updateExpirationTrackers(partitionId, connectionId, new EpochMillis(timestamp), accumulation, 0)) {
             connectionAccumulationMap.remove(key);
             return null;
@@ -347,6 +352,10 @@ public class ExpiringTrafficStreamMap {
 
     Stream<Accumulation> values() {
         return connectionAccumulationMap.values().stream();
+    }
+
+    Stream<Map.Entry<ScopedConnectionIdKey, Accumulation>> entries() {
+        return connectionAccumulationMap.entrySet().stream();
     }
 
     void clear() {
