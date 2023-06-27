@@ -39,9 +39,9 @@ public class KafkaPrinter {
                 description = "Client id that should be used when communicating with the Kafka broker.")
         String clientGroupId;
         @Parameter(required = false,
-                names = {"-m", "--enable-msk-client"},
-                description = "Enables properties required for connecting to an MSK public endpoint.")
-        Boolean isMSKPublic = false;
+                names = {"--enableMSKAuth"},
+                description = "Enables SASL properties required for connecting to MSK with IAM auth.")
+        boolean mskAuthEnabled = false;
         @Parameter(required = false,
                 names = {"--kafkaConfigFile"},
                 arity = 1,
@@ -92,7 +92,7 @@ public class KafkaPrinter {
             properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         }
         // Required for using SASL auth with MSK public endpoint
-        if (params.isMSKPublic){
+        if (params.mskAuthEnabled){
             properties.setProperty("security.protocol", "SASL_SSL");
             properties.setProperty("sasl.mechanism", "AWS_MSK_IAM");
             properties.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
