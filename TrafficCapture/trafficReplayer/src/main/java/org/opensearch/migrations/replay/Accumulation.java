@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class Accumulation {
     RequestResponsePacketPair rrPair = new RequestResponsePacketPair();
-    final AtomicLong newestPacketTimestampInMillis;
+    public final AtomicLong newestPacketTimestampInMillis;
     State state = State.NOTHING_SENT;
 
     public Accumulation() {
