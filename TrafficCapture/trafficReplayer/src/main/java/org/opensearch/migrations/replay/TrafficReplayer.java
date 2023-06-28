@@ -169,9 +169,9 @@ public class TrafficReplayer {
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger exceptionCount = new AtomicInteger();
         var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
-        ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String,? extends AggregatedRawResponse>> requestFutureMap =
+        ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>> requestFutureMap =
                 new ConcurrentHashMap<>();
-        ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String,? extends AggregatedRawResponse>>
+        ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>>
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
@@ -180,12 +180,12 @@ public class TrafficReplayer {
                             if (log.isTraceEnabled()) {
                                 log.trace("Done receiving captured stream for this "+rrPair.requestData);
                             }
-                            DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse> resultantCf =
+                            DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> resultantCf =
                                     requestFutureMap.get(rrPair.requestData)
                                             .map(f->
                                                     f.handle((summary, t) -> {
                                                         try {
-                                                            AggregatedRawResponse rval =
+                                                            AggregatedTransformedResponse rval =
                                                                     packageAndWriteResponse(tupleWriter, rrPair, summary, t);
                                                             successCount.incrementAndGet();
                                                             return rval;
@@ -193,12 +193,18 @@ public class TrafficReplayer {
                                                             exceptionCount.incrementAndGet();
                                                             throw e;
                                                         } finally {
-                                                            log.error("removing rrPair.requestData for " +
-                                                                    rrPair.connectionId);
                                                             requestToFinalWorkFuturesMap.remove(rrPair.requestData);
+                                                            log.error("removed rrPair.requestData to requestToFinalWorkFuturesMap for " +
+                                                                    rrPair.connectionId);
                                                         }
                                                     }), ()->"TrafficReplayer.runReplayWithIOStreams.progressTracker");
-                            requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
+                            if (!resultantCf.future.isDone()) {
+                                log.error("Adding " + rrPair.connectionId + " to requestToFinalWorkFuturesMap");
+                                requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
+                                if (resultantCf.future.isDone()) {
+                                    requestToFinalWorkFuturesMap.remove(rrPair.requestData);
+                                }
+                            }
                         }
         );
         try {
@@ -244,37 +250,55 @@ public class TrafficReplayer {
     private void
     waitForRemainingWork(Level logLevel, @NonNull Duration timeout,
                          @NonNull ConcurrentHashMap<HttpMessageAndTimestamp,
-                                 DiagnosticTrackableCompletableFuture<String, ? extends AggregatedRawResponse>>
+                                 DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>>
                                  requestToFinalWorkFuturesMap)
             throws ExecutionException, InterruptedException, TimeoutException {
         var allRemainingWorkArray =
+                (DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>[])
                 requestToFinalWorkFuturesMap.values().toArray(DiagnosticTrackableCompletableFuture[]::new);
         log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length + " items: " +
-                Arrays.stream(allRemainingWorkArray).map(cf->cf.toString()).collect(Collectors.joining("\n")));
-
+                Arrays.stream(allRemainingWorkArray)
+                        .map(dcf->dcf.formatAsString(TrafficReplayer::formatWorkItem))
+                        .collect(Collectors.joining("\n")));
 
         // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
         // and were removed from the live map (hopefully)
-        var allWorkFuture =
-                StringTrackableCompletableFuture.allOf(allRemainingWorkArray, ()->"TrafficReplayer.AllWorkFinished");
+        var allWorkFuture = StringTrackableCompletableFuture.allOf(allRemainingWorkArray, () -> "TrafficReplayer.AllWorkFinished");
         try {
-            allWorkFuture.composeHandleApplication((t, v) -> {
-                        log.info("stopping packetHandlerFactory's group");
-                        packetHandlerFactory.stopGroup();
-                        // squash exceptions for individual requests
-                        return StringTrackableCompletableFuture.completedFuture(null, () -> "finished all work");
-                    }, () -> "TrafficReplayer.PacketHandlerFactory->stopGroup")
-                    .get(timeout);
+            allWorkFuture.get(timeout);
         } catch (TimeoutException e) {
-            allWorkFuture.future.cancel(true);
+            var didCancel = allWorkFuture.future.cancel(true);
+            if (!didCancel) {
+                assert allWorkFuture.future.isDone() : "expected future to have finished if cancel didn't succeed";
+                // continue with the rest of the function
+            } else {
+                throw e;
+            }
+        }
+        allWorkFuture.composeHandleApplication((t, v) -> {
+                    log.info("stopping packetHandlerFactory's group");
+                    packetHandlerFactory.stopGroup();
+                    // squash exceptions for individual requests
+                    return StringTrackableCompletableFuture.completedFuture(null, () -> "finished all work");
+                }, () -> "TrafficReplayer.PacketHandlerFactory->stopGroup");
+    }
 
+    private static String formatWorkItem(CompletableFuture<?> cf) {
+        try {
+            var resultValue = cf.get();
+            if (resultValue instanceof AggregatedTransformedResponse) {
+                return "" + ((AggregatedTransformedResponse) resultValue).getTransformationStatus();
+            }
+            return null;
+        } catch (ExecutionException | InterruptedException e) {
+            return e.getMessage();
         }
     }
 
-    private static AggregatedRawResponse
+    private static AggregatedTransformedResponse
     packageAndWriteResponse(SourceTargetCaptureTuple.TupleToFileWriter tripleWriter,
                             RequestResponsePacketPair rrPair,
-                            AggregatedRawResponse summary,
+                            AggregatedTransformedResponse summary,
                             Throwable t) {
         log.trace("done sending and finalizing data to the packet handler");
         SourceTargetCaptureTuple requestResponseTriple;

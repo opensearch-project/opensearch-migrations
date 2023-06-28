@@ -25,8 +25,8 @@ public class StringTrackableCompletableFuture<T>
         return new StringTrackableCompletableFuture<>(CompletableFuture.completedFuture(v), diagnosticSupplier);
     }
 
-    public static <D> StringTrackableCompletableFuture<Void>
-    allOf(DiagnosticTrackableCompletableFuture<D,Void>[] allRemainingWorkArray, Supplier<String> diagnosticSupplier) {
+    public static <U> StringTrackableCompletableFuture<Void>
+    allOf(DiagnosticTrackableCompletableFuture<String,? extends U>[] allRemainingWorkArray, Supplier<String> diagnosticSupplier) {
         return new StringTrackableCompletableFuture<>(
                 CompletableFuture.allOf(Arrays.stream(allRemainingWorkArray)
                         .map(tcf->tcf.future).toArray(CompletableFuture[]::new)),

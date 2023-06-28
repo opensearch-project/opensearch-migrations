@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 class StringTrackableCompletableFutureTest {
@@ -50,12 +51,24 @@ class StringTrackableCompletableFutureTest {
         notifyAndCheckNewDiagnosticValue(stcf1, notifier1, "A[^]");
         Assertions.assertEquals("A[^]->B[…]", stcf2.toString());
         Assertions.assertEquals("A[^]->B[…]->C[…]", stcf3.toString());
+        Assertions.assertEquals("A[1]->B[…]->C[…]",
+                stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
         notifyAndCheckNewDiagnosticValue(stcf2, notifier2, "A[^]->B[^]");
         Assertions.assertEquals("A[^]", stcf1.toString());
         Assertions.assertEquals("A[^]->B[^]->C[…]", stcf3.toString());
+        Assertions.assertEquals("A[1]->B[11]->C[…]",
+                stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
         notifyAndCheckNewDiagnosticValue(stcf3, notifier3, "A[^]->B[^]->C[^]");
         Assertions.assertEquals("A[^]", stcf1.toString());
         Assertions.assertEquals("A[^]->B[^]", stcf2.toString());
+    }
+
+    public static String formatCompletableFuture(CompletableFuture<?> cf) {
+        try {
+            return "" + cf.get();
+        } catch (ExecutionException | InterruptedException e) {
+            return "EXCEPTION";
+        }
     }
 
     private void notifyAndCheckNewDiagnosticValue(DiagnosticTrackableCompletableFuture<String, Integer> stcf,

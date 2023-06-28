@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.util;
 
 import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -21,6 +22,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 public class DiagnosticTrackableCompletableFuture<D, T> {
+
     public final CompletableFuture<T> future;
     private final RecursiveImmutableChain<AbstractMap.SimpleEntry<CompletableFuture,Supplier<D>>> diagnosticSupplierChain;
 
@@ -56,11 +58,11 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     }
 
     public DiagnosticTrackableCompletableFuture(@NonNull CompletableFuture<T> future, Supplier<D> diagnosticSupplier) {
-        this(future, new RecursiveImmutableChain(makePair(future, diagnosticSupplier), null));
+        this(future, new RecursiveImmutableChain(makeDiagnosticPair(future, diagnosticSupplier), null));
     }
 
     private static <T,D> AbstractMap.SimpleEntry<CompletableFuture,Supplier<D>>
-    makePair(CompletableFuture<T> future, Supplier<D> diagnosticSupplier) {
+    makeDiagnosticPair(CompletableFuture<T> future, Supplier<D> diagnosticSupplier) {
         return new AbstractMap.SimpleEntry(future, diagnosticSupplier);
     }
 
@@ -68,7 +70,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     map(Function<CompletableFuture<T>, CompletableFuture<U>> fn, Supplier<D> diagnosticSupplier) {
         var newCf = fn.apply(future);
         return new DiagnosticTrackableCompletableFuture<>(newCf,
-                this.diagnosticSupplierChain.chain(makePair(newCf, diagnosticSupplier)));
+                this.diagnosticSupplierChain.chain(makeDiagnosticPair(newCf, diagnosticSupplier)));
     }
 
     public <U> DiagnosticTrackableCompletableFuture<D, U>
@@ -76,7 +78,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
                 Supplier<D> diagnosticSupplier) {
         var newCf = this.future.thenCompose(v->fn.apply(v).future);
         return new DiagnosticTrackableCompletableFuture<>(newCf,
-                this.diagnosticSupplierChain.chain(makePair(newCf, diagnosticSupplier)));
+                this.diagnosticSupplierChain.chain(makeDiagnosticPair(newCf, diagnosticSupplier)));
     }
 
     /**
@@ -102,7 +104,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
             return wcf.future;
         });
         return new DiagnosticTrackableCompletableFuture<>(newCf,
-                this.diagnosticSupplierChain.chain(makePair(newCf, diagnosticSupplier)));
+                this.diagnosticSupplierChain.chain(makeDiagnosticPair(newCf, diagnosticSupplier)));
     }
 
     public T get() throws ExecutionException, InterruptedException {
@@ -130,12 +132,25 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
 
     @Override
     public String toString() {
-        var strList = diagnosticStream().map(kvp->formatDiagnostics(kvp)).collect(Collectors.toList());
+        return formatAsString(x->null);
+    }
+
+    public String formatAsString(Function<CompletableFuture,String> resultFormatter) {
+        var strList = diagnosticStream().map(kvp->formatDiagnostics(kvp, resultFormatter)).collect(Collectors.toList());
         Collections.reverse(strList);
         return strList.stream().collect(Collectors.joining("->"));
     }
 
-    protected String formatDiagnostics(AbstractMap.SimpleEntry<CompletableFuture, Supplier<D>> kvp) {
-        return "" + kvp.getValue().get() + (kvp.getKey().isDone() ? "[^]" : "[…]");
+    @SneakyThrows
+    protected String formatDiagnostics(AbstractMap.SimpleEntry<CompletableFuture, Supplier<D>> kvp,
+                                       Function<CompletableFuture,String> resultFormatter) {
+        var diagnosticInfo = kvp.getValue().get();
+        return "" + diagnosticInfo +
+                (kvp.getKey().isDone() ? formatWithDefault(resultFormatter, kvp.getKey()) : "[…]");
+    }
+
+    private static String formatWithDefault(Function<CompletableFuture,String> formatter, CompletableFuture cf) {
+        var str = formatter.apply(cf);
+        return "[" + (str == null ? "^" : str) + "]";
     }
 }
