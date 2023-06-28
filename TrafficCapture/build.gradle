@@ -1,5 +1,6 @@
 allprojects {
     apply plugin: 'java'
+    apply plugin: 'jacoco'
 
     java {
         toolchain {
@@ -8,5 +9,12 @@ allprojects {
     }
     test {
         jvmArgs '-ea'
+    }
+
+    jacocoTestReport {
+        reports {
+            xml.required = true
+            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        }
     }
 }
