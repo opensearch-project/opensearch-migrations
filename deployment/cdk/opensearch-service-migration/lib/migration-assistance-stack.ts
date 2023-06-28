@@ -37,7 +37,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
-            clusterName: 'migration-msk-cluster2',
+            clusterName: 'migration-msk-cluster',
             kafkaVersion: '2.8.1',
             numberOfBrokerNodes: 2,
             brokerNodeGroupInfo: {

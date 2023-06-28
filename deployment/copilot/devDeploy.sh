@@ -14,10 +14,12 @@ fi
 export CDK_DEPLOYMENT_STAGE=dev
 
 # Pipe output to some place and grab the export commands and execute them :)
+cd ../opensearch-service-migration
 cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c --c dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --require-approval never
 
 # === Copilot Deployment ===
 
+cd ../copilot
 # Init app
 copilot app init
 
