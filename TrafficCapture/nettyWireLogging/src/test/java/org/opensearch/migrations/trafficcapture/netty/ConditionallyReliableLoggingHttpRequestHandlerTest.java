@@ -37,7 +37,7 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         AtomicReference<ByteBuffer> outputByteBuffer = new AtomicReference<>();
         byte[] scratchBytes = new byte[1024*1024];
         AtomicInteger flushCount = new AtomicInteger();
-        var offloader = new StreamChannelConnectionCaptureSerializer("Test",
+        var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection",
                 () -> CodedOutputStream.newInstance(scratchBytes),
                 cos -> {
                     outputByteBuffer.set(ByteBuffer.wrap(scratchBytes, 0, cos.getTotalBytesWritten()));

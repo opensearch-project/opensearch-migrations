@@ -82,6 +82,7 @@ class NettyScanningHttpProxyTest {
     private static final Random random = new Random();
     public static final String LOCALHOST = "localhost";
     public static final String UPSTREAM_SERVER_RESPONSE_BODY = "Hello tester!\n";
+    public static final String TEST_NODE_ID_STRING = "test_node_id";
 
     private static int retryWithNewPortUntilNoThrow(Consumer<Integer> r) {
         int numTries = 0;
@@ -103,7 +104,7 @@ class NettyScanningHttpProxyTest {
         final int NUM_EXPECTED_TRAFFIC_STREAMS = 1;
         final int NUM_INTERACTIONS = 3;
         CountDownLatch interactionsCapturedCountdown = new CountDownLatch(NUM_EXPECTED_TRAFFIC_STREAMS);
-        var captureFactory = new InMemoryConnectionCaptureFactory(1024*1024,
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024*1024,
                 () -> interactionsCapturedCountdown.countDown());
         var servers = startServers(captureFactory);
 

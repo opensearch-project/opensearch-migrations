@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,26 +26,29 @@ import java.util.function.BiFunction;
 @Deprecated
 public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
     private final BiFunction<String, Integer, FileOutputStream> outputStreamCreator;
+    private String nodeId;
     private final int bufferSize;
 
-    public FileConnectionCaptureFactory(BiFunction<String, Integer, FileOutputStream> outputStreamCreator, int bufferSize) {
+    public FileConnectionCaptureFactory(String nodeId, int bufferSize,
+                                        BiFunction<String, Integer, FileOutputStream> outputStreamCreator) {
+        this.nodeId = nodeId;
         this.outputStreamCreator = outputStreamCreator;
         this.bufferSize = bufferSize;
     }
 
-    public FileConnectionCaptureFactory(Path rootPath, int bufferSize) {
-        this((id, n) -> {
+    public FileConnectionCaptureFactory(String nodeId, int bufferSize, Path rootPath) {
+        this(nodeId, bufferSize, (id, n) -> {
             try {
                 var filePath = rootPath.resolve(id + "_" + n.toString() + ".protocap");
                 return new FileOutputStream(filePath.toString());
             } catch (FileNotFoundException e) {
                 throw new RuntimeException(e);
             }
-        }, bufferSize);
+        });
     }
 
-    public FileConnectionCaptureFactory(String path, int bufferSize) {
-        this(Paths.get(path), bufferSize);
+    public FileConnectionCaptureFactory(String nodeId, String path, int bufferSize) {
+        this(nodeId, bufferSize, Paths.get(path));
     }
 
     private CompletableFuture closeHandler(String connectionId, ByteBuffer byteBuffer, CodedOutputStream codedOutputStream, int callCounter) {
@@ -69,7 +73,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToFileStreamMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(connectionId,
+        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId,
             () -> {
                 ByteBuffer bb = ByteBuffer.allocate(bufferSize);
                 var cos = CodedOutputStream.newInstance(bb);

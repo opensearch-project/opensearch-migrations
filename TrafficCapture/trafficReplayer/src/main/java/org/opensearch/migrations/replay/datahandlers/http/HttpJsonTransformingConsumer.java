@@ -73,10 +73,11 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {
         chunks.add(nextRequestPacket.duplicate().readerIndex(0).retain());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
-        if (log.isDebugEnabled()) {
+        if (log.isTraceEnabled()) {
             byte[] copy = new byte[nextRequestPacket.readableBytes()];
             nextRequestPacket.duplicate().readBytes(copy);
-            log.trace("Writing into embedded channel: " + new String(copy, StandardCharsets.UTF_8));
+            log.trace("HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
+                    + new String(copy, StandardCharsets.UTF_8));
         }
         return CompletableFuture.completedFuture(null).thenAccept(x ->
                 channel.writeInbound(nextRequestPacket));

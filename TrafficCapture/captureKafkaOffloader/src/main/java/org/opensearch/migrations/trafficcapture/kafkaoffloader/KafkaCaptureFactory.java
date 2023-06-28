@@ -21,12 +21,15 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
 
     private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
 
+    private final String nodeId;
     // Potential future optimization here to use a direct buffer (e.g. nio) instead of byte array
     private final Producer<String, byte[]> producer;
     private final String topicNameForTraffic;
     private final int bufferSize;
 
-    public KafkaCaptureFactory(Producer<String, byte[]> producer, String topicNameForTraffic, int bufferSize) {
+    public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer,
+                               String topicNameForTraffic, int bufferSize) {
+        this.nodeId = nodeId;
         // There is likely some default timeout/retry settings we should configure here to reduce any potential blocking
         // i.e. the Kafka cluster is unavailable
         this.producer = producer;
@@ -34,8 +37,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         this.bufferSize = bufferSize;
     }
 
-    public KafkaCaptureFactory(Producer<String, byte[]> producer, int bufferSize) {
-        this(producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, bufferSize);
+    public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer, int bufferSize) {
+        this(nodeId, producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, bufferSize);
     }
 
     @Override
@@ -45,7 +48,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
         WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteStreamMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(connectionId,
+        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId,
             () -> {
                 ByteBuffer bb = ByteBuffer.allocate(bufferSize);
                 var cos = CodedOutputStream.newInstance(bb);

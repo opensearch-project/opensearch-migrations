@@ -123,7 +123,7 @@ public class SourceTargetCaptureTuple {
         public void writeJSON(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject jsonObject = toJSONObject(triple);
 
-            log.warn("Writing json tuple to output stream");
+            log.trace("Writing json tuple to output stream for " + triple);
             outputStream.write((jsonObject.toString()+"\n").getBytes(StandardCharsets.UTF_8));
             outputStream.flush();
         }
