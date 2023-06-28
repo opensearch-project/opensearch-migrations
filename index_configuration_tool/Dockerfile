@@ -10,9 +10,8 @@ FROM python:3.11-slim
 WORKDIR /code
 # Copy only required dependencies
 COPY --from=builder /root/.local /root/.local
-# Copy only source code and Logstash grammar
+# Copy only source code
 COPY ./*.py .
-COPY logstash.lark .
 
 # update PATH
 ENV PATH=/root/.local:$PATH

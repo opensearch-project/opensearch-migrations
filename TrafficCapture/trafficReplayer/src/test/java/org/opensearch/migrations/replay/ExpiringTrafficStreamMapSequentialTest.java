@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
+import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -19,7 +21,7 @@ class ExpiringTrafficStreamMapSequentialTest {
                                       int expectedExpirationCounts[]) {
         var expiredAccumulations = new ArrayList<Accumulation>();
         var expiringMap = new ExpiringTrafficStreamMap(Duration.ofSeconds(window), Duration.ofSeconds(granularity),
-                new ExpiringTrafficStreamMap.BehavioralPolicy() {
+                new BehavioralPolicy() {
                     @Override
                     public void onExpireAccumulation(String partitionId,
                                                      String connectionId,

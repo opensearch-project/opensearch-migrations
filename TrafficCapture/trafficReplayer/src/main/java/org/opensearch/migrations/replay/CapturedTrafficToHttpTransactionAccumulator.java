@@ -1,6 +1,8 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
+import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 
 import java.time.Duration;
@@ -54,7 +56,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                        BiConsumer<String,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
-                new ExpiringTrafficStreamMap.BehavioralPolicy() {
+                new BehavioralPolicy() {
                     @Override
                     public void onExpireAccumulation(String partitionId,
                                                      String connectionId,
@@ -195,11 +197,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void close() {
-        liveStreams.entries().forEach(kvp -> {
-            if (kvp.getValue().state != Accumulation.State.RESPONSE_SENT) {
+        liveStreams.values().forEach(accum -> {
+            if (accum.state != Accumulation.State.RESPONSE_SENT) {
                 requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
             }
-            fireAccumulationsCallbacks(kvp.getKey().connectionId, kvp.getValue());
+            fireAccumulationsCallbacks(accum.getConnectionId(), accum);
         });
         liveStreams.clear();
     }

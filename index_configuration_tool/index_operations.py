@@ -11,9 +11,9 @@ __ALL_INDICES_ENDPOINT = "*"
 __INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version", "store"]
 
 
-def fetch_all_indices(endpoint: str, optional_auth: Optional[tuple] = None) -> dict:
+def fetch_all_indices(endpoint: str, optional_auth: Optional[tuple] = None, verify: bool = True) -> dict:
     actual_endpoint = endpoint + __ALL_INDICES_ENDPOINT
-    resp = requests.get(actual_endpoint, auth=optional_auth)
+    resp = requests.get(actual_endpoint, auth=optional_auth, verify=verify)
     # Remove internal settings
     result = dict(resp.json())
     for index in result:

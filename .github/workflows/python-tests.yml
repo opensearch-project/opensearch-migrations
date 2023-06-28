@@ -1,6 +1,12 @@
 name: python-tests
 
-on: [push, pull_request]
+on:
+  push:
+    paths:
+      - 'cluster_migration_core/**.py'
+  pull_request:
+    paths:
+      - 'cluster_migration_core/**.py'
 
 jobs:
   test-linux:

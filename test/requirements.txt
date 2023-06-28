@@ -1,0 +1,9 @@
+certifi==2023.5.7
+charset-normalizer==3.1.0
+idna==3.4
+iniconfig==2.0.0
+packaging==23.1
+pluggy==1.0.0
+pytest==7.3.1
+requests==2.31.0
+urllib3==2.0.3

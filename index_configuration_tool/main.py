@@ -1,15 +1,29 @@
 import argparse
+import yaml
 from typing import Optional
 
 import index_operations
-import logstash_conf_parser as logstash_parser
 import utils
 
 # Constants
 SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
+SOURCE_KEY = "source"
+SINK_KEY = "sink"
 HOSTS_KEY = "hosts"
-USER_KEY = "user"
+USER_KEY = "username"
 PWD_KEY = "password"
+INSECURE_KEY = "insecure"
+CONNECTION_KEY = "connection"
+
+
+# This config key may be either directly in the main dict (for sink)
+# or inside a nested dict (for source). The default value is False.
+def is_insecure(config: dict) -> bool:
+    if INSECURE_KEY in config:
+        return config[INSECURE_KEY]
+    elif CONNECTION_KEY in config and INSECURE_KEY in config[CONNECTION_KEY]:
+        return config[CONNECTION_KEY][INSECURE_KEY]
+    return False
 
 
 # TODO Only supports basic auth for now
@@ -19,26 +33,42 @@ def get_auth(input_data: dict) -> Optional[tuple]:
 
 
 def get_endpoint_info(plugin_config: dict) -> tuple:
-    endpoint = "https://" if ("ssl" in plugin_config and plugin_config["ssl"]) else "http://"
     # "hosts" can be a simple string, or an array of hosts for Logstash to hit.
     # This tool needs one accessible host, so we pick the first entry in the latter case.
-    endpoint += plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
+    endpoint = plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
     endpoint += "/"
     return endpoint, get_auth(plugin_config)
 
 
 def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
     endpoint, auth_tuple = get_endpoint_info(plugin_config)
-    return index_operations.fetch_all_indices(endpoint, auth_tuple)
+    # verify boolean will be the inverse of the insecure SSL key, if present
+    should_verify = not is_insecure(plugin_config)
+    return index_operations.fetch_all_indices(endpoint, auth_tuple, should_verify)
+
+
+def check_supported_endpoint(config: dict) -> Optional[tuple]:
+    for supported_type in SUPPORTED_ENDPOINTS:
+        if supported_type in config:
+            return supported_type, config[supported_type]
 
 
 def get_supported_endpoint(config: dict, key: str) -> tuple:
-    # The value of each key is a list of plugin configs.
-    # Each config is a tuple, where the first value is the endpoint type.
-    supported_endpoint = next((p for p in config[key] if p[0] in SUPPORTED_ENDPOINTS), None)
-    if not supported_endpoint:
+    # The value of each key may be a single plugin (as a dict)
+    # or a list of plugin configs
+    supported_tuple = tuple()
+    if type(config[key]) is dict:
+        supported_tuple = check_supported_endpoint(config[key])
+    elif type(config[key]) is list:
+        for entry in config[key]:
+            supported_tuple = check_supported_endpoint(entry)
+            # Break out of the loop at the first supported type
+            if supported_tuple:
+                break
+    if not supported_tuple:
         raise ValueError("Could not find any supported endpoints in section: " + key)
-    return supported_endpoint
+    # First tuple value is the name, second value is the config dict
+    return supported_tuple[0], supported_tuple[1]
 
 
 def validate_plugin_config(config: dict, key: str):
@@ -53,11 +83,13 @@ def validate_plugin_config(config: dict, key: str):
         raise ValueError("Invalid auth configuration (Password without user) for endpoint: " + supported_endpoint[0])
 
 
-def validate_logstash_config(config: dict):
-    if "input" not in config or "output" not in config:
-        raise ValueError("Missing input or output data from Logstash config")
-    validate_plugin_config(config, "input")
-    validate_plugin_config(config, "output")
+def validate_pipeline_config(config: dict):
+    if SOURCE_KEY not in config:
+        raise ValueError("Missing source configuration in Data Prepper pipeline YAML")
+    if SINK_KEY not in config:
+        raise ValueError("Missing sink configuration in Data Prepper pipeline YAML")
+    validate_plugin_config(config, SOURCE_KEY)
+    validate_plugin_config(config, SINK_KEY)
 
 
 # Computes differences in indices between source and target.
@@ -92,15 +124,18 @@ def print_report(index_differences: tuple[set, set, set]):  # pragma no cover
 
 
 def run(config_file_path: str) -> None:
-    # Parse and validate logstash config file
-    logstash_config = logstash_parser.parse(config_file_path)
-    validate_logstash_config(logstash_config)
+    # Parse and validate pipelines YAML file
+    with open(config_file_path, 'r') as pipeline_file:
+        dp_config = yaml.safe_load(pipeline_file)
+    # We expect the Data Prepper pipeline to only have a single top-level value
+    pipeline_config = next(iter(dp_config.values()))
+    validate_pipeline_config(pipeline_config)
     # Endpoint is a tuple of (type, config)
-    endpoint = get_supported_endpoint(logstash_config, "input")
+    endpoint = get_supported_endpoint(pipeline_config, SOURCE_KEY)
     # Fetch all indices from source cluster
     source_indices = fetch_all_indices_by_plugin(endpoint[1])
     # Fetch all indices from target cluster
-    endpoint = get_supported_endpoint(logstash_config, "output")
+    endpoint = get_supported_endpoint(pipeline_config, SINK_KEY)
     target_endpoint, target_auth = get_endpoint_info(endpoint[1])
     target_indices = index_operations.fetch_all_indices(target_endpoint, target_auth)
     # Compute index differences and print report
@@ -119,8 +154,8 @@ if __name__ == '__main__':  # pragma no cover
     arg_parser = argparse.ArgumentParser(
         prog="python main.py",
         description="This tool creates indices on a target cluster based on the contents of a source cluster.\n" +
-        "The source and target endpoints are obtained by parsing a Logstash config file, which is the " +
-        "sole expected argument for this module.\nAlso prints a report of the indices to be created, " +
+        "The source and target endpoints are obtained by parsing a Data Prepper pipelines YAML file, which " +
+        "is the sole expected argument for this module.\nAlso prints a report of the indices to be created, " +
         "along with indices that are identical or have conflicting settings/mappings.\nIn case of the " +
         "latter, no action will be taken on the target cluster.",
         formatter_class=argparse.RawTextHelpFormatter
@@ -128,7 +163,7 @@ if __name__ == '__main__':  # pragma no cover
     # This tool only takes one argument
     arg_parser.add_argument(
         "config_file_path",
-        help="Path to the Logstash config file to parse for source and target endpoint information"
+        help="Path to the Data Prepper pipeline YAML file to parse for source and target endpoint information"
     )
     args = arg_parser.parse_args()
     print("\n##### Starting index configuration tool... #####\n")

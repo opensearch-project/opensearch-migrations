@@ -6,12 +6,17 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class Accumulation {
     RequestResponsePacketPair rrPair;
-    final AtomicLong newestPacketTimestampInMillis;
+    public final AtomicLong newestPacketTimestampInMillis;
+
     State state = State.NOTHING_SENT;
 
     public Accumulation(String connectionId) {
-         rrPair = new RequestResponsePacketPair(connectionId);
+        rrPair = new RequestResponsePacketPair(connectionId);
         newestPacketTimestampInMillis = new AtomicLong(0);
+    }
+
+    public String getConnectionId() {
+        return rrPair.connectionId;
     }
 
     @Override
