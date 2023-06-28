@@ -8,6 +8,7 @@ import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {HistoricalCaptureStack} from "./historical-capture-stack";
+import {MSKUtilityStack} from "./msk-utility-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string
@@ -53,9 +54,8 @@ export class StackComposer {
         const openAccessPolicyEnabled = getContextForType('openAccessPolicyEnabled', 'boolean')
         const availabilityZoneCount = getContextForType('availabilityZoneCount', 'number')
         const migrationAssistanceEnabled = getContextForType('migrationAssistanceEnabled', 'boolean')
-        const MSKARN = getContextForType('MSKARN', 'string')
-        const MSKBrokers = getContextForType('MSKBrokers', 'object')
-        const MSKTopic = getContextForType('MSKTopic', 'string')
+        const mskARN = getContextForType('mskARN', 'string')
+        const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
         const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
@@ -163,17 +163,25 @@ export class StackComposer {
         if (migrationAssistanceEnabled && networkStack) {
             const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
                 vpc: networkStack.vpc,
-                MSKARN: MSKARN,
-                MSKBrokers: MSKBrokers,
-                MSKTopic: MSKTopic,
+                mskARN: mskARN,
                 targetEndpoint: opensearchStack.domainEndpoint,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 ...props,
             })
-
             migrationStack.addDependency(opensearchStack)
             this.stacks.push(migrationStack)
+
+            const mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
+                vpc: networkStack.vpc,
+                mskARN: migrationStack.mskARN,
+                mskEnablePublicEndpoints: mskEnablePublicEndpoints,
+                stackName: `OSServiceMSKUtilityCDKStack-${stage}-${region}`,
+                description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
+                ...props,
+            })
+            mskUtilityStack.addDependency(migrationStack)
+            this.stacks.push(mskUtilityStack)
         }
 
         // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited

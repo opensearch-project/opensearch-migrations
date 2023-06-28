@@ -1,4 +1,4 @@
-import {CfnOutput, Stack, StackProps} from "aws-cdk-lib";
+import {CfnOutput, Stack} from "aws-cdk-lib";
 import {
     Instance,
     InstanceClass,
@@ -12,17 +12,19 @@ import {
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
+import {StackPropsExt} from "./stack-composer";
 
-export interface migrationStackProps extends StackProps {
+export interface migrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly MSKARN: string,
-    readonly MSKBrokers: string[],
-    readonly MSKTopic: string,
+    // Future support needed to allow importing an existing MSK cluster
+    readonly mskARN?: string,
     readonly targetEndpoint: string
 }
 
 
 export class MigrationAssistanceStack extends Stack {
+
+    public readonly mskARN: string;
 
     constructor(scope: Construct, id: string, props: migrationStackProps) {
         super(scope, id, props);
@@ -30,14 +32,12 @@ export class MigrationAssistanceStack extends Stack {
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
             name: 'migration-msk-config',
-            serverProperties: `
-                auto.create.topics.enable=true
-            `
+            serverProperties: "auto.create.topics.enable=true"
         })
 
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
-            clusterName: 'migration-msk-cluster',
+            clusterName: 'migration-msk-cluster2',
             kafkaVersion: '2.8.1',
             numberOfBrokerNodes: 2,
             brokerNodeGroupInfo: {
@@ -52,7 +52,7 @@ export class MigrationAssistanceStack extends Stack {
             },
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
-                // This is temporary, need way to dynamically get latest
+                // Current limitation of using L1 construct, would like to get latest revision dynamically
                 revision: 1
             },
             encryptionInfo: {
@@ -73,62 +73,7 @@ export class MigrationAssistanceStack extends Stack {
                 }
             }
         });
-        mskCluster.addDependency(mskClusterConfig)
-
-        // WIP Custom Resources to enable public endpoint for MSK and get the bootstrap broker urls, these may get
-        // combined into an actual lambda implementation in the future
-        //
-        // const crPolicyStatement = new PolicyStatement({
-        //     effect: Effect.ALLOW,
-        //     actions: ["ec2:DescribeSubnets",
-        //         "ec2:DescribeVpcs",
-        //         "ec2:DescribeSecurityGroups",
-        //         "ec2:DescribeRouteTables",
-        //         "ec2:DescribeVpcEndpoints",
-        //         "ec2:DescribeVpcAttribute",
-        //         "ec2:DescribeNetworkAcls",
-        //         "kafka:*"],
-        //     resources: ["*"]
-        // })
-        // const crPolicy = AwsCustomResourcePolicy.fromStatements([crPolicyStatement])
-        // const mskPublicEndpointCustomResource = new AwsCustomResource(this, 'MigrationMSKPublicEndpointCR', {
-        //     onCreate: {
-        //         service: 'Kafka',
-        //         action: 'updateConnectivity',
-        //         parameters: {
-        //             ClusterArn: mskCluster.attrArn,
-        //             CurrentVersion: "K3P5ROKL5A1OLE",
-        //             ConnectivityInfo: {
-        //                 PublicAccess: {
-        //                     Type: 'SERVICE_PROVIDED_EIPS'
-        //                 }
-        //             }
-        //         },
-        //         physicalResourceId: PhysicalResourceId.of(Date.now().toString())
-        //     },
-        //     policy: crPolicy,
-        //     vpc: props.vpc
-        // })
-
-        // const mskPublicEndpointCustomResource = new AwsCustomResource(this, 'MigrationMSKPublicEndpointCR', {
-        //     onCreate: {
-        //         service: 'Kafka',
-        //         action: 'getBootstrapBrokers',
-        //         parameters: {
-        //             ClusterArn: mskCluster.attrArn,
-        //             Outputs: {
-        //                 CustomOutput: 'customOutputValue'
-        //             }
-        //         },
-        //         physicalResourceId: PhysicalResourceId.of(Date.now().toString())
-        //     },
-        //     policy: AwsCustomResourcePolicy.fromSdkCalls({resources: [mskCluster.attrArn]}),
-        //     vpc: props.vpc
-        // })
-
-        // new CfnOutput(this, 'MSKBrokerOutput', {
-        //     value: mskPublicEndpointCustomResource.getResponseField("Outputs.CustomOutput")
-        // });
+        this.mskARN = mskCluster.attrArn
 
         const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
             vpc: props.vpc,
@@ -154,7 +99,7 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc,
             vpcSubnets: { subnetType: SubnetType.PUBLIC },
             instanceType: InstanceType.of(InstanceClass.T2, InstanceSize.MICRO),
-            machineImage: MachineImage.latestAmazonLinux(),
+            machineImage: MachineImage.latestAmazonLinux2(),
             securityGroup: oinoSecurityGroup,
             // Manually created for now, to be automated in future
             //keyName: "es-node-key"
@@ -168,8 +113,7 @@ export class MigrationAssistanceStack extends Stack {
             `export MIGRATION_PUBLIC_SUBNET_2=${props.vpc.publicSubnets[1].subnetId}`,
             `export MIGRATION_DOMAIN_ENDPOINT=${props.targetEndpoint}`,
             `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
-            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`,
-            `export MIGRATION_KAFKA_BROKER_ENDPOINTS=`]
+            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`]
 
         const cfnOutput = new CfnOutput(this, 'CopilotExports', {
             value: exports.join(";"),
