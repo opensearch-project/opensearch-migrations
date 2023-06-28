@@ -1,8 +1,9 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.traffic.expiration;
 
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.Accumulation;
 
 import java.time.Duration;
 import java.time.Instant;
