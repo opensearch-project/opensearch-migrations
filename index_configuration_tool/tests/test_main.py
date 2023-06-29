@@ -20,13 +20,16 @@ BASE_CONFIG_SECTION = {
 # Utility method to create a test plugin config
 def create_plugin_config(host_list: list[str],
                          user: Optional[str] = None,
-                         password: Optional[str] = None) -> dict:
+                         password: Optional[str] = None,
+                         disable_auth: Optional[bool] = None) -> dict:
     config = dict()
     config["hosts"] = host_list
     if user:
         config["username"] = user
     if password:
         config["password"] = password
+    if disable_auth is not None:
+        config["disable_authentication"] = disable_auth
     return config
 
 
@@ -185,12 +188,17 @@ class TestMain(unittest.TestCase):
         self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
 
     def test_validate_plugin_config_bad_auth_password(self):
-        test_data = create_config_section(create_plugin_config(["host"], user="test"))
+        test_data = create_config_section(create_plugin_config(["host"], user="test", disable_auth=False))
         self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
 
     def test_validate_plugin_config_bad_auth_user(self):
         test_data = create_config_section(create_plugin_config(["host"], password="test"))
         self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
+
+    def test_validate_plugin_config_auth_disabled(self):
+        test_data = create_config_section(create_plugin_config(["host"], user="test", disable_auth=True))
+        # Should complete without errors
+        main.validate_plugin_config(test_data, TEST_KEY)
 
     def test_validate_plugin_config_happy_case(self):
         plugin_config = create_plugin_config(["host"], "user", "password")
