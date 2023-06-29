@@ -3,7 +3,7 @@
 #  https://aws.github.io/copilot-cli/docs/manifest/environment/
 
 # Your environment name will be used in naming your resources like VPC, cluster, etc.
-name: test
+name: dev
 type: Environment
 
 # Import your own VPC and subnets or configure how they should be created.
