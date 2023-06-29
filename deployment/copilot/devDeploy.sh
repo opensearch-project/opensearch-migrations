@@ -23,7 +23,7 @@ fi
 # === CDK Deployment ===
 export CDK_DEPLOYMENT_STAGE=dev
 # Will be used for CDK and Copilot
-export AWS_DEFAULT_REGION=us-east-2
+export AWS_DEFAULT_REGION=us-east-1
 export DOCKER_BUILDKIT=0
 export COMPOSE_DOCKER_CLI_BUILD=0
 
