@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -41,9 +42,19 @@ import java.util.function.Consumer;
 @Slf4j
 public class CapturedTrafficToHttpTransactionAccumulator {
 
+    @AllArgsConstructor
+    public static class UniqueRequestKey {
+        public final String connectionId;
+        public final int requestIndex;
+        @Override
+        public String toString() {
+            return connectionId + '.' + requestIndex;
+        }
+    }
+
     public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
     private final ExpiringTrafficStreamMap liveStreams;
-    private final BiConsumer<String, HttpMessageAndTimestamp> requestHandler;
+    private final BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -52,7 +63,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final AtomicInteger requestsTerminatedUponAccumulatorCloseCounter = new AtomicInteger();
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
-                                                       BiConsumer<String,HttpMessageAndTimestamp> requestReceivedHandler,
+                                                       BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new BehavioralPolicy() {
@@ -176,7 +187,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
      */
     private void handleEndOfRequest(String connectionId, Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.NOTHING_SENT : "state == " + accumulation.state;
-        requestHandler.accept(connectionId, accumulation.rrPair.requestData);
+        var reqKey = new UniqueRequestKey(connectionId, accumulation.getIndexOfCurrentRequest());
+        requestHandler.accept(reqKey, accumulation.rrPair.requestData);
         accumulation.state = Accumulation.State.REQUEST_SENT;
     }
 

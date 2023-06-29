@@ -175,7 +175,8 @@ public class TrafficReplayer {
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
-                        (connId,request) -> requestFutureMap.put(request, writeToSocketAndClose(request, connId)),
+                        (connId,request) ->
+                                requestFutureMap.put(request, writeToSocketAndClose(request, connId.toString())),
                         rrPair -> {
                             if (log.isTraceEnabled()) {
                                 log.trace("Done receiving captured stream for this "+rrPair.requestData);
