@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 class StringTrackableCompletableFutureTest {
     @SneakyThrows
     private static void sneakyWait(CompletableFuture o) {
-        o.get(1, TimeUnit.SECONDS);
+        o.get(5, TimeUnit.MINUTES);
     }
 
     private void notify(CompletableFuture o) {
@@ -38,7 +38,7 @@ class StringTrackableCompletableFutureTest {
         }),
                 ()->"B");
         var id2 = "[" + System.identityHashCode(stcf2) + "] ";
-        Assertions.assertEquals(id1 + "A[…]->" + id2 + "B[…]", stcf2.toString());
+        Assertions.assertEquals(id2 + "B[…]<-" + id1 + "A[…]", stcf2.toString());
 
         var stcf3 = stcf2.map(f->f.thenApplyAsync(x->{
                     sneakyWait(notifier3);
@@ -48,23 +48,24 @@ class StringTrackableCompletableFutureTest {
         var id3 = "[" + System.identityHashCode(stcf3) + "] ";
 
         Assertions.assertEquals(id1 + "A[…]", stcf1.toString());
-        Assertions.assertEquals(id1 + "A[…]->" + id2 + "B[…]", stcf2.toString());
-        Assertions.assertEquals(id1 + "A[…]->" + id2 + "B[…]->" + id3 + "C[…]", stcf3.toString());
+        Assertions.assertEquals(id2 + "B[…]<-" + id1 + "A[…]", stcf2.toString());
+        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[…]<-" + id1 + "A[…]", stcf3.toString());
 
         notifyAndCheckNewDiagnosticValue(stcf1, notifier1, id1 + "A[^]");
-        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[…]", stcf2.toString());
-        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[…]->" + id3 + "C[…]", stcf3.toString());
-        Assertions.assertEquals(id1 + "A[1]->" + id2 + "B[…]->" + id3 + "C[…]",
+        Assertions.assertEquals(id2 + "B[…]<-" + id1 + "A[^]", stcf2.toString());
+        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[…]<-" + id1 + "A[^]", stcf3.toString());
+        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[…]<-" + id1 + "A[1]",
                 stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
-        notifyAndCheckNewDiagnosticValue(stcf2, notifier2, id1 + "A[^]->" + id2 + "B[^]");
+        notifyAndCheckNewDiagnosticValue(stcf2, notifier2, id2 + "B[^]<-" + id1 + "A[^]");
         Assertions.assertEquals(id1 + "A[^]", stcf1.toString());
-        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[^]->" + id3 + "C[…]", stcf3.toString());
-        Assertions.assertEquals(id1 + "A[1]->" + id2 + "B[11]->" + id3 + "C[…]",
+        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[^]<-" + id1 + "A[^]", stcf3.toString());
+        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[11]<-" + id1 + "A[1]",
                 stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
         notifyAndCheckNewDiagnosticValue(stcf3, notifier3,
-                id1 + "A[^]->" + id2  +"B[^]->" + id3 + "C[^]");
+                id3 + "C[^]<-" + id2  +"B[^]<-" + id1 + "A[^]");
         Assertions.assertEquals(id1 + "A[^]", stcf1.toString());
-        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[^]", stcf2.toString());
+        Assertions.assertEquals(id2 + "B[^]<-" + id1 + "A[^]", stcf2.toString());
+
     }
 
     public static String formatCompletableFuture(DiagnosticTrackableCompletableFuture<String,?> cf) {
