@@ -37,7 +37,10 @@ BASE_INDICES_DATA = {
                 NUM_REPLICAS_SETTING: 1
             }
         },
-        MAPPINGS_KEY: {}
+        MAPPINGS_KEY: {
+            # Strict mapping should be filtered out
+            "dynamic": "strict"
+        }
     },
     INDEX3_NAME: {
         SETTINGS_KEY: {
@@ -47,6 +50,7 @@ BASE_INDICES_DATA = {
             }
         },
         MAPPINGS_KEY: {
+            "dynamic": "false",
             "id": {"type": "keyword"}
         }
     }
