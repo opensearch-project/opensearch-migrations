@@ -20,14 +20,23 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+/**
+ * This class wraps CompletableFutures into traceable and identifiable pieces so that when
+ * dealing with thousands of completable futures at a time, one can clearly understand how
+ * work is proceeding and why there may be issues.
+ *
+ * This is adding a great amount of clarity, though using it may still be a challenge.  Much
+ * more work is expected to improve the UX for developers.
+ * @param <D> The type of object that will be returned to represent diagnostic information
+ * @param <T> The type of value of the underlying (internal) CompletableFuture's result
+ */
 @Slf4j
 public class DiagnosticTrackableCompletableFuture<D, T> {
 
     public final CompletableFuture<T> future;
     protected AtomicReference<DiagnosticTrackableCompletableFuture<D,T>> innerComposedPendingCompletableFutureReference;
-    private final
-    RecursiveImmutableChain<AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture,Supplier<D>>>
-            diagnosticSupplierChain;
+    protected final Supplier<D> diagnosticSupplier;
+    protected final DiagnosticTrackableCompletableFuture<D, ?> dependencyDiagnosticFuture;
 
     /**
      * This factory class is here so that subclasses can write their own versions that return objects
@@ -58,10 +67,11 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
 
     private DiagnosticTrackableCompletableFuture(
             @NonNull CompletableFuture<T> future,
-            @NonNull RecursiveImmutableChain<AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture,Supplier<D>>>
-                    diagnosticSupplierChain) {
+            @NonNull Supplier<D> diagnosticSupplier,
+            DiagnosticTrackableCompletableFuture parentFuture) {
         this.future = future;
-        this.diagnosticSupplierChain = diagnosticSupplierChain;
+        this.diagnosticSupplier = diagnosticSupplier;
+        this.dependencyDiagnosticFuture = parentFuture;
     }
 
     public DiagnosticTrackableCompletableFuture(@NonNull CompletableFuture<T> future,
@@ -69,28 +79,11 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         this(future, diagnosticSupplier, null);
     }
 
-    private DiagnosticTrackableCompletableFuture(@NonNull CompletableFuture<T> future,
-                                                 @NonNull Supplier<D> diagnosticSupplier,
-                                                 RecursiveImmutableChain<AbstractMap.SimpleEntry
-                                                         <DiagnosticTrackableCompletableFuture, Supplier<D>>>
-                                                         lastTrackableCompletableFuture) {
-        this.future = future;
-        this.diagnosticSupplierChain =
-                new RecursiveImmutableChain(makeDiagnosticPair(this, diagnosticSupplier),
-                        lastTrackableCompletableFuture);
-    }
-
-    private static <T,D> AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture,Supplier<D>>
-    makeDiagnosticPair(@NonNull DiagnosticTrackableCompletableFuture<D,T> future,
-                       @NonNull Supplier<D> diagnosticSupplier) {
-        return new AbstractMap.SimpleEntry(future, diagnosticSupplier);
-    }
-
     public <U> DiagnosticTrackableCompletableFuture<D, U>
     map(@NonNull Function<CompletableFuture<T>, CompletableFuture<U>> fn,
         @NonNull Supplier<D> diagnosticSupplier) {
         var newCf = fn.apply(future);
-        return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, diagnosticSupplierChain);
+        return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
     }
 
     public <U> DiagnosticTrackableCompletableFuture<D, U>
@@ -103,7 +96,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
             return innerFuture.future;
         });
         var wrappedDiagnosticFuture =
-                new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, diagnosticSupplierChain);
+                new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
         wrappedDiagnosticFuture.innerComposedPendingCompletableFutureReference = innerComposedCompletableFutureReference;
         wrappedDiagnosticFuture.future.whenComplete((v2,t2)->innerComposedCompletableFutureReference.set(null));
         return wrappedDiagnosticFuture;
@@ -135,7 +128,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
                 });
         var newCf = handledFuture.thenCompose(wcf->wcf.future);
         var wrappedDiagnosticFuture =
-                new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, diagnosticSupplierChain);
+                new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
         wrappedDiagnosticFuture.innerComposedPendingCompletableFutureReference = innerComposedCompletableFutureReference;
         wrappedDiagnosticFuture.future.whenComplete((v2,t2)->innerComposedCompletableFutureReference.set(null));
         return wrappedDiagnosticFuture;
@@ -145,7 +138,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     handle(@NonNull BiFunction<? super T, Throwable, ? extends U> fn,
                              @NonNull  Supplier<D> diagnosticSupplier) {
         CompletableFuture<U> newCf = this.future.handle((v, t)->fn.apply(v,t));
-        return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, diagnosticSupplierChain);
+        return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
     }
 
     public T get() throws ExecutionException, InterruptedException {
@@ -159,15 +152,13 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     }
 
     public Stream<AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture,Supplier<D>>> diagnosticStream() {
-        var chainHeadReference = new AtomicReference<>(this.diagnosticSupplierChain);
+        var chainHeadReference = new AtomicReference<>((DiagnosticTrackableCompletableFuture)this);
         return IntStream.generate(()->chainHeadReference.get()!=null?1:0)
                 .takeWhile(x->x==1)
                 .mapToObj(i->{
-                    try {
-                        return chainHeadReference.get().item;
-                    } finally {
-                        chainHeadReference.set(chainHeadReference.get().previous);
-                    }
+                    var dcf = chainHeadReference.get();
+                    chainHeadReference.set(dcf.dependencyDiagnosticFuture);
+                    return new AbstractMap.SimpleEntry(dcf, dcf.diagnosticSupplier);
                 });
     }
 
