@@ -15,7 +15,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 /**
@@ -73,7 +72,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     }
 
     @Override
-    public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {
+    public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         chunks.add(nextRequestPacket.duplicate().readerIndex(0).retain());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
         if (log.isTraceEnabled()) {
@@ -82,8 +81,9 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
             log.trace("HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
                     + new String(copy, StandardCharsets.UTF_8));
         }
-        return CompletableFuture.completedFuture(null).thenAccept(x ->
-                channel.writeInbound(nextRequestPacket));
+        return StringTrackableCompletableFuture.completedFuture(null, ()->"initialValue")
+                .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
+                        ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse> finalizeRequest() {
@@ -96,7 +96,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                     null);
         }
         return offloadingHandler.getPacketReceiverCompletionFuture()
-                .composeHandleApplication((v, t) -> {
+                .getDeferredFutureThroughHandle((v, t) -> {
                     if (t != null) {
                         if (t instanceof NoContentException) {
                             return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
@@ -112,10 +112,15 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     private DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>
     redriveWithoutTransformation(IPacketFinalizingConsumer<AggregatedRawResponse> packetConsumer, Throwable reason) {
         DiagnosticTrackableCompletableFuture<String,Void> consumptionChainedFuture =
-                new DiagnosticTrackableCompletableFuture<String,Void>(chunks.stream().collect(
-                        Utils.foldLeft(CompletableFuture.completedFuture(null),
-                                (cf, bb) -> cf.thenCompose(v -> packetConsumer.consumeBytes(bb)))),
-                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.");
+                chunks.stream().collect(
+                        Utils.foldLeft(DiagnosticTrackableCompletableFuture.factory.
+                                        completedFuture(null, ()->"Initial value"),
+                                (dcf, bb) -> dcf.thenCompose(v -> {
+                                    var rval = packetConsumer.consumeBytes(bb);
+                                    log.error("packetConsumer.consumeBytes()="+rval);
+                                    return rval;
+                                },
+                                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation collect()")));
         return consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()")
                 .map(f->f.thenApply(r->reason == null ?

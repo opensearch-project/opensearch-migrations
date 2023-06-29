@@ -29,41 +29,45 @@ class StringTrackableCompletableFutureTest {
             return 1;
         }),
                 ()->"A");
-        Assertions.assertEquals("A[…]", stcf1.toString());
+        var id1 = "[" + System.identityHashCode(stcf1) + "] ";
+        Assertions.assertEquals(id1 + "A[…]", stcf1.toString());
 
         var stcf2 = stcf1.map(f->f.thenApplyAsync(x->{
             sneakyWait(notifier2);
             return x*10+1;
         }),
                 ()->"B");
-        Assertions.assertEquals("A[…]->B[…]", stcf2.toString());
+        var id2 = "[" + System.identityHashCode(stcf2) + "] ";
+        Assertions.assertEquals(id1 + "A[…]->" + id2 + "B[…]", stcf2.toString());
 
         var stcf3 = stcf2.map(f->f.thenApplyAsync(x->{
                     sneakyWait(notifier3);
                     return x*10+1;
                 }),
                 ()->"C");
+        var id3 = "[" + System.identityHashCode(stcf3) + "] ";
 
-        Assertions.assertEquals("A[…]", stcf1.toString());
-        Assertions.assertEquals("A[…]->B[…]", stcf2.toString());
-        Assertions.assertEquals("A[…]->B[…]->C[…]", stcf3.toString());
+        Assertions.assertEquals(id1 + "A[…]", stcf1.toString());
+        Assertions.assertEquals(id1 + "A[…]->" + id2 + "B[…]", stcf2.toString());
+        Assertions.assertEquals(id1 + "A[…]->" + id2 + "B[…]->" + id3 + "C[…]", stcf3.toString());
 
-        notifyAndCheckNewDiagnosticValue(stcf1, notifier1, "A[^]");
-        Assertions.assertEquals("A[^]->B[…]", stcf2.toString());
-        Assertions.assertEquals("A[^]->B[…]->C[…]", stcf3.toString());
-        Assertions.assertEquals("A[1]->B[…]->C[…]",
+        notifyAndCheckNewDiagnosticValue(stcf1, notifier1, id1 + "A[^]");
+        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[…]", stcf2.toString());
+        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[…]->" + id3 + "C[…]", stcf3.toString());
+        Assertions.assertEquals(id1 + "A[1]->" + id2 + "B[…]->" + id3 + "C[…]",
                 stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
-        notifyAndCheckNewDiagnosticValue(stcf2, notifier2, "A[^]->B[^]");
-        Assertions.assertEquals("A[^]", stcf1.toString());
-        Assertions.assertEquals("A[^]->B[^]->C[…]", stcf3.toString());
-        Assertions.assertEquals("A[1]->B[11]->C[…]",
+        notifyAndCheckNewDiagnosticValue(stcf2, notifier2, id1 + "A[^]->" + id2 + "B[^]");
+        Assertions.assertEquals(id1 + "A[^]", stcf1.toString());
+        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[^]->" + id3 + "C[…]", stcf3.toString());
+        Assertions.assertEquals(id1 + "A[1]->" + id2 + "B[11]->" + id3 + "C[…]",
                 stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
-        notifyAndCheckNewDiagnosticValue(stcf3, notifier3, "A[^]->B[^]->C[^]");
-        Assertions.assertEquals("A[^]", stcf1.toString());
-        Assertions.assertEquals("A[^]->B[^]", stcf2.toString());
+        notifyAndCheckNewDiagnosticValue(stcf3, notifier3,
+                id1 + "A[^]->" + id2  +"B[^]->" + id3 + "C[^]");
+        Assertions.assertEquals(id1 + "A[^]", stcf1.toString());
+        Assertions.assertEquals(id1 + "A[^]->" + id2 + "B[^]", stcf2.toString());
     }
 
-    public static String formatCompletableFuture(CompletableFuture<?> cf) {
+    public static String formatCompletableFuture(DiagnosticTrackableCompletableFuture<String,?> cf) {
         try {
             return "" + cf.get();
         } catch (ExecutionException | InterruptedException e) {

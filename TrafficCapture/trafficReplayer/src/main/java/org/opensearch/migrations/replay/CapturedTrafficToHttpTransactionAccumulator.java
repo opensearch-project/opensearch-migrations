@@ -46,7 +46,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final BiConsumer<String, HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
-    private final AtomicInteger newConnectionCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
     private final AtomicInteger closedConnectionCounter = new AtomicInteger();
     private final AtomicInteger connectionsExpiredCounter = new AtomicInteger();
@@ -70,7 +69,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         this.fullDataHandler = fullDataHandler;
     }
 
-    public int numberOfConnectionsCreated() { return newConnectionCounter.get(); }
+    public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
     public int numberOfRequestsOnReusedConnections() { return reusedKeepAliveCounter.get(); }
     public int numberOfConnectionsClosed() { return closedConnectionCounter.get(); }
     public int numberOfConnectionsExpired() { return connectionsExpiredCounter.get(); }
@@ -89,7 +88,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         "NOT reproducing this to the target cluster (TODO - do something better?)");
                 return;
             }
-            handleEndOfMessage(nodeId, connectionId, accum);
+            handleEndOfRequest(connectionId, accum);
         } else if (observation.hasRead()) {
             var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
             assert accum.state == Accumulation.State.NOTHING_SENT;
@@ -159,20 +158,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         // If this was brand new or if we've already closed the item out and pushed
         // the state to RESPONSE_SENT, we don't need to care about triggering the
         // callback.  We only need to worry about this if we have yet to send the
-        // RESPONSE.  Notice that handleEndOfMessage will bump the state itself
-        // on the (soon to be recycled) accum object.
+        // RESPONSE.
         if (accum.state == Accumulation.State.REQUEST_SENT) {
             reusedKeepAliveCounter.incrementAndGet();
             if (log.isDebugEnabled()) {
                 log.debug("Resetting accum[" + connectionId + "]=" + accum);
             }
-            handleEndOfMessage(nodeId, connectionId, accum);
-            // We shouldn't need to check the state again - it should be NOT_SENT, but in case
-            // this code goes multi-threaded, this might be a bit safer.
-            // TODO - reevaluate once the packet assembly code is more mature
-            return getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
-        } else if (accum.state == Accumulation.State.NOTHING_SENT) {
-            newConnectionCounter.incrementAndGet();
+            handleEndOfResponse(accum);
         }
         return accum;
     }
@@ -182,18 +174,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
      * @param accumulation
      * @return true if there are still callbacks remaining to be called
      */
-    private boolean handleEndOfMessage(String nodeId, String connectionId, Accumulation accumulation) {
-        switch (accumulation.state) {
-            case NOTHING_SENT:
-                requestHandler.accept(connectionId, accumulation.rrPair.requestData);
-                accumulation.state = Accumulation.State.REQUEST_SENT;
-                return true;
-            case REQUEST_SENT:
-                fullDataHandler.accept(accumulation.rrPair);
-                accumulation.state = Accumulation.State.RESPONSE_SENT;
-                liveStreams.remove(nodeId, connectionId);
-        }
-        return false;
+    private void handleEndOfRequest(String connectionId, Accumulation accumulation) {
+        assert accumulation.state == Accumulation.State.NOTHING_SENT : "state == " + accumulation.state;
+        requestHandler.accept(connectionId, accumulation.rrPair.requestData);
+        accumulation.state = Accumulation.State.REQUEST_SENT;
+    }
+
+    private void handleEndOfResponse(Accumulation accumulation) {
+        assert accumulation.state == Accumulation.State.REQUEST_SENT;
+        fullDataHandler.accept(accumulation.rrPair);
+        accumulation.resetForNextRequest();
     }
 
     public void close() {
@@ -209,12 +199,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void fireAccumulationsCallbacks(String connectionId, Accumulation accumulation) {
         switch (accumulation.state) {
             case NOTHING_SENT:
-                requestHandler.accept(connectionId, accumulation.rrPair.requestData);
-                accumulation.state = Accumulation.State.REQUEST_SENT;
+                handleEndOfRequest(connectionId, accumulation);
                 // fall through
             case REQUEST_SENT:
-                fullDataHandler.accept(accumulation.rrPair);
-                accumulation.state = Accumulation.State.RESPONSE_SENT;
+                handleEndOfResponse(accumulation);
         }
     }
 }

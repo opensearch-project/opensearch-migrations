@@ -26,12 +26,12 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -275,7 +275,7 @@ public class TrafficReplayer {
                 throw e;
             }
         }
-        allWorkFuture.composeHandleApplication((t, v) -> {
+        allWorkFuture.getDeferredFutureThroughHandle((t, v) -> {
                     log.info("stopping packetHandlerFactory's group");
                     packetHandlerFactory.stopGroup();
                     // squash exceptions for individual requests
@@ -283,7 +283,7 @@ public class TrafficReplayer {
                 }, () -> "TrafficReplayer.PacketHandlerFactory->stopGroup");
     }
 
-    private static String formatWorkItem(CompletableFuture<?> cf) {
+    private static String formatWorkItem(DiagnosticTrackableCompletableFuture<String,?> cf) {
         try {
             var resultValue = cf.get();
             if (resultValue instanceof AggregatedTransformedResponse) {
@@ -334,10 +334,13 @@ public class TrafficReplayer {
             var packetHandler = packetHandlerFactory.create(diagnosticLabel);
             for (var packetData : request.packetBytes) {
                 log.debug("sending "+packetData.length+" bytes to the packetHandler");
-                packetHandler.consumeBytes(packetData);
+                var consumeFuture = packetHandler.consumeBytes(packetData);
+                log.debug("consumeFuture = " + consumeFuture);
             }
             log.debug("done sending bytes, now finalizing the request");
-            return packetHandler.finalizeRequest();
+            var lastRequestFuture = packetHandler.finalizeRequest();
+            log.debug("finalizeRequest future = "  + lastRequestFuture);
+            return lastRequestFuture;
         } catch (Exception e) {
             log.debug("Caught exception in writeToSocketAndClose, so failing future");
             return StringTrackableCompletableFuture.failedFuture(e, ()->"TrafficReplayer.writeToSocketAndClose");
@@ -347,8 +350,8 @@ public class TrafficReplayer {
     public void runReplay(Stream<TrafficStream> trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         trafficChunkStream
-//                .filter(ts->ts.getConnectionId().equals("0242acfffe150008-00000009-00000019-36de434c8bbbf67d-7242ec9c"))
-//                .limit(4)
+                .filter(ts->ts.getConnectionId().equals("0242acfffe180008-0000000a-0000000d-168310809a55863e-687dec40"))
+                .limit(2)
                 .forEach(ts-> ts.getSubStreamList().stream()
                         .forEach(o ->
                                 trafficToHttpTransactionAccumulator.accept(ts.getNodeId(), ts.getConnectionId(), o))

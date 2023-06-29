@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 /**
@@ -37,10 +38,7 @@ public class ExpiringTrafficStreamMap {
     protected final Duration minimumGuaranteedLifetime;
     protected final Duration granularity;
     protected final BehavioralPolicy behavioralPolicy;
-
-    public ExpiringTrafficStreamMap(Duration minimumGuaranteedLifetime) {
-        this(minimumGuaranteedLifetime, Duration.ofSeconds(1), new BehavioralPolicy());
-    }
+    private final AtomicInteger newConnectionCounter;
 
     public ExpiringTrafficStreamMap(Duration minimumGuaranteedLifetime,
                                     Duration granularity,
@@ -50,6 +48,11 @@ public class ExpiringTrafficStreamMap {
         this.minimumGuaranteedLifetime = minimumGuaranteedLifetime;
         this.nodeToExpiringBucketMap = new ConcurrentHashMap<>();
         this.behavioralPolicy = behavioralPolicy;
+        this.newConnectionCounter = new AtomicInteger(0);
+    }
+
+    public int numberOfConnectionsCreated() {
+        return newConnectionCounter.get();
     }
 
     private ExpiringKeyQueue getOrCreateNodeMap(String partitionId, EpochMillis timestamp) {
@@ -80,14 +83,14 @@ public class ExpiringTrafficStreamMap {
         // for expiration tracking purposes, push incoming packets' timestamps to be monotonic?
         var timestampMillis = new EpochMillis(Math.max(observedTimestampMillis.millis, expiringQueue.lastKey().millis));
 
-        var lastPacketTimestamp = new EpochMillis(accumulation.newestPacketTimestampInMillis.get());
+        var lastPacketTimestamp = new EpochMillis(accumulation.getNewestPacketTimestampInMillisReference().get());
         if (lastPacketTimestamp.millis == ACCUMULATION_DEAD_SENTINEL) {
             behavioralPolicy.onNewDataArrivingAfterItsAccumulationHasBeenExpired(partitionId, connectionId,
                     lastPacketTimestamp.toInstant(), expiringQueue.getLatestPossibleKeyValue());
             return false;
         }
         if (timestampMillis.test(lastPacketTimestamp, (newTs, lastTs) -> newTs > lastTs)) {
-            var witnessValue = accumulation.newestPacketTimestampInMillis.compareAndExchange(lastPacketTimestamp.millis,
+            var witnessValue = accumulation.getNewestPacketTimestampInMillisReference().compareAndExchange(lastPacketTimestamp.millis,
                     timestampMillis.millis);
             if (lastPacketTimestamp.millis != witnessValue) {
                 ++attempts;
@@ -150,7 +153,10 @@ public class ExpiringTrafficStreamMap {
 
     public Accumulation getOrCreate(String partitionId, String connectionId, Instant timestamp) {
         var key = new ScopedConnectionIdKey(partitionId, connectionId);
-        var accumulation = connectionAccumulationMap.computeIfAbsent(key, k->new Accumulation(connectionId));
+        var accumulation = connectionAccumulationMap.computeIfAbsent(key, k->{
+            newConnectionCounter.incrementAndGet();
+            return new Accumulation(connectionId);
+        });
         if (!updateExpirationTrackers(partitionId, connectionId, new EpochMillis(timestamp), accumulation, 0)) {
             connectionAccumulationMap.remove(key);
             return null;
@@ -161,7 +167,7 @@ public class ExpiringTrafficStreamMap {
     public Accumulation remove(String partitionId, String id) {
         var accum = connectionAccumulationMap.remove(new ScopedConnectionIdKey(partitionId, id));
         if (accum != null) {
-            accum.newestPacketTimestampInMillis.set(ACCUMULATION_DEAD_SENTINEL);
+            accum.getNewestPacketTimestampInMillisReference().set(ACCUMULATION_DEAD_SENTINEL);
         }
         return accum;
         // Once the accumulations are gone from the connectionAccumulationMap map, upon the normal expiration

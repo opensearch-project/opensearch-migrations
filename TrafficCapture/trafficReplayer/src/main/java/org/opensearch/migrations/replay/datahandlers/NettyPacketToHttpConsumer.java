@@ -71,19 +71,20 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     @Override
-    public CompletableFuture<Void> consumeBytes(ByteBuf packetData) {
+    public DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(ByteBuf packetData) {
         log.debug("Scheduling write of packetData["+packetData+"]" +
                 " hash=" + System.identityHashCode(packetData));
-        final var completableFuture = new CompletableFuture<Void>();
+        final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
+                ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
         if (outboundChannelFuture.isDone()) {
             Channel channel = outboundChannelFuture.channel();
             if (!channel.isActive()) {
                 log.warn("Channel is not active - future packets for this connection will be dropped.");
                 log.warn("Need to do more sophisticated tracking of progress and retry further up the stack");
-                completableFuture.completeExceptionally(
+                return StringTrackableCompletableFuture.failedFuture(
                         new RuntimeException("The outbound channel's future has completed but " +
-                                "the channel is not in an active state - dropping data"));
-                return completableFuture;
+                                "the channel is not in an active state - dropping data"),
+                        ()->"failed future due to channel not becoming active");
             }
             log.trace("Writing data to backside handler and will return future = "+completableFuture);
             channel.writeAndFlush(packetData)
@@ -92,7 +93,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         try {
                             if (!future.isSuccess()) {
                                 log.warn("closing outbound channel because WRITE future was not successful " +
-                                        future.cause() + " hash=" + System.identityHashCode(packetData));
+                                        future.cause() + " hash=" + System.identityHashCode(packetData) +
+                                        " will be sending the exception to " + completableFuture);
                                 future.channel().close(); // close the backside
                                 cause = future.cause();
                             }
@@ -102,11 +104,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         if (cause == null) {
                             log.debug("Signaling previously returned CompletableFuture packet write was successful: "
                                     + packetData + " hash=" + System.identityHashCode(packetData));
-                            completableFuture.complete(null);
+                            completableFuture.future.complete(null);
                         } else {
                             log.trace("Signaling previously returned CompletableFuture packet write had an exception : "
                                     + packetData + " hash=" + System.identityHashCode(packetData));
-                            completableFuture.completeExceptionally(cause);
+                            completableFuture.future.completeExceptionally(cause);
                         }
                     });
         } else {
@@ -117,21 +119,23 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     if (outboundChannelFuture.isSuccess()) {
                         log.trace("outboundChannelFuture has finished - retriggering consumeBytes" +
                                 " hash=" + System.identityHashCode(packetData));
-                        consumeBytes(packetData).whenComplete((x,t)-> {
+                        consumeBytes(packetData).map(cf->cf.whenComplete((x,t)-> {
                             if (t != null) {
                                 log.warn("inner consumeBytes has finished w/ exception t="+t +
                                         " hash=" + System.identityHashCode(packetData));
-                                completableFuture.completeExceptionally(t);
+                                completableFuture.future.completeExceptionally(t);
                             } else {
                                 log.trace("inner consumeBytes has finished w/ x="+x +
                                         " hash=" + System.identityHashCode(packetData));
-                                completableFuture.complete(x);
+                                completableFuture.future.complete(x);
                             }
-                        });
+                        }),
+                                ()->"NettyPacketToHttpConsumer.consumeBytes() is waiting for the recursive call to " +
+                                        "consumeBytes to finish since the channel wasn't already active yet");
                     } else {
                         log.warn("outbound channel was not set up successfully, NOT writing bytes " +
                                 " hash=" + System.identityHashCode(packetData));
-                        completableFuture.completeExceptionally(outboundChannelFuture.cause());
+                        completableFuture.future.completeExceptionally(outboundChannelFuture.cause());
                     }
             });
         }

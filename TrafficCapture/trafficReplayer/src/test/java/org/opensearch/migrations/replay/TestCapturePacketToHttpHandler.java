@@ -34,10 +34,10 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     }
 
     @Override
-    public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {
+    public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         log.info("incoming buffer refcnt="+nextRequestPacket.refCnt());
         var duplicatedPacket = nextRequestPacket.duplicate().retain();
-        return CompletableFuture.runAsync(() -> {
+        return new DiagnosticTrackableCompletableFuture(CompletableFuture.runAsync(() -> {
             try {
                 log.info("Running async future for " + nextRequestPacket);
                 Thread.sleep(consumeDuration.toMillis());
@@ -52,7 +52,8 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-        });
+        }),
+                ()->"TestCapturePacketToHttpHandler.consumeBytes");
     }
 
     @Override

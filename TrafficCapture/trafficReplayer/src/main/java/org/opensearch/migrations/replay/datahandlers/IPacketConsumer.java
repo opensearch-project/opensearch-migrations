@@ -17,8 +17,8 @@ public interface IPacketConsumer {
         var bb = Unpooled.wrappedBuffer(nextRequestPacket).retain();
         var rval = consumeBytes(bb);
         bb.release();
-        return new DiagnosticTrackableCompletableFuture<String,Void>(rval, ()->"IPacketConsumer.consumeBytes()");
+        return rval;
     }
 
-    CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket);
+    DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket);
 }

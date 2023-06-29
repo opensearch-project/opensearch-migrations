@@ -83,10 +83,6 @@ class TrafficReplayerTest {
                         .setWrite(WriteObservation.newBuilder()
                                 .build())
                         .build())
-                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                        .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
-                                .build())
-                        .build())
                 .build();
     }
 
