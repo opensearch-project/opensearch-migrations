@@ -1,4 +1,4 @@
-# The manifest for the "test" environment.
+# The manifest for the "dev" environment.
 # Read the full specification for the "Environment" type at:
 #  https://aws.github.io/copilot-cli/docs/manifest/environment/
 

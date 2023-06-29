@@ -1,31 +1,34 @@
-# The manifest for the "kafka-broker" service.
+# The manifest for the "capture-proxy" service.
 # Read the full specification for the "Load Balanced Web Service" type at:
 #  https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/
 
-# This is a non-essential experimental service to test running Kafka within ECS. It has no volume, is a single broker, and will be recreated in
-# dev environment deployments. With this in mind, it should only be used on a test basis.
-
 # Your service name will be used in naming your resources like log groups, ECS services, etc.
-name: kafka-broker
+name: capture-proxy
 type: Load Balanced Web Service
-
-## Distribute traffic to your service.
-http: false
-nlb:
-  port: 9092
 
 # Allow service-to-service communication with ECS Service Connect
 network:
   connect: true
 
+# Distribute traffic to your service.
+http:
+  # Requests to this path will be forwarded to your service.
+  # To match all requests you can use the "/" path.
+  path: '/'
+  # You can specify a custom health check path. The default is "/".
+  # healthcheck: '/'
+
 # Configuration for your containers and service.
 image:
-  location: docker.io/bitnami/kafka:3.4
+  # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/#image-build
+  build: ../TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer/Dockerfile
   # Port exposed through your container to route traffic to it.
-  port: 9092
+  port: 80
 
-cpu: 256       # Number of CPU units for the task.
-memory: 2048   # Amount of memory in MiB used by the task.
+command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main  --kafkaConnection ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --enableMSKAuth --destinationUri  http://elasticsearch:9200 --listenPort 80 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
+
+cpu: 512       # Number of CPU units for the task.
+memory: 2048    # Amount of memory in MiB used by the task.
 count: 1       # Number of tasks that should be running in your service.
 exec: true     # Enable getting a shell to your container (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html).
 
@@ -34,18 +37,8 @@ exec: true     # Enable getting a shell to your container (https://docs.aws.amaz
  
 # Optional fields for more advanced use-cases.
 #
-variables:                    # Pass environment variables as key value pairs.
-  # Definitions for some of these variables can be found in the Bitnami docker documentation here: https://hub.docker.com/r/bitnami/kafka/
-  ALLOW_PLAINTEXT_LISTENER: yes
-  KAFKA_ENABLE_KRAFT: no
-  KAFKA_ZOOKEEPER_CONNECT: kafka-zookeeper:2181
-  # Interfaces that Kafka binds to
-  KAFKA_LISTENERS: PLAINTEXT://:9092
-  # Define the protocol to use per listener name
-  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-  # Metadata passed back to clients, that they will use to connect to brokers
-  # This is currently only accessible within an ECS service that can connect to kafka-broker
-  KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092
+#variables:                    # Pass environment variables as key value pairs.
+#  LOG_LEVEL: info
 
 #secrets:                      # Pass secrets from AWS Systems Manager (SSM) Parameter Store.
 #  GITHUB_TOKEN: GITHUB_TOKEN  # The key is the name of the environment variable, the value is the name of the SSM parameter.

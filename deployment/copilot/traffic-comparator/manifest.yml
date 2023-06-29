@@ -47,7 +47,7 @@ exec: true     # Enable getting a shell to your container (https://docs.aws.amaz
 
 # You can override any of the values defined above by environment.
 environments:
-  test:
-    count: 1               # Number of tasks to run for the "test" environment.
-    deployment:            # The deployment strategy for the "test" environment.
+  dev:
+    count: 1               # Number of tasks to run for the "dev" environment.
+    deployment:            # The deployment strategy for the "dev" environment.
       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.

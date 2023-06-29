@@ -43,7 +43,7 @@ export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafk
 
 #### Setting up existing Copilot infrastructure
 
-It is **important** to run any `copilot` commands from within this directory (`deployment/copilot`). When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a test environment, which should be used for proper operation.
+It is **important** to run any `copilot` commands from within this directory (`deployment/copilot`). When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a dev environment, which should be used for proper operation.
 
 When initially setting up Copilot, each component (apps, services, and environments) need to be initialized. Beware when initializing an environment in Copilot, it will prompt you for values even if you've defined them in the `manifest.yml`, though values input at the prompt are ignored in favor of what was specified in the file.
 
@@ -57,9 +57,9 @@ If using temporary environment credentials when initializing an environment:
 // Initialize app
 copilot app init
 
-// Initialize env with required "test" name
+// Initialize env with required "dev" name
 // Be cautious to specify the proper region as this will dictate where resources are deployed
-copilot env init --name test
+copilot env init --name dev
 
 // Initialize services with their respective required name
 copilot svc init --name kafka-puller
@@ -76,13 +76,13 @@ Currently, it seems that Copilot does not support deploying all services at once
 
 ```
 // Deploy environment
-copilot env deploy --name test
+copilot env deploy --name dev
 
 // Deploy services to a deployed environment
-copilot svc deploy --name traffic-comparator-jupyter --env test
-copilot svc deploy --name traffic-comparator --env test
-copilot svc deploy --name traffic-replayer --env test
-copilot svc deploy --name kafka-puller --env test
+copilot svc deploy --name traffic-comparator-jupyter --env dev
+copilot svc deploy --name traffic-comparator --env dev
+copilot svc deploy --name traffic-replayer --env dev
+copilot svc deploy --name kafka-puller --env dev
 ```
 
 ### Executing Commands on a Deployed Service
