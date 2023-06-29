@@ -24,6 +24,8 @@ fi
 export CDK_DEPLOYMENT_STAGE=dev
 # Will be used for CDK and Copilot
 export AWS_DEFAULT_REGION=us-east-1
+# Used to overcome error: "failed to solve with frontend dockerfile.v0: failed to create LLB definition: unexpected
+# status code [manifests latest]: 400 Bad Request" but may not be practical
 export DOCKER_BUILDKIT=0
 export COMPOSE_DOCKER_CLI_BUILD=0
 
@@ -43,6 +45,7 @@ found_exports=$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)
 printf "The following exports were added from CDK:\n%s\n" "$found_exports"
 eval "$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)"
 
+# Future enhancement needed here to make our Copilot deployment able to be reran without error even if no changes are deployed
 # === Copilot Deployment ===
 
 cd ../../copilot
