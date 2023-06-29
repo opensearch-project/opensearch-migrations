@@ -45,12 +45,14 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                 currentFuture.handle((v,t)->
                         packetReceiverCompletionFuture.completeExceptionally(t));
                 packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
+                return;
             } else if (currentFuture.get() == null) {
                 log.info("The handler responsible for writing data to the server was detached before writing byte " +
                         "bytes.  Throwing a NoContentException so that the calling context can handle appropriately.");
                 packetReceiverCompletionFutureRef.set(CompletableFuture.failedFuture(new NoContentException()));
+                return;
             }
-            return;
+            // fall-through
         }
         packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
         currentFuture = currentFuture.whenComplete((v1,t1) -> {

@@ -49,7 +49,7 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
             ch.pipeline().addLast(new SslHandler(sslEngineProvider.get()));
         }
 
-        var offloader = connectionCaptureFactory.createOffloader(ch.id().asShortText());
+        var offloader = connectionCaptureFactory.createOffloader(ch.id().asLongText());
         //ch.pipeline().addLast(new LoggingHandler("PRE", LogLevel.WARN));
         ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
         ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader,

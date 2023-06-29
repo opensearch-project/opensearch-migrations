@@ -20,69 +20,15 @@ import java.util.List;
 
 @Slf4j
 public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
-    static class SimpleHttpResponseDecoder extends HttpResponseDecoder {
-        /**
-         * Override to broaden the visibility.
-         *
-         * @param ctx    the {@link ChannelHandlerContext} which this {@link ByteToMessageDecoder} belongs to
-         * @param buffer the {@link ByteBuf} from which to read data
-         * @param out    the {@link List} to which decoded messages should be added
-         * @throws Exception
-         */
-        @Override
-        public void decode(ChannelHandlerContext ctx, ByteBuf buffer, List<Object> out) throws Exception {
-            super.decode(ctx, buffer, out);
-        }
-
-        @Override
-        public void decodeLast(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
-            super.decodeLast(ctx, in, out);
-        }
-
-        @Override
-        public HttpMessage createMessage(String[] initialLine) {
-            return new DefaultHttpResponse(
-                    HttpVersion.valueOf(initialLine[0]),
-                    HttpResponseStatus.valueOf(Integer.parseInt(initialLine[1]), initialLine[2])
-                    , new PassThruHttpHeaders()
-            );
-        }
-    }
 
     private final IChannelConnectionCaptureSerializer trafficOffloader;
-    private final SimpleHttpResponseDecoder decoder;
 
     public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
-        decoder = new SimpleHttpResponseDecoder();
     }
 
     public HttpCaptureSerializerUtil.HttpProcessedState onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
         return HttpCaptureSerializerUtil.addRelevantHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
-    }
-
-    public void parseHttpMessageParts(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-        var bb = (ByteBuf) msg;
-        bb.markReaderIndex();
-        // todo - move this into a pool
-        var httpProcessedState = HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
-        var parsedMsgs = new ArrayList<>(4);
-        while (bb.readableBytes() > 0) {
-            var lastIdx = bb.readerIndex();
-            log.warn("Parsing from idx="+lastIdx+" readableBytes="+ bb.readableBytes());
-            decoder.decode(ctx, bb, parsedMsgs);
-            httpProcessedState = onHttpObjectsDecoded(parsedMsgs);
-            if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE || // got what we needed
-                    lastIdx == bb.readerIndex()) { // no progress
-                break;
-            }
-            parsedMsgs.clear();
-        }
-        log.trace("Resetting index");
-        bb.resetReaderIndex();
-        if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
-            trafficOffloader.flushCommitAndResetStream(false);
-        }
     }
 
     @Override
@@ -118,7 +64,6 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         trafficOffloader.addWriteEvent(Instant.now(), (ByteBuf) msg);
-        parseHttpMessageParts(ctx, msg, promise);
         super.write(ctx, msg, promise);
     }
 

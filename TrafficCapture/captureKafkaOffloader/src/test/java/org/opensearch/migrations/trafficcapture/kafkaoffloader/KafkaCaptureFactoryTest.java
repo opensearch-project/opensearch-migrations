@@ -24,6 +24,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 public class KafkaCaptureFactoryTest {
 
+    public static final String TEST_NODE_ID_STRING = "test_node_id";
     @Mock
     private Producer<String, byte[]> mockProducer;
 
@@ -32,7 +33,8 @@ public class KafkaCaptureFactoryTest {
 
     @Test
     public void testLinearOffloadingIsSuccessful() throws IOException {
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(mockProducer, 1024*1024);
+        KafkaCaptureFactory kafkaCaptureFactory =
+                new KafkaCaptureFactory(TEST_NODE_ID_STRING, mockProducer, 1024*1024);
         IChannelConnectionCaptureSerializer offloader = kafkaCaptureFactory.createOffloader(connectionId);
 
         List<Callback> recordSentCallbacks = new ArrayList<>(3);
@@ -79,7 +81,8 @@ public class KafkaCaptureFactoryTest {
 
     @Test
     public void testOngoingFuturesAreAggregated() throws IOException {
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(mockProducer, 1024*1024);
+        KafkaCaptureFactory kafkaCaptureFactory =
+                new KafkaCaptureFactory(TEST_NODE_ID_STRING, mockProducer, 1024*1024);
         IChannelConnectionCaptureSerializer offloader = kafkaCaptureFactory.createOffloader(connectionId);
 
         List<Callback> recordSentCallbacks = new ArrayList<>(3);

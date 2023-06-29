@@ -44,7 +44,8 @@ class KafkaPrinterTest {
                 .setNanos(t.getNano())
                 .build();
         var builder = TrafficStream.newBuilder()
-                .setId("testStreamId")
+                .setNodeId("testNode")
+                .setConnectionId("testStreamId")
                 .setNumberOfThisLastChunk(1);
         for (int i = 0; i < numReads; ++i) {
             builder = builder.addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)

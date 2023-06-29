@@ -107,6 +107,12 @@ public class TrafficReplayer {
                 arity=1,
                 description = "input file to read the request/response traces for the source cluster")
         String inputFilename;
+        @Parameter(required = false,
+                names = {"-t", "--packet-timeout-seconds"},
+                arity = 1,
+                description = "assume that connections were terminated after this many " +
+                        "seconds of inactivity observed in the captured stream")
+        int observedPacketConnectionTimeout = 30;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -143,14 +149,16 @@ public class TrafficReplayer {
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
                 try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntriesFromFileOrStdin(params.inputFilename)) {
-                    tr.runReplayWithIOStreams(closeableStream.stream(), bufferedOutputStream);
+                    tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                            closeableStream.stream(), bufferedOutputStream);
                     log.info("reached the end of the ingestion output stream");
                 }
             }
         }
     }
 
-    private void runReplayWithIOStreams(Stream<TrafficStream> trafficChunkStream,
+    private void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
+                                        Stream<TrafficStream> trafficChunkStream,
                                         BufferedOutputStream bufferedOutputStream)
             throws IOException, InterruptedException, ExecutionException {
         AtomicInteger successCount = new AtomicInteger();
@@ -161,10 +169,12 @@ public class TrafficReplayer {
         ConcurrentHashMap<HttpMessageAndTimestamp, CompletableFuture<AggregatedRawResponse>>
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(
+                new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         request -> requestFutureMap.put(request, writeToSocketAndClose(request)),
                         rrPair -> {
-                            log.warn("Done receiving captured stream for this "+rrPair.requestData);
+                            if (log.isTraceEnabled()) {
+                                log.trace("Done receiving captured stream for this "+rrPair.requestData);
+                            }
                             var resultantCf = requestFutureMap.get(rrPair.requestData)
                                     .handle((summary, t) -> {
                                         try {
@@ -182,6 +192,9 @@ public class TrafficReplayer {
         );
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
+        } catch (Exception e) {
+            log.warn("Terminating runReplay due to", e);
+            throw e;
         } finally {
             trafficToHttpTransactionAccumulator.close();
             var allRemainingWorkArray = requestToFinalWorkFuturesMap.values().toArray(CompletableFuture[]::new);
@@ -202,13 +215,20 @@ public class TrafficReplayer {
             } else {
                 log.info(successCount.get() + " requests were successfully processed.");
             }
+            log.info("# of connections created: {}; # of requests on reused keep-alive connections: {}; " +
+                            "# of expired connections: {}; # of connections closed: {}",
+                    trafficToHttpTransactionAccumulator.numberOfConnectionsCreated(),
+                    trafficToHttpTransactionAccumulator.numberOfRequestsOnReusedConnections(),
+                    trafficToHttpTransactionAccumulator.numberOfConnectionsExpired(),
+                    trafficToHttpTransactionAccumulator.numberOfConnectionsClosed()
+            );
             assert requestToFinalWorkFuturesMap.size() == 0 :
                     "expected to wait for all of the in flight requests to fully flush and self destruct themselves";
         }
     }
 
     private static AggregatedRawResponse packageAndWriteResponse(SourceTargetCaptureTuple.TupleToFileWriter tripleWriter, RequestResponsePacketPair rrPair, AggregatedRawResponse summary, Throwable t) {
-        log.warn("done sending and finalizing data to the packet handler");
+        log.trace("done sending and finalizing data to the packet handler");
         SourceTargetCaptureTuple requestResponseTriple;
         if (t != null) {
             log.error("Got exception in CompletableFuture callback: ", t);
@@ -246,15 +266,19 @@ public class TrafficReplayer {
             log.debug("done sending bytes, now finalizing the request");
             return packetHandler.finalizeRequest();
         } catch (Exception e) {
-            log.debug("Caught exception in writeToSocketAndClose, so throwing");
-            throw new RuntimeException(e);
+            log.debug("Caught exception in writeToSocketAndClose, so failing future");
+            return CompletableFuture.failedFuture(e);
         }
     }
 
     public void runReplay(Stream<TrafficStream> trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         trafficChunkStream
-                .forEach(ts->ts.getSubStreamList().stream()
-                        .forEach(o-> trafficToHttpTransactionAccumulator.accept(ts.getId(), o)));
+//                .filter(ts->ts.getConnectionId().equals("0242acfffe150008-00000009-00000019-36de434c8bbbf67d-7242ec9c"))
+//                .limit(4)
+                .forEach(ts-> ts.getSubStreamList().stream()
+                        .forEach(o ->
+                                trafficToHttpTransactionAccumulator.accept(ts.getNodeId(), ts.getConnectionId(), o))
+                );
     }
 }

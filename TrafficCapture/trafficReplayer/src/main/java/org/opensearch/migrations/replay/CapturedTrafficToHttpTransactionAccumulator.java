@@ -1,13 +1,14 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
+import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 
+import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
-import java.util.function.BiConsumer;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -37,76 +38,102 @@ import java.util.function.Consumer;
  * responses may not have been completely received.
  */
 @Slf4j
-public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<String, TrafficObservation> {
-    enum State {
-        NOTHING_SENT,
-        RESPONSE_SENT,
-        REQUEST_SENT
-    }
-    public static class Accumulation {
-        RequestResponsePacketPair rrPair = new RequestResponsePacketPair();
-        State state = State.NOTHING_SENT;
+public class CapturedTrafficToHttpTransactionAccumulator {
 
-        @Override
-        public String toString() {
-            final StringBuilder sb = new StringBuilder("Accumulation{");
-            sb.append("rrPair=").append(rrPair);
-            sb.append(", state=").append(state);
-            sb.append('}');
-            return sb.toString();
-        }
-    }
-    private final Map<String, Accumulation> liveStreams;
+    public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
+    private final ExpiringTrafficStreamMap liveStreams;
     private final Consumer<HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
 
-    public CapturedTrafficToHttpTransactionAccumulator(Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
+    private final AtomicInteger newConnectionCounter = new AtomicInteger();
+    private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
+    private final AtomicInteger closedConnectionCounter = new AtomicInteger();
+    private final AtomicInteger expiredCounter = new AtomicInteger();
+
+    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
+                                                       Consumer<HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler) {
-        liveStreams = new HashMap<>();
+        liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
+                new BehavioralPolicy() {
+                    @Override
+                    public void onExpireAccumulation(String partitionId,
+                                                     String connectionId,
+                                                     Accumulation accumulation) {
+                        expiredCounter.incrementAndGet();
+                        log.error("firing accumulation for accum=[" + connectionId + "]=" + accumulation);
+                        fireAccumulationsCallbacks(accumulation);
+                    }
+                });
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
     }
 
-    @Override
-    public void accept(String id, TrafficObservation observation) {
-        log.error("Stream: " + id + " Consuming observation: " + observation);
+    public int numberOfConnectionsCreated() { return newConnectionCounter.get(); }
+    public int numberOfRequestsOnReusedConnections() { return reusedKeepAliveCounter.get(); }
+    public int numberOfConnectionsClosed() { return closedConnectionCounter.get(); }
+    public int numberOfConnectionsExpired() { return numberOfConnectionsExpired(); }
+
+    public void accept(String nodeId, String connectionId, TrafficObservation observation) {
+        log.debug("Stream: " + nodeId + "/" + connectionId + " Consuming observation: " + observation);
         var timestamp =
                 Optional.of(observation.getTs()).map(t->Instant.ofEpochSecond(t.getSeconds(), t.getNanos())).get();
         if (observation.hasEndOfMessageIndicator()) {
-            var accum = liveStreams.get(id);
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
             if (accum == null) {
                 log.warn("Received EOM w/out an accumulated value, assuming an empty server interaction and " +
                         "NOT reproducing this to the target cluster (TODO - do something better?)");
                 return;
             }
-            handleEndOfMessage(id, accum);
+            handleEndOfMessage(nodeId, connectionId, accum);
         } else if (observation.hasRead()) {
-            var accum = getAccumulationForFirstRequestObservation(id);
-            assert accum.state == State.NOTHING_SENT;
-            var runningList = accum.rrPair;
-            // TODO - eliminate the byte[] and use the underlying nio buffer
-            runningList.addRequestData(timestamp, observation.getRead().getData().toByteArray());
-        } else if (observation.hasReadSegment()) {
-            var accum = getAccumulationForFirstRequestObservation(id);
-            assert accum.state == State.NOTHING_SENT;
-            throw new RuntimeException("Not implemented yet.");
+            var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
+            assert accum.state == Accumulation.State.NOTHING_SENT;
+            log.trace("Adding request data for accum[" + connectionId + "]=" + accum);
+            accum.rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
+            log.trace("Added request data for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasWrite()) {
-            var accum = liveStreams.get(id);
-            assert accum != null && accum.state == State.REQUEST_SENT;
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
+            assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
             var runningList = accum.rrPair;
             if (runningList == null) {
                 throw new RuntimeException("Apparent out of order exception - " +
                         "found a purported write to a socket before a read!");
             }
+            log.trace("Adding response data for accum[" + connectionId + "]=" + accum);
             runningList.addResponseData(timestamp, observation.getWrite().getData().toByteArray());
+            log.trace("Added response data for accum[" + connectionId + "]=" + accum);
+        } else if (observation.hasReadSegment()) {
+            var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
+            assert accum.state == Accumulation.State.NOTHING_SENT;
+            log.trace("Adding request segment for accum[" + connectionId + "]=" + accum);
+            if (accum.rrPair.requestData == null) {
+                accum.rrPair.requestData = new HttpMessageAndTimestamp(timestamp);
+            }
+            accum.rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
+            log.trace("Added request segment for accum[" + connectionId + "]=" + accum);
         } else if (observation.hasWriteSegment()) {
-            var accum = liveStreams.get(id);
-            assert accum != null && accum.state == State.REQUEST_SENT;
-            var runningList = accum.rrPair;
-            throw new RuntimeException("Not implemented yet.");
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
+            assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
+            log.trace("Adding response segment for accum[" + connectionId + "]=" + accum);
+            if (accum.rrPair.responseData == null) {
+                accum.rrPair.responseData = new HttpMessageAndTimestamp(timestamp);
+            }
+            accum.rrPair.responseData.addSegment(observation.getWrite().getData().toByteArray());
+            log.trace("Added response segment for accum[" + connectionId + "]=" + accum);
+        } else if (observation.hasSegmentEnd()) {
+            var accum = liveStreams.get(nodeId, connectionId, timestamp);
+            assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
+            if (accum.rrPair.requestData.hasInProgressSegment()) {
+                accum.rrPair.requestData.finalizeRequestSegments(timestamp);
+            } else if (accum.rrPair.responseData.hasInProgressSegment()) {
+                accum.rrPair.responseData.finalizeRequestSegments(timestamp);
+            } else {
+                throw new RuntimeException("Got an end of segment indicator, but no segments are in progress");
+            }
         } else if (observation.hasConnectionException()) {
-            var accum = liveStreams.remove(id);
-            log.warn("Removing accumulated traffic pair for " + id);
+            closedConnectionCounter.incrementAndGet();
+            var accum = liveStreams.remove(nodeId, connectionId);
+            log.warn("Removing accumulated traffic pair for " + connectionId);
             log.debug("Accumulated object: " + accum);
         } else {
             log.warn("unaccounted for observation type " + observation);
@@ -120,52 +147,64 @@ public class CapturedTrafficToHttpTransactionAccumulator implements BiConsumer<S
     // received.  For the latter case, this will close out the old accumulation,
     // recycling it from the liveStream map and into the response callback (by
     // invoking the callback).
-    private Accumulation getAccumulationForFirstRequestObservation(String id) {
-        var accum = liveStreams.computeIfAbsent(id, k -> new Accumulation());
+    private Accumulation getAccumulationForFirstRequestObservation(String nodeId,
+                                                                   String connectionId,
+                                                                   Instant timestamp) {
+        var accum = liveStreams.getOrCreate(nodeId, connectionId, timestamp);
         // If this was brand new or if we've already closed the item out and pushed
         // the state to RESPONSE_SENT, we don't need to care about triggering the
         // callback.  We only need to worry about this if we have yet to send the
         // RESPONSE.  Notice that handleEndOfMessage will bump the state itself
         // on the (soon to be recycled) accum object.
-        if (accum.state == State.REQUEST_SENT) {
-            handleEndOfMessage(id, accum);
-            accum = new Accumulation();
-            liveStreams.put(id, accum);
+        if (accum.state == Accumulation.State.REQUEST_SENT) {
+            reusedKeepAliveCounter.incrementAndGet();
+            if (log.isDebugEnabled()) {
+                log.debug("Resetting accum[" + connectionId + "]=" + accum);
+            }
+            handleEndOfMessage(nodeId, connectionId, accum);
+            // We shouldn't need to check the state again - it should be NOT_SENT, but in case
+            // this code goes multi-threaded, this might be a bit safer.
+            // TODO - reevaluate once the packet assembly code is more mature
+            return getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
+        } else if (accum.state == Accumulation.State.NOTHING_SENT) {
+            newConnectionCounter.incrementAndGet();
         }
         return accum;
     }
 
     /**
-     * @param id
+     * @param connectionId
      * @param accumulation
      * @return true if there are still callbacks remaining to be called
      */
-    private boolean handleEndOfMessage(String id, Accumulation accumulation) {
+    private boolean handleEndOfMessage(String nodeId, String connectionId, Accumulation accumulation) {
         switch (accumulation.state) {
             case NOTHING_SENT:
                 requestHandler.accept(accumulation.rrPair.requestData);
-                accumulation.state = State.REQUEST_SENT;
+                accumulation.state = Accumulation.State.REQUEST_SENT;
                 return true;
             case REQUEST_SENT:
                 fullDataHandler.accept(accumulation.rrPair);
-                accumulation.state = State.RESPONSE_SENT;
-                liveStreams.remove(id);
+                accumulation.state = Accumulation.State.RESPONSE_SENT;
+                liveStreams.remove(nodeId, connectionId);
         }
         return false;
     }
 
     public void close() {
-        liveStreams.values().forEach(accumulation-> {
-            switch (accumulation.state) {
-                case NOTHING_SENT:
-                    requestHandler.accept(accumulation.rrPair.requestData);
-                    accumulation.state = State.REQUEST_SENT;
-                    // fall through
-                case REQUEST_SENT:
-                    fullDataHandler.accept(accumulation.rrPair);
-                    accumulation.state = State.RESPONSE_SENT;
-            }
-        });
+        liveStreams.values().forEach(this::fireAccumulationsCallbacks);
         liveStreams.clear();
+    }
+
+    private void fireAccumulationsCallbacks(Accumulation accumulation) {
+        switch (accumulation.state) {
+            case NOTHING_SENT:
+                requestHandler.accept(accumulation.rrPair.requestData);
+                accumulation.state = Accumulation.State.REQUEST_SENT;
+                // fall through
+            case REQUEST_SENT:
+                fullDataHandler.accept(accumulation.rrPair);
+                accumulation.state = Accumulation.State.RESPONSE_SENT;
+        }
     }
 }

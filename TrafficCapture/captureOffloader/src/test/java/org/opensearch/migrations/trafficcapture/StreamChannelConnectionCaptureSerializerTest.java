@@ -34,6 +34,7 @@ class StreamChannelConnectionCaptureSerializerTest {
     private final static String FAKE_EXCEPTION_DATA = "abcdefghijklmnop";
     private final static String FAKE_READ_PACKET_DATA = "ABCDEFGHIJKLMNOP";
     public static final String TEST_TRAFFIC_STREAM_ID_STRING = "Test";
+    public static final String TEST_NODE_ID_STRING = "test_node_id";
 
 
     private static TrafficStream makeSampleTrafficStream(Instant t) {
@@ -42,7 +43,8 @@ class StreamChannelConnectionCaptureSerializerTest {
                 .setNanos(t.getNano())
                 .build();
         return TrafficStream.newBuilder()
-                .setId(TEST_TRAFFIC_STREAM_ID_STRING)
+                .setNodeId(TEST_NODE_ID_STRING)
+                .setConnectionId(TEST_TRAFFIC_STREAM_ID_STRING)
                 .setNumberOfThisLastChunk(1)
                 .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                         .setRead(ReadObservation.newBuilder()
@@ -154,7 +156,8 @@ class StreamChannelConnectionCaptureSerializerTest {
         final var referenceTimestamp = Instant.now(Clock.systemUTC());
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
         // Arbitrarily picking small buffer size that can only hold one empty message
-        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 40);
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated,
+                TEST_NODE_ID_STRING.length() + 40);
         var bb = Unpooled.buffer(0);
         serializer.addWriteEvent(referenceTimestamp, bb);
         serializer.addWriteEvent(referenceTimestamp, bb);
@@ -197,7 +200,8 @@ class StreamChannelConnectionCaptureSerializerTest {
         Assertions.assertEquals(1, outputBuffersCreated.size());
         var onlyBuffer = outputBuffersList.get(0);
         var reconstitutedTrafficStream = TrafficStream.parseFrom(onlyBuffer);
-        Assertions.assertEquals(TEST_TRAFFIC_STREAM_ID_STRING, reconstitutedTrafficStream.getId());
+        Assertions.assertEquals(TEST_TRAFFIC_STREAM_ID_STRING, reconstitutedTrafficStream.getConnectionId());
+        Assertions.assertEquals(TEST_NODE_ID_STRING, reconstitutedTrafficStream.getNodeId());
         Assertions.assertEquals(5, reconstitutedTrafficStream.getSubStreamCount());
         Assertions.assertEquals(1, reconstitutedTrafficStream.getNumberOfThisLastChunk());
         Assertions.assertFalse(reconstitutedTrafficStream.hasNumber());
@@ -206,15 +210,17 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     private StreamChannelConnectionCaptureSerializer
-    createSerializerWithTestHandler(ConcurrentLinkedQueue<ByteBuffer> outputBuffers, int bufferSize) throws IOException {
+    createSerializerWithTestHandler(ConcurrentLinkedQueue<ByteBuffer> outputBuffers, int bufferSize)
+            throws IOException {
         var codedStreamToByteBuffersMap = new ConcurrentHashMap<CodedOutputStream, ByteBuffer>();
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
-        return new StreamChannelConnectionCaptureSerializer(TEST_TRAFFIC_STREAM_ID_STRING,
+        return new StreamChannelConnectionCaptureSerializer(TEST_NODE_ID_STRING, TEST_TRAFFIC_STREAM_ID_STRING,
             () -> {
                 ByteBuffer bytes = ByteBuffer.allocate(bufferSize);
                 var rval = CodedOutputStream.newInstance(bytes);
                 codedStreamToByteBuffersMap.put(rval, bytes);
+                log.trace("Put COS: " + rval + " into map (keys="+ mapToKeyStrings(codedStreamToByteBuffersMap) +") with bytes=" + bytes);
                 return rval;
             },
             (codedOutputStream) -> {
@@ -239,5 +245,9 @@ class StreamChannelConnectionCaptureSerializerTest {
                 return singleAggregateCfRef[0];
             }
         );
+    }
+
+    private static String mapToKeyStrings(ConcurrentHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBuffersMap) {
+        return codedStreamToByteBuffersMap.keySet().stream().map(k -> k.toString()).collect(Collectors.joining(","));
     }
 }
