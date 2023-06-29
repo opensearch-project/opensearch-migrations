@@ -23,7 +23,7 @@ fi
 # === CDK Deployment ===
 export CDK_DEPLOYMENT_STAGE=dev
 # Will be used for CDK and Copilot
-export CDK_DEFAULT_REGION=us-east-1
+export AWS_DEFAULT_REGION=us-east-2
 export DOCKER_BUILDKIT=0
 export COMPOSE_DOCKER_CLI_BUILD=0
 
@@ -52,7 +52,7 @@ if [ "$skip_init" = false ] ; then
   copilot app init migration-copilot
 
   # Init env
-  copilot env init -a migration-copilot --name dev --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $CDK_DEFAULT_REGION
+  copilot env init -a migration-copilot --name dev --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
 
   # Init services
   copilot svc init -a migration-copilot --name traffic-comparator-jupyter
