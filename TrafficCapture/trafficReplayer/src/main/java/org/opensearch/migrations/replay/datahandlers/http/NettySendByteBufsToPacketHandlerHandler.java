@@ -9,6 +9,7 @@ import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.AggregatedTransformedResponse;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -36,67 +37,65 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();
         this.diagnosticLabel = diagnosticLabel;
         currentFuture = DiagnosticTrackableCompletableFuture.factory.completedFuture(null,
-                ()->"currentFuture for NettySendByteBufsToPacketHandlerHandler initialized to the base case");
+                ()->"currentFuture for NettySendByteBufsToPacketHandlerHandler initialized to the base case for " + diagnosticLabel);
     }
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         log.debug("Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
         log.trace("HR: old currentFuture="+currentFuture);
-        DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> packetReceiverCompletionFuture =
-                new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(),
-                        () -> "Waiting for NettySendByteBufsToPacketHandlerHandler to complete this future.  " +
-                                "this.currentFuture, whose completion will complete this future is currently:\n" +
-                                "    <<" + currentFuture + ">>\n");
+//                        () -> "Waiting for NettySendByteBufsToPacketHandlerHandler to complete this future.  " +
+//                                "this.currentFuture, whose completion will complete this future is currently:\n" +
+//                                "    <<" + currentFuture + ">>\n");
         if (currentFuture.future.isDone()) {
             if (currentFuture.future.isCompletedExceptionally()) {
-                currentFuture.map(cf->cf.handle((v,t)->
-                        packetReceiverCompletionFuture.map(cf2->{
-                            cf2.completeExceptionally(t);
-                            return cf2;
-                        }, ()->"handlerRemoved: packetReceiverCompletionFuture receiving exceptional value")),
-                        ()->"handlerRemoved: mapping the completed currentFuture's exception " +
-                                "to the exposed packetReceiverCompletionFuture");
-                packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
+                packetReceiverCompletionFutureRef.set(currentFuture.getDeferredFutureThroughHandle((v,t)->
+                                StringTrackableCompletableFuture.failedFuture(t, ()->"fixed failure"),
+                        ()->"handlerRemoved: packetReceiverCompletionFuture receiving exceptional value"));
                 return;
             } else if (currentFuture.get() == null) {
                 log.info("The handler responsible for writing data to the server was detached before writing byte " +
                         "bytes.  Throwing a NoContentException so that the calling context can handle appropriately.");
-                packetReceiverCompletionFutureRef.
-                        set(DiagnosticTrackableCompletableFuture.factory.failedFuture(new NoContentException(),
+                packetReceiverCompletionFutureRef.set(
+                        StringTrackableCompletableFuture.failedFuture(new NoContentException(),
                                 ()->"Setting NoContentException to the exposed CompletableFuture" +
                                         " of NettySendByteBufsToPacketHandlerHandler"));
                 return;
             }
             // fall-through
         }
-        packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
-        // I don't want to capture this object, but the preexisting value of the currentFuture field
-        final var preexistingFutureForCapture = currentFuture;
-        currentFuture = currentFuture.getDeferredFutureThroughHandle((v1, t1) -> {
+
+        var packetReceiverCompletionFuture = currentFuture.getDeferredFutureThroughHandle((v1, t1) -> {
                     assert v1 != null :
                             "expected in progress Boolean to be not null since null should signal that work was never started";
                     var transformationStatus = v1.booleanValue() ?
                             AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED :
                             AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR;
-                    return packetReceiver.finalizeRequest().handle((v2, t2) -> {
+                    return packetReceiver.finalizeRequest().getDeferredFutureThroughHandle((v2, t2) -> {
                                 if (t1 != null) {
-                                    packetReceiverCompletionFuture.future.completeExceptionally(t1);
+                                    return StringTrackableCompletableFuture.<AggregatedTransformedResponse>failedFuture(t1,
+                                            ()->"fixed failure from currentFuture.getDeferredFutureThroughHandle()");
                                 } else if (t2 != null) {
-                                    packetReceiverCompletionFuture.future.completeExceptionally(t2);
+                                    return StringTrackableCompletableFuture.<AggregatedTransformedResponse>failedFuture(t2,
+                                            ()->"fixed failure from packetReceiver.finalizeRequest()");
                                 } else {
-                                    packetReceiverCompletionFuture.future
-                                            .complete(Optional.ofNullable(v2)
+                                    return StringTrackableCompletableFuture.completedFuture(Optional.ofNullable(v2)
                                                     .map(r->new AggregatedTransformedResponse(r,  transformationStatus))
-                                                    .orElse(null));
+                                                    .orElse(null),
+                                            ()->"fixed value from packetReceiver.finalizeRequest()"
+                                            );
                                 }
-                                return true;
                             },
                             ()->"handlerRemoved: NettySendByteBufsToPacketHandlerHandler is setting the completed value for its " +
                                     "packetReceiverCompletionFuture, after the packets have been finalized " +
                                     "to the packetReceiver");
                 },
                 () -> "handlerRemoved: waiting for the currentFuture to finish");
+        currentFuture = packetReceiverCompletionFuture.getDeferredFutureThroughHandle((v,t)->
+                StringTrackableCompletableFuture.<Boolean>completedFuture(true,
+                        ()->"ignoring return type of packetReceiver.finalizeRequest() but waiting for it to finish"),
+                ()->"Waiting for packetReceiver.finalizeRequest() and will return once that is done");
+        packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
         log.trace("HR: new currentFuture="+currentFuture);
         super.handlerRemoved(ctx);
     }

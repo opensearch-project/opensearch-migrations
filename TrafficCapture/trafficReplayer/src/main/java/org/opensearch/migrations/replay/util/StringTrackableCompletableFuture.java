@@ -17,7 +17,7 @@ public class StringTrackableCompletableFuture<T>
     }
 
     public static <T> StringTrackableCompletableFuture<T>
-    failedFuture(Exception e, Supplier<String> diagnosticSupplier) {
+    failedFuture(Throwable e, Supplier<String> diagnosticSupplier) {
         return new StringTrackableCompletableFuture<>(CompletableFuture.failedFuture(e), diagnosticSupplier);
     }
 

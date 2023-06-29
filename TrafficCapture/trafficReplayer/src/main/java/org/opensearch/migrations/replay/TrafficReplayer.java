@@ -350,8 +350,6 @@ public class TrafficReplayer {
     public void runReplay(Stream<TrafficStream> trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         trafficChunkStream
-                .filter(ts->ts.getConnectionId().equals("0242acfffe180008-0000000a-0000000d-168310809a55863e-687dec40"))
-                .limit(2)
                 .forEach(ts-> ts.getSubStreamList().stream()
                         .forEach(o ->
                                 trafficToHttpTransactionAccumulator.accept(ts.getNodeId(), ts.getConnectionId(), o))
