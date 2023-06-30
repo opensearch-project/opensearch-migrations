@@ -65,7 +65,7 @@ export class MSKUtilityStack extends Stack {
                 timeout: Duration.minutes(15),
                 entry: path.join(__dirname, 'lambda/msk-public-endpoint-handler.ts'),
                 role: lambdaExecRole,
-                environment: {MSK_ARN: props.mskARN, MAX_ATTEMPTS: "3"}
+                environment: {MSK_ARN: props.mskARN, MAX_ATTEMPTS: "4"}
             });
 
             const customResourceProvider = new Provider(this, 'customResourceProvider', {
@@ -94,7 +94,7 @@ export class MSKUtilityStack extends Stack {
             brokerEndpointsOutput = waitCondition.attrData.toString()
         }
         else {
-            const mskGetBrokersCustomResource = getBrokersCR(this, props.vpc, props.mskARN)
+            const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, props.mskARN)
             brokerEndpointsOutput = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")
             //brokerEndpointsOutput = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
         }
@@ -106,7 +106,7 @@ export class MSKUtilityStack extends Stack {
     }
 }
 
-export function getBrokersCR(scope: Construct, vpc: IVpc, clusterArn: string): AwsCustomResource {
+export function getBrokersCustomResource(scope: Construct, vpc: IVpc, clusterArn: string): AwsCustomResource {
     const getBrokersCR = new AwsCustomResource(scope, 'migrationMSKGetBrokersCR', {
         onCreate: {
             service: 'Kafka',
