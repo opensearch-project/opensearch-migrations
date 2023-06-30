@@ -164,13 +164,14 @@ def run(args: argparse.Namespace) -> None:
     target_indices = index_operations.fetch_all_indices(target_endpoint, target_auth)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
-    if args.report or args.dryrun:
+    if args.report:
         print_report(diff)
     # The first element in the tuple is the set of indices to create
     indices_to_create = diff[0]
     if indices_to_create:
         # Write output YAML
-        write_output(dp_config, indices_to_create, args.output_file)
+        if not args.report:
+            write_output(dp_config, indices_to_create, args.output_file)
         if not args.dryrun:
             index_data = dict()
             for index_name in indices_to_create:
@@ -183,10 +184,13 @@ if __name__ == '__main__':  # pragma no cover
     arg_parser = argparse.ArgumentParser(
         prog="python main.py",
         description="This tool creates indices on a target cluster based on the contents of a source cluster.\n" +
-        "The source and target endpoints are obtained by parsing a Data Prepper pipelines YAML file, which " +
-        "is the sole expected argument for this module.\nAlso prints a report of the indices to be created, " +
-        "along with indices that are identical or have conflicting settings/mappings.\nIn case of the " +
-        "latter, no action will be taken on the target cluster.",
+        "The first input to the tool is a path to a Data Prepper pipeline YAML file, which is parsed to obtain " +
+        "the source and target cluster endpoints.\nThe second input is an output path to which a modified version " +
+        "of the pipeline YAML file is written. This version of the pipeline adds an index inclusion configuration " +
+        "to the sink, specifying only those indices that were created by the index configuration tool.\nThis tool " +
+        "can also print a report based on the indices in the source cluster, indicating which ones will be created, " +
+        "along with indices that are identical or have conflicting settings/mappings.\nIn case of the latter, no "
+        "action will be taken on the target cluster.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     # Positional, required arguments
@@ -202,7 +206,7 @@ if __name__ == '__main__':  # pragma no cover
     arg_parser.add_argument("--report", "-r", action="store_true",
                             help="Print a report of the index differences instead of generating a YAML file")
     arg_parser.add_argument("--dryrun", action="store_true",
-                            help="Print a report of the index differences but don't create any indices")
+                            help="Skips the actual creation of indices on the target cluster")
     print("\n##### Starting index configuration tool... #####\n")
     run(arg_parser.parse_args())
     print("\n##### Index configuration tool has completed! #####\n")

@@ -1,3 +1,4 @@
+import argparse
 import copy
 import pickle
 import random
@@ -224,11 +225,13 @@ class TestMain(unittest.TestCase):
         test_config = next(iter(self.loaded_pipeline_config.values()))
         main.validate_pipeline_config(test_config)
 
+    @patch('main.write_output')
     @patch('main.print_report')
     @patch('index_operations.create_indices')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
-    def test_run(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock, mock_print_report: MagicMock):
+    def test_run_report(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock,
+                        mock_print_report: MagicMock, mock_write_output: MagicMock):
         index_to_create = test_constants.INDEX3_NAME
         index_with_conflict = test_constants.INDEX2_NAME
         index_exact_match = test_constants.INDEX1_NAME
@@ -245,9 +248,67 @@ class TestMain(unittest.TestCase):
         index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
         # Fetch indices is called first for source, then for target
         mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
-        main.run(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH)
+        # Set up test input
+        test_input = argparse.Namespace()
+        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
+        test_input.report = True
+        test_input.dryrun = False
+        main.run(test_input)
         mock_create_indices.assert_called_once_with(expected_create_payload, test_constants.TARGET_ENDPOINT, ANY)
         mock_print_report.assert_called_once_with(expected_diff)
+        # Write output should never be called when report is generated
+        mock_write_output.assert_not_called()
+
+    @patch('main.print_report')
+    @patch('main.write_output')
+    @patch('index_operations.fetch_all_indices')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
+                        mock_print_report: MagicMock):
+        index_to_create = test_constants.INDEX1_NAME
+        expected_output_path = "dummy"
+        # Create mock data for indices on target
+        target_indices_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        del target_indices_data[index_to_create]
+        # Fetch indices is called first for source, then for target
+        mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
+        # Set up test input
+        test_input = argparse.Namespace()
+        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
+        test_input.output_file = expected_output_path
+        test_input.dryrun = True
+        test_input.report = False
+        main.run(test_input)
+        mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
+        # Report should not be printed
+        mock_print_report.assert_not_called()
+
+    @patch('yaml.dump')
+    def test_write_output(self, mock_dump: MagicMock):
+        expected_output_path = "dummy"
+        index_to_create = "good_index"
+        # Set up expected data that will be dumped
+        expected_output_data = copy.deepcopy(self.loaded_pipeline_config)
+        expected_output_data['test-pipeline-input']['source'] = {
+            'opensearch': {
+                'indices': {
+                    'exclude': [
+                        {'index_name_regex': 'bad_index'}
+                    ],
+                    'include': [
+                        {'index_name_regex': index_to_create}
+                    ]
+                }
+            }
+        }
+        # Set up test input
+        test_input = copy.deepcopy(expected_output_data)
+        del test_input['test-pipeline-input']['source']['opensearch']['indices']['include']
+        # Call method under test
+        with patch('builtins.open') as mock_open:
+            main.write_output(test_input, {index_to_create}, expected_output_path)
+            mock_open.assert_called_once_with(expected_output_path, 'w')
+            mock_dump.assert_called_once_with(expected_output_data, ANY)
 
 
 if __name__ == '__main__':
