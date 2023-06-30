@@ -1,0 +1,44 @@
+# You can use any of these parameters to create conditions or mappings in your template.
+Parameters:
+  App:
+    Type: String
+    Description: Your application's name.
+  Env:
+    Type: String
+    Description: The environment name your service, job, or workflow is being deployed to.
+  Name:
+    Type: String
+    Description: Your workload's name.
+    
+Resources:
+  MSKPublisherAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allow Fargate container to consume from MSK
+      PolicyDocument:
+        Version: '2012-10-17'
+        # We should enhance IAM policy here to further restrict the Resource
+        Statement:
+          - Action:
+              - kafka-cluster:AlterCluster
+              - kafka-cluster:Connect
+              - kafka-cluster:DescribeCluster
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - kafka-cluster:*Topic*
+              - kafka-cluster:ReadData
+              - kafka-cluster:WriteData
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - kafka-cluster:AlterGroup
+              - kafka-cluster:DescribeGroup
+            Effect: Allow
+            Resource: "*"
+
+Outputs:
+  # 1. You need to output the IAM ManagedPolicy so that Copilot can add it as a managed policy to your ECS task role.
+  MSKPublisherAccessPolicyArn:
+    Description: "The ARN of the ManagedPolicy to attach to the task role."
+    Value: !Ref MSKPublisherAccessPolicy

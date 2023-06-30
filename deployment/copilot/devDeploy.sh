@@ -50,6 +50,9 @@ eval "$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)"
 
 cd ../../copilot
 
+# Allow script to continue on error for copilot services, as copilot will error when no changes are needed
+set +e
+
 if [ "$skip_init" = false ] ; then
   # Init app
   copilot app init migration-copilot

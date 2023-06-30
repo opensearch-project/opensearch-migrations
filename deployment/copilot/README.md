@@ -36,6 +36,7 @@ export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_PUBLIC_SUBNET_1=subnet-123;
 export MIGRATION_PUBLIC_SUBNET_2=subnet-124;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
 export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
@@ -67,6 +68,9 @@ copilot svc init --name traffic-replayer
 copilot svc init --name traffic-comparator
 copilot svc init --name traffic-comparator-jupyter
 
+copilot svc init --name elasticsearch
+copilot svc init --name capture-proxy
+
 ```
 
 ### Deploying Services to an Environment
@@ -83,6 +87,9 @@ copilot svc deploy --name traffic-comparator-jupyter --env dev
 copilot svc deploy --name traffic-comparator --env dev
 copilot svc deploy --name traffic-replayer --env dev
 copilot svc deploy --name kafka-puller --env dev
+
+copilot svc deploy --name elasticsearch --env dev
+copilot svc deploy --name capture-proxy --env dev
 ```
 
 ### Executing Commands on a Deployed Service
@@ -93,6 +100,8 @@ copilot svc exec traffic-comparator-jupyter --container traffic-comparator-jupyt
 copilot svc exec traffic-comparator --container traffic-comparator --command "bash"
 copilot svc exec traffic-replayer --container traffic-replayer --command "bash"
 copilot svc exec kafka-puller --container kafka-puller --command "bash"
+copilot svc exec elasticsearch --container elasticsearch --command "bash"
+copilot svc exec capture-proxy --container capture-proxy --command "bash"
 ```
 
 ### Addons

@@ -5,7 +5,9 @@ import {
     InstanceSize,
     InstanceType,
     IVpc,
-    MachineImage, Peer, Port,
+    MachineImage,
+    Peer,
+    Port,
     SecurityGroup,
     SubnetType
 } from "aws-cdk-lib/aws-ec2";
@@ -13,11 +15,13 @@ import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {StackPropsExt} from "./stack-composer";
+import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 
 export interface migrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     // Future support needed to allow importing an existing MSK cluster
     readonly mskARN?: string,
+    readonly mskEnablePublicEndpoints?: boolean
     readonly targetEndpoint: string
 }
 
@@ -35,6 +39,21 @@ export class MigrationAssistanceStack extends Stack {
             serverProperties: "auto.create.topics.enable=true"
         })
 
+        const mskSecurityGroup = new SecurityGroup(this, 'migrationMSKSecurityGroup', {
+            vpc: props.vpc,
+            allowAllOutbound: true
+        });
+        // This will allow all ip access for all TCP ports by default when public access is enabled,
+        // it should be updated if further restriction is desired
+        if (props.mskEnablePublicEndpoints) {
+            mskSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.allTcp())
+        }
+        mskSecurityGroup.addIngressRule(mskSecurityGroup, Port.allTraffic())
+
+        const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
+            retention: RetentionDays.THREE_MONTHS
+        });
+
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
             clusterName: 'migration-msk-cluster',
@@ -49,6 +68,7 @@ export class MigrationAssistanceStack extends Stack {
                         type: "DISABLED"
                     }
                 },
+                securityGroups: [mskSecurityGroup.securityGroupId]
             },
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
@@ -70,6 +90,14 @@ export class MigrationAssistanceStack extends Stack {
                 },
                 unauthenticated: {
                     enabled: false
+                }
+            },
+            loggingInfo: {
+                brokerLogs: {
+                    cloudWatchLogs: {
+                        enabled: true,
+                        logGroup: mskLogGroup.logGroupName
+                    }
                 }
             }
         });
@@ -112,6 +140,7 @@ export class MigrationAssistanceStack extends Stack {
             `export MIGRATION_PUBLIC_SUBNET_1=${props.vpc.publicSubnets[0].subnetId}`,
             `export MIGRATION_PUBLIC_SUBNET_2=${props.vpc.publicSubnets[1].subnetId}`,
             `export MIGRATION_DOMAIN_ENDPOINT=${props.targetEndpoint}`,
+            `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
             `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
             `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`]
 
