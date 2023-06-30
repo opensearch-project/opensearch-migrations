@@ -10,6 +10,7 @@ SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
 SOURCE_KEY = "source"
 SINK_KEY = "sink"
 HOSTS_KEY = "hosts"
+DISABLE_AUTH_KEY = "disable_authentication"
 USER_KEY = "username"
 PWD_KEY = "password"
 INSECURE_KEY = "insecure"
@@ -28,7 +29,7 @@ def is_insecure(config: dict) -> bool:
 
 # TODO Only supports basic auth for now
 def get_auth(input_data: dict) -> Optional[tuple]:
-    if USER_KEY in input_data and PWD_KEY in input_data:
+    if not input_data.get(DISABLE_AUTH_KEY, False) and USER_KEY in input_data and PWD_KEY in input_data:
         return input_data[USER_KEY], input_data[PWD_KEY]
 
 
@@ -77,10 +78,14 @@ def validate_plugin_config(config: dict, key: str):
     plugin_config = supported_endpoint[1]
     if HOSTS_KEY not in plugin_config:
         raise ValueError("No hosts defined for endpoint: " + supported_endpoint[0])
-    if USER_KEY in plugin_config and PWD_KEY not in plugin_config:
-        raise ValueError("Invalid auth configuration (no password for user) for endpoint: " + supported_endpoint[0])
-    elif PWD_KEY in plugin_config and USER_KEY not in plugin_config:
-        raise ValueError("Invalid auth configuration (Password without user) for endpoint: " + supported_endpoint[0])
+    # Check if auth is disabled. If so, no further validation is required
+    if plugin_config.get(DISABLE_AUTH_KEY, False):
+        return
+    elif USER_KEY not in plugin_config:
+        raise ValueError("Invalid auth configuration (no username) for endpoint: " + supported_endpoint[0])
+    elif PWD_KEY not in plugin_config:
+        raise ValueError("Invalid auth configuration (no password for username) for endpoint: " +
+                         supported_endpoint[0])
 
 
 def validate_pipeline_config(config: dict):
