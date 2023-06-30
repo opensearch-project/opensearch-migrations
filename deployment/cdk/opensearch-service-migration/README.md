@@ -29,7 +29,10 @@ A `CDK_DEPLOYMENT_STAGE` environment variable must be set to assist in naming re
 ### Deploying your CDK
 Before deploying your CDK you should fill in any desired context parameters that will dictate the composition of your OpenSearch Service Domain
 
-This can be accomplished by providing these options in a `cdk.context.json` file
+This can be accomplished by providing these options in a `cdk.context.json` file and then deploying like so:
+```
+cdk deploy "*"
+```
 
 Or by passing the context options you want to change as options in the CDK CLI
 ```
@@ -100,10 +103,8 @@ Additional context on some of these options, can also be found in the Domain con
 | availabilityZoneCount                           | false    | number       | 1                                                                                                                                                                                                                              | The number of Availability Zones for the Domain to use. If not specified a single AZ is used. If specified the Domain CDK construct requires at least 2 AZs                                                                                                  |
 | openAccessPolicyEnabled                         | false    | boolean      | false                                                                                                                                                                                                                          | Applies an open access policy to the Domain. **NOTE**: This setting should only be used for Domains placed within a VPC, and is applicable to many use cases where access controlled by Security Groups on the VPC is sufficient.                            |
 | domainRemovalPolicy                             | false    | string       | "RETAIN"                                                                                                                                                                                                                       | Policy to apply when the domain is removed from the CloudFormation stack                                                                                                                                                                                     |
-| MSKARN                                          | false    | string       | `"arn:aws:kafka:us-east-2:123456789123:cluster/msk-cluster-test/81fbae45-5d25-44bb-aff0-108e71cc079b-7"`                                                                                                                       | Supply the Managed Streaming Apache Kafka Cluster ARN                                                                                                                                                                                                        |
-| MSKBrokers                                      | false    | object       | ["localhost"]                                                                                                                                                                                                                  | Supply the broker's addresses to be pulling from                                                                                                                                                                                                             |
-| MSKTopic                                        | fasle    | string       | "first_topic"                                                                                                                                                                                                                  | Supply the names of the topics to be pulling from                                                                                                                                                                                                            |
-
+| mskARN (Not currently available)                | false    | string       | `"arn:aws:kafka:us-east-2:123456789123:cluster/msk-cluster-test/81fbae45-5d25-44bb-aff0-108e71cc079b-7"`                                                                                                                       | Supply an existing MSK cluster ARN to use. **NOTE** As MSK is using an L1 construct this is not currently available for use                                                                                                                                  |
+| mskEnablePublicEndpoints                        | false    | boolean      | true                                                                                                                                                                                                                           | Specify if public endpoints should be enabled on the MSK cluster                                                                                                                                                                                             |
 
 A template `cdk.context.json` to be used to fill in these values is below:
 ```
@@ -138,7 +139,9 @@ A template `cdk.context.json` to be used to fill in these values is below:
   "vpcSecurityGroupIds": "",
   "availabilityZoneCount": "",
   "openAccessPolicyEnabled": "",
-  "domainRemovalPolicy": ""
+  "domainRemovalPolicy": "",
+  "mskARN": "",
+  "mskEnablePublicEndpoints": ""
 }
 
 ```
