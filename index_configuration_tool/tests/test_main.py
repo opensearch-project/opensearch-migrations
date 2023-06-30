@@ -187,11 +187,15 @@ class TestMain(unittest.TestCase):
         test_data = create_config_section({})
         self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
 
-    def test_validate_plugin_config_bad_auth_password(self):
+    def test_validate_plugin_config_missing_auth(self):
+        test_data = create_config_section(create_plugin_config(["host"]))
+        self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
+
+    def test_validate_plugin_config_missing_password(self):
         test_data = create_config_section(create_plugin_config(["host"], user="test", disable_auth=False))
         self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
 
-    def test_validate_plugin_config_bad_auth_user(self):
+    def test_validate_plugin_config_missing_user(self):
         test_data = create_config_section(create_plugin_config(["host"], password="test"))
         self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
 
