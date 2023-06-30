@@ -78,13 +78,14 @@ def validate_plugin_config(config: dict, key: str):
     plugin_config = supported_endpoint[1]
     if HOSTS_KEY not in plugin_config:
         raise ValueError("No hosts defined for endpoint: " + supported_endpoint[0])
-    if not plugin_config.get(DISABLE_AUTH_KEY, False):
-        if USER_KEY in plugin_config and PWD_KEY not in plugin_config:
-            raise ValueError("Invalid auth configuration (no password for user) for endpoint: " +
-                             supported_endpoint[0])
-        elif PWD_KEY in plugin_config and USER_KEY not in plugin_config:
-            raise ValueError("Invalid auth configuration (Password without user) for endpoint: " +
-                             supported_endpoint[0])
+    # Check if auth is disabled. If so, no further validation is required
+    if plugin_config.get(DISABLE_AUTH_KEY, False):
+        return
+    elif USER_KEY not in plugin_config:
+        raise ValueError("Invalid auth configuration (no username) for endpoint: " + supported_endpoint[0])
+    elif PWD_KEY not in plugin_config:
+        raise ValueError("Invalid auth configuration (no password for username) for endpoint: " +
+                         supported_endpoint[0])
 
 
 def validate_pipeline_config(config: dict):
