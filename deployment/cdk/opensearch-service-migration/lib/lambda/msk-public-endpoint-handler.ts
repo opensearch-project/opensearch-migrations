@@ -2,6 +2,15 @@ import {Context} from 'aws-lambda';
 import {DescribeClusterV2Command, UpdateConnectivityCommand, GetBootstrapBrokersCommand, KafkaClient} from "@aws-sdk/client-kafka";
 import {InvokeCommand, LambdaClient} from "@aws-sdk/client-lambda"
 
+/**
+ *
+ * NOTE: This is a temporary piece to allow enabling MSK public endpoint upon creation of MSK in CDK. It will regularly check the
+ * MSK cluster until the update is complete by recursively calling itself (up to a set number of times) until it has detected the
+ * cluster to be ACTIVE, which is necessary for updates lasting over 15 minutes, and then trigger a CFN wait condition that
+ * the process is complete. This is not best practice and should be replaced with something such as AWS Step Functions in a future update.
+ *
+ */
+
 function delay(ms: number) {
     return new Promise( resolve => setTimeout(resolve, ms) );
 }
@@ -115,9 +124,19 @@ export const handler = async (event: any, context: Context): Promise<void> => {
     let maxAttempts = process.env.MAX_ATTEMPTS ? parseInt(process.env.MAX_ATTEMPTS) : undefined
     if (!maxAttempts) {
         console.log('Max attempts not provided by environment or unable to be parsed, defaulting to 3 attempts')
-        maxAttempts = 3
+        maxAttempts = 4
     }
     if (!process.env.MSK_ARN) {
+        const failedInputRequirementResponse = {
+            Status: "FAILURE",
+            Reason: "Unable to process connectivity update as a required env variable is missing [MSK_ARN]",
+            // Since our wait condition only needs one occurrence this value can be any static value
+            UniqueId: "updateConnectivityID",
+            Data: "Update failed: Unable to process connectivity update as a required env variable is missing [MSK_ARN]"
+        }
+        const waitCondCall = event.Attempt == undefined ? event.ResourceProperties.CallbackUrl : event.CallbackUrl
+        // @ts-ignore
+        await fetch(waitCondCall, {method: 'PUT', body: JSON.stringify(failedInputRequirementResponse)});
         throw Error(`Missing at least one required environment variable [MSK_ARN: ${process.env.MSK_ARN}]`)
     }
 
@@ -137,7 +156,16 @@ export const handler = async (event: any, context: Context): Promise<void> => {
         console.log(`Starting attempt no. ${event.Attempt}`)
         callback = event.CallbackUrl
         if (event.Attempt > maxAttempts) {
-            console.log("Unable to conclude update has completed after max attempts... Stopping now")
+            console.log("Unable to conclude connectivity update has completed after max attempts... Alerting failure and stopping now")
+            const failedTimeRequirementResponse = {
+                Status: "FAILURE",
+                Reason: "Unable to conclude update has completed after max attempts",
+                // Since our wait condition only needs one occurrence this value can be any static value
+                UniqueId: "updateConnectivityID",
+                Data: "Update failed: Unable to conclude connectivity update has completed after max attempts"
+            }
+            // @ts-ignore
+            await fetch(callback, {method: 'PUT', body: JSON.stringify(failedTimeRequirementResponse)});
             return
         }
         attempt = event.Attempt + 1
@@ -147,7 +175,8 @@ export const handler = async (event: any, context: Context): Promise<void> => {
         Attempt: attempt,
         CallbackUrl: callback
     }
-    while(context.getRemainingTimeInMillis() > 25000) {
+    // Continue polling until there is 5 minutes or less remaining in Lambda
+    while(context.getRemainingTimeInMillis() > 300000) {
         const clusterResponse = await describeClusterV2()
         const state = clusterResponse.ClusterInfo.State
         console.log("Current cluster state is: " + state)
