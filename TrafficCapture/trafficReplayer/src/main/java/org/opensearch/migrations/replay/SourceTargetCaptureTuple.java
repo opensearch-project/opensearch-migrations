@@ -17,14 +17,23 @@ import java.util.Scanner;
 @Slf4j
 public class SourceTargetCaptureTuple {
     private RequestResponsePacketPair sourcePair;
-    private List<byte[]> shadowResponseData;
+    private final List<byte[]> shadowRequestData;
+    private final List<byte[]> shadowResponseData;
+    private final AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus;
+    private final Throwable errorCause;
     Duration shadowResponseDuration;
 
     public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
+                                    List<byte[]> shadowRequestData,
                                     List<byte[]> shadowResponseData,
+                                    AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus,
+                                    Throwable errorCause,
                                     Duration shadowResponseDuration) {
         this.sourcePair = sourcePair;
+        this.shadowRequestData = shadowRequestData;
         this.shadowResponseData = shadowResponseData;
+        this.transformationStatus = transformationStatus;
+        this.errorCause = errorCause;
         this.shadowResponseDuration = shadowResponseDuration;
     }
 
@@ -77,7 +86,7 @@ public class SourceTargetCaptureTuple {
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
-            log.warn("TODO: These durations are not measuring the same values!");
+            //log.warn("TODO: These durations are not measuring the same values!");
             meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
                 Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(), triple.sourcePair.responseData.getLastPacketTimestamp())));
             meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
@@ -129,4 +138,16 @@ public class SourceTargetCaptureTuple {
         }
     }
 
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
+        sb.append("\n sourcePair=").append(sourcePair);
+        sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
+        sb.append("\n shadowRequestData=").append(Utils.packetsToStringTruncated(shadowRequestData));
+        sb.append("\n shadowResponseData=").append(Utils.packetsToStringTruncated(shadowResponseData));
+        sb.append("\n transformStatus=").append(transformationStatus);
+        sb.append("\n errorCause=").append(errorCause==null ? "null" : errorCause.toString());
+        sb.append('}');
+        return sb.toString();
+    }
 }

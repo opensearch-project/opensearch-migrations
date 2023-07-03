@@ -77,6 +77,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
         if (outboundChannelFuture.isDone()) {
+            responseBuilder.addRequestPacket(packetData);
             Channel channel = outboundChannelFuture.channel();
             if (!channel.isActive()) {
                 log.warn("Channel is not active - future packets for this connection will be dropped.");

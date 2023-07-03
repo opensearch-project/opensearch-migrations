@@ -45,8 +45,8 @@ public class RequestResponsePacketPair {
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("RequestResponsePacketPair{");
-        sb.append("requestData=").append(requestData);
-        sb.append(", responseData=").append(responseData);
+        sb.append("\n requestData=").append(requestData);
+        sb.append("\n responseData=").append(responseData);
         sb.append('}');
         return sb.toString();
     }

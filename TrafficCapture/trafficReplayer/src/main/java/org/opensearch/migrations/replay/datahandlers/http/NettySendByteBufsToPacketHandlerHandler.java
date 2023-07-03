@@ -51,7 +51,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                         ()->"handlerRemoved: packetReceiverCompletionFuture receiving exceptional value"));
                 return;
             } else if (currentFuture.get() == null) {
-                log.info("The handler responsible for writing data to the server was detached before writing byte " +
+                log.info("The handler responsible for writing data to the server was detached before writing " +
                         "bytes.  Throwing a NoContentException so that the calling context can handle appropriately.");
                 packetReceiverCompletionFutureRef.set(
                         StringTrackableCompletableFuture.failedFuture(new NoContentException(),
@@ -117,7 +117,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
             currentFuture = currentFuture.thenCompose(v-> {
                 log.trace("chaining consumingBytes with " + msg + " lastFuture=" + preexistingFutureForCapture);
                 var rval = packetReceiver.consumeBytes(bb);
-                log.error("packetReceiver.consumeBytes()="+rval);
+                log.trace("packetReceiver.consumeBytes()="+rval);
                 bb.release();
                 return rval.map(cf->cf.thenApply(ignore->false),
                         ()->"this NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is going to return a" +

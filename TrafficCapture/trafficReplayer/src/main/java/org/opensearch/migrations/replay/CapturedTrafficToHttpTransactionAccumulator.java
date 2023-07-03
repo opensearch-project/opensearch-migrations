@@ -72,7 +72,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                      String connectionId,
                                                      Accumulation accumulation) {
                         connectionsExpiredCounter.incrementAndGet();
-                        log.error("firing accumulation for accum=[" + connectionId + "]=" + accumulation);
+                        log.trace("firing accumulation for accum=[" + connectionId + "]=" + accumulation);
                         fireAccumulationsCallbacks(connectionId, accumulation);
                     }
                 });

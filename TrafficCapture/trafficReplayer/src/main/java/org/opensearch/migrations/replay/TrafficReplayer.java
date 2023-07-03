@@ -31,7 +31,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -175,8 +174,23 @@ public class TrafficReplayer {
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
-                        (connId,request) ->
-                                requestFutureMap.put(request, writeToSocketAndClose(request, connId.toString())),
+                        (connId,request) -> {
+                    var requestPushFuture = writeToSocketAndClose(request, connId.toString());
+                            requestFutureMap.put(request, requestPushFuture);
+                            try {
+                                var rval = requestPushFuture.get();
+                                log.error("value returned="+rval);
+                            } catch (ExecutionException e) {
+                                log.warn("Got an ExecutionException: ", e);
+                                // eating this exception is the RIGHT thing to do here!  Future invocations
+                                // of get() or chained invocations will continue to expose this exception, which
+                                // is where/how the exception should be handled.
+                            } catch (InterruptedException e) {
+                                log.warn("Got an interrupted exception while waiting for a request to be handled.  " +
+                                        "Assuming that this request should silently fail and that the " +
+                                        "calling context has more awareness than we do here.");
+                            }
+                        },
                         rrPair -> {
                             if (log.isTraceEnabled()) {
                                 log.trace("Done receiving captured stream for this "+rrPair.requestData);
@@ -307,16 +321,22 @@ public class TrafficReplayer {
         if (t != null) {
             log.error("Got exception in CompletableFuture callback: ", t);
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
-                    new ArrayList<>(), Duration.ZERO
+                    new ArrayList<>(), new ArrayList<>(),
+                    AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR, null, Duration.ZERO
             );
         } else {
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
-                    summary.getReceiptTimeAndResponsePackets().map(entry -> entry.getValue()).collect(Collectors.toList()),
+                    summary.requestPackets,
+                    summary.getReceiptTimeAndResponsePackets()
+                            .map(entry -> entry.getValue()).collect(Collectors.toList()),
+                    summary.getTransformationStatus(),
+                    summary.getErrorCause(),
                     summary.getResponseDuration()
             );
         }
 
         try {
+            log.info("Source/Shadow Request/Response tuple: " + requestResponseTriple);
             tripleWriter.writeJSON(requestResponseTriple);
         } catch (IOException e) {
             log.error("Caught an IOException while writing triples output.");

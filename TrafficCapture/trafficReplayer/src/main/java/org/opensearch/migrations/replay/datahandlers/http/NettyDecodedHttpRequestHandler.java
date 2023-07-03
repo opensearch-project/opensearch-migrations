@@ -88,7 +88,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             }
         } else if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                 headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
-            log.info("There were changes to the headers that require the message to be reformatted through , " +
+            log.info("There were changes to the headers that require the message to be reformatted through " +
                     "this pipeline but the content (payload) doesn't need to be transformed.  Content Handlers " +
                     "are not being added to the pipeline");
             pipelineOrchestrator.addBaselineHandlers(pipeline);

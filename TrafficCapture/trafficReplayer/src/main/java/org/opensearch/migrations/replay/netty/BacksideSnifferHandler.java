@@ -25,7 +25,7 @@ public class BacksideSnifferHandler extends ChannelDuplexHandler {
         var origReaderIdx = bb.markReaderIndex();
         byte[] output = new byte[bb.readableBytes()];
         bb.readBytes(output);
-        aggregatedRawResponseBuilder.addPacket(output);
+        aggregatedRawResponseBuilder.addResponsePacket(output);
         bb.resetReaderIndex();
         ctx.fireChannelRead(msg);
     }
