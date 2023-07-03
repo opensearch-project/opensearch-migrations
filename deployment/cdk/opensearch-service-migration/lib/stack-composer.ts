@@ -26,7 +26,7 @@ export class StackComposer {
 
         let version: EngineVersion
         let accessPolicies: PolicyStatement[]|undefined
-        const defaultValues: { [x: string]: (string); } = defaultValuesJson
+        const defaultValues: { [x: string]: (any); } = defaultValuesJson
         const domainName = getContextForType('domainName', 'string')
         const dataNodeType = getContextForType('dataNodeType', 'string')
         const dataNodeCount = getContextForType('dataNodeCount', 'number')
@@ -207,8 +207,8 @@ export class StackComposer {
         function getContextForType(optionName: string, expectedType: string): any {
             const option = scope.node.tryGetContext(optionName)
 
-            // If no context is provided and a default value exists, use it
-            if (option === undefined && defaultValues[optionName]) {
+            // If no context is provided (undefined or empty string) and a default value exists, use it
+            if ((option === undefined || option === "") && defaultValues[optionName]) {
                 return defaultValues[optionName]
             }
 
