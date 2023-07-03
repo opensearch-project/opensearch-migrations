@@ -3,9 +3,6 @@ package org.opensearch.migrations.replay.datahandlers;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-
-import java.util.concurrent.CompletableFuture;
 
 /**
  * This class consumes arrays of bytes or ByteBufs, potentially asynchronously,

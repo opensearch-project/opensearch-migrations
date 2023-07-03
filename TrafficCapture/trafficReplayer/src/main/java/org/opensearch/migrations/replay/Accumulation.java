@@ -7,8 +7,8 @@ public class Accumulation {
 
     enum State {
         NOTHING_SENT,
-        RESPONSE_SENT,
-        REQUEST_SENT
+        REQUEST_SENT,
+        RESPONSE_SENT
     }
 
     RequestResponsePacketPair rrPair;

@@ -44,9 +44,6 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         log.debug("Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
         log.trace("HR: old currentFuture="+currentFuture);
-//                        () -> "Waiting for NettySendByteBufsToPacketHandlerHandler to complete this future.  " +
-//                                "this.currentFuture, whose completion will complete this future is currently:\n" +
-//                                "    <<" + currentFuture + ">>\n");
         if (currentFuture.future.isDone()) {
             if (currentFuture.future.isCompletedExceptionally()) {
                 packetReceiverCompletionFutureRef.set(currentFuture.getDeferredFutureThroughHandle((v,t)->
@@ -114,7 +111,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                     " ctx hash=" + System.identityHashCode(ctx));
             var bb = ((ByteBuf) msg).retain();
             log.trace("CR: old currentFuture="+currentFuture);
-            // I don't want to capture this object, but the preexisting value of the currentFuture field
+            // I don't want to capture the *this* object, the preexisting value of the currentFuture field only
             final var preexistingFutureForCapture = currentFuture;
             var numBytesToSend = bb.readableBytes();
             currentFuture = currentFuture.thenCompose(v-> {
@@ -137,5 +134,4 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
             ctx.fireChannelRead(msg);
         }
     }
-
 }

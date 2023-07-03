@@ -195,7 +195,8 @@ public class TrafficReplayer {
                                                             throw e;
                                                         } finally {
                                                             requestToFinalWorkFuturesMap.remove(rrPair.requestData);
-                                                            log.error("removed rrPair.requestData to requestToFinalWorkFuturesMap for " +
+                                                            log.trace("removed rrPair.requestData to " +
+                                                                    "requestToFinalWorkFuturesMap for " +
                                                                     rrPair.connectionId);
                                                         }
                                                     }), ()->"TrafficReplayer.runReplayWithIOStreams.progressTracker");
@@ -216,16 +217,16 @@ public class TrafficReplayer {
         } finally {
             trafficToHttpTransactionAccumulator.close();
             var PRIMARY_LOG_LEVEL = Level.INFO;
-            var SECONDARY_LOG_LEVEL = Level.INFO;
+            var SECONDARY_LOG_LEVEL = Level.WARN;
             var logLevel = PRIMARY_LOG_LEVEL;
             for (var timeout = Duration.ofSeconds(1); ; timeout = timeout.multipliedBy(2)) {
                 try {
                     waitForRemainingWork(logLevel, timeout, requestToFinalWorkFuturesMap);
-                    logLevel = SECONDARY_LOG_LEVEL;
                     break;
                 } catch (TimeoutException e) {
                     log.atLevel(logLevel).log("Caught timeout exception while waiting for the remaining " +
                             "requests to be finalized.");
+                    logLevel = SECONDARY_LOG_LEVEL;
                 }
             }
             if (exceptionCount.get() > 0) {

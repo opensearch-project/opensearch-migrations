@@ -172,7 +172,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
                 .collect(Collectors.toList());
         return strList.stream().collect(Collectors.joining("<-"));
     }
-//"[…]"
+
     @SneakyThrows
     protected String formatFutureWithDiagnostics(
             @NonNull AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture, Supplier<D>> kvp,
