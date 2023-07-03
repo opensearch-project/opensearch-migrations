@@ -13,7 +13,7 @@ cd $script_dir_abs_path
 
 SECONDS=0
 
-# Allow --skip-init flag to avoid one-time setups
+# Allow --skip-bootstrap flag to avoid one-time setups
 skip_boot=false
 if [[ $* == *--skip-bootstrap* ]]
 then
@@ -22,6 +22,7 @@ fi
 
 # === CDK Deployment ===
 export CDK_DEPLOYMENT_STAGE=dev
+export COPILOT_DEPLOYMENT_STAGE=dev
 # Will be used for CDK and Copilot
 export AWS_DEFAULT_REGION=us-east-1
 export COPILOT_DEPLOYMENT_NAME=migration-copilot
@@ -59,7 +60,7 @@ set +e
 copilot app init $COPILOT_DEPLOYMENT_NAME
 
 # Init env
-copilot env init -a $COPILOT_DEPLOYMENT_NAME --name dev --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
+copilot env init -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
 
 # Init services
 copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter
@@ -72,17 +73,17 @@ copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name capture-proxy
 copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name opensearch-benchmark
 
 # Deploy env
-copilot env deploy -a $COPILOT_DEPLOYMENT_NAME --name dev
+copilot env deploy -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE
 
 # Deploy services
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter --env dev
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator --env dev
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-replayer --env dev
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name kafka-puller --env dev
+copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name kafka-puller --env $COPILOT_DEPLOYMENT_STAGE
 
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name elasticsearch --env dev
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name capture-proxy --env dev
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name opensearch-benchmark --env dev
+copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name opensearch-benchmark --env $COPILOT_DEPLOYMENT_STAGE
 
 
 # Output deployment time
