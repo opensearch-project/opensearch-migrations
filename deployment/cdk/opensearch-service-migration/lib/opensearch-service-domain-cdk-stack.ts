@@ -23,6 +23,7 @@ export interface opensearchServiceDomainCdkProps extends StackPropsExt {
   readonly fineGrainedManagerUserARN?: string,
   readonly fineGrainedManagerUserName?: string,
   readonly fineGrainedManagerUserSecretManagerKeyARN?: string,
+  readonly enableDemoManager?: boolean,
   readonly enforceHTTPS?: boolean,
   readonly tlsSecurityPolicy?: TLSSecurityPolicy,
   readonly ebsEnabled?: boolean,
@@ -54,13 +55,20 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
 
-    const managerUserSecret: SecretValue|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
+    let managerUserSecret: SecretValue|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
         Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN).secretValue : undefined
 
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
     // Map objects from props
+
+    let managerUserName: string|undefined = props.fineGrainedManagerUserName
+    // Enable demo mode setting
+    if (props.enableDemoManager) {
+      managerUserName = "admin"
+      managerUserSecret = SecretValue.unsafePlainText("Admin123!")
+    }
     const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
         {enabled: true, availabilityZoneCount: props.availabilityZoneCount} : undefined
 
@@ -79,7 +87,7 @@ export class OpensearchServiceDomainCdkStack extends Stack {
       },
       fineGrainedAccessControl: {
         masterUserArn: props.fineGrainedManagerUserARN,
-        masterUserName: props.fineGrainedManagerUserName,
+        masterUserName: managerUserName,
         masterUserPassword: managerUserSecret
       },
       nodeToNodeEncryption: props.nodeToNodeEncryptionEnabled,

@@ -17,10 +17,10 @@ image:
     dockerfile: ../TrafficCapture/dockerSolution/build/docker/trafficReplayer/Dockerfile
   port: 10001
 
-command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure | nc traffic-comparator 9220"
+command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --auth-header-value Basic\\ YWRtaW46QWRtaW4xMjMh | nc traffic-comparator 9220"
 
-cpu: 512       # Number of CPU units for the task.
-memory: 2048    # Amount of memory in MiB used by the task.
+cpu: 1024       # Number of CPU units for the task.
+memory: 4096    # Amount of memory in MiB used by the task.
 count: 1       # Number of tasks that should be running in your service.
 exec: true     # Enable getting a shell to your container (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html).
 

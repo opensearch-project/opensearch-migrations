@@ -70,6 +70,7 @@ copilot svc init --name traffic-comparator-jupyter
 
 copilot svc init --name elasticsearch
 copilot svc init --name capture-proxy
+copilot svc init --name opensearch-benchmark
 
 ```
 
@@ -90,6 +91,7 @@ copilot svc deploy --name kafka-puller --env dev
 
 copilot svc deploy --name elasticsearch --env dev
 copilot svc deploy --name capture-proxy --env dev
+copilot svc deploy --name opensearch-benchmark --env dev
 ```
 
 ### Executing Commands on a Deployed Service
@@ -102,6 +104,7 @@ copilot svc exec traffic-replayer --container traffic-replayer --command "bash"
 copilot svc exec kafka-puller --container kafka-puller --command "bash"
 copilot svc exec elasticsearch --container elasticsearch --command "bash"
 copilot svc exec capture-proxy --container capture-proxy --command "bash"
+copilot svc exec opensearch-benchmark --container opensearch-benchmark --command "bash"
 ```
 
 ### Addons
