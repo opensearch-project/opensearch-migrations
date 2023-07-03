@@ -102,10 +102,11 @@ class ExpiringKeyQueue extends
             var key = new ScopedConnectionIdKey(partitionId, connectionId);
             var accumulation = connectionAccumulatorMap.get(key);
             if (accumulation != null &&
-                    accumulation.newestPacketTimestampInMillis.get() < earlierTimesToPreserve.millis) {
+                    accumulation.getNewestPacketTimestampInMillisReference().get() < earlierTimesToPreserve.millis) {
                 var priorValue = connectionAccumulatorMap.remove(key);
                 if (priorValue != null) {
-                    priorValue.newestPacketTimestampInMillis.set(ExpiringTrafficStreamMap.ACCUMULATION_DEAD_SENTINEL);
+                    priorValue.getNewestPacketTimestampInMillisReference()
+                            .set(ExpiringTrafficStreamMap.ACCUMULATION_DEAD_SENTINEL);
                     behavioralPolicy.onExpireAccumulation(partitionId, connectionId, accumulation);
                 }
             }

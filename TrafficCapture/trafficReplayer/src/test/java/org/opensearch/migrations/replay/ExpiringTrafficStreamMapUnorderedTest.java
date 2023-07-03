@@ -59,12 +59,4 @@ class ExpiringTrafficStreamMapUnorderedTest {
                 new int[] {1, 7, 3, 8, 4, 4, 3, 9, 13, 15},
                 new int[] {0, 1, 1, 1, 1, 1, 1, 1,  3,  8});
     }
-
-//    @Test
-//    public void testConnectionsAreExpired3() {
-//        testExpirations(i->"connectionId_"+i, 5,1, false,
-//                new int[] {1, 7, 3, 8, 4, 4, 3, 9, 13, 15},
-//                new int[] {0, 1, 1, 1, 1, 1, 1, 1,  2,  7});
-//    }
-
 }
