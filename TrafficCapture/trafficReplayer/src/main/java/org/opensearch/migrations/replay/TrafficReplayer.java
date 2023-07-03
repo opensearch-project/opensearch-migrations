@@ -175,8 +175,21 @@ public class TrafficReplayer {
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
-                        (connId,request) ->
-                                requestFutureMap.put(request, writeToSocketAndClose(request, connId.toString())),
+                        (connId,request) -> {
+                    var requestPushFuture = writeToSocketAndClose(request, connId.toString());
+                            requestFutureMap.put(request, requestPushFuture);
+                            try {
+                                requestPushFuture.get();
+                            } catch (ExecutionException e) {
+                                // eating this exception is the RIGHT thing to do here!  Future invocations
+                                // of get() or chained invocations will continue to expose this exception, which
+                                // is where/how the exception should be handled.
+                            } catch (InterruptedException e) {
+                                log.info("Got an interrupted exception while waiting for a request to be handled.  " +
+                                        "Assuming that this request should silently fail and that the " +
+                                        "calling context has more awareness than we do here.");
+                            }
+                        },
                         rrPair -> {
                             if (log.isTraceEnabled()) {
                                 log.trace("Done receiving captured stream for this "+rrPair.requestData);
