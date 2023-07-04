@@ -6,6 +6,8 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -32,10 +34,10 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     }
 
     @Override
-    public CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket) {
+    public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         log.info("incoming buffer refcnt="+nextRequestPacket.refCnt());
         var duplicatedPacket = nextRequestPacket.duplicate().retain();
-        return CompletableFuture.runAsync(() -> {
+        return new DiagnosticTrackableCompletableFuture(CompletableFuture.runAsync(() -> {
             try {
                 log.info("Running async future for " + nextRequestPacket);
                 Thread.sleep(consumeDuration.toMillis());
@@ -50,15 +52,17 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-        });
+        }),
+                ()->"TestCapturePacketToHttpHandler.consumeBytes");
     }
 
     @Override
-    public CompletableFuture<AggregatedRawResponse> finalizeRequest() {
+    public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse> finalizeRequest() {
         numFinalizations.incrementAndGet();
         Assertions.assertEquals(1, numFinalizations.get());
         bytesCaptured = byteArrayOutputStream.toByteArray();
-        return CompletableFuture.completedFuture(dummyAggregatedResponse);
+        return StringTrackableCompletableFuture.completedFuture(dummyAggregatedResponse,
+                ()->"TestCapturePacketToHttpHandler.dummy");
     }
 
     public String getCapturedAsString() {

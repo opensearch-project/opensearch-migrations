@@ -2,8 +2,7 @@ package org.opensearch.migrations.replay.datahandlers;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-
-import java.util.concurrent.CompletableFuture;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
 /**
  * This class consumes arrays of bytes or ByteBufs, potentially asynchronously,
@@ -11,12 +10,12 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface IPacketConsumer {
 
-    default CompletableFuture<Void> consumeBytes(byte[] nextRequestPacket) {
+    default DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(byte[] nextRequestPacket) {
         var bb = Unpooled.wrappedBuffer(nextRequestPacket).retain();
         var rval = consumeBytes(bb);
         bb.release();
         return rval;
     }
 
-    CompletableFuture<Void> consumeBytes(ByteBuf nextRequestPacket);
+    DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket);
 }

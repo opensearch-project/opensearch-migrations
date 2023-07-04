@@ -27,12 +27,16 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
     final IPacketFinalizingConsumer packetReceiver;
     final JsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
+    final String diagnosticLabel;
 
-    public NettyDecodedHttpRequestHandler(JsonTransformer transformer, List<List<Integer>> chunkSizes,
-                                          IPacketFinalizingConsumer packetReceiver) {
+    public NettyDecodedHttpRequestHandler(JsonTransformer transformer,
+                                          List<List<Integer>> chunkSizes,
+                                          IPacketFinalizingConsumer packetReceiver,
+                                          String diagnosticLabel) {
         this.packetReceiver = packetReceiver;
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
+        this.diagnosticLabel = diagnosticLabel;
     }
 
     @Override
@@ -41,7 +45,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));
             var request = (HttpRequest) msg;
-            var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, packetReceiver);
+            var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, packetReceiver, diagnosticLabel);
             var pipeline = ctx.pipeline();
             try {
                 handlePayloadNeutralTransformation(ctx, request,

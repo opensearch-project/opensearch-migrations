@@ -35,10 +35,14 @@ public class RequestPipelineOrchestrator {
     public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer packetReceiver;
+    final String diagnosticLabel;
 
-    public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes, IPacketFinalizingConsumer packetReceiver) {
+    public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
+                                       IPacketFinalizingConsumer packetReceiver,
+                                       String diagnosticLabel) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
+        this.diagnosticLabel = diagnosticLabel;
     }
 
     static void removeThisAndPreviousHandlers(ChannelPipeline pipeline, ChannelHandler beforeHandler) {
@@ -68,7 +72,7 @@ public class RequestPipelineOrchestrator {
         // Note2: This handler may remove itself and all other handlers and replace the pipeline ONLY with the
         //        "baseline" handlers.  In that case, the pipeline will be processing only ByteBufs, hence the
         //        reason that there's some branching in the types that different handlers consume..
-        pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, packetReceiver));
+        pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, packetReceiver, diagnosticLabel));
         addLoggingHandler(pipeline, "A");
     }
 
@@ -110,7 +114,8 @@ public class RequestPipelineOrchestrator {
         // IN:  ByteBufs(3)
         // OUT: nothing - terminal!  ByteBufs are routed to the packet handler!
         addLoggingHandler(pipeline, "I");
-        pipeline.addLast(OFFLOADING_HANDLER_NAME, new NettySendByteBufsToPacketHandlerHandler(packetReceiver));
+        pipeline.addLast(OFFLOADING_HANDLER_NAME,
+                new NettySendByteBufsToPacketHandlerHandler(packetReceiver, diagnosticLabel));
     }
 
     private void addLoggingHandler(ChannelPipeline pipeline, String name) {

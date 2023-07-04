@@ -20,7 +20,8 @@ class HttpJsonTransformingConsumerTest {
     public void testPassThroughSinglePacketPost() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformingHandler = new HttpJsonTransformingConsumer(JoltJsonTransformer.newBuilder().build(), testPacketCapture);
+        var transformingHandler = new HttpJsonTransformingConsumer(JoltJsonTransformer.newBuilder().build(),
+                testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -54,7 +55,7 @@ class HttpJsonTransformingConsumerTest {
                 }
             }
         });
-        var transformingHandler = new HttpJsonTransformingConsumer(complexTransformer,  testPacketCapture);
+        var transformingHandler = new HttpJsonTransformingConsumer(complexTransformer,  testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {

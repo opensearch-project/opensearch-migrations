@@ -5,7 +5,7 @@ import lombok.EqualsAndHashCode;
 
 @AllArgsConstructor
 @EqualsAndHashCode
-class ScopedConnectionIdKey {
+public class ScopedConnectionIdKey {
     public final String nodeId;
     public final String connectionId;
 }

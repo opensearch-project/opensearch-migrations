@@ -14,6 +14,11 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
+    public final String connectionId;
+
+    public RequestResponsePacketPair(String connectionId) {
+        this.connectionId = connectionId;
+    }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {

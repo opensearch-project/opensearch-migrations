@@ -28,8 +28,8 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
     }
 
     @Override
-    public IPacketFinalizingConsumer<AggregatedTransformedResponse> create() {
-        return new HttpJsonTransformingConsumer(jsonTransformer, createNettyHandler());
+    public IPacketFinalizingConsumer<AggregatedTransformedResponse> create(String diagnosticLabel) {
+        return new HttpJsonTransformingConsumer(jsonTransformer, createNettyHandler(), diagnosticLabel);
     }
 
     public void stopGroup() {
