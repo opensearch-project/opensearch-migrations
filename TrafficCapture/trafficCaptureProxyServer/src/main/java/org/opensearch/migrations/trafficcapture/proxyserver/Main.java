@@ -49,7 +49,7 @@ public class Main {
         @Parameter(required = false,
                 names = {"--noCapture"},
                 arity = 0,
-                description = "Directory to store trace files in.")
+                description = "If enabled, Does NOT store trace files in.")
         boolean noCapture;
         @Parameter(required = false,
                 names = {"--kafkaConfigFile"},

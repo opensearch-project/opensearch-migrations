@@ -1,0 +1,30 @@
+version: '3.7'
+services:
+  nginx:
+    image: 'migrations/nginx:latest'
+    ports:
+      - "8080:80"
+
+  captureproxy:
+    image: 'migrations/capture_proxy:latest'
+    networks:
+      - testing
+    ports:
+      - "9201:9201"
+    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --destinationUri  http://nginx:80 --listenPort 9201 --no-capture true
+    depends_on:
+      - nginx
+
+  jmeter:
+    image: 'migrations/jmeter:latest'
+    networks:
+      - testing
+    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.JMeterLoadTest -p 9201 -d captureproxy
+    depends_on:
+      - captureproxy
+
+
+
+networks:
+  testing:
+    driver: bridge

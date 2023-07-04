@@ -1,13 +1,13 @@
 ARG NGINX_VERSION=1.23.4
 FROM nginx:${NGINX_VERSION}  as build
 
-RUN apt-get update
+RUN apt-get update && apt-get upgrade -y
 RUN apt-get install -y \
             openssh-client \
             git \
             wget \
-            libxml2 \
-            libxslt1-dev \
+            libxml2-dev \
+            libxslt-dev \
             libpcre3 \
             libpcre3-dev \
             zlib1g \
@@ -43,8 +43,12 @@ RUN NGINX_ARGS=$(nginx -V 2>&1 | sed -n -e 's/^.*arguments: //p') \
 
 FROM nginx:${NGINX_VERSION}
 
-RUN apt-get update
-RUN apt-get install -y vim
+# Switch to noninteractive mode to avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends vim \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 RUN /bin/bash -c  '\
     export HTMLDIR=/usr/share/nginx/html ; \

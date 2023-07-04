@@ -15,7 +15,7 @@ include('captureKafkaOffloader',
         'nettyWireLogging',
         'trafficCaptureProxyServer',
         'trafficReplayer',
-
+        'testingEnvironment',
         'dockerSolution',
         'trafficCaptureProxyServerTest'
 )
