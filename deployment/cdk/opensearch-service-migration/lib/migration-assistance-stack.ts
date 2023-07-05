@@ -132,21 +132,20 @@ export class MigrationAssistanceStack extends Stack {
             //keyName: "es-node-key"
         });
 
-        // FIX CASE WHERE NO SUBNETS
         let publicSubnetString = ""
-        props.vpc.publicSubnets.forEach(subnet => publicSubnetString.concat(subnet.subnetId, ","))
-        publicSubnetString = publicSubnetString.substring(0, publicSubnetString.length - 1)
+        props.vpc.publicSubnets.forEach(subnet => publicSubnetString = publicSubnetString.concat(subnet.subnetId, ","))
+        if (publicSubnetString) publicSubnetString = publicSubnetString.substring(0, publicSubnetString.length - 1)
         let privateSubnetString = ""
-        props.vpc.privateSubnets.forEach(subnet => privateSubnetString.concat(subnet.subnetId, ","))
+        props.vpc.privateSubnets.forEach(subnet => privateSubnetString = privateSubnetString.concat(subnet.subnetId, ","))
         privateSubnetString = privateSubnetString.substring(0, privateSubnetString.length - 1)
 
         const exports = [
             `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
-            `export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`,
-            `export MIGRATION_PRIVATE_SUBNETS=${privateSubnetString}`,
             `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
             `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
             `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`]
+        if (publicSubnetString) exports.push(`export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`)
+        if (privateSubnetString) exports.push(`export MIGRATION_PRIVATE_SUBNETS=${privateSubnetString}`)
 
         new CfnOutput(this, 'CopilotMigrationExports', {
             value: exports.join(";"),

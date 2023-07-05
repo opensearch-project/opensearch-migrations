@@ -171,7 +171,6 @@ export class StackComposer {
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 ...props,
             })
-            migrationStack.addDependency(opensearchStack)
             this.stacks.push(migrationStack)
 
             const mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {

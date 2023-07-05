@@ -80,8 +80,9 @@ if [ "$skip_copilot_init" = false ] ; then
   # Init app
   copilot app init $COPILOT_DEPLOYMENT_NAME
 
-  # Init env
-  copilot env init -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
+  # Init env, start state does not contain existing manifest but is created on the fly here to accommodate varying numbers of public and private subnets
+  copilot env init -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE --import-vpc-id $MIGRATION_VPC_ID --import-public-subnets $MIGRATION_PUBLIC_SUBNETS --import-private-subnets $MIGRATION_PRIVATE_SUBNETS --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
+  #copilot env init -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
 
   # Init services
   copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter
