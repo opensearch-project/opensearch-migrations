@@ -11,9 +11,8 @@ network:
  vpc:
    id: ${MIGRATION_VPC_ID}
    subnets:
-     public:
-       - id: ${MIGRATION_PUBLIC_SUBNET_1}
-       - id: ${MIGRATION_PUBLIC_SUBNET_2}
+     public: [ "${MIGRATION_PUBLIC_SUBNETS}" ]
+     private: [ "${MIGRATION_PRIVATE_SUBNETS}" ]
 
 
 # Configure the load balancers in your environment, once created.

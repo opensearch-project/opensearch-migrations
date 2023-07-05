@@ -1,7 +1,7 @@
 import {Construct} from "constructs";
 import {EbsDeviceVolumeType, ISecurityGroup, IVpc, SubnetSelection} from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
-import {RemovalPolicy, SecretValue, Stack, StackProps} from "aws-cdk-lib";
+import {CfnOutput, RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
 import {IKey, Key} from "aws-cdk-lib/aws-kms";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
@@ -115,5 +115,10 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     });
 
     this.domainEndpoint = domain.domainEndpoint
+
+    new CfnOutput(this, 'CopilotDomainExports', {
+      value: `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`,
+      description: 'Exported Domain resource values created by CDK that are needed by Copilot container deployments',
+    });
   }
 }

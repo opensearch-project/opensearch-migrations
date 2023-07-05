@@ -167,7 +167,6 @@ export class StackComposer {
                 vpc: networkStack.vpc,
                 mskARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
-                targetEndpoint: opensearchStack.domainEndpoint,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 ...props,

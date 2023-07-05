@@ -22,7 +22,6 @@ export interface migrationStackProps extends StackPropsExt {
     // Future support needed to allow importing an existing MSK cluster
     readonly mskARN?: string,
     readonly mskEnablePublicEndpoints?: boolean
-    readonly targetEndpoint: string
 }
 
 
@@ -133,20 +132,25 @@ export class MigrationAssistanceStack extends Stack {
             //keyName: "es-node-key"
         });
 
-        // This is a temporary fragile piece to help with importing values from CDK to Copilot. It assumes the provided VPC has two public subnets and
-        // does not currently provide the MSK broker endpoints as a future Custom Resource is needed to accomplish this
+        // FIX CASE WHERE NO SUBNETS
+        let publicSubnetString = ""
+        props.vpc.publicSubnets.forEach(subnet => publicSubnetString.concat(subnet.subnetId, ","))
+        publicSubnetString = publicSubnetString.substring(0, publicSubnetString.length - 1)
+        let privateSubnetString = ""
+        props.vpc.privateSubnets.forEach(subnet => privateSubnetString.concat(subnet.subnetId, ","))
+        privateSubnetString = privateSubnetString.substring(0, privateSubnetString.length - 1)
+
         const exports = [
             `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
-            `export MIGRATION_PUBLIC_SUBNET_1=${props.vpc.publicSubnets[0].subnetId}`,
-            `export MIGRATION_PUBLIC_SUBNET_2=${props.vpc.publicSubnets[1].subnetId}`,
-            `export MIGRATION_DOMAIN_ENDPOINT=${props.targetEndpoint}`,
+            `export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`,
+            `export MIGRATION_PRIVATE_SUBNETS=${privateSubnetString}`,
             `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
             `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
             `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`]
 
-        const cfnOutput = new CfnOutput(this, 'CopilotExports', {
+        new CfnOutput(this, 'CopilotMigrationExports', {
             value: exports.join(";"),
-            description: 'Exported resource values created by CDK that are needed by Copilot container deployments',
+            description: 'Exported migration resource values created by CDK that are needed by Copilot container deployments',
         });
 
     }

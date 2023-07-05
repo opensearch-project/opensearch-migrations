@@ -19,18 +19,38 @@ if [[ $* == *--skip-bootstrap* ]]
 then
   skip_boot=true
 fi
+# Allow --skip-copilot-init flag to avoid initializing Copilot components
+skip_copilot_init=false
+if [[ $* == *--skip-copilot-init* ]]
+then
+  skip_copilot_init=true
+fi
+# Allow --destroy flag to clean up existing resources
+destroy=false
+if [[ $* == *--destroy* ]]
+then
+  destroy=true
+fi
 
-# === CDK Deployment ===
 export CDK_DEPLOYMENT_STAGE=dev
 export COPILOT_DEPLOYMENT_STAGE=dev
 # Will be used for CDK and Copilot
 export AWS_DEFAULT_REGION=us-east-1
 export COPILOT_DEPLOYMENT_NAME=migration-copilot
-
 # Used to overcome error: "failed to solve with frontend dockerfile.v0: failed to create LLB definition: unexpected
 # status code [manifests latest]: 400 Bad Request" but may not be practical
 export DOCKER_BUILDKIT=0
 export COMPOSE_DOCKER_CLI_BUILD=0
+
+if [ "$destroy" = true ] ; then
+  set +e
+  copilot app delete
+  cd ../cdk/opensearch-service-migration
+  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoManager=true
+  exit 1
+fi
+
+# === CDK Deployment ===
 
 cd ../cdk/opensearch-service-migration
 if [ "$skip_boot" = false ] ; then
@@ -56,21 +76,24 @@ cd ../../copilot
 # Allow script to continue on error for copilot services, as copilot will error when no changes are needed
 set +e
 
-# Init app
-copilot app init $COPILOT_DEPLOYMENT_NAME
+if [ "$skip_copilot_init" = false ] ; then
+  # Init app
+  copilot app init $COPILOT_DEPLOYMENT_NAME
 
-# Init env
-copilot env init -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
+  # Init env
+  copilot env init -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $AWS_DEFAULT_REGION
 
-# Init services
-copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter
-copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator
-copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-replayer
-copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name kafka-puller
+  # Init services
+  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter
+  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator
+  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-replayer
+  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name kafka-puller
 
-copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name elasticsearch
-copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name capture-proxy
-copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name opensearch-benchmark
+  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name elasticsearch
+  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name capture-proxy
+  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name opensearch-benchmark
+fi
+
 
 # Deploy env
 copilot env deploy -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE
