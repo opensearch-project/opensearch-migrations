@@ -1,15 +1,12 @@
-# Multistage build - 1st stage
-FROM python:3.11 AS builder
+FROM opensearch-data-prepper:2.4.0-SNAPSHOT
 COPY requirements.txt .
 
 # Install dependencies to local user directory
+RUN apk update
+RUN apk add --no-cache python3 py-pip
 RUN pip install --user -r requirements.txt
 
-# Multistage build - 2nd stage
-FROM python:3.11-slim
 WORKDIR /code
-# Copy only required dependencies
-COPY --from=builder /root/.local /root/.local
 # Copy only source code
 COPY ./*.py .
 
@@ -17,4 +14,4 @@ COPY ./*.py .
 ENV PATH=/root/.local:$PATH
 
 # make sure you include the -u flag to have our stdout logged
-ENTRYPOINT [ "python", "-u", "./main.py" ]
+CMD python -u ./main.py -r $DATA_PREPPER_PATH/pipelines/pipelines.yaml $DATA_PREPPER_PATH/pipelines/pipelines.yaml; $DATA_PREPPER_PATH/bin/data-prepper
