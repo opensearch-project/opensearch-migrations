@@ -170,8 +170,7 @@ def run(args: argparse.Namespace) -> None:
     indices_to_create = diff[0]
     if indices_to_create:
         # Write output YAML
-        if not args.report:
-            write_output(dp_config, indices_to_create, args.output_file)
+        write_output(dp_config, indices_to_create, args.output_file)
         if not args.dryrun:
             index_data = dict()
             for index_name in indices_to_create:
@@ -189,8 +188,7 @@ if __name__ == '__main__':  # pragma no cover
         "of the pipeline YAML file is written. This version of the pipeline adds an index inclusion configuration " +
         "to the sink, specifying only those indices that were created by the index configuration tool.\nThis tool " +
         "can also print a report based on the indices in the source cluster, indicating which ones will be created, " +
-        "along with indices that are identical or have conflicting settings/mappings.\nIn case of the latter, no "
-        "action will be taken on the target cluster.",
+        "along with indices that are identical or have conflicting settings/mappings.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     # Positional, required arguments
@@ -204,7 +202,7 @@ if __name__ == '__main__':  # pragma no cover
     )
     # Optional arguments
     arg_parser.add_argument("--report", "-r", action="store_true",
-                            help="Print a report of the index differences instead of generating a YAML file")
+                            help="Print a report of the index differences")
     arg_parser.add_argument("--dryrun", action="store_true",
                             help="Skips the actual creation of indices on the target cluster")
     print("\n##### Starting index configuration tool... #####\n")
