@@ -27,15 +27,14 @@ import java.util.Optional;
 public class JMeterLoadTest {
 
     static class Parameters {
-        @Parameter(required = false,
+        @Parameter(required = true,
                 names = {"-p", "--port"},
-                //arity = 1,
                 description = "Port number")
-        int backsidePort = 9200;
-        @Parameter(required = false,
+        int backsidePort;
+        @Parameter(required = true,
                 names = {"-d", "--domain-name"},
                 description = "Domain name")
-        String domainName = "proxy";
+        String domainName;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -57,7 +56,7 @@ public class JMeterLoadTest {
         StandardJMeterEngine jmeter = new StandardJMeterEngine();
         File home = new File(".");
         JMeterUtils.setJMeterHome(home.getPath());
-        JMeterUtils.loadJMeterProperties("jmeter.properties");
+        JMeterUtils.loadJMeterProperties("/jmeter.properties");
 
         String outputFileName = null;
         //outputFileName = "results.jtl";
