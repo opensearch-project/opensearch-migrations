@@ -19,7 +19,7 @@ services:
     image: 'testenv/jmeter:latest'
     networks:
       - testing
-    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.JMeterLoadTest -p 9201 -d captureproxy
+    command: /bin/sh -c "while sleep 10; do /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.JMeterLoadTest -p 9201 -d captureproxy; done"
     depends_on:
       - captureproxy
 
