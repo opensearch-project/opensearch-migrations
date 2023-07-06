@@ -26,6 +26,26 @@ brew install aws/tap/copilot-cli
 ```
 Otherwise, please follow the manual instructions [here](https://aws.github.io/copilot-cli/docs/getting-started/install/)
 
+### Deploy with an automated script
+
+The following script command can be executed to deploy both the CDK infrastructure and Copilot services for a development environment
+```
+./devDeploy.sh
+```
+Options:
+```
+--skip-bootstrap                Skips installing packages with npm for CDK, bootstrapping CDK, and building the docker images used by Copilot
+--skip-copilot-init             Skips Copilot initialization of app, environments, and services
+--destroy                       Cleans up all deployed resources from this script (CDK and Copilot)
+```
+
+Requirements:
+* AWS credentials have been configured
+* CDK and Copilot CLIs have been installed
+
+### Deploy commands one at a time
+
+The following sections list out commands line-by-line for deploying this solution
 
 #### Importing values from CDK
 The typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) that Copilot requires, and then deploy the desired Copilot services. Documentation for setting up and deploying these resources can be found in the CDK [README](../cdk/opensearch-service-migration/README.md).
@@ -33,12 +53,12 @@ The typical use case for this Copilot app is to initially use the `opensearch-se
 The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
 ```
 export MIGRATION_VPC_ID=vpc-123;
-export MIGRATION_PUBLIC_SUBNET_1=subnet-123;
-export MIGRATION_PUBLIC_SUBNET_2=subnet-124;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
+export MIGRATION_PUBLIC_SUBNETS=subnet-123,subnet-124;
+export MIGRATION_PRIVATE_SUBNETS=subnet-125,subnet-126;
 export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
 ```
 
@@ -74,7 +94,7 @@ copilot svc init --name opensearch-benchmark
 
 ```
 
-### Deploying Services to an Environment
+#### Deploying Services to an Environment
 When deploying a service with the Copilot CLI, a status bar will be displayed that gets updated as the deployment progresses. The command will complete when the specific service has all its resources created and health checks are passing on the deployed containers.
 
 Currently, it seems that Copilot does not support deploying all services at once (issue [here](https://github.com/aws/copilot-cli/issues/3474)) or creating dependencies between separate services. In light of this, services need to be deployed one at a time as show below.

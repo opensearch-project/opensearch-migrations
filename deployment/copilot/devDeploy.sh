@@ -61,6 +61,9 @@ if [ "$skip_boot" = false ] ; then
   cdk bootstrap
 fi
 
+# This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
+# The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
+# More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
 cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoManager=true -O cdkOutput.json --require-approval never
 
 # Gather CDK output which includes export commands needed by Copilot, and make them available to the environment
