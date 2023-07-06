@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandlerAdapter {
     final IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver;
-    // final Boolean value indicates if the handler received a LastHttpContent message
+    // final Boolean value indicates if the handler received a LastHttpContent or EndOfInput message
     // TODO - make this threadsafe.  calls may come in on different threads
     DiagnosticTrackableCompletableFuture<String, Boolean> currentFuture;
     private AtomicReference<DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>>
@@ -104,6 +104,13 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
     }
 
     @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        currentFuture = DiagnosticTrackableCompletableFuture.factory.failedFuture(cause,
+                () -> "NettySendByteBufsToPacketHandlerHandler got an exception");
+        super.exceptionCaught(ctx, cause);
+    }
+
+    @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (msg instanceof ByteBuf) {
             log.trace("read the following message and sending it to consumeBytes: " + msg +
@@ -126,10 +133,10 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                     ()->"NettySendByteBufsToPacketHandlerHandler.channelRead waits for the previous future " +
                             "to finish before writing the next set of " + numBytesToSend + " bytes ");
             log.trace("CR: new currentFuture="+currentFuture);
-        } else if (msg instanceof LastHttpContent) {
+        } else if (msg instanceof LastHttpContent || msg instanceof EndOfInput) {
             currentFuture = currentFuture.map(cf->cf.thenApply(ignore->true),
                     ()->"this NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is prepared to return a " +
-                            "completedValue of true since the LastHttpContent object has been received");
+                            "completedValue of true since the " + msg + " object has been received");
         } else {
             ctx.fireChannelRead(msg);
         }

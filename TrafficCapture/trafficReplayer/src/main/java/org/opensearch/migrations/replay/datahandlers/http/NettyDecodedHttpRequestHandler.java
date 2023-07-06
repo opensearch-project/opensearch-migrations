@@ -5,6 +5,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
@@ -40,7 +41,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));
@@ -48,8 +49,8 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, packetReceiver, diagnosticLabel);
             var pipeline = ctx.pipeline();
             try {
-                handlePayloadNeutralTransformation(ctx, request,
-                        parseHeadersIntoMessage(request), pipelineOrchestrator);
+                var httpJsonMessage = transform(transformer, parseHeadersIntoMessage(request));
+                handlePayloadNeutralTransformation(ctx, request, httpJsonMessage, pipelineOrchestrator);
             } catch (PayloadNotLoadedException pnle) {
                 log.debug("The transforms for this message require payload manipulation, " +
                         "all content handlers are being loaded.");
@@ -59,6 +60,11 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             }
         } else if (msg instanceof HttpContent) {
             ctx.fireChannelRead(msg);
+        } else {
+            // ByteBufs shouldn't come through, but in case there's a regression in
+            // RequestPipelineOrchestrator.removeThisAndPreviousHandlers to remove the handlers
+            // in order rather in reverse order
+            super.channelRead(ctx, msg);
         }
     }
 
@@ -76,10 +82,8 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
                                                     HttpRequest request,
                                                     HttpJsonMessageWithFaultingPayload httpJsonMessage,
                                                     RequestPipelineOrchestrator pipelineOrchestrator)
-            throws PayloadNotLoadedException
     {
         var pipeline = ctx.pipeline();
-        httpJsonMessage = transform(transformer, httpJsonMessage);
         if (headerFieldsAreIdentical(request, httpJsonMessage)) {
             log.info("Transformation isn't necessary.  " +
                     "Clearing pipeline to let the parent context redrive directly.");
@@ -93,7 +97,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
                     "are not being added to the pipeline");
             pipelineOrchestrator.addBaselineHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
-            pipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
+            RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
         } else {
             log.info("New headers have been specified that require the payload stream to be reformatted," +
                     "adding Content Handlers to this pipeline.");

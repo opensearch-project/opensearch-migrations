@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
+import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.AggregatedTransformedResponse;
@@ -66,8 +68,16 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     }
 
     private NettySendByteBufsToPacketHandlerHandler getOffloadingHandler() {
-        return Optional.ofNullable(channel).map(c -> (NettySendByteBufsToPacketHandlerHandler) c.pipeline()
-                        .get(RequestPipelineOrchestrator.OFFLOADING_HANDLER_NAME))
+        return Optional.ofNullable(channel).map(c ->
+                        (NettySendByteBufsToPacketHandlerHandler) c.pipeline()
+                                .get(RequestPipelineOrchestrator.OFFLOADING_HANDLER_NAME))
+                .orElse(null);
+    }
+
+    private HttpRequestDecoder getHttpRequestDecoderHandler() {
+        return Optional.ofNullable(channel).map(c ->
+                        (HttpRequestDecoder) c.pipeline()
+                                .get(RequestPipelineOrchestrator.HTTP_REQUEST_DECODER_NAME))
                 .orElse(null);
     }
 
@@ -88,16 +98,30 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse> finalizeRequest() {
         var offloadingHandler = getOffloadingHandler();
-        channel.close();
+        try {
+            channel.checkException();
+            if (getHttpRequestDecoderHandler() == null) { // LastHttpContent won't be sent
+                channel.writeInbound(new EndOfInput());   // so send our own version of 'EOF'
+            }
+        } catch (Exception e) {
+            if (e instanceof NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException) {
+                log.debug("Caught IncompleteJsonBodyException when sending the end of content", e);
+            } else {
+                log.warn("Caught exception when sending the end of content", e);
+            }
+            return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, e);
+        } finally {
+            channel.close();
+        }
         if (offloadingHandler == null) {
             // the NettyDecodedHttpRequestHandler gave up and didn't bother installing the baseline handlers -
             // redrive the chunks
-            return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver,
-                    null);
+            return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, null);
         }
         return offloadingHandler.getPacketReceiverCompletionFuture()
                 .getDeferredFutureThroughHandle((v, t) -> {
                     if (t != null) {
+                        t = unwindPossibleCompletionException(t);
                         if (t instanceof NoContentException) {
                             return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                         } else {
@@ -107,6 +131,13 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                         return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                     }
                 }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
+    }
+
+    private static Throwable unwindPossibleCompletionException(Throwable t) {
+        while (t instanceof CompletionException) {
+            t = ((CompletionException) t).getCause();
+        }
+        return t;
     }
 
     private DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>

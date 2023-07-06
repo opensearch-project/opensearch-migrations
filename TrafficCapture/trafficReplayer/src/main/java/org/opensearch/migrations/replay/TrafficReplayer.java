@@ -31,6 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -164,7 +166,7 @@ public class TrafficReplayer {
     private void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
                                         Stream<TrafficStream> trafficChunkStream,
                                         BufferedOutputStream bufferedOutputStream)
-            throws IOException, InterruptedException, ExecutionException {
+            throws InterruptedException, ExecutionException {
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger exceptionCount = new AtomicInteger();
         var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
@@ -174,54 +176,9 @@ public class TrafficReplayer {
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
-                        (connId,request) -> {
-                    var requestPushFuture = writeToSocketAndClose(request, connId.toString());
-                            requestFutureMap.put(request, requestPushFuture);
-                            try {
-                                var rval = requestPushFuture.get();
-                                log.error("value returned="+rval);
-                            } catch (ExecutionException e) {
-                                log.warn("Got an ExecutionException: ", e);
-                                // eating this exception is the RIGHT thing to do here!  Future invocations
-                                // of get() or chained invocations will continue to expose this exception, which
-                                // is where/how the exception should be handled.
-                            } catch (InterruptedException e) {
-                                log.warn("Got an interrupted exception while waiting for a request to be handled.  " +
-                                        "Assuming that this request should silently fail and that the " +
-                                        "calling context has more awareness than we do here.");
-                            }
-                        },
-                        rrPair -> {
-                            if (log.isTraceEnabled()) {
-                                log.trace("Done receiving captured stream for this "+rrPair.requestData);
-                            }
-                            DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> resultantCf =
-                                    requestFutureMap.get(rrPair.requestData)
-                                            .map(f->
-                                                    f.handle((summary, t) -> {
-                                                        try {
-                                                            AggregatedTransformedResponse rval =
-                                                                    packageAndWriteResponse(tupleWriter, rrPair, summary, t);
-                                                            successCount.incrementAndGet();
-                                                            return rval;
-                                                        } catch (Exception e) {
-                                                            exceptionCount.incrementAndGet();
-                                                            throw e;
-                                                        } finally {
-                                                            requestToFinalWorkFuturesMap.remove(rrPair.requestData);
-                                                            log.trace("removed rrPair.requestData to " +
-                                                                    "requestToFinalWorkFuturesMap for " +
-                                                                    rrPair.connectionId);
-                                                        }
-                                                    }), ()->"TrafficReplayer.runReplayWithIOStreams.progressTracker");
-                            if (!resultantCf.future.isDone()) {
-                                log.error("Adding " + rrPair.connectionId + " to requestToFinalWorkFuturesMap");
-                                requestToFinalWorkFuturesMap.put(rrPair.requestData, resultantCf);
-                                if (resultantCf.future.isDone()) {
-                                    requestToFinalWorkFuturesMap.remove(rrPair.requestData);
-                                }
-                            }
-                        }
+                        getRecordedRequestReconstructCompleteHandler(requestFutureMap),
+                        getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
+                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap)
         );
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
@@ -261,6 +218,71 @@ public class TrafficReplayer {
             assert requestToFinalWorkFuturesMap.size() == 0 :
                     "expected to wait for all of the in flight requests to fully flush and self destruct themselves";
         }
+    }
+
+    private BiConsumer<CapturedTrafficToHttpTransactionAccumulator.UniqueRequestKey, HttpMessageAndTimestamp>
+    getRecordedRequestReconstructCompleteHandler(ConcurrentHashMap<HttpMessageAndTimestamp,
+            DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>> requestFutureMap) {
+        return (connId, request) -> {
+            var requestPushFuture = writeToSocketAndClose(request, connId.toString());
+            requestFutureMap.put(request, requestPushFuture);
+            try {
+                var rval = requestPushFuture.get();
+                log.error("value returned=" + rval);
+            } catch (ExecutionException e) {
+                log.warn("Got an ExecutionException: ", e);
+                // eating this exception is the RIGHT thing to do here!  Future invocations
+                // of get() or chained invocations will continue to expose this exception, which
+                // is where/how the exception should be handled.
+            } catch (InterruptedException e) {
+                log.warn("Got an interrupted exception while waiting for a request to be handled.  " +
+                        "Assuming that this request should silently fail and that the " +
+                        "calling context has more awareness than we do here.");
+            }
+        };
+    }
+
+    private static Consumer<RequestResponsePacketPair>
+    getRecordedRequestAndResponseReconstructCompleteHandler(
+            AtomicInteger successCount,
+            AtomicInteger exceptionCount,
+            SourceTargetCaptureTuple.TupleToFileWriter tupleWriter,
+            ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>>
+                    responseInProgressMap,
+            ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>>
+                    targetTransactionInProgressMap) {
+        return rrPair -> {
+            if (log.isTraceEnabled()) {
+                log.trace("Done receiving captured stream for this " + rrPair.requestData);
+            }
+            var resultantCf = responseInProgressMap.remove(rrPair.requestData)
+                    .map(f ->
+                            f.handle((summary, t) -> {
+                                try {
+                                    AggregatedTransformedResponse rval =
+                                            packageAndWriteResponse(tupleWriter, rrPair, summary, t);
+                                    successCount.incrementAndGet();
+                                    return rval;
+                                } catch (Exception e) {
+                                    log.info("base64 gzipped traffic stream: " +
+                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream()));
+                                    exceptionCount.incrementAndGet();
+                                    throw e;
+                                } finally {
+                                    targetTransactionInProgressMap.remove(rrPair.requestData);
+                                    log.trace("removed rrPair.requestData to " +
+                                            "targetTransactionInProgressMap for " +
+                                            rrPair.connectionId);
+                                }
+                            }), () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
+            if (!resultantCf.future.isDone()) {
+                log.error("Adding " + rrPair.connectionId + " to targetTransactionInProgressMap");
+                targetTransactionInProgressMap.put(rrPair.requestData, resultantCf);
+                if (resultantCf.future.isDone()) {
+                    targetTransactionInProgressMap.remove(rrPair.requestData);
+                }
+            }
+        };
     }
 
     private void
@@ -322,7 +344,7 @@ public class TrafficReplayer {
             log.error("Got exception in CompletableFuture callback: ", t);
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
                     new ArrayList<>(), new ArrayList<>(),
-                    AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR, null, Duration.ZERO
+                    AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR, t, Duration.ZERO
             );
         } else {
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
@@ -344,7 +366,11 @@ public class TrafficReplayer {
             throw new CompletionException(e);
         }
 
-        if (t !=null) { throw new CompletionException(t); }
+        if (t != null) { throw new CompletionException(t); }
+        if (summary.getErrorCause() != null) { throw new CompletionException(summary.getErrorCause()); }
+        if (summary.getTransformationStatus() == AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR) {
+            throw new CompletionException(new RuntimeException("Unknown error transforming the request"));
+        }
         return summary;
     }
 

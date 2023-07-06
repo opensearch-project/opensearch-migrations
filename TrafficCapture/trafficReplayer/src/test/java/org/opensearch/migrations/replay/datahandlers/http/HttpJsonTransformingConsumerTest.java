@@ -37,6 +37,32 @@ class HttpJsonTransformingConsumerTest {
     }
 
     @Test
+    public void testPassThroughSinglePacketWithoutBodyTransformationPost() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null,null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        var transformingHandler = new HttpJsonTransformingConsumer(
+                JoltJsonTransformer.newBuilder()
+                        .addHostSwitchOperation("test.domain")
+                        .build(),
+                testPacketCapture, "TEST");
+        byte[] testBytes;
+        try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+                "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
+            testBytes = sampleStream.readAllBytes();
+            testBytes = new String(testBytes, StandardCharsets.UTF_8)
+                    .replace("foo.example", "test.domain")
+                    .getBytes(StandardCharsets.UTF_8);
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8),
+                testPacketCapture.getCapturedAsString());
+        Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
+        Assertions.assertEquals(AggregatedTransformedResponse.HttpRequestTransformationStatus.SKIPPED,
+                returnedResponse.getTransformationStatus());
+    }
+
+    @Test
     public void testPartialBodyThrowsAndIsRedriven() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
@@ -60,7 +86,8 @@ class HttpJsonTransformingConsumerTest {
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
             var allBytes = sampleStream.readAllBytes();
-            testBytes = Arrays.copyOfRange(allBytes, 0, allBytes.length-10);
+            Arrays.fill(allBytes, allBytes.length-10, allBytes.length, (byte)' ');
+            testBytes = Arrays.copyOfRange(allBytes, 0, allBytes.length);
         }
         transformingHandler.consumeBytes(testBytes);
         var returnedResponse = transformingHandler.finalizeRequest().get();
@@ -69,6 +96,7 @@ class HttpJsonTransformingConsumerTest {
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
         Assertions.assertEquals(AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR,
                 returnedResponse.getTransformationStatus());
-        Assertions.assertInstanceOf(NoContentException.class, returnedResponse.getErrorCause());
+        Assertions.assertInstanceOf(NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException.class,
+                returnedResponse.getErrorCause());
     }
 }

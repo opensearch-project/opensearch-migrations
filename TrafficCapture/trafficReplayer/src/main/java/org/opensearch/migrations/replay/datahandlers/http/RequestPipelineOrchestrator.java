@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.transform.JsonTransformer;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -31,8 +32,9 @@ public class RequestPipelineOrchestrator {
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
-    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.of(LogLevel.INFO);
+    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
     public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
+    public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer packetReceiver;
     final String diagnosticLabel;
@@ -45,13 +47,18 @@ public class RequestPipelineOrchestrator {
         this.diagnosticLabel = diagnosticLabel;
     }
 
-    static void removeThisAndPreviousHandlers(ChannelPipeline pipeline, ChannelHandler beforeHandler) {
-        do {
-            var h = pipeline.removeFirst();
-            if (h == beforeHandler) {
+    static void removeThisAndPreviousHandlers(ChannelPipeline pipeline, ChannelHandler targetHandler) {
+        var precedingHandlers = new ArrayList<ChannelHandler>();
+        for (var kvp : pipeline) {
+            precedingHandlers.add(kvp.getValue());
+            if (kvp.getValue() == targetHandler) {
                 break;
             }
-        } while (true);
+        }
+        Collections.reverse(precedingHandlers);
+        for (var h : precedingHandlers) {
+            pipeline.remove(h);
+        }
     }
 
     void addContentRepackingHandlers(ChannelPipeline pipeline) {
@@ -63,16 +70,19 @@ public class RequestPipelineOrchestrator {
     }
 
     void addInitialHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
-        pipeline.addFirst(new HttpRequestDecoder());
+        pipeline.addFirst(HTTP_REQUEST_DECODER_NAME, new HttpRequestDecoder());
         addLoggingHandler(pipeline, "A");
-        // IN:  Netty HttpRequest(1) + HttpContent(1) blocks (which may be compressed)
+        // IN:  Netty HttpRequest(1) + HttpContent(1) blocks (which may be compressed) + EndOfInput + ByteBuf
         // OUT: ByteBufs(1) OR Netty HttpRequest(1) + HttpJsonMessage(1) with only headers PLUS + HttpContent(1) blocks
         // Note1: original Netty headers are preserved so that HttpContentDecompressor can work appropriately.
         //        HttpJsonMessage is used so that we can capture the headers exactly as they were and to
         //        observe packet sizes.
         // Note2: This handler may remove itself and all other handlers and replace the pipeline ONLY with the
         //        "baseline" handlers.  In that case, the pipeline will be processing only ByteBufs, hence the
-        //        reason that there's some branching in the types that different handlers consume..
+        //        reason that there's some branching in the types that different handlers consume.
+        // Note3: ByteBufs will be sent through when there were pending bytes left to be parsed by the
+        //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
+        //        NettyDecodedHttpRequestHandler is removed.
         pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, packetReceiver, diagnosticLabel));
         addLoggingHandler(pipeline, "B");
     }
@@ -100,7 +110,7 @@ public class RequestPipelineOrchestrator {
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
         pipeline.addLast(new NettyJsonContentCompressor());
         addLoggingHandler(pipeline, "G");
-        // IN:  Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
+        // IN:  Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks + EndOfInput
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + ByteBufs(2)
         pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
         addLoggingHandler(pipeline, "H");
@@ -122,6 +132,4 @@ public class RequestPipelineOrchestrator {
     private void addLoggingHandler(ChannelPipeline pipeline, String name) {
         PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler(name, logLevel)));
     }
-
-
 }
