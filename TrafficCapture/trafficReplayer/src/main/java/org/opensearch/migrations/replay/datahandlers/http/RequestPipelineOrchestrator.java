@@ -88,12 +88,12 @@ public class RequestPipelineOrchestrator {
     }
 
     void addContentParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
-        log.info("Adding content parsing handlers to pipeline");
+        log.debug("Adding content parsing handlers to pipeline");
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
         pipeline.addLast(new HttpContentDecompressor());
         if (transformer != null) {
-            log.info("Adding JSON handlers to pipeline");
+            log.debug("Adding JSON handlers to pipeline");
             //  IN: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) blocks
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
             addLoggingHandler(pipeline, "C");

@@ -30,8 +30,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     ChannelFuture outboundChannelFuture;
     AggregatedRawResponse.Builder responseBuilder;
     BacksideHttpWatcherHandler responseWatchHandler;
+    final String diagnosticLabel;
 
-    public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext) {
+    public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
+                                     String diagnosticLabel) {
+        this.diagnosticLabel = "[" + diagnosticLabel + "] ";
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
@@ -49,7 +52,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         outboundChannelFuture.addListener((ChannelFutureListener) future -> {
             if (future.isSuccess()) {
                 // connection complete start to read first data
-                log.debug("Done setting up backend channel & it was successful");
+                log.debug(diagnosticLabel + "Done setting up backend channel & it was successful");
                 var pipeline = future.channel().pipeline();
                 if (sslContext != null) {
                     SSLEngine sslEngine = sslContext.newEngine(future.channel().alloc());
@@ -64,8 +67,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 pipeline.addLast(responseWatchHandler);
             } else {
                 // Close the connection if the connection attempt has failed.
-                log.error("closing outbound channel because CONNECT future was not successful");
-                log.error(future.cause());
+                log.warn(diagnosticLabel + "closing outbound channel because CONNECT future was not successful");
+                log.warn(future.cause());
             }
         });
     }
@@ -80,11 +83,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             responseBuilder.addRequestPacket(packetData);
             Channel channel = outboundChannelFuture.channel();
             if (!channel.isActive()) {
-                log.warn("Channel is not active - future packets for this connection will be dropped.");
-                log.warn("Need to do more sophisticated tracking of progress and retry further up the stack");
+                log.warn(diagnosticLabel + "Channel is not active - future packets for this connection will be dropped.");
+                log.warn(diagnosticLabel + "Need to do more sophisticated tracking of progress and retry further up the stack");
                 return StringTrackableCompletableFuture.failedFuture(
                         new RuntimeException("The outbound channel's future has completed but " +
-                                "the channel is not in an active state - dropping data"),
+                                "the channel is not in an active state - dropping data for " + diagnosticLabel),
                         ()->"failed future due to channel not becoming active");
             }
             log.trace("Writing data to backside handler and will return future = "+completableFuture);
@@ -93,7 +96,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         Throwable cause = null;
                         try {
                             if (!future.isSuccess()) {
-                                log.warn("closing outbound channel because WRITE future was not successful " +
+                                log.warn(diagnosticLabel + "closing outbound channel because WRITE future was not successful " +
                                         future.cause() + " hash=" + System.identityHashCode(packetData) +
                                         " will be sending the exception to " + completableFuture);
                                 future.channel().close(); // close the backside
@@ -122,7 +125,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                                 " hash=" + System.identityHashCode(packetData));
                         consumeBytes(packetData).map(cf->cf.whenComplete((x,t)-> {
                             if (t != null) {
-                                log.warn("inner consumeBytes has finished w/ exception t="+t +
+                                log.warn(diagnosticLabel + "inner consumeBytes has finished w/ exception t="+t +
                                         " hash=" + System.identityHashCode(packetData));
                                 completableFuture.future.completeExceptionally(t);
                             } else {
@@ -134,7 +137,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                                 ()->"NettyPacketToHttpConsumer.consumeBytes() is waiting for the recursive call to " +
                                         "consumeBytes to finish since the channel wasn't already active yet");
                     } else {
-                        log.warn("outbound channel was not set up successfully, NOT writing bytes " +
+                        log.warn(diagnosticLabel + "outbound channel was not set up successfully, NOT writing bytes " +
                                 " hash=" + System.identityHashCode(packetData));
                         completableFuture.future.completeExceptionally(outboundChannelFuture.cause());
                     }

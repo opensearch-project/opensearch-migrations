@@ -37,7 +37,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         this.packetReceiver = packetReceiver;
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
-        this.diagnosticLabel = diagnosticLabel;
+        this.diagnosticLabel = "[" + diagnosticLabel + "] ";
     }
 
     @Override
@@ -85,22 +85,22 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
     {
         var pipeline = ctx.pipeline();
         if (headerFieldsAreIdentical(request, httpJsonMessage)) {
-            log.info("Transformation isn't necessary.  " +
+            log.info(diagnosticLabel + "Transformation isn't necessary.  " +
                     "Clearing pipeline to let the parent context redrive directly.");
             while (pipeline.first() != null) {
                 pipeline.removeFirst();
             }
         } else if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                 headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
-            log.info("There were changes to the headers that require the message to be reformatted through " +
-                    "this pipeline but the content (payload) doesn't need to be transformed.  Content Handlers " +
-                    "are not being added to the pipeline");
+            log.info(diagnosticLabel + "There were changes to the headers that require the message to be reformatted " +
+                    "through this pipeline but the content (payload) doesn't need to be transformed.  " +
+                    "Content Handlers are not being added to the pipeline");
             pipelineOrchestrator.addBaselineHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
             RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
         } else {
-            log.info("New headers have been specified that require the payload stream to be reformatted," +
-                    "adding Content Handlers to this pipeline.");
+            log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
+                    "reformatted, adding Content Handlers to this pipeline.");
             pipelineOrchestrator.addContentRepackingHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
         }

@@ -59,7 +59,7 @@ public class BehavioralPolicy {
         }
     }
 
-    public void onExpireAccumulation(String partitionId, String connectionId, Accumulation accumulation) {
+    public void onExpireAccumulation(String partitionId, Accumulation accumulation) {
         // do nothing by default
     }
 }

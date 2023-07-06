@@ -220,7 +220,7 @@ public class TrafficReplayer {
         }
     }
 
-    private BiConsumer<CapturedTrafficToHttpTransactionAccumulator.UniqueRequestKey, HttpMessageAndTimestamp>
+    private BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp>
     getRecordedRequestReconstructCompleteHandler(ConcurrentHashMap<HttpMessageAndTimestamp,
             DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>> requestFutureMap) {
         return (connId, request) -> {
@@ -228,9 +228,9 @@ public class TrafficReplayer {
             requestFutureMap.put(request, requestPushFuture);
             try {
                 var rval = requestPushFuture.get();
-                log.error("value returned=" + rval);
+                log.trace("Summary response value for " + connId + " returned=" + rval);
             } catch (ExecutionException e) {
-                log.warn("Got an ExecutionException: ", e);
+                log.warn("Got an ExecutionException for " + connId + ": ", e);
                 // eating this exception is the RIGHT thing to do here!  Future invocations
                 // of get() or chained invocations will continue to expose this exception, which
                 // is where/how the exception should be handled.
@@ -344,8 +344,7 @@ public class TrafficReplayer {
             log.error("Got exception in CompletableFuture callback: ", t);
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
                     new ArrayList<>(), new ArrayList<>(),
-                    AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR, t, Duration.ZERO
-            );
+                    AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR, t, Duration.ZERO);
         } else {
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
                     summary.requestPackets,

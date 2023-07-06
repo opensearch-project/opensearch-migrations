@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -42,16 +41,6 @@ import java.util.function.Consumer;
 @Slf4j
 public class CapturedTrafficToHttpTransactionAccumulator {
 
-    @AllArgsConstructor
-    public static class UniqueRequestKey {
-        public final String connectionId;
-        public final int requestIndex;
-        @Override
-        public String toString() {
-            return connectionId + '.' + requestIndex;
-        }
-    }
-
     public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
     private final ExpiringTrafficStreamMap liveStreams;
     private final BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp> requestHandler;
@@ -69,11 +58,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 new BehavioralPolicy() {
                     @Override
                     public void onExpireAccumulation(String partitionId,
-                                                     String connectionId,
                                                      Accumulation accumulation) {
                         connectionsExpiredCounter.incrementAndGet();
-                        log.trace("firing accumulation for accum=[" + connectionId + "]=" + accumulation);
-                        fireAccumulationsCallbacks(connectionId, accumulation);
+                        log.trace("firing accumulation for accum=[" + accumulation.getRequestId() + "]=" + accumulation);
+                        fireAccumulationsCallbacks(accumulation);
                     }
                 });
         this.requestHandler = requestReceivedHandler;
@@ -99,7 +87,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         "NOT reproducing this to the target cluster (TODO - do something better?)");
                 return;
             }
-            handleEndOfRequest(connectionId, accum);
+            handleEndOfRequest(accum);
         } else if (observation.hasRead()) {
             var accum = getAccumulationForFirstRequestObservation(nodeId, connectionId, timestamp);
             assert accum.state == Accumulation.State.NOTHING_SENT;
@@ -181,14 +169,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     /**
-     * @param connectionId
      * @param accumulation
      * @return true if there are still callbacks remaining to be called
      */
-    private void handleEndOfRequest(String connectionId, Accumulation accumulation) {
+    private void handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.NOTHING_SENT : "state == " + accumulation.state;
-        var reqKey = new UniqueRequestKey(connectionId, accumulation.getIndexOfCurrentRequest());
-        requestHandler.accept(reqKey, accumulation.rrPair.requestData);
+        requestHandler.accept(accumulation.getRequestId(), accumulation.rrPair.requestData);
         accumulation.state = Accumulation.State.REQUEST_SENT;
     }
 
@@ -203,15 +189,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (accum.state != Accumulation.State.RESPONSE_SENT) {
                 requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
             }
-            fireAccumulationsCallbacks(accum.getConnectionId(), accum);
+            fireAccumulationsCallbacks(accum);
         });
         liveStreams.clear();
     }
 
-    private void fireAccumulationsCallbacks(String connectionId, Accumulation accumulation) {
+    private void fireAccumulationsCallbacks(Accumulation accumulation) {
         switch (accumulation.state) {
             case NOTHING_SENT:
-                handleEndOfRequest(connectionId, accumulation);
+                handleEndOfRequest(accumulation);
                 // fall through
             case REQUEST_SENT:
                 handleEndOfResponse(accumulation);

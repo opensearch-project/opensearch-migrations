@@ -141,6 +141,7 @@ public class SourceTargetCaptureTuple {
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
+        sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
         sb.append("\n sourcePair=").append(sourcePair);
         sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
         sb.append("\n shadowRequestData=").append(Utils.packetsToStringTruncated(shadowRequestData));

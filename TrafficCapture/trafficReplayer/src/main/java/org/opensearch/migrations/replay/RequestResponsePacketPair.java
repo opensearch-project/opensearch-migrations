@@ -14,9 +14,9 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    public final String connectionId;
+    public final UniqueRequestKey connectionId;
 
-    public RequestResponsePacketPair(String connectionId) {
+    public RequestResponsePacketPair(UniqueRequestKey connectionId) {
         this.connectionId = connectionId;
     }
 
