@@ -41,9 +41,6 @@ public class AggregatedRawResponse implements Serializable {
         }
 
         public AggregatedRawResponse.Builder addRequestPacket(ByteBuf packet) {
-            if (requestPackets.size() > 0 && requestPackets.get(requestPackets.size()-1).length == packet.readableBytes()) {
-                log.warn("checkme");
-            }
             byte[] output = new byte[packet.readableBytes()];
             packet.readBytes(output);
             packet.resetReaderIndex();
