@@ -20,7 +20,7 @@ image:
   # This port is not currently used, but having a port specified was a requirement for using Service Connect
   port: 9209
 
-command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --topic-name logging-traffic-topic --enableMSKAuth | nc -v traffic-replayer 10001"
+command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka-broker:9092 --topic-name logging-traffic-topic | nc -v traffic-replayer 10001"
 
 cpu: 256       # Number of CPU units for the task.
 memory: 512    # Amount of memory in MiB used by the task.
