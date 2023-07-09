@@ -32,8 +32,8 @@ public class JMeterLoadTest {
                 description = "Port number")
         int backsidePort;
         @Parameter(required = true,
-                names = {"-d", "--domain-name"},
-                description = "Domain name")
+                names = {"-s", "--server-name"},
+                description = "Server name")
         String domainName;
     }
 

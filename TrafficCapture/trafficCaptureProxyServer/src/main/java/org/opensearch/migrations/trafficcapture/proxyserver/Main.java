@@ -49,8 +49,8 @@ public class Main {
         @Parameter(required = false,
                 names = {"--noCapture"},
                 arity = 0,
-                description = "If enabled, Does NOT store trace files in.")
-        boolean noCapture;
+                description = "If enabled, Does NOT capture traffic to ANY sink.")
+                boolean noCapture;
         @Parameter(required = false,
                 names = {"--kafkaConfigFile"},
                 arity = 1,
