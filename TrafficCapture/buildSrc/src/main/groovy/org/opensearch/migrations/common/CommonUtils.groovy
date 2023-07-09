@@ -2,6 +2,7 @@ package org.opensearch.migrations.common
 
 import org.gradle.api.tasks.Copy
 import org.gradle.api.Project
+import com.bmuschko.gradle.docker.tasks.image.Dockerfile
 
 class CommonUtils {
     static def calculateDockerHash(def projectName, def project) {

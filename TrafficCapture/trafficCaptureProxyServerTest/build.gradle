@@ -1,8 +1,7 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id "com.avast.gradle.docker-compose" version "0.16.12"
-    id "com.bmuschko.docker-java-application" version "9.3.1"
-
+    id 'com.bmuschko.docker-remote-api'
 }
 import org.opensearch.migrations.common.CommonUtils
 import org.opensearch.migrations.common.CommonConfigurations
