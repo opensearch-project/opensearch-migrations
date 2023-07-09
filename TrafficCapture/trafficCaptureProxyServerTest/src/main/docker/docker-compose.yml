@@ -1,12 +1,12 @@
 version: '3.7'
 services:
   webserver:
-    image: 'testenv/nginx:latest'
+    image: 'migrations/nginx:latest'
     ports:
       - "8080:80"
 
   captureproxy:
-    image: 'testenv/capture_proxy:latest'
+    image: 'migrations/capture_proxy:latest'
     networks:
       - testing
     ports:
@@ -16,7 +16,7 @@ services:
       - webserver
 
   jmeter:
-    image: 'testenv/jmeter:latest'
+    image: 'migrations/jmeter:latest'
     networks:
       - testing
     command: /bin/sh -c "while sleep 10; do /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.JMeterLoadTest -p 9201 -s captureproxy; done"

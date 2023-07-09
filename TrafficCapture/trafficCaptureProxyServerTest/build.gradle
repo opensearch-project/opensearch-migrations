@@ -71,8 +71,8 @@ def dockerFilesForExternalServices = [
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
     task("buildDockerImage_${projectName}", type: DockerBuildImage) {
         def hash = calculateDockerHash(projectName)
-        images.add("testenv/${dockerImageName}:$hash")
-        images.add("testenv/${dockerImageName}:latest")
+        images.add("migrations/${dockerImageName}:$hash")
+        images.add("migrations/${dockerImageName}:latest")
         inputDir = project.file("src/main/docker/${projectName}")
     }
 }
@@ -87,38 +87,9 @@ def baseImageProjectOverrides = [
 
 def createContainerTasks = { projectName, dockerImageName ->
     def dockerBuildDir = "build/docker/${projectName}"
-    CommonUtils.copyArtifact(projectName, project)
+    CommonUtils.copyArtifact(project, projectName)
 
-    task "createDockerfile_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.Dockerfile) {
-        dependsOn "copyArtifact_${projectName}"
-        destFile = project.file("${dockerBuildDir}/Dockerfile")
-        def baseImageOverrideProjectName = baseImageProjectOverrides.get(projectName)
-        if (baseImageOverrideProjectName) {
-            def dependentDockerImageName = dockerFilesForExternalServices.get(baseImageOverrideProjectName)
-            def hashNonce = calculateDockerHash(baseImageOverrideProjectName)
-            from "testenv/${dependentDockerImageName}:${hashNonce}"
-            dependsOn "buildDockerImage_${baseImageOverrideProjectName}"
-            runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
-            runCommand("yum -y install nmap-ncat")
-        } else {
-            from 'openjdk:11-jre'
-            if (projectName == "trafficCaptureProxyServerTest") {
-                instruction 'COPY jmeter.properties /jmeter.properties'
-            }
-            runCommand("apt-get update && apt-get install -y netcat")
-        }
-
-        copyFile("jars", "/jars")
-        // can't set the environment variable from the runtimeClasspath because the Dockerfile is
-        // constructed in the configuration phase and the classpath won't be realized until the
-        // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
-        // and it's simplest to pack that up into a helper script.
-        runCommand("printf \"#!/bin/sh\\njava -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
-        runCommand("chmod +x /runJavaWithClasspath.sh")
-        // container stay-alive
-        defaultCommand('tail', '-f', '/dev/null')
-        //defaultCommand('/runJavaWithClasspath.sh', '...')
-    }
+    CommonUtils.createDockerfile(project, projectName, baseImageProjectOverrides, dockerFilesForExternalServices)
 }
 
 javaContainerServices.each(createContainerTasks)
@@ -128,8 +99,8 @@ javaContainerServices.each(createContainerTasks)
     task "buildDockerImage_${projectName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${projectName}"
         inputDir = project.file("${dockerBuildDir}")
-        images.add("testenv/${dockerImageName}:${version}")
-        images.add("testenv/${dockerImageName}:latest")
+        images.add("migrations/${dockerImageName}:${version}")
+        images.add("migrations/${dockerImageName}:latest")
     }
 }
 
