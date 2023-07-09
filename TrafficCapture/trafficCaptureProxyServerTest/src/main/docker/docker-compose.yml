@@ -1,6 +1,6 @@
 version: '3.7'
 services:
-  nginx:
+  webserver:
     image: 'testenv/nginx:latest'
     ports:
       - "8080:80"
@@ -11,9 +11,9 @@ services:
       - testing
     ports:
       - "9201:9201"
-    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --destinationUri  http://nginx:80 --listenPort 9201 --noCapture
+    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --destinationUri  http://webserver:80 --listenPort 9201 --noCapture
     depends_on:
-      - nginx
+      - webserver
 
   jmeter:
     image: 'testenv/jmeter:latest'
