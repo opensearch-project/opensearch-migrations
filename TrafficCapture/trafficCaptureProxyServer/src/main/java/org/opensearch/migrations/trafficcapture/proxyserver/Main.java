@@ -50,7 +50,7 @@ public class Main {
                 names = {"--noCapture"},
                 arity = 0,
                 description = "If enabled, Does NOT capture traffic to ANY sink.")
-                boolean noCapture;
+        boolean noCapture;
         @Parameter(required = false,
                 names = {"--kafkaConfigFile"},
                 arity = 1,
