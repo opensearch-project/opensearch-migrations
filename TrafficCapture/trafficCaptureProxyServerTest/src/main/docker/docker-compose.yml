@@ -1,7 +1,7 @@
 version: '3.7'
 services:
   webserver:
-    image: 'migrations/nginx:latest'
+    image: 'migrations/nginx-perf-test-webserver:latest'
     ports:
       - "8080:80"
 
