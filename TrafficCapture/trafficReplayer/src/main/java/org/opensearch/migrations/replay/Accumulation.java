@@ -19,10 +19,10 @@ public class Accumulation {
 
     public Accumulation(String connectionId) {
         numberOfResets = new AtomicInteger();
-        resetForNextRequest(this, connectionId);
+        this.resetForRequest(new UniqueRequestKey(connectionId, 0));
     }
 
-    public String getConnectionId() {
+    public UniqueRequestKey getRequestId() {
         return rrPair.connectionId;
     }
 
@@ -39,11 +39,6 @@ public class Accumulation {
         return sb.toString();
     }
 
-    public void resetForNextRequest() {
-        numberOfResets.incrementAndGet();
-        resetForNextRequest(this, this.rrPair.connectionId);
-    }
-
     /**
      * Accumulations are reset for each new HttpRequest that is discovered.  This value indicates how
      * many times the object has been reset, indicating in a logical sequence of requests against this
@@ -55,11 +50,14 @@ public class Accumulation {
         return numberOfResets.get();
     }
 
-    private static void resetForNextRequest(Accumulation accumulation, String connectionId) {
-        accumulation.state = State.NOTHING_SENT;
-        accumulation.rrPair = new RequestResponsePacketPair(connectionId);
-        accumulation.newestPacketTimestampInMillis = new AtomicLong(0);
+    public void resetForNextRequest() {
+        numberOfResets.incrementAndGet();
+        resetForRequest(new UniqueRequestKey(getRequestId().connectionId, getIndexOfCurrentRequest()));
     }
 
-
+    private void resetForRequest(UniqueRequestKey key) {
+        this.state = State.NOTHING_SENT;
+        this.rrPair = new RequestResponsePacketPair(key);
+        this.newestPacketTimestampInMillis = new AtomicLong(0);
+    }
 }

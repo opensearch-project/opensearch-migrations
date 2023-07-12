@@ -14,9 +14,9 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    public final String connectionId;
+    public final UniqueRequestKey connectionId;
 
-    public RequestResponsePacketPair(String connectionId) {
+    public RequestResponsePacketPair(UniqueRequestKey connectionId) {
         this.connectionId = connectionId;
     }
 
@@ -45,8 +45,8 @@ public class RequestResponsePacketPair {
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("RequestResponsePacketPair{");
-        sb.append("requestData=").append(requestData);
-        sb.append(", responseData=").append(responseData);
+        sb.append("\n requestData=").append(requestData);
+        sb.append("\n responseData=").append(responseData);
         sb.append('}');
         return sb.toString();
     }

@@ -24,7 +24,6 @@ class ExpiringTrafficStreamMapSequentialTest {
                 new BehavioralPolicy() {
                     @Override
                     public void onExpireAccumulation(String partitionId,
-                                                     String connectionId,
                                                      Accumulation accumulation) {
                         expiredAccumulations.add(accumulation);
                     }

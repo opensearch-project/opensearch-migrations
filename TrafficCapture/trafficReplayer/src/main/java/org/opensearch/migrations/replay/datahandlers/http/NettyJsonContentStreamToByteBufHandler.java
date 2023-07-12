@@ -76,10 +76,12 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
                     break;
                 case FIXED:
                     bufferedContents.addComponents(true, dataByteBuf.retain());
-                    if (lastContent) { finalizeFixedContentStream(ctx); }
+                    if (lastContent) {
+                        finalizeFixedContentStream(ctx);
+                    }
                     break;
                 default:
-                    throw new RuntimeException("Unknown transfer encoding mode "+streamMode);
+                    throw new RuntimeException("Unknown transfer encoding mode " + streamMode);
             }
         } else {
             super.channelRead(ctx, msg);

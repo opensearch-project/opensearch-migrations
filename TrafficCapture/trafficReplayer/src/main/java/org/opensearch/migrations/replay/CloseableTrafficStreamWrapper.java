@@ -25,7 +25,7 @@ public class CloseableTrafficStreamWrapper implements Closeable {
                     return null;
                 }
                 var ts = builder.build();
-                log.debug("Parsed traffic stream #" + (trafficStreamsRead.incrementAndGet()) + ": "+ts);
+                log.trace("Parsed traffic stream #" + (trafficStreamsRead.incrementAndGet()) + ": "+ts);
                 return ts;
             } catch (IOException e) {
                 log.error("Got exception while reading input: "+e);

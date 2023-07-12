@@ -18,7 +18,7 @@ import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
  */
 public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter {
 
-    public static class IncompleteJsonBodyException extends RuntimeException {}
+    public static class IncompleteJsonBodyException extends NoContentException {}
 
     JsonAccumulator jsonAccumulator;
     HttpJsonMessageWithFaultingPayload capturedHttpJsonMessage;

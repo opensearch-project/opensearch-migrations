@@ -30,7 +30,7 @@ public class AddCompressionEncodingTest {
     public void addingCompressionRequestHeaderCompressesPayload() throws ExecutionException, InterruptedException, IOException {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null,
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null, null,
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var compressingTransformer = new HttpJsonTransformingConsumer(
