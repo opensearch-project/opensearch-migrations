@@ -14,10 +14,10 @@ cd $script_dir_abs_path
 SECONDS=0
 
 # Allow --skip-bootstrap flag to avoid one-time setups
-skip_boot=false
+skip_bootstrap=false
 if [[ $* == *--skip-bootstrap* ]]
 then
-  skip_boot=true
+  skip_bootstrap=true
 fi
 # Allow --skip-copilot-init flag to avoid initializing Copilot components
 skip_copilot_init=false
@@ -46,14 +46,14 @@ if [ "$destroy" = true ] ; then
   set +e
   copilot app delete
   cd ../cdk/opensearch-service-migration
-  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoManager=true
+  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoAdmin=true
   exit 1
 fi
 
 # === CDK Deployment ===
 
 cd ../cdk/opensearch-service-migration
-if [ "$skip_boot" = false ] ; then
+if [ "$skip_bootstrap" = false ] ; then
   cd ../../../TrafficCapture
   ./gradlew :dockerSolution:buildDockerImages
   cd ../deployment/cdk/opensearch-service-migration
@@ -64,7 +64,7 @@ fi
 # This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
 # The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
-cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoManager=true -O cdkOutput.json --require-approval never
+cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoAdmin=true -O cdkOutput.json --require-approval never
 
 # Gather CDK output which includes export commands needed by Copilot, and make them available to the environment
 found_exports=$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)

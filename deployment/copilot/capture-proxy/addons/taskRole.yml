@@ -14,13 +14,12 @@ Resources:
   MSKPublisherAccessPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      Description: Allow Fargate container to consume from MSK
+      Description: Allow compute host to consume from MSK
       PolicyDocument:
         Version: '2012-10-17'
         # We should enhance IAM policy here to further restrict the Resource
         Statement:
           - Action:
-              - kafka-cluster:AlterCluster
               - kafka-cluster:Connect
               - kafka-cluster:DescribeCluster
             Effect: Allow

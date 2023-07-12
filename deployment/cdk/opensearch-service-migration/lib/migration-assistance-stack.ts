@@ -40,7 +40,7 @@ export class MigrationAssistanceStack extends Stack {
 
         const mskSecurityGroup = new SecurityGroup(this, 'migrationMSKSecurityGroup', {
             vpc: props.vpc,
-            allowAllOutbound: true
+            allowAllOutbound: false
         });
         // This will allow all ip access for all TCP ports by default when public access is enabled,
         // it should be updated if further restriction is desired
@@ -132,12 +132,12 @@ export class MigrationAssistanceStack extends Stack {
             //keyName: "es-node-key"
         });
 
-        let publicSubnetString = ""
-        props.vpc.publicSubnets.forEach(subnet => publicSubnetString = publicSubnetString.concat(subnet.subnetId, ","))
-        if (publicSubnetString) publicSubnetString = publicSubnetString.substring(0, publicSubnetString.length - 1)
-        let privateSubnetString = ""
-        props.vpc.privateSubnets.forEach(subnet => privateSubnetString = privateSubnetString.concat(subnet.subnetId, ","))
-        privateSubnetString = privateSubnetString.substring(0, privateSubnetString.length - 1)
+        let publicSubnetString = props.vpc.publicSubnets.map(_ => _.subnetId).join(",")
+        //props.vpc.publicSubnets.forEach(subnet => publicSubnetString = publicSubnetString.concat(subnet.subnetId, ","))
+        //if (publicSubnetString) publicSubnetString = publicSubnetString.substring(0, publicSubnetString.length - 1)
+        let privateSubnetString = props.vpc.privateSubnets.map(_ => _.subnetId).join(",")
+        //props.vpc.privateSubnets.forEach(subnet => privateSubnetString = privateSubnetString.concat(subnet.subnetId, ","))
+        //privateSubnetString = privateSubnetString.substring(0, privateSubnetString.length - 1)
 
         const exports = [
             `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,

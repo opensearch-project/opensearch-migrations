@@ -118,13 +118,13 @@ copilot svc deploy --name opensearch-benchmark --env dev
 
 A command shell can be opened in the service's container if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
 ```
-copilot svc exec -a migration-copilot -e dev -n traffic-comparator-jupyter -c "/bin/bash"
-copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "/bin/bash"
-copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "/bin/bash"
-copilot svc exec -a migration-copilot -e dev -n kafka-puller -c "/bin/bash"
-copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "/bin/bash"
-copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "/bin/bash"
-copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "/bin/bash"
+copilot svc exec -a migration-copilot -e dev -n traffic-comparator-jupyter -c "bash"
+copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "bash"
+copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "bash"
+copilot svc exec -a migration-copilot -e dev -n kafka-puller -c "bash"
+copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "bash"
+copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "bash"
+copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
 ```
 
 ### Addons

@@ -38,7 +38,7 @@ export class StackComposer {
         const fineGrainedManagerUserARN = getContextForType('fineGrainedManagerUserARN', 'string')
         const fineGrainedManagerUserName = getContextForType('fineGrainedManagerUserName', 'string')
         const fineGrainedManagerUserSecretManagerKeyARN = getContextForType('fineGrainedManagerUserSecretManagerKeyARN', 'string')
-        const enableDemoManager = getContextForType('enableDemoManager', 'boolean')
+        const enableDemoAdmin = getContextForType('enableDemoAdmin', 'boolean')
         const enforceHTTPS = getContextForType('enforceHTTPS', 'boolean')
         const ebsEnabled = getContextForType('ebsEnabled', 'boolean')
         const ebsIops = getContextForType('ebsIops', 'number')
@@ -134,7 +134,7 @@ export class StackComposer {
             fineGrainedManagerUserARN: fineGrainedManagerUserARN,
             fineGrainedManagerUserName: fineGrainedManagerUserName,
             fineGrainedManagerUserSecretManagerKeyARN: fineGrainedManagerUserSecretManagerKeyARN,
-            enableDemoManager: enableDemoManager,
+            enableDemoAdmin: enableDemoAdmin,
             enforceHTTPS: enforceHTTPS,
             tlsSecurityPolicy: tlsSecurityPolicy,
             ebsEnabled: ebsEnabled,
