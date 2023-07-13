@@ -1,4 +1,7 @@
 {
   "engineVersion": "OS_2.5",
-  "domainName": "os-service-domain"
+  "domainName": "os-service-domain",
+  "enforceHTTPS": true,
+  "nodeToNodeEncryptionEnabled": true,
+  "encryptionAtRestEnabled": true
 }

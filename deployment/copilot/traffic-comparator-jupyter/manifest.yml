@@ -16,13 +16,14 @@ http:
     path: '/'
     port: 8888
     success_codes: '200-405'
-    healthy_threshold: 3
+    healthy_threshold: 2
     unhealthy_threshold: 2
     interval: 15s
     timeout: 10s
     grace_period: 60s
 
 network:
+  connect: true
   vpc:
     security_groups: [ "${MIGRATION_COMPARATOR_EFS_SG_ID}" ]
 
@@ -43,25 +44,13 @@ storage:
       efs:
         id: ${MIGRATION_COMPARATOR_EFS_ID}
 
-cpu: 256       # Number of CPU units for the task.
-memory: 512    # Amount of memory in MiB used by the task.
+cpu: 512       # Number of CPU units for the task.
+memory: 2048    # Amount of memory in MiB used by the task.
 count: 1       # Number of tasks that should be running in your service.
 exec: true     # Enable getting a shell to your container (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html).
 
-# storage:
-  # readonly_fs: true       # Limit to read-only access to mounted root filesystems.
- 
-# Optional fields for more advanced use-cases.
-#
-#variables:                    # Pass environment variables as key value pairs.
-#  LOG_LEVEL: info
-
-#secrets:                      # Pass secrets from AWS Systems Manager (SSM) Parameter Store.
-#  GITHUB_TOKEN: GITHUB_TOKEN  # The key is the name of the environment variable, the value is the name of the SSM parameter.
-
-# You can override any of the values defined above by environment.
 environments:
-  test:
-    count: 1               # Number of tasks to run for the "test" environment.
-    deployment:            # The deployment strategy for the "test" environment.
+  dev:
+    count: 1               # Number of tasks to run for the "dev" environment.
+    deployment:            # The deployment strategy for the "dev" environment.
       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.

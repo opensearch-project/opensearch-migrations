@@ -3,7 +3,7 @@
 #  https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/
 
 # This is a non-essential experimental service to test running Kafka within ECS. It has no volume, is a single broker, and will be recreated in
-# test environment deployments. With this in mind, it should only be used on a test basis.
+# dev environment deployments. With this in mind, it should only be used on a test basis.
 
 # Your service name will be used in naming your resources like log groups, ECS services, etc.
 name: kafka-broker
@@ -29,12 +29,8 @@ memory: 2048   # Amount of memory in MiB used by the task.
 count: 1       # Number of tasks that should be running in your service.
 exec: true     # Enable getting a shell to your container (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html).
 
-# storage:
-  # readonly_fs: true       # Limit to read-only access to mounted root filesystems.
- 
-# Optional fields for more advanced use-cases.
-#
-variables:                    # Pass environment variables as key value pairs.
+# Pass environment variables as key value pairs.
+variables:
   # Definitions for some of these variables can be found in the Bitnami docker documentation here: https://hub.docker.com/r/bitnami/kafka/
   ALLOW_PLAINTEXT_LISTENER: yes
   KAFKA_ENABLE_KRAFT: no
@@ -47,12 +43,8 @@ variables:                    # Pass environment variables as key value pairs.
   # This is currently only accessible within an ECS service that can connect to kafka-broker
   KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092
 
-#secrets:                      # Pass secrets from AWS Systems Manager (SSM) Parameter Store.
-#  GITHUB_TOKEN: GITHUB_TOKEN  # The key is the name of the environment variable, the value is the name of the SSM parameter.
-
-# You can override any of the values defined above by environment.
 environments:
-  test:
-    count: 1               # Number of tasks to run for the "test" environment.
-    deployment:            # The deployment strategy for the "test" environment.
+  dev:
+    count: 1               # Number of tasks to run for the "dev" environment.
+    deployment:            # The deployment strategy for the "dev" environment.
       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.

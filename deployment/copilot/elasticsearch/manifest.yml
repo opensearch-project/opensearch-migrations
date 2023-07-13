@@ -1,33 +1,20 @@
-# The manifest for the "traffic-comparator" service.
+# The manifest for the "elasticsearch" service.
 # Read the full specification for the "Backend Service" type at:
 #  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
 
 # Your service name will be used in naming your resources like log groups, ECS services, etc.
-name: traffic-comparator
+name: elasticsearch
 type: Backend Service
 
 # Allow service-to-service communication with ECS Service Connect
 network:
   connect: true
-  vpc:
-    security_groups: [ "${MIGRATION_COMPARATOR_EFS_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
   # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
-  build:
-    dockerfile: ../TrafficCapture/dockerSolution/build/docker/trafficComparator/Dockerfile
-  port: 9220
-
-command: /bin/sh -c "cd containerTC && pip3 install --editable . && nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -vv stream | trafficcomparator dump-to-sqlite --db /shared/comparisons.db"
-
-storage:
-  volumes:
-    sharedSQLVolume: # This is a variable key and can be set to an arbitrary string.
-      path: '/shared'
-      read_only: false
-      efs:
-        id: ${MIGRATION_COMPARATOR_EFS_ID}
+  build: ../TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard/Dockerfile
+  port: 9200
 
 cpu: 512       # Number of CPU units for the task.
 memory: 2048    # Amount of memory in MiB used by the task.

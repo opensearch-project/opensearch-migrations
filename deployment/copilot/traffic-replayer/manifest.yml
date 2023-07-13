@@ -17,27 +17,15 @@ image:
     dockerfile: ../TrafficCapture/dockerSolution/build/docker/trafficReplayer/Dockerfile
   port: 10001
 
-command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer http://vpc-aos-domain-chxj2uiujn2bbwsc5avkvzff2m.us-east-1.es.amazonaws.com:80 --insecure | nc traffic-comparator 9220"
+command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --auth-header-value Basic\\ YWRtaW46QWRtaW4xMjMh | nc traffic-comparator 9220"
 
-cpu: 256       # Number of CPU units for the task.
-memory: 512    # Amount of memory in MiB used by the task.
+cpu: 1024       # Number of CPU units for the task.
+memory: 4096    # Amount of memory in MiB used by the task.
 count: 1       # Number of tasks that should be running in your service.
 exec: true     # Enable getting a shell to your container (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html).
 
-# storage:
-  # readonly_fs: true       # Limit to read-only access to mounted root filesystems.
-
-# Optional fields for more advanced use-cases.
-#
-#variables:                    # Pass environment variables as key value pairs.
-#  LOG_LEVEL: info
-
-#secrets:                      # Pass secrets from AWS Systems Manager (SSM) Parameter Store.
-#  GITHUB_TOKEN: GITHUB_TOKEN  # The key is the name of the environment variable, the value is the name of the SSM parameter.
-
-# You can override any of the values defined above by environment.
 environments:
-  test:
-    count: 1               # Number of tasks to run for the "test" environment.
-    deployment:            # The deployment strategy for the "test" environment.
-       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.
+  dev:
+    count: 1               # Number of tasks to run for the "dev" environment.
+    deployment:            # The deployment strategy for the "dev" environment.
+      rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.
