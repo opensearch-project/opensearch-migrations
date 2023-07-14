@@ -48,27 +48,20 @@ services:
     depends_on:
       - zookeeper
 
-  traffic_capture_puller:
-    image: 'migrations/kafka_capture_puller:latest'
-    networks:
-      - migrations
-    depends_on:
-      - kafka
-      - replayer
-    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.KafkaPrinter --group-id default-logging-group --broker-address kafka:9092 --topic-name logging-traffic-topic | nc -v replayer 10001"
-
   replayer:
     image: 'migrations/traffic_replayer:latest'
     networks:
       - migrations
     depends_on:
+      kafka:
+        condition: service_started
       opensearchtarget:
         condition: service_started
       trafficcomparator:
         condition: service_healthy
-    ports:
-      - "10001:10001"
-    command: /bin/sh -c "nc -v -l -p 10001 | /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure | nc trafficcomparator 9220"
+#    healthcheck:
+#      test: "lsof -i -P -n"
+    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group | nc trafficcomparator 9220"
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:latest'

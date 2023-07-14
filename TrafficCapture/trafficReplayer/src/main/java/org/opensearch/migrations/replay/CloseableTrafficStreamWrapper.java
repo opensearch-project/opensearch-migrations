@@ -1,12 +1,14 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.Closeable;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -48,11 +50,25 @@ public class CloseableTrafficStreamWrapper implements Closeable {
         }
     }
 
-    public static CloseableTrafficStreamWrapper getLogEntriesFromFileOrStdin(String filename) throws IOException {
-        return filename == null ? getCaptureEntriesFromInputStream(System.in) :
-                getLogEntriesFromFile(filename);
+    public static CloseableTrafficStreamWrapper generateTrafficStreamFromMessageSource(ITrafficCaptureSource captureSource) {
+        Stream<TrafficStream> stream = captureSource.consumeTrafficFromSource();
+        return new CloseableTrafficStreamWrapper(captureSource, stream);
     }
 
+    public static CloseableTrafficStreamWrapper getLogEntries(Optional<String> filename, Optional<ITrafficCaptureSource> captureSource) throws IOException {
+        if (filename.isPresent() && captureSource.isPresent()) {
+            throw new RuntimeException("Only one traffic source can be specified, detected options for input file as well as Kafka");
+        }
+        if (captureSource.isPresent()) {
+            return generateTrafficStreamFromMessageSource(captureSource.get());
+        }
+        else if (filename.isPresent()) {
+            return getLogEntriesFromFile(filename.get());
+        }
+        else {
+            return getCaptureEntriesFromInputStream(System.in);
+        }
+    }
 
     private CloseableTrafficStreamWrapper(Closeable underlyingCloseableResource, Stream<TrafficStream> underlyingStream) {
         this.underlyingCloseableResource = underlyingCloseableResource;

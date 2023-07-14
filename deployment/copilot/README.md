@@ -83,7 +83,6 @@ copilot app init
 copilot env init --name dev
 
 // Initialize services with their respective required name
-copilot svc init --name kafka-puller
 copilot svc init --name traffic-replayer
 copilot svc init --name traffic-comparator
 copilot svc init --name traffic-comparator-jupyter
@@ -107,7 +106,6 @@ copilot env deploy --name dev
 copilot svc deploy --name traffic-comparator-jupyter --env dev
 copilot svc deploy --name traffic-comparator --env dev
 copilot svc deploy --name traffic-replayer --env dev
-copilot svc deploy --name kafka-puller --env dev
 
 copilot svc deploy --name elasticsearch --env dev
 copilot svc deploy --name capture-proxy --env dev
@@ -121,7 +119,6 @@ A command shell can be opened in the service's container if that service has ena
 copilot svc exec -a migration-copilot -e dev -n traffic-comparator-jupyter -c "bash"
 copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "bash"
 copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "bash"
-copilot svc exec -a migration-copilot -e dev -n kafka-puller -c "bash"
 copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "bash"
 copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "bash"
 copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
@@ -129,7 +126,7 @@ copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
 
 ### Addons
 
-Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. An example of this can be seen in the [kafka-puller](kafka-puller/addons/taskRole.yml) service which has an `addons` directory and yaml file which adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK.
+Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. An example of this can be seen in the [traffic-replayer](traffic-replayer/addons/taskRole.yml) service which has an `addons` directory and yaml file which adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK.
 
 Official documentation on Addons can be found [here](https://aws.github.io/copilot-cli/docs/developing/addons/workload/).
 
