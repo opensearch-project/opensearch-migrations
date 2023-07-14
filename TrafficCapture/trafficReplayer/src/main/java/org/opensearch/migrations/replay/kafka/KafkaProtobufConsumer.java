@@ -74,7 +74,6 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                 Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
                     try {
                         TrafficStream ts = TrafficStream.parseFrom(record.value());
-                        //System.out.println(ts.getNodeId());
                         if (log.isTraceEnabled()) {
                             log.trace("Parsed traffic stream #" + (trafficStreamsRead.incrementAndGet()) + ": "+ts);
                         }

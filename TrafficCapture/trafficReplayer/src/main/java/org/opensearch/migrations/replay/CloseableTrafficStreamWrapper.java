@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.Closeable;
