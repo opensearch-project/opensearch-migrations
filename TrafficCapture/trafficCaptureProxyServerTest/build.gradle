@@ -37,6 +37,9 @@ dependencies {
         implementation('org.apache.tika:tika-core:1.28.4') {
             because 'mend security issue'
         }
+        implementation('com.github.jtidy:jtidy:1.0.4') {
+            because 'mend security issue'
+        }
     }
 }
 
