@@ -44,7 +44,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
      */
     public static class factory {
         public static <T, D> DiagnosticTrackableCompletableFuture<D, T>
-        failedFuture(@NonNull Exception e, @NonNull Supplier<D> diagnosticSupplier) {
+        failedFuture(@NonNull Throwable e, @NonNull Supplier<D> diagnosticSupplier) {
             return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.failedFuture(e),
                     diagnosticSupplier, null);
         }

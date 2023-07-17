@@ -7,12 +7,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 public class HttpMessageAndTimestamp {
-    public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 32;
     private Instant firstPacketTimestamp;
     @Getter
     @Setter
@@ -43,15 +40,7 @@ public class HttpMessageAndTimestamp {
 
     @Override
     public String toString() {
-        var packetBytesAsStr = packetBytes.stream()
-                .map(bArr-> {
-                    var str = IntStream.range(0, bArr.length).map(idx -> bArr[idx])
-                            .limit(MAX_BYTES_SHOWN_FOR_TO_STRING)
-                            .mapToObj(b -> "" + (char) b)
-                            .collect(Collectors.joining());
-                    return "[" + (bArr.length > MAX_BYTES_SHOWN_FOR_TO_STRING ? str + "..." : str) + "]";
-                })
-                .collect(Collectors.joining(","));
+        var packetBytesAsStr = Utils.packetsToStringTruncated(packetBytes);
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);
         sb.append(", lastPacketTimestamp=").append(lastPacketTimestamp);

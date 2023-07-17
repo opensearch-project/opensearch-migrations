@@ -67,6 +67,11 @@ public class Main {
                 description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
         String kafkaConnection;
         @Parameter(required = false,
+            names = {"--enableMSKAuth"},
+            arity = 0,
+            description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
+        boolean mskAuthEnabled = false;
+        @Parameter(required = false,
                 names = {"--sslConfigFile"},
                 arity = 1,
                 description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
@@ -166,6 +171,9 @@ public class Main {
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
         } else if (params.kafkaPropertiesFile != null) {
+            if (params.kafkaConnection != null || params.mskAuthEnabled) {
+                log.warn("--kafkaConnection and --enableMSKAuth options are ignored when providing a Kafka properties file (--kafkaConfigFile) ");
+            }
             return getKafkaConnectionFactory(nodeId, params.kafkaPropertiesFile, params.maximumTrafficStreamSize);
         } else if (params.kafkaConnection != null) {
             var kafkaProps = new Properties();
@@ -173,6 +181,12 @@ public class Main {
             kafkaProps.put("client.id", params.kafkaClientId);
             kafkaProps.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
             kafkaProps.put("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+            if (params.mskAuthEnabled) {
+                kafkaProps.setProperty("security.protocol", "SASL_SSL");
+                kafkaProps.setProperty("sasl.mechanism", "AWS_MSK_IAM");
+                kafkaProps.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
+                kafkaProps.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
+            }
 
             return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(kafkaProps), params.maximumTrafficStreamSize);
         } else if (params.noCapture) {

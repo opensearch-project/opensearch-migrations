@@ -26,6 +26,26 @@ brew install aws/tap/copilot-cli
 ```
 Otherwise, please follow the manual instructions [here](https://aws.github.io/copilot-cli/docs/getting-started/install/)
 
+### Deploy with an automated script
+
+The following script command can be executed to deploy both the CDK infrastructure and Copilot services for a development environment
+```
+./devDeploy.sh
+```
+Options:
+```
+--skip-bootstrap                Skips installing packages with npm for CDK, bootstrapping CDK, and building the docker images used by Copilot
+--skip-copilot-init             Skips Copilot initialization of app, environments, and services
+--destroy                       Cleans up all deployed resources from this script (CDK and Copilot)
+```
+
+Requirements:
+* AWS credentials have been configured
+* CDK and Copilot CLIs have been installed
+
+### Deploy commands one at a time
+
+The following sections list out commands line-by-line for deploying this solution
 
 #### Importing values from CDK
 The typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) that Copilot requires, and then deploy the desired Copilot services. Documentation for setting up and deploying these resources can be found in the CDK [README](../cdk/opensearch-service-migration/README.md).
@@ -33,17 +53,18 @@ The typical use case for this Copilot app is to initially use the `opensearch-se
 The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
 ```
 export MIGRATION_VPC_ID=vpc-123;
-export MIGRATION_PUBLIC_SUBNET_1=subnet-123;
-export MIGRATION_PUBLIC_SUBNET_2=subnet-124;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
+export MIGRATION_PUBLIC_SUBNETS=subnet-123,subnet-124;
+export MIGRATION_PRIVATE_SUBNETS=subnet-125,subnet-126;
 export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
 ```
 
 #### Setting up existing Copilot infrastructure
 
-It is **important** to run any `copilot` commands from within this directory (`deployment/copilot`). When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a test environment, which should be used for proper operation.
+It is **important** to run any `copilot` commands from within this directory (`deployment/copilot`). When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a dev environment, which should be used for proper operation.
 
 When initially setting up Copilot, each component (apps, services, and environments) need to be initialized. Beware when initializing an environment in Copilot, it will prompt you for values even if you've defined them in the `manifest.yml`, though values input at the prompt are ignored in favor of what was specified in the file.
 
@@ -57,9 +78,9 @@ If using temporary environment credentials when initializing an environment:
 // Initialize app
 copilot app init
 
-// Initialize env with required "test" name
+// Initialize env with required "dev" name
 // Be cautious to specify the proper region as this will dictate where resources are deployed
-copilot env init --name test
+copilot env init --name dev
 
 // Initialize services with their respective required name
 copilot svc init --name kafka-puller
@@ -67,32 +88,43 @@ copilot svc init --name traffic-replayer
 copilot svc init --name traffic-comparator
 copilot svc init --name traffic-comparator-jupyter
 
+copilot svc init --name elasticsearch
+copilot svc init --name capture-proxy
+copilot svc init --name opensearch-benchmark
+
 ```
 
-### Deploying Services to an Environment
+#### Deploying Services to an Environment
 When deploying a service with the Copilot CLI, a status bar will be displayed that gets updated as the deployment progresses. The command will complete when the specific service has all its resources created and health checks are passing on the deployed containers.
 
 Currently, it seems that Copilot does not support deploying all services at once (issue [here](https://github.com/aws/copilot-cli/issues/3474)) or creating dependencies between separate services. In light of this, services need to be deployed one at a time as show below.
 
 ```
 // Deploy environment
-copilot env deploy --name test
+copilot env deploy --name dev
 
 // Deploy services to a deployed environment
-copilot svc deploy --name traffic-comparator-jupyter --env test
-copilot svc deploy --name traffic-comparator --env test
-copilot svc deploy --name traffic-replayer --env test
-copilot svc deploy --name kafka-puller --env test
+copilot svc deploy --name traffic-comparator-jupyter --env dev
+copilot svc deploy --name traffic-comparator --env dev
+copilot svc deploy --name traffic-replayer --env dev
+copilot svc deploy --name kafka-puller --env dev
+
+copilot svc deploy --name elasticsearch --env dev
+copilot svc deploy --name capture-proxy --env dev
+copilot svc deploy --name opensearch-benchmark --env dev
 ```
 
 ### Executing Commands on a Deployed Service
 
 A command shell can be opened in the service's container if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
 ```
-copilot svc exec traffic-comparator-jupyter --container traffic-comparator-jupyter --command "bash"
-copilot svc exec traffic-comparator --container traffic-comparator --command "bash"
-copilot svc exec traffic-replayer --container traffic-replayer --command "bash"
-copilot svc exec kafka-puller --container kafka-puller --command "bash"
+copilot svc exec -a migration-copilot -e dev -n traffic-comparator-jupyter -c "bash"
+copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "bash"
+copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "bash"
+copilot svc exec -a migration-copilot -e dev -n kafka-puller -c "bash"
+copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "bash"
+copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "bash"
+copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
 ```
 
 ### Addons

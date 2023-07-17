@@ -23,13 +23,13 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
         this.sslContext = sslContext;
     }
 
-    NettyPacketToHttpConsumer createNettyHandler() {
-        return new NettyPacketToHttpConsumer(eventLoopGroup, serverUri, sslContext);
+    NettyPacketToHttpConsumer createNettyHandler(String diagnosticLabel) {
+        return new NettyPacketToHttpConsumer(eventLoopGroup, serverUri, sslContext, diagnosticLabel);
     }
 
     @Override
     public IPacketFinalizingConsumer<AggregatedTransformedResponse> create(String diagnosticLabel) {
-        return new HttpJsonTransformingConsumer(jsonTransformer, createNettyHandler(), diagnosticLabel);
+        return new HttpJsonTransformingConsumer(jsonTransformer, createNettyHandler(diagnosticLabel), diagnosticLabel);
     }
 
     public void stopGroup() {

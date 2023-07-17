@@ -26,7 +26,7 @@ export class StackComposer {
 
         let version: EngineVersion
         let accessPolicies: PolicyStatement[]|undefined
-        const defaultValues: { [x: string]: (string); } = defaultValuesJson
+        const defaultValues: { [x: string]: (any); } = defaultValuesJson
         const domainName = getContextForType('domainName', 'string')
         const dataNodeType = getContextForType('dataNodeType', 'string')
         const dataNodeCount = getContextForType('dataNodeCount', 'number')
@@ -38,6 +38,7 @@ export class StackComposer {
         const fineGrainedManagerUserARN = getContextForType('fineGrainedManagerUserARN', 'string')
         const fineGrainedManagerUserName = getContextForType('fineGrainedManagerUserName', 'string')
         const fineGrainedManagerUserSecretManagerKeyARN = getContextForType('fineGrainedManagerUserSecretManagerKeyARN', 'string')
+        const enableDemoAdmin = getContextForType('enableDemoAdmin', 'boolean')
         const enforceHTTPS = getContextForType('enforceHTTPS', 'boolean')
         const ebsEnabled = getContextForType('ebsEnabled', 'boolean')
         const ebsIops = getContextForType('ebsIops', 'number')
@@ -133,6 +134,7 @@ export class StackComposer {
             fineGrainedManagerUserARN: fineGrainedManagerUserARN,
             fineGrainedManagerUserName: fineGrainedManagerUserName,
             fineGrainedManagerUserSecretManagerKeyARN: fineGrainedManagerUserSecretManagerKeyARN,
+            enableDemoAdmin: enableDemoAdmin,
             enforceHTTPS: enforceHTTPS,
             tlsSecurityPolicy: tlsSecurityPolicy,
             ebsEnabled: ebsEnabled,
@@ -164,12 +166,11 @@ export class StackComposer {
             const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
                 vpc: networkStack.vpc,
                 mskARN: mskARN,
-                targetEndpoint: opensearchStack.domainEndpoint,
+                mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 ...props,
             })
-            migrationStack.addDependency(opensearchStack)
             this.stacks.push(migrationStack)
 
             const mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
@@ -206,8 +207,8 @@ export class StackComposer {
         function getContextForType(optionName: string, expectedType: string): any {
             const option = scope.node.tryGetContext(optionName)
 
-            // If no context is provided and a default value exists, use it
-            if (option === undefined && defaultValues[optionName]) {
+            // If no context is provided (undefined or empty string) and a default value exists, use it
+            if ((option === undefined || option === "") && defaultValues[optionName]) {
                 return defaultValues[optionName]
             }
 

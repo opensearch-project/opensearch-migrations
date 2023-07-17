@@ -27,7 +27,7 @@ public class HeaderTransformerTest {
     @Test
     public void testTransformer() throws Exception {
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null,
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null, null,
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var jsonHandler = JoltJsonTransformer.newBuilder()
@@ -79,7 +79,7 @@ public class HeaderTransformerTest {
     public void testMalformedPayloadIsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null,
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null, null,
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
@@ -103,7 +103,7 @@ public class HeaderTransformerTest {
     public void testMalformedPayload_andTypeMappingUri_IsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null,
+        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null, null,
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(

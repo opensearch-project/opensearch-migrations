@@ -1,7 +1,7 @@
 import {Construct} from "constructs";
 import {EbsDeviceVolumeType, ISecurityGroup, IVpc, SubnetSelection} from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
-import {RemovalPolicy, SecretValue, Stack, StackProps} from "aws-cdk-lib";
+import {CfnOutput, RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
 import {IKey, Key} from "aws-cdk-lib/aws-kms";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
@@ -23,6 +23,7 @@ export interface opensearchServiceDomainCdkProps extends StackPropsExt {
   readonly fineGrainedManagerUserARN?: string,
   readonly fineGrainedManagerUserName?: string,
   readonly fineGrainedManagerUserSecretManagerKeyARN?: string,
+  readonly enableDemoAdmin?: boolean,
   readonly enforceHTTPS?: boolean,
   readonly tlsSecurityPolicy?: TLSSecurityPolicy,
   readonly ebsEnabled?: boolean,
@@ -54,13 +55,20 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
 
-    const managerUserSecret: SecretValue|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
+    let adminUserSecret: SecretValue|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
         Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN).secretValue : undefined
 
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
     // Map objects from props
+
+    let adminUserName: string|undefined = props.fineGrainedManagerUserName
+    // Enable demo mode setting
+    if (props.enableDemoAdmin) {
+      adminUserName = "admin"
+      adminUserSecret = SecretValue.unsafePlainText("Admin123!")
+    }
     const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
         {enabled: true, availabilityZoneCount: props.availabilityZoneCount} : undefined
 
@@ -79,8 +87,8 @@ export class OpensearchServiceDomainCdkStack extends Stack {
       },
       fineGrainedAccessControl: {
         masterUserArn: props.fineGrainedManagerUserARN,
-        masterUserName: props.fineGrainedManagerUserName,
-        masterUserPassword: managerUserSecret
+        masterUserName: adminUserName,
+        masterUserPassword: adminUserSecret
       },
       nodeToNodeEncryption: props.nodeToNodeEncryptionEnabled,
       encryptionAtRest: {
@@ -107,5 +115,10 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     });
 
     this.domainEndpoint = domain.domainEndpoint
+
+    new CfnOutput(this, 'CopilotDomainExports', {
+      value: `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`,
+      description: 'Exported Domain resource values created by CDK that are needed by Copilot container deployments',
+    });
   }
 }
