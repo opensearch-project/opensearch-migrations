@@ -17,8 +17,6 @@ image:
   # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
   build:
     dockerfile: ../TrafficCapture/dockerSolution/build/docker/trafficReplayer/Dockerfile
-  # Port not in use but requirement for service connect
-  #port: 10001
 
 command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --auth-header-value Basic\\ YWRtaW46QWRtaW4xMjMh --kafka-traffic-brokers ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth | nc traffic-comparator 9220"
 

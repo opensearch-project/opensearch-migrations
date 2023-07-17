@@ -14,8 +14,6 @@ network:
 image:
   # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
   build: ../TrafficCapture/dockerSolution/src/main/docker/openSearchBenchmark/Dockerfile
-  # Not used but a requirement for using ECS Service Connect
-  port: 9001
 
 cpu: 512       # Number of CPU units for the task.
 memory: 1024    # Amount of memory in MiB used by the task.

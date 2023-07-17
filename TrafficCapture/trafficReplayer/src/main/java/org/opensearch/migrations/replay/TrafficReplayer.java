@@ -176,13 +176,13 @@ public class TrafficReplayer {
             return;
         }
 
-        Optional<ITrafficCaptureSource> kafkaSource = Optional.ofNullable(KafkaProtobufConsumer.buildKafkaSourceFromParams(params.kafkaTrafficBrokers,
-            params.kafkaTrafficTopic, params.kafkaTrafficGroupId, params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile));
+        ITrafficCaptureSource kafkaSource = KafkaProtobufConsumer.buildKafkaConsumer(params.kafkaTrafficBrokers,
+            params.kafkaTrafficTopic, params.kafkaTrafficGroupId, params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile);
         var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntries(Optional.ofNullable(params.inputFilename), kafkaSource)) {
+                try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntries(params.inputFilename, kafkaSource)) {
                     tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
                             closeableStream.stream(), bufferedOutputStream);
                     log.info("reached the end of the ingestion output stream");

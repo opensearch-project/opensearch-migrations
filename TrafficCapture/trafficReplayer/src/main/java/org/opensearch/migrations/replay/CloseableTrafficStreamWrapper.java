@@ -54,15 +54,15 @@ public class CloseableTrafficStreamWrapper implements Closeable {
         return new CloseableTrafficStreamWrapper(captureSource, stream);
     }
 
-    public static CloseableTrafficStreamWrapper getLogEntries(Optional<String> filename, Optional<ITrafficCaptureSource> captureSource) throws IOException {
-        if (filename.isPresent() && captureSource.isPresent()) {
+    public static CloseableTrafficStreamWrapper getLogEntries(String filename, ITrafficCaptureSource captureSource) throws IOException {
+        if (filename != null && captureSource != null) {
             throw new RuntimeException("Only one traffic source can be specified, detected options for input file as well as Kafka");
         }
-        if (captureSource.isPresent()) {
-            return generateTrafficStreamFromMessageSource(captureSource.get());
+        if (captureSource != null) {
+            return generateTrafficStreamFromMessageSource(captureSource);
         }
-        else if (filename.isPresent()) {
-            return getLogEntriesFromFile(filename.get());
+        else if (filename != null) {
+            return getLogEntriesFromFile(filename);
         }
         else {
             return getCaptureEntriesFromInputStream(System.in);

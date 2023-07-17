@@ -27,12 +27,13 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
     private final String topic;
     private Stream<TrafficStream> supplierStream;
 
-    public KafkaProtobufConsumer (Consumer<String, byte[]> consumer, String topic) {
+    public KafkaProtobufConsumer(Consumer<String, byte[]> consumer, String topic) {
+        assert topic != null;
         this.consumer = consumer;
         this.topic = topic;
     }
 
-    public static KafkaProtobufConsumer buildKafkaSourceFromParams(String brokers, String topic, String groupId, boolean enableMSKAuth, String propertyFilePath) {
+    public static KafkaProtobufConsumer buildKafkaConsumer(String brokers, String topic, String groupId, boolean enableMSKAuth, String propertyFilePath) {
         if (brokers == null && topic == null && groupId == null) {
             return null;
         }
@@ -40,6 +41,11 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
             throw new RuntimeException("To enable a Kafka traffic source, the following parameters are required " +
                 "[--kafka-traffic-brokers, --kafka-traffic-topic, --kafka-traffic-group-id]");
         }
+        var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
+        return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic);
+    }
+
+    public static Properties buildKafkaProperties(String brokers, String groupId, boolean enableMSKAuth, String propertyFilePath) {
         var kafkaProps = new Properties();
         kafkaProps.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
         kafkaProps.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
@@ -60,8 +66,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                 log.error("Unable to load properties from kafka properties file.");
             }
         }
-        return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic);
-
+        return kafkaProps;
     }
 
     @Override
