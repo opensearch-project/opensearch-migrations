@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import java.io.IOException;
 import lombok.AllArgsConstructor;
 import org.apache.jmeter.assertions.ResponseAssertion;
 import org.apache.jmeter.control.LoopController;
@@ -35,6 +36,10 @@ public class JMeterLoadTest {
                 names = {"-s", "--server-name"},
                 description = "Server name")
         String domainName;
+        @Parameter(required = false,
+                names = {"-r", "--protocol"},
+                description = "Protocol used. HTTP or HTTPS. Default = HTTPS")
+        String protocol = "HTTPS";
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -56,11 +61,20 @@ public class JMeterLoadTest {
         StandardJMeterEngine jmeter = new StandardJMeterEngine();
         File home = new File(".");
         JMeterUtils.setJMeterHome(home.getPath());
-        JMeterUtils.loadJMeterProperties("/jmeter.properties");
+        File jmeterProperties = new File(home, "jmeter.properties");
+        if (!jmeterProperties.exists()) {
+            try {
+                System.out.println("Couldn't find a provided jmeter.properties file, creating a new one." );
+                jmeterProperties.createNewFile();
+            } catch (IOException e) {
+                System.out.println("Error creating jmeter.properties file: " + e.getMessage());
+            }
+        }
+        JMeterUtils.loadJMeterProperties(jmeterProperties.getPath());
 
         String outputFileName = null;
         //outputFileName = "results.jtl";
-        ListedHashTree hashTree = createTestPlan(params.domainName, params.backsidePort, 100, 8, 1,
+        ListedHashTree hashTree = createTestPlan(params.protocol, params.domainName, params.backsidePort, 1000, 8, 1,
                 false, outputFileName);
 
         jmeter.configure(hashTree);
@@ -68,7 +82,7 @@ public class JMeterLoadTest {
     }
 
     @NotNull
-    private static ListedHashTree createTestPlan(String domain, int port, int loopCount, int workerThreadCount,
+    private static ListedHashTree createTestPlan(String protocol, String domain, int port, int loopCount, int workerThreadCount,
                                                  int summaryUpdateFrequencySeconds, boolean verifyResponse,
                                                  String logOutputFileName) {
         ListedHashTree hashTree = new ListedHashTree();
@@ -91,12 +105,12 @@ public class JMeterLoadTest {
         {
             var threadGroupHashTree = hashTree.add(testPlan, createThreadGroup("FireAndForgetGroup",
                     loopCount, workerThreadCount, 1));
-            Arrays.stream(files).forEach(fr -> threadGroupHashTree.add(createHttpSampler(domain, port, fr, "GET", verifyResponse)));
+            Arrays.stream(files).forEach(fr -> threadGroupHashTree.add(createHttpSampler(protocol, domain, port, fr, "GET", verifyResponse)));
         }
         {
             var threadGroupHashTree = hashTree.add(testPlan, createThreadGroup("TransactionGroup",
                     loopCount, workerThreadCount, 1));
-            Arrays.stream(files).forEach(fr -> threadGroupHashTree.add(createHttpSampler(domain, port, fr, "POST", verifyResponse)));
+            Arrays.stream(files).forEach(fr -> threadGroupHashTree.add(createHttpSampler(protocol, domain, port, fr, "POST", verifyResponse)));
         }
         hashTree.add(testPlan, createResultCollector(logOutputFileName, summaryUpdateFrequencySeconds));
         return hashTree;
@@ -143,13 +157,14 @@ public class JMeterLoadTest {
     }
 
     @NotNull
-    private static HashTree createHttpSampler(String domain, int port, FileReference fr, String method, boolean verifyResponse) {
+    private static HashTree createHttpSampler(String protocol, String domain, int port, FileReference fr, String method, boolean verifyResponse) {
         HTTPSampler httpSampler = new HTTPSampler();
         httpSampler.setProperty(TestElement.TEST_CLASS, HTTPSampler.class.getName());
         httpSampler.setName(method + " Sampler");
         httpSampler.setMethod(method);
         httpSampler.setDomain(domain);
         httpSampler.setPort(port);
+        httpSampler.setProtocol(protocol);
         httpSampler.setPath(fr.filename);
         var hashTree = new ListedHashTree();
         hashTree.add(httpSampler)

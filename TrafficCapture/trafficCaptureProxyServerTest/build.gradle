@@ -84,7 +84,7 @@ def javaContainerServices = [
         "trafficCaptureProxyServerTest": "jmeter"
 ]
 def baseImageProjectOverrides = [
-        "nginx": "nginx"
+        "nginx": "nginx-perf-test-webserver"
 ]
 
 def createContainerTasks = { projectName, dockerImageName ->

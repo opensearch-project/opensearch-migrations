@@ -30,11 +30,6 @@ class CommonUtils {
             dependsOn ":${projectName}:jar"
             if (projectName == "trafficCaptureProxyServerTest") {
                 include "*.properties"
-                def jmeterPropertiesFile = project.file("src/main/docker/${projectName}/jmeter.properties")
-                if (jmeterPropertiesFile.exists()) {
-                    from jmeterPropertiesFile.absolutePath
-                    into "${dockerBuildDir}"
-                }
             }
             from { project.project(":${projectName}").configurations.findByName("runtimeClasspath").files }
             from { project.project(":${projectName}").tasks.getByName('jar') }
@@ -59,9 +54,6 @@ class CommonUtils {
                 runCommand("yum -y install nmap-ncat")
             } else {
                 from 'openjdk:11-jre'
-                if (projectName == "trafficCaptureProxyServerTest") {
-                    instruction 'COPY jmeter.properties /jmeter.properties'
-                }
                 runCommand("apt-get update && apt-get install -y netcat")
             }
 
