@@ -34,7 +34,9 @@ class ExpiringTrafficStreamMapUnorderedTest {
         var expiredCountsPerLoop = new ArrayList<Integer>();
         for (int i=0; i<expectedExpirationCounts.length; ++i) {
             var ts = Instant.ofEpochSecond(timestamps[i]);
-            var accumulation = expiringMap.getOrCreate(TEST_NODE_ID_STRING, connectionGenerator.apply(i), ts);
+            var accumulation =
+                    expiringMap.getOrCreateWithoutExpiration(TEST_NODE_ID_STRING, connectionGenerator.apply(i));
+            expiringMap.expireOldEntries(TEST_NODE_ID_STRING, connectionGenerator.apply(i), accumulation, ts);
             createdAccumulations.add(accumulation);
             if (accumulation != null) {
                 accumulation.rrPair.addResponseData(ts, ("Add" + i).getBytes(StandardCharsets.UTF_8));
