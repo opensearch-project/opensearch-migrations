@@ -7,5 +7,5 @@ import java.util.stream.Stream;
 
 public interface ITrafficCaptureSource extends Closeable {
 
-    Stream<TrafficStream> consumeTrafficFromSource();
+    Stream<TrafficStream> supplyTrafficFromSource();
 }

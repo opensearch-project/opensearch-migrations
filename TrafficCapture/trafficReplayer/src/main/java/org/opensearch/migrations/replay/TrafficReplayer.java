@@ -8,6 +8,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.kafka.KafkaBehavioralPolicy;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
@@ -176,13 +177,13 @@ public class TrafficReplayer {
             return;
         }
 
-        ITrafficCaptureSource kafkaSource = KafkaProtobufConsumer.buildKafkaConsumer(params.kafkaTrafficBrokers,
-            params.kafkaTrafficTopic, params.kafkaTrafficGroupId, params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile);
+        ITrafficCaptureSource trafficCaptureSource = KafkaProtobufConsumer.buildKafkaConsumer(params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
+            params.kafkaTrafficGroupId, params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile, new KafkaBehavioralPolicy());
         var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntries(params.inputFilename, kafkaSource)) {
+                try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntries(params.inputFilename, trafficCaptureSource)) {
                     tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
                             closeableStream.stream(), bufferedOutputStream);
                     log.info("reached the end of the ingestion output stream");

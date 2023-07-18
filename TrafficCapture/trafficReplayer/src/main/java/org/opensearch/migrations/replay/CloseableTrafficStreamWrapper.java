@@ -7,7 +7,6 @@ import java.io.Closeable;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -50,7 +49,7 @@ public class CloseableTrafficStreamWrapper implements Closeable {
     }
 
     public static CloseableTrafficStreamWrapper generateTrafficStreamFromMessageSource(ITrafficCaptureSource captureSource) {
-        Stream<TrafficStream> stream = captureSource.consumeTrafficFromSource();
+        Stream<TrafficStream> stream = captureSource.supplyTrafficFromSource();
         return new CloseableTrafficStreamWrapper(captureSource, stream);
     }
 
