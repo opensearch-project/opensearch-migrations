@@ -6,7 +6,8 @@ RUN apk update
 RUN apk add --no-cache python3 py-pip
 RUN pip install --user -r requirements.txt
 
-WORKDIR /code
+ENV ICT_CODE_PATH /code
+WORKDIR $ICT_CODE_PATH
 # Copy only source code
 COPY ./*.py .
 
@@ -14,4 +15,4 @@ COPY ./*.py .
 ENV PATH=/root/.local:$PATH
 
 # make sure you include the -u flag to have our stdout logged
-CMD python -u ./main.py -r $DATA_PREPPER_PATH/pipelines/pipelines.yaml $DATA_PREPPER_PATH/pipelines/pipelines.yaml; $DATA_PREPPER_PATH/bin/data-prepper
+ENTRYPOINT python -u ./main.py -r $ICT_CODE_PATH/input.yaml $DATA_PREPPER_PATH/pipelines/pipelines.yaml; $DATA_PREPPER_PATH/bin/data-prepper
