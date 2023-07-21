@@ -112,6 +112,27 @@ copilot svc deploy --name capture-proxy --env dev
 copilot svc deploy --name opensearch-benchmark --env dev
 ```
 
+### Running Benchmarks on the Deployed Solution
+
+Once the solution is deployed, the easiest way to test the solution is to exec into the benchmark container and run a benchmark test through, as the following steps illustrate
+
+```
+// Exec into container
+copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
+
+// Run benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy:443 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
+```
+
+After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same benchmark container to confirm
+```
+// Check source cluster
+curl https://capture-proxy:443/_cat/indices?v --insecure -u admin:admin
+
+// Check target cluster
+curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:Admin123!
+```
+
 ### Executing Commands on a Deployed Service
 
 A command shell can be opened in the service's container if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.

@@ -90,6 +90,18 @@ public class TrafficReplayer {
         }
     }
 
+    private static ITrafficCaptureSource buildKafkaTrafficCaptureSource(String brokers, String topic, String groupId,
+        boolean enableMSKAuth, String propertyFilePath, KafkaBehavioralPolicy behavioralPolicy) throws IOException {
+        if (brokers == null && topic == null && groupId == null) {
+            return null;
+        }
+        if (brokers == null || topic == null || groupId == null) {
+            throw new ParameterException("To enable a Kafka traffic source, the following parameters are required " +
+                "[--kafka-traffic-brokers, --kafka-traffic-topic, --kafka-traffic-group-id]");
+        }
+        return KafkaProtobufConsumer.buildKafkaConsumer(brokers, topic, groupId, enableMSKAuth, propertyFilePath, behavioralPolicy);
+    }
+
     static class Parameters {
         @Parameter(required = true,
                 arity = 1,
@@ -177,7 +189,7 @@ public class TrafficReplayer {
             return;
         }
 
-        ITrafficCaptureSource trafficCaptureSource = KafkaProtobufConsumer.buildKafkaConsumer(params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
+        ITrafficCaptureSource trafficCaptureSource = buildKafkaTrafficCaptureSource(params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
             params.kafkaTrafficGroupId, params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile, new KafkaBehavioralPolicy());
         var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :

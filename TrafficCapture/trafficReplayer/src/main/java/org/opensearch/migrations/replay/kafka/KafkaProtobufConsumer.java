@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -29,6 +30,14 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
     private final String topic;
     private final KafkaBehavioralPolicy behavioralPolicy;
 
+
+    public KafkaProtobufConsumer(Consumer<String, byte[]> consumer, String topic) {
+        assert topic != null;
+        this.consumer = consumer;
+        this.topic = topic;
+        this.behavioralPolicy = new KafkaBehavioralPolicy();
+    }
+
     public KafkaProtobufConsumer(Consumer<String, byte[]> consumer, String topic, KafkaBehavioralPolicy behavioralPolicy) {
         assert topic != null;
         this.consumer = consumer;
@@ -36,26 +45,26 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
         this.behavioralPolicy = behavioralPolicy;
     }
 
-    public static KafkaProtobufConsumer buildKafkaConsumer(String brokers, String topic, String groupId, boolean enableMSKAuth,
-        String propertyFilePath, KafkaBehavioralPolicy behavioralPolicy) {
-        if (brokers == null && topic == null && groupId == null) {
-            return null;
-        }
-        if (brokers == null || topic == null || groupId == null) {
-            throw new RuntimeException("To enable a Kafka traffic source, the following parameters are required " +
-                "[--kafka-traffic-brokers, --kafka-traffic-topic, --kafka-traffic-group-id]");
-        }
+    public static KafkaProtobufConsumer buildKafkaConsumer(@NonNull String brokers, @NonNull String topic, @NonNull String groupId,
+        boolean enableMSKAuth, String propertyFilePath, KafkaBehavioralPolicy behavioralPolicy) throws IOException {
         var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
         return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic, behavioralPolicy);
     }
 
-    public static Properties buildKafkaProperties(String brokers, String groupId, boolean enableMSKAuth, String propertyFilePath) {
+    public static Properties buildKafkaProperties(@NonNull String brokers, @NonNull String groupId, boolean enableMSKAuth,
+        String propertyFilePath) throws IOException {
         var kafkaProps = new Properties();
-        kafkaProps.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
         kafkaProps.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
         kafkaProps.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-        kafkaProps.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         kafkaProps.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        if (propertyFilePath != null) {
+            try (InputStream input = new FileInputStream(propertyFilePath)) {
+                kafkaProps.load(input);
+            } catch (IOException ex) {
+                log.error("Unable to load properties from kafka properties file with path: {}", propertyFilePath);
+                throw ex;
+            }
+        }
         // Required for using SASL auth with MSK public endpoint
         if (enableMSKAuth) {
             kafkaProps.setProperty("security.protocol", "SASL_SSL");
@@ -63,13 +72,8 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
             kafkaProps.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
             kafkaProps.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
         }
-        if (propertyFilePath != null) {
-            try (InputStream input = new FileInputStream(propertyFilePath)) {
-                kafkaProps.load(input);
-            } catch (IOException ex) {
-                log.error("Unable to load properties from kafka properties file.");
-            }
-        }
+        kafkaProps.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
+        kafkaProps.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         return kafkaProps;
     }
 
@@ -84,16 +88,15 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                 try {
                     records = consumer.poll(CONSUMER_POLL_TIMEOUT);
                 }
-                catch (Exception e) {
-                    log.warn("Unable to poll the topic: {} with our Kafka consumer... Ending message consumption now. Original exception: ", topic, e);
-                    return null;
+                catch (RuntimeException e) {
+                    log.warn("Unable to poll the topic: {} with our Kafka consumer... Ending message consumption now", topic);
+                    throw e;
                 }
                 Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
                     try {
                         TrafficStream ts = TrafficStream.parseFrom(record.value());
-                        if (log.isTraceEnabled()) {
-                            log.trace("Parsed traffic stream #" + (trafficStreamsRead.incrementAndGet()) + ": "+ts);
-                        }
+                        // Ensure we increment trafficStreamsRead even at a higher log level
+                        log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
                         return ts;
                     } catch (InvalidProtocolBufferException e) {
                         return behavioralPolicy.onInvalidKafkaRecord(record, e);
@@ -103,15 +106,15 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
             }).takeWhile(Objects::nonNull);
             return generatedStream.flatMap(stream -> stream);
         } catch (Exception e) {
-            log.error("Unexpected exception: ", e);
+            log.error("Terminating Kafka traffic stream");
+            throw e;
         }
-        return Stream.empty();
     }
 
     @Override
     public void close() throws IOException {
         consumer.close();
-        log.info("This consumer closed successfully.");
+        log.info("Kafka consumer closed successfully.");
     }
 
 }

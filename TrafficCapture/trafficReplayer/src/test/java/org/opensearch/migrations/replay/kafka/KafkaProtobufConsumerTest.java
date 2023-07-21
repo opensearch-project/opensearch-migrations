@@ -10,7 +10,6 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -19,6 +18,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,95 +30,88 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
 @Slf4j
 class KafkaProtobufConsumerTest {
     public static final int NUM_READ_ITEMS_BOUND = 1000;
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
     @Test
-    @Timeout(value = 1000, unit = MILLISECONDS)
     public void testSupplyTrafficFromSource() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME, new KafkaBehavioralPolicy());
-        // Update required beginning offsets
-        HashMap<TopicPartition, Long> startOffsets = new HashMap<>();
-        TopicPartition tp = new TopicPartition(TEST_TOPIC_NAME, 0);
-        startOffsets.put(tp, 0L);
-        mockConsumer.updateBeginningOffsets(startOffsets);
+        KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME);
+        initializeMockConsumerTopic(mockConsumer);
 
         Stream<TrafficStream> trafficStream = protobufConsumer.supplyTrafficFromSource();
         List<Integer> substreamCounts = new ArrayList<>();
+        // On a single poll() add records to the topic
         mockConsumer.schedulePollTask(() -> {
-            // Required rebalance to add records
+            // Required rebalance to add records to topic
             mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
             addRecordsToTopic(numTrafficStreams, 1, mockConsumer, substreamCounts);
             Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
         });
 
         AtomicInteger foundStreamsCount = new AtomicInteger(0);
-        trafficStream.forEach(stream -> {
+        // This assertion will fail the test case if not completed within its duration, as would be the case if there
+        // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
+        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> trafficStream.limit(numTrafficStreams).forEach(stream -> {
             log.trace("Stream has substream count: " + stream.getSubStreamCount());
-            Assertions.assertTrue(stream instanceof TrafficStream);
-            Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.get()));
-            foundStreamsCount.getAndIncrement();
-            if (foundStreamsCount.get() == numTrafficStreams) {
-                try {
-                    protobufConsumer.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        });
+            Assertions.assertInstanceOf(TrafficStream.class, stream);
+            Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
+        }));
+        Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
+        try {
+            protobufConsumer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
     }
 
     @Test
-    @Timeout(value = 1000, unit = MILLISECONDS)
     public void testSupplyTrafficWithUnformattedMessages() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME, new KafkaBehavioralPolicy());
-        // Update required beginning offsets
-        HashMap<TopicPartition, Long> startOffsets = new HashMap<>();
-        TopicPartition tp = new TopicPartition(TEST_TOPIC_NAME, 0);
-        startOffsets.put(tp, 0L);
-        mockConsumer.updateBeginningOffsets(startOffsets);
+        KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME);
+        initializeMockConsumerTopic(mockConsumer);
 
         Stream<TrafficStream> trafficStream = protobufConsumer.supplyTrafficFromSource();
         List<Integer> substreamCounts = new ArrayList<>();
+        // On a single poll() add records to the topic
         mockConsumer.schedulePollTask(() -> {
             // Required rebalance to add records
             mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
-            // Invalid records to be dropped
+
+            // Add two invalid records that can't be parsed and should be dropped
             mockConsumer.addRecord(new ConsumerRecord(TEST_TOPIC_NAME, 0, 1, Instant.now().toString(),
                 "Invalid Data".getBytes(StandardCharsets.UTF_8)));
             mockConsumer.addRecord(new ConsumerRecord(TEST_TOPIC_NAME, 0, 2, Instant.now().toString(),
                 "Invalid Data".getBytes(StandardCharsets.UTF_8)));
 
+            // Add valid records
             addRecordsToTopic(numTrafficStreams, 3, mockConsumer, substreamCounts);
             Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
         });
 
         AtomicInteger foundStreamsCount = new AtomicInteger(0);
-        trafficStream.forEach(stream -> {
+        // This assertion will fail the test case if not completed within its duration, as would be the case if there
+        // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
+        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> trafficStream.limit(numTrafficStreams).forEach(stream -> {
             log.trace("Stream has substream count: " + stream.getSubStreamCount());
-            Assertions.assertTrue(stream instanceof TrafficStream);
-            Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.get()));
-            foundStreamsCount.getAndIncrement();
-            if (foundStreamsCount.get() == numTrafficStreams) {
-                try {
-                    protobufConsumer.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        });
+            Assertions.assertInstanceOf(TrafficStream.class, stream);
+            Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
+        }));
+        Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
+        try {
+            protobufConsumer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     @Test
-    public void testBuildPropertiesBaseCase() {
+    public void testBuildPropertiesBaseCase() throws IOException {
         Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", false, null);
         Assertions.assertEquals(5, props.size());
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
@@ -129,7 +122,7 @@ class KafkaProtobufConsumerTest {
     }
 
     @Test
-    public void testBuildPropertiesMSKAuthEnabled() {
+    public void testBuildPropertiesMSKAuthEnabled() throws IOException {
         Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", true, null);
         Assertions.assertEquals(9, props.size());
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
@@ -144,16 +137,21 @@ class KafkaProtobufConsumerTest {
     }
 
     @Test
-    public void testBuildPropertiesWithProvidedPropertyFile() {
+    public void testBuildPropertiesWithProvidedPropertyFile() throws IOException {
         File simplePropertiesFile = new File("src/test/resources/kafka/simple-kafka.properties");
-        Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", false, simplePropertiesFile.getPath());
-        Assertions.assertEquals(7, props.size());
+        Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", true, simplePropertiesFile.getPath());
+        Assertions.assertEquals(10, props.size());
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringDeserializer", props.get("key.deserializer"));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", props.get("value.deserializer"));
-        Assertions.assertEquals("KafkaLoggingConsumerGroup", props.get(ConsumerConfig.GROUP_ID_CONFIG));
+        // Property file will not overwrite another specified command argument
+        Assertions.assertEquals("groupId", props.get(ConsumerConfig.GROUP_ID_CONFIG));
         Assertions.assertEquals("earliest", props.get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG));
-        Assertions.assertEquals("SASL_SSL2", props.get("security.protocol"));
+        // Property file will not overwrite another specified command argument
+        Assertions.assertEquals("SASL_SSL", props.get("security.protocol"));
+        Assertions.assertEquals("AWS_MSK_IAM", props.get("sasl.mechanism"));
+        Assertions.assertEquals("software.amazon.msk.auth.iam.IAMLoginModule required;", props.get("sasl.jaas.config"));
+        Assertions.assertEquals("software.amazon.msk.auth.iam.IAMClientCallbackHandler", props.get("sasl.client.callback.handler.class"));
         Assertions.assertEquals("3555", props.get("max.block.ms"));
     }
 
@@ -200,5 +198,13 @@ class KafkaProtobufConsumerTest {
             log.trace("adding record");
             mockConsumer.addRecord(record);
         }
+    }
+
+    // Required initialization for working with Mock Consumer
+    private void initializeMockConsumerTopic(MockConsumer<String, byte[]> mockConsumer) {
+        HashMap<TopicPartition, Long> startOffsets = new HashMap<>();
+        TopicPartition tp = new TopicPartition(TEST_TOPIC_NAME, 0);
+        startOffsets.put(tp, 0L);
+        mockConsumer.updateBeginningOffsets(startOffsets);
     }
 }

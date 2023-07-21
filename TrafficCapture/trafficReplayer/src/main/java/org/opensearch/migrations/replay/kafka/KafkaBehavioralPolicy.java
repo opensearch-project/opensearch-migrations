@@ -10,7 +10,7 @@ public class KafkaBehavioralPolicy {
 
     // Default behavior to log and ignore invalid records
     public TrafficStream onInvalidKafkaRecord(ConsumerRecord<String, byte[]> record, InvalidProtocolBufferException e) {
-        log.error("Unable to parse incoming traffic stream with error: ", e);
+        log.error("Unable to parse incoming traffic stream with record id: {} from error: ", record.key(), e);
         return null;
     }
 }
