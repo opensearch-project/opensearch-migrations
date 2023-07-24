@@ -48,7 +48,7 @@ class KafkaProtobufConsumerTest {
         mockConsumer.schedulePollTask(() -> {
             // Required rebalance to add records to topic
             mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
-            addRecordsToTopic(numTrafficStreams, 1, mockConsumer, substreamCounts);
+            addGeneratedTrafficStreamsToTopic(numTrafficStreams, 1, mockConsumer, substreamCounts);
             Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
         });
 
@@ -83,14 +83,15 @@ class KafkaProtobufConsumerTest {
             // Required rebalance to add records
             mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
 
-            // Add two invalid records that can't be parsed and should be dropped
-            mockConsumer.addRecord(new ConsumerRecord(TEST_TOPIC_NAME, 0, 1, Instant.now().toString(),
-                "Invalid Data".getBytes(StandardCharsets.UTF_8)));
-            mockConsumer.addRecord(new ConsumerRecord(TEST_TOPIC_NAME, 0, 2, Instant.now().toString(),
-                "Invalid Data".getBytes(StandardCharsets.UTF_8)));
+            // Add invalid records that can't be parsed and should be dropped
+            int partitionOffset = 1;
+            for (; partitionOffset < 3; partitionOffset++) {
+                mockConsumer.addRecord(new ConsumerRecord(TEST_TOPIC_NAME, 0, partitionOffset, Instant.now().toString(),
+                    "Invalid Data".getBytes(StandardCharsets.UTF_8)));
+            }
 
             // Add valid records
-            addRecordsToTopic(numTrafficStreams, 3, mockConsumer, substreamCounts);
+            addGeneratedTrafficStreamsToTopic(numTrafficStreams, partitionOffset, mockConsumer, substreamCounts);
             Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
         });
 
@@ -181,7 +182,17 @@ class KafkaProtobufConsumerTest {
         }
     }
 
-    private static void addRecordsToTopic(int numTrafficStreams, int offsetStart, MockConsumer<String, byte[]> mockConsumer, List<Integer> substreamCountTracker) {
+    /**
+     * This helper function will generate N (or numTrafficStreams) traffic streams and place each traffic stream into
+     * one Consumer Record. The Consumer Records will then be added to the provided mockConsumer and simulate records
+     * being added to the relevant Kafka topic
+     *
+     * @param numTrafficStreams
+     * @param offsetStart
+     * @param mockConsumer
+     * @param substreamCountTracker
+     */
+    private static void addGeneratedTrafficStreamsToTopic(int numTrafficStreams, int offsetStart, MockConsumer<String, byte[]> mockConsumer, List<Integer> substreamCountTracker) {
         Random random = new Random(2);
         Supplier<Integer> integerSupplier = () -> random.nextInt(NUM_READ_ITEMS_BOUND);
         for (int i = 0; i < numTrafficStreams; ++i) {

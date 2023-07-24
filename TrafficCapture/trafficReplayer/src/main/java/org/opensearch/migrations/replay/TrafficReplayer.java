@@ -8,8 +8,6 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.kafka.KafkaBehavioralPolicy;
-import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -28,7 +26,6 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -90,16 +87,15 @@ public class TrafficReplayer {
         }
     }
 
-    private static ITrafficCaptureSource buildKafkaTrafficCaptureSource(String brokers, String topic, String groupId,
-        boolean enableMSKAuth, String propertyFilePath, KafkaBehavioralPolicy behavioralPolicy) throws IOException {
+    public static boolean validateRequiredKafkaParams(String brokers, String topic, String groupId) {
         if (brokers == null && topic == null && groupId == null) {
-            return null;
+            return false;
         }
         if (brokers == null || topic == null || groupId == null) {
             throw new ParameterException("To enable a Kafka traffic source, the following parameters are required " +
                 "[--kafka-traffic-brokers, --kafka-traffic-topic, --kafka-traffic-group-id]");
         }
-        return KafkaProtobufConsumer.buildKafkaConsumer(brokers, topic, groupId, enableMSKAuth, propertyFilePath, behavioralPolicy);
+        return true;
     }
 
     static class Parameters {
@@ -189,15 +185,13 @@ public class TrafficReplayer {
             return;
         }
 
-        ITrafficCaptureSource trafficCaptureSource = buildKafkaTrafficCaptureSource(params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
-            params.kafkaTrafficGroupId, params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile, new KafkaBehavioralPolicy());
         var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntries(params.inputFilename, trafficCaptureSource)) {
+                try (var closeableStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params)) {
                     tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                            closeableStream.stream(), bufferedOutputStream);
+                            closeableStream.supplyTrafficFromSource(), bufferedOutputStream);
                     log.info("reached the end of the ingestion output stream");
                 }
             }

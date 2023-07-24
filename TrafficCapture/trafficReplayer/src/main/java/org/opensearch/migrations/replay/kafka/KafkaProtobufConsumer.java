@@ -99,7 +99,11 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                         log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
                         return ts;
                     } catch (InvalidProtocolBufferException e) {
-                        return behavioralPolicy.onInvalidKafkaRecord(record, e);
+                        RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
+                        if (recordError != null) {
+                            throw recordError;
+                        }
+                        return null;
                     }
                 }).filter(Objects::nonNull);
                 return trafficStream;
