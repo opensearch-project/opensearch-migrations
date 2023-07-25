@@ -6,7 +6,7 @@ On wings of the morning breeze
 Effortless migration
 ```
 
-This repo will contain tools and documentation to assist in migrations to and upgrades of OpenSearch clusters.
+This repo will contain code, tools and documentation to assist in migrations to and upgrades of OpenSearch clusters.
 
 ## Table of Contents
 
