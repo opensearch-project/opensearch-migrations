@@ -9,8 +9,6 @@ MAPPINGS_KEY = "mappings"
 __INDEX_KEY = "index"
 __ALL_INDICES_ENDPOINT = "*"
 __INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version", "store"]
-__DYNAMIC_KEY = "dynamic"
-__STRICT_VALUE = "strict"
 
 
 def fetch_all_indices(endpoint: str, optional_auth: Optional[tuple] = None, verify: bool = True) -> dict:
@@ -19,15 +17,6 @@ def fetch_all_indices(endpoint: str, optional_auth: Optional[tuple] = None, veri
     # Remove internal settings
     result = dict(resp.json())
     for index in result:
-        # TODO Remove after https://github.com/opensearch-project/data-prepper/issues/2864 is resolved
-        try:
-            dynamic_mapping_value = result[index][MAPPINGS_KEY][__DYNAMIC_KEY]
-            if dynamic_mapping_value == __STRICT_VALUE:
-                del result[index][MAPPINGS_KEY][__DYNAMIC_KEY]
-        except KeyError:
-            # One of the keys in the path above is not present, so we can
-            # ignore the deletion logic and execute the rest
-            pass
         for setting in __INTERNAL_SETTINGS_KEYS:
             index_settings = result[index][SETTINGS_KEY]
             if __INDEX_KEY in index_settings:

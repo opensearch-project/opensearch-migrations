@@ -91,7 +91,6 @@ if [ "$skip_copilot_init" = false ] ; then
   copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter
   copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator
   copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name traffic-replayer
-  copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name kafka-puller
 
   copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name elasticsearch
   copilot svc init -a $COPILOT_DEPLOYMENT_NAME --name capture-proxy
@@ -106,7 +105,6 @@ copilot env deploy -a $COPILOT_DEPLOYMENT_NAME --name $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name kafka-puller --env $COPILOT_DEPLOYMENT_STAGE
 
 copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_DEPLOYMENT_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE

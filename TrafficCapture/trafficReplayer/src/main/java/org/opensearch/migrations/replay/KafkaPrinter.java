@@ -1,4 +1,4 @@
-package org.opensearch.migrations;
+package org.opensearch.migrations.replay;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -11,42 +11,56 @@ import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.InputStream;
 import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+/**
+ * Caution: This is a utility tool for printing Kafka records and is intended to be used adhoc as needed for outputting
+ * Kafka records, normally to the console or redirected to a file, and is not needed for normal functioning of the
+ * Replayer. Some use cases where this tool is handy include:
+ *
+ * 1. Capturing a particular set of Kafka traffic records to a file which can then be repeatedly passed as an input param
+ * to the Replayer for testing.
+ * 2. Printing records for a topic with a different group id then is used normally to compare
+ * 3. Clearing records for a  topic with the same group id
+ */
 public class KafkaPrinter {
     private static final Logger log = LoggerFactory.getLogger(KafkaPrinter.class);
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
 
     static class Parameters {
         @Parameter(required = true,
-                names = {"-b", "--broker-address"},
-                description = "Broker's address")
-        String brokerAddress;
+            names = {"--kafka-traffic-brokers"},
+            arity=1,
+            description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers to bootstrap with i.e. 'localhost:9092,localhost2:9092'")
+        String kafkaTrafficBrokers;
         @Parameter(required = true,
-                names = {"-t", "--topic-name"},
-                description = "topic name")
-        String topicName;
+            names = {"--kafka-traffic-topic"},
+            arity=1,
+            description = "Topic name used to pull messages from Kafka")
+        String kafkaTrafficTopic;
         @Parameter(required = true,
-                names = {"-g", "--group-id"},
-                description = "Client id that should be used when communicating with the Kafka broker.")
-        String clientGroupId;
+            names = {"--kafka-traffic-group-id"},
+            arity=1,
+            description = "Consumer group id that is used when pulling messages from Kafka")
+        String kafkaTrafficGroupId;
         @Parameter(required = false,
-                names = {"--enableMSKAuth"},
-                description = "Enables SASL properties required for connecting to MSK with IAM auth.")
-        boolean mskAuthEnabled = false;
+            names = {"--kafka-traffic-enable-msk-auth"},
+            arity=0,
+            description = "Enables SASL properties required for connecting to MSK with IAM auth")
+        boolean kafkaTrafficEnableMSKAuth;
         @Parameter(required = false,
-                names = {"--kafkaConfigFile"},
-                arity = 1,
-                description = "Kafka properties file")
-        String kafkaPropertiesFile;
+            names = {"--kafka-traffic-property-file"},
+            arity=1,
+            description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
+        String kafkaTrafficPropertyFile;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -71,36 +85,34 @@ public class KafkaPrinter {
             return;
         }
 
-        String bootstrapServers = params.brokerAddress;
-        String groupId = params.clientGroupId;
-        String topic = params.topicName;
+        String bootstrapServers = params.kafkaTrafficBrokers;
+        String groupId = params.kafkaTrafficGroupId;
+        String topic = params.kafkaTrafficTopic;
 
         Properties properties = new Properties();
-        if (params.kafkaPropertiesFile != null) {
-            try (InputStream input = new FileInputStream(params.kafkaPropertiesFile)) {
+        properties.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
+        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+
+        if (params.kafkaTrafficPropertyFile != null) {
+            try (InputStream input = new FileInputStream(params.kafkaTrafficPropertyFile)) {
                 properties.load(input);
             } catch (IOException ex) {
                 log.error("Unable to load properties from kafka.properties file.");
                 return;
             }
         }
-        else {
-            properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-            properties.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-            properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-            properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-            properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        }
         // Required for using SASL auth with MSK public endpoint
-        if (params.mskAuthEnabled){
+        if (params.kafkaTrafficEnableMSKAuth){
             properties.setProperty("security.protocol", "SASL_SSL");
             properties.setProperty("sasl.mechanism", "AWS_MSK_IAM");
             properties.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
             properties.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
         }
+        properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
 
         KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties);
-
         try {
             consumer.subscribe(Collections.singleton(topic));
             pipeRecordsToProtoBufDelimited(consumer, getDelimitedProtoBufOutputter(System.out));
@@ -114,7 +126,8 @@ public class KafkaPrinter {
         }
     }
 
-    static void pipeRecordsToProtoBufDelimited(org.apache.kafka.clients.consumer.Consumer<String, byte[]> kafkaConsumer,
+    static void pipeRecordsToProtoBufDelimited(
+        Consumer<String, byte[]> kafkaConsumer,
                                                java.util.function.Consumer<Stream<byte[]>> binaryReceiver) {
         while (true) {
             processNextChunkOfKafkaEvents(kafkaConsumer, binaryReceiver);
