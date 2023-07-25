@@ -92,7 +92,7 @@ class TrafficReplayerTest {
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger();
-            Assertions.assertTrue(new TrafficCaptureInputStream(bais).supplyTrafficFromSource()
+            Assertions.assertTrue(new InputStreamOfTraffic(bais).supplyTrafficFromSource()
                     .allMatch(ts->ts.equals(makeTrafficStream(timestamp.plus(counter.getAndIncrement(),
                             ChronoUnit.SECONDS)))));
         }
@@ -128,7 +128,7 @@ class TrafficReplayerTest {
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 3);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
-            try (var trafficSource = new TrafficCaptureInputStream(bais)) {
+            try (var trafficSource = new InputStreamOfTraffic(bais)) {
                 tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
             }
         }

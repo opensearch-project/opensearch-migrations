@@ -11,10 +11,10 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 @Slf4j
-public class TrafficCaptureInputStream implements ITrafficCaptureSource {
+public class InputStreamOfTraffic implements ITrafficCaptureSource {
     private final InputStream inputStream;
 
-    public TrafficCaptureInputStream(InputStream inputStream) {
+    public InputStreamOfTraffic(InputStream inputStream) {
         this.inputStream = inputStream;
     }
 
