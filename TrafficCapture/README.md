@@ -1,28 +1,41 @@
-## Running the Docker Solution
+# Traffic Capture
 
-While in the TrafficCapture directory, run the following command:
+## Table of Contents
 
-`./gradlew :dockerSolution:composeUp`
+- [Traffic Capture](#traffic-capture)
+    - [Table of Contents](#table-of-contents)
+    - [Overview](#overview)
+    - [Tools](#tools)
+        - [Docker Solution](#docker-solution)
+        - [Traffic Capture Proxy Server](#traffic-capture-proxy-server)
+        - [Traffic Replayer](#traffic-replayer)
+        - [Capture Kafka Offloader](#capture-kafka-offloader)
 
-## Compatibility
+## Overview
 
-Must have Java version 11 installed.
+This directory provides a suite of tools designed to facilitate the migration and upgrade of OpenSearch clusters. 
+Each tool serves a unique function, and are used in combination to provide an end-to-end migrations and upgrades solution.
 
-The tools in this directory can only be built if you have Java version 11 installed.
+## Tools
 
-The version is specified in `TrafficCapture/build.gradle` using a Java toolchain, which allows us
-to decouple the Java version used by Gradle itself from Java version used by the tools here.
+### Docker Solution
 
-Any attempt to use a different version will cause the build to fail and will result in the following error (or similar)
-depending on which tool/project is being built. The below example shows the error printed when running e.g `./gradlew 
-trafficCaptureProxyServer:build`
+The Docker Solution is a containerized environment that allows for the easy setup and deployment of the other tools in this repository.
+For more details, check out the [Docker Solution README](dockerSolution/README.md).
 
-```
-* What went wrong:
-A problem occurred evaluating project ':trafficCaptureProxyServer'.
-> Could not resolve all dependencies for configuration ':trafficCaptureProxyServer:opensearchSecurityPlugin'.
-   > Failed to calculate the value of task ':trafficCaptureProxyServer:compileJava' property 'javaCompiler'.
-      > No matching toolchains found for requested specification: {languageVersion=10, vendor=any, implementation=vendor-specific}.
-         > No locally installed toolchains match (see https://docs.gradle.org/8.0.2/userguide/toolchains.html#sec:auto_detection) and toolchain download repositories have not been configured (see https://docs.gradle.org/8.0.2/userguide/toolchains.html#sub:download_repositories).
+### Traffic Capture Proxy Server
 
-```
+The Traffic Capture Proxy Server acts as a middleman, capturing traffic going to a source, which can then be used by the Traffic Replayer.
+
+### Traffic Replayer
+
+The Traffic Replayer consumes streams of IP packets that were previously recorded by the Traffic Capture Proxy Server and replays the requests to another HTTP
+server, recording the packet traffic of the new interactions.
+
+Learn more about its functionality and setup here: [Traffic Replayer](trafficReplayer/README.md)
+
+### Capture Kafka Offloader
+
+The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.
+
+Learn more about its functionality and setup here: [Capture Kafka Offloader](captureKafkaOffloader/README.md)
