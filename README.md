@@ -30,6 +30,8 @@ on the `*.py` files.
 The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP
 traffic, which can then be offloaded and replayed to other HTTP server(s).
 
+More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md) 
+
 ### Local Docker Solution
 
 A containarized end-to-end solution can be deployed locally using Docker.
