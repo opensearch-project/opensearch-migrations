@@ -54,11 +54,11 @@ public class TrafficReplayer {
 
     public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, authorizationHeader, allowInsecureConnections, 
+        this(serverUri, allowInsecureConnections,
                 buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader));
     }
     
-    public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections,
+    public TrafficReplayer(URI serverUri, boolean allowInsecureConnections,
                            JsonTransformer jsonTransformer)
             throws SSLException
     {
@@ -76,7 +76,7 @@ public class TrafficReplayer {
     }
 
     private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
-        if (serverUri.getScheme().toLowerCase().equals("https")) {
+        if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
                 sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
@@ -87,6 +87,16 @@ public class TrafficReplayer {
         }
     }
 
+    public static boolean validateRequiredKafkaParams(String brokers, String topic, String groupId) {
+        if (brokers == null && topic == null && groupId == null) {
+            return false;
+        }
+        if (brokers == null || topic == null || groupId == null) {
+            throw new ParameterException("To enable a Kafka traffic source, the following parameters are required " +
+                "[--kafka-traffic-brokers, --kafka-traffic-topic, --kafka-traffic-group-id]");
+        }
+        return true;
+    }
 
     static class Parameters {
         @Parameter(required = true,
@@ -119,6 +129,31 @@ public class TrafficReplayer {
                 description = "assume that connections were terminated after this many " +
                         "seconds of inactivity observed in the captured stream")
         int observedPacketConnectionTimeout = 30;
+        @Parameter(required = false,
+            names = {"--kafka-traffic-brokers"},
+            arity=1,
+            description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers to bootstrap with i.e. 'localhost:9092,localhost2:9092'")
+        String kafkaTrafficBrokers;
+        @Parameter(required = false,
+            names = {"--kafka-traffic-topic"},
+            arity=1,
+            description = "Topic name used to pull messages from Kafka")
+        String kafkaTrafficTopic;
+        @Parameter(required = false,
+            names = {"--kafka-traffic-group-id"},
+            arity=1,
+            description = "Consumer group id that is used when pulling messages from Kafka")
+        String kafkaTrafficGroupId;
+        @Parameter(required = false,
+            names = {"--kafka-traffic-enable-msk-auth"},
+            arity=0,
+            description = "Enables SASL properties required for connecting to MSK with IAM auth")
+        boolean kafkaTrafficEnableMSKAuth;
+        @Parameter(required = false,
+            names = {"--kafka-traffic-property-file"},
+            arity=1,
+            description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
+        String kafkaTrafficPropertyFile;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -154,9 +189,9 @@ public class TrafficReplayer {
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (var closeableStream = CloseableTrafficStreamWrapper.getLogEntriesFromFileOrStdin(params.inputFilename)) {
+                try (var closeableStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params)) {
                     tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                            closeableStream.stream(), bufferedOutputStream);
+                            closeableStream.supplyTrafficFromSource(), bufferedOutputStream);
                     log.info("reached the end of the ingestion output stream");
                 }
             }
