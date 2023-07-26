@@ -44,6 +44,8 @@ save them in Kafka before they continue to a "Source Cluster".
 The Traffic Capture Puller then takes the captured traffic and sends it to the Traffic Replayer.
 The Traffic Replayer's logs (Tuples consisting of a request, a pair of responses) is then stored in persistent storage for the user's own analytics usages
 
+Note that the script must be manually started.
+
 Partial example output of OpenSearch Benchmark:
 
 ```
