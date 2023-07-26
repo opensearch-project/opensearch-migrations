@@ -44,6 +44,33 @@ save them in Kafka before they continue to a "Source Cluster".
 The Traffic Capture Puller then takes the captured traffic and sends it to the Traffic Replayer.
 The Traffic Replayer's logs (Tuples consisting of a request, a pair of responses) is then stored in persistent storage for the user's own analytics usages
 
+Partial example output of OpenSearch Benchmark:
+
+```
+
+Running opensearch-benchmark w/ 'geonames' workload...
+
+   ____                  _____                      __       ____                  __                         __
+/ __ \____  ___  ____ / ___/___  ____ ___________/ /_     / __ )___  ____  _____/ /_  ____ ___  ____ ______/ /__
+/ / / / __ \/ _ \/ __ \\__ \/ _ \/ __ `/ ___/ ___/ __ \   / __  / _ \/ __ \/ ___/ __ \/ __ `__ \/ __ `/ ___/ //_/
+/ /_/ / /_/ /  __/ / / /__/ /  __/ /_/ / /  / /__/ / / /  / /_/ /  __/ / / / /__/ / / / / / / / / /_/ / /  / ,<
+\____/ .___/\___/_/ /_/____/\___/\__,_/_/   \___/_/ /_/  /_____/\___/_/ /_/\___/_/ /_/_/ /_/ /_/\__,_/_/  /_/|_|
+/_/
+
+[INFO] You did not provide an explicit timeout in the client options. Assuming default of 10 seconds.
+[INFO] Downloading workload data (20.5 kB total size)                             [100.0%]
+[INFO] Decompressing workload data from [/root/.benchmark/benchmarks/data/geonames/documents-2-1k.json.bz2] to [/root/.benchmark/benchmarks/data/geonames/documents-2-1k.json] ... [OK]
+[INFO] Preparing file offset table for [/root/.benchmark/benchmarks/data/geonames/documents-2-1k.json] ... [OK]
+[INFO] Executing test with workload [geonames], test_procedure [append-no-conflicts] and provision_config_instance ['external'] with version [7.10.2].
+
+[WARNING] indexing_total_time is 14 ms indicating that the cluster is not in a defined clean state. Recorded index time metrics may be misleading.
+[WARNING] refresh_total_time is 65 ms indicating that the cluster is not in a defined clean state. Recorded index time metrics may be misleading.
+Running delete-index                                                           [100% done]
+Running create-index                                                           [100% done]
+Running check-cluster-health                                                   [100% done]
+Running index-append                                                           [100% done]
+```
+
 ### Capture Kafka Offloader
 
 The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.
