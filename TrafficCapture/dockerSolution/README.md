@@ -26,18 +26,17 @@ While in the TrafficCapture directory, run the following command:
 
 ### Compatibility
 
-Must have Java version 11 installed.
-
 The tools in this directory can only be built if you have Java version 11 installed.
 
 The version is specified in `TrafficCapture/build.gradle` using a Java toolchain, which allows us
 to decouple the Java version used by Gradle itself from Java version used by the tools here.
 
 Any attempt to use a different version will cause the build to fail and will result in the following error (or similar)
-depending on which tool/project is being built. The below example shows the error printed when running e.g `./gradlew
-trafficCaptureProxyServer:build`
+depending on which tool/project is being built. Below is an example error when attempting to build with an incompatible Java version.
 
 ```
+./gradlew trafficCaptureProxyServer:build
+
 * What went wrong:
 A problem occurred evaluating project ':trafficCaptureProxyServer'.
 > Could not resolve all dependencies for configuration ':trafficCaptureProxyServer:opensearchSecurityPlugin'.

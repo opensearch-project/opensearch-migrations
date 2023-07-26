@@ -6,7 +6,7 @@ On wings of the morning breeze
 Effortless migration
 ```
 
-This repo will contain code, tools and documentation to assist in migrations to and upgrades of OpenSearch clusters.
+This repo contains code, tools and documentation to assist in migrations to and upgrades of OpenSearch clusters.
 
 ## Table of Contents
 
@@ -22,13 +22,13 @@ This repo will contain code, tools and documentation to assist in migrations to 
 
 ## Setup for commits
 
-Developers must run the "install_githooks.sh" script in order to add the pre-commit hook, which runs a linting command
-on the `*.py` files.
+Developers must run the "install_githooks.sh" script in order to add any pre-commit hooks.
+At the moment, one pre-commit hook will be installed which runs a linting commandon the `*.py` files.
 
 ## Traffic Capture
 
 The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP
-traffic, which can then be offloaded and replayed to other HTTP server(s).
+traffic, which can then be offloaded and replayed to other HTTP(S) server(s).
 
 More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md) 
 

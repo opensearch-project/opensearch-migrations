@@ -1,6 +1,10 @@
 ## End-to-End Testing
 
 Developers can run a test script which will verify the end-to-end Docker Solution.
+
+#### Compatibility
+* Python >= 3.7
+
 #### Pre-requisites
 
 * Have all containers from Docker solution running.
@@ -29,6 +33,7 @@ The following are the default values for the only endpoints touched by this scri
 * `SOURCE_ENDPOINT = http://localhost:19200`
 * `TARGET_ENDPOINT = https://localhost:29200`
 * `JUPYTER_NOTEBOOK = http://localhost:8888/api`
+
 #### Clean Up
 The test script is implemented with a setup and teardown functions that are ran after
 each and every test where additions made to the endpoints are deleted, *mostly* cleaning up after themselves, however,
