@@ -40,7 +40,6 @@ dependencies {
 
     testImplementation project(':captureProtobufs')
     testImplementation project(path: ':testUtilities')
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
 }
 
 tasks.withType(Tar){

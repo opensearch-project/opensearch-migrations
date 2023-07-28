@@ -17,8 +17,7 @@ buildscript {
 }
 
 plugins {
-    id 'java'
-    id 'application'
+    id 'org.opensearch.migrations.java-application-conventions'
     id "com.github.spotbugs" version "4.7.3"
 //    id 'checkstyle'
     id 'org.owasp.dependencycheck' version '8.2.1'
@@ -61,7 +60,6 @@ dependencies {
 
     testImplementation project(':testUtilities')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter', version: '5.9.2'
 }
 
 application {
