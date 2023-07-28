@@ -89,7 +89,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void accept(TrafficStream yetToBeSequencedTrafficStream) {
-        log.warn("Got trafficStream: " + summarizeTrafficStream(yetToBeSequencedTrafficStream));
+        log.trace("Got trafficStream: " + summarizeTrafficStream(yetToBeSequencedTrafficStream));
         var accum = liveStreams.getOrCreateWithoutExpiration(
                 yetToBeSequencedTrafficStream.getNodeId(),
                 yetToBeSequencedTrafficStream.getConnectionId());
@@ -148,7 +148,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 throw new RuntimeException("Got an end of segment indicator, but no segments are in progress");
             }
         } else if (observation.hasConnectionException()) {
-            // the following line means that
             rotateAccumulationIfNecessary(connectionId, accum);
             closedConnectionCounter.incrementAndGet();
             accum.resetForNextRequest();

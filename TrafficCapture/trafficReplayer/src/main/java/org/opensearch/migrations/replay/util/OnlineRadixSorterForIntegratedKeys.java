@@ -19,14 +19,14 @@ import java.util.stream.Stream;
  */
 public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter<T> {
 
-        ToIntFunction<T> radixResolver;
+    ToIntFunction<T> radixResolver;
 
-        public OnlineRadixSorterForIntegratedKeys(int startingOffset, ToIntFunction<T> radixResolver) {
-            super(startingOffset);
-            this.radixResolver = radixResolver;
-        }
-
-        public void add(T item, Consumer<T> sortedItemVisitor) {
-            super.add(radixResolver.applyAsInt(item), item, sortedItemVisitor);
-        }
+    public OnlineRadixSorterForIntegratedKeys(int startingOffset, ToIntFunction<T> radixResolver) {
+        super(startingOffset);
+        this.radixResolver = radixResolver;
     }
+
+    public void add(T item, Consumer<T> sortedItemVisitor) {
+        super.add(radixResolver.applyAsInt(item), item, sortedItemVisitor);
+    }
+}

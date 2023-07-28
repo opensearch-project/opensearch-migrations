@@ -1,13 +1,8 @@
 package org.opensearch.migrations.replay;
 
-import lombok.Getter;
-import org.opensearch.migrations.replay.util.OnlineRadixSorter;
 import org.opensearch.migrations.replay.util.OnlineRadixSorterForIntegratedKeys;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;

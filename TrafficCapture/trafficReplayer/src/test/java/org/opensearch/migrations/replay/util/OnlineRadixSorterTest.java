@@ -7,8 +7,6 @@ import java.util.ArrayList;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class OnlineRadixSorterTest {
 
     private static String stringify(Stream<Integer> stream) {
@@ -17,8 +15,8 @@ class OnlineRadixSorterTest {
 
     private static String add(OnlineRadixSorterForIntegratedKeys<Integer> sorter, int v) {
         var sortedItems = new ArrayList<Integer>();
-        sorter.add(Integer.valueOf(v), i->sortedItems.add(i));
-        return sortedItems.stream().map(i->i.toString()).collect(Collectors.joining(","));
+        sorter.add(v, i->sortedItems.add(i));
+        return stringify(sortedItems.stream());
     }
 
     @Test
