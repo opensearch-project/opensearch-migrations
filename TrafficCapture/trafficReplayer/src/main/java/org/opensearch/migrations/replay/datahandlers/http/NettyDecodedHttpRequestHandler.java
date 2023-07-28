@@ -43,9 +43,18 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
+            var request = (HttpRequest) msg;
+            log.info(new StringBuilder(diagnosticLabel)
+                    .append(" parsed request: ")
+                    .append(request.method())
+                    .append(" ")
+                    .append(request.uri())
+                    .append(" ")
+                    .append(request.protocolVersion().text())
+                    .toString());
+
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));
-            var request = (HttpRequest) msg;
             var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, packetReceiver, diagnosticLabel);
             var pipeline = ctx.pipeline();
             try {
