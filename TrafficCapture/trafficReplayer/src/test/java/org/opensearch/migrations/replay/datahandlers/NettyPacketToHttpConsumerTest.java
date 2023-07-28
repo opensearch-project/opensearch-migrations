@@ -100,7 +100,7 @@ class NettyPacketToHttpConsumerTest {
     }
 
     @Test
-    public void testHttpResponseIsASuccessfullyCaptured()
+    public void testHttpResponseIsSuccessfullyCaptured()
             throws SSLException, ExecutionException, InterruptedException
     {
         var sslContextBuilder = SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE);
