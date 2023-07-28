@@ -47,6 +47,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final ExpiringTrafficStreamMap liveStreams;
     private final BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
+    private final Consumer<Accumulation> onTrafficStreamMissingOnExpiration;
 
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
     private final AtomicInteger closedConnectionCounter = new AtomicInteger();
@@ -55,12 +56,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
                                                        BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
-                                                       Consumer<RequestResponsePacketPair> fullDataHandler) {
+                                                       Consumer<RequestResponsePacketPair> fullDataHandler)
+    {
+        this(minTimeout, requestReceivedHandler, fullDataHandler, accumulation ->
+                log.warn("TrafficStreams are still pending for this expiring accumulation: " + accumulation));
+    }
+
+    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
+                                                       BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
+                                                       Consumer<RequestResponsePacketPair> fullDataHandler,
+                                                       Consumer<Accumulation> onTrafficStreamMissingOnExpiration) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new BehavioralPolicy() {
                     @Override
-                    public void onExpireAccumulation(String partitionId,
-                                                     Accumulation accumulation) {
+                    public void onExpireAccumulation(String partitionId, Accumulation accumulation) {
                         connectionsExpiredCounter.incrementAndGet();
                         log.trace("firing accumulation for accum=[" + accumulation.getRequestId() + "]=" + accumulation);
                         fireAccumulationsCallbacks(accumulation);
@@ -68,6 +77,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 });
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
+        this.onTrafficStreamMissingOnExpiration = onTrafficStreamMissingOnExpiration;
     }
 
     public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
@@ -247,6 +257,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     private void fireAccumulationsCallbacks(Accumulation accumulation) {
+        if (accumulation.trafficStreamsSorter.hasPending()) {
+            onTrafficStreamMissingOnExpiration.accept(accumulation);
+        }
         switch (accumulation.state) {
             case NOTHING_SENT:
                 if (!handleEndOfRequest(accumulation)) {

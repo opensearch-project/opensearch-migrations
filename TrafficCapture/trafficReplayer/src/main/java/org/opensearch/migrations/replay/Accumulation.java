@@ -47,6 +47,9 @@ public class Accumulation {
         final StringBuilder sb = new StringBuilder("Accumulation{");
         sb.append("rrPair=").append(rrPair);
         sb.append(", state=").append(state);
+        if (trafficStreamsSorter.hasPending()) {
+            sb.append(", sorter=").append(trafficStreamsSorter);
+        }
         sb.append('}');
         return sb.toString();
     }

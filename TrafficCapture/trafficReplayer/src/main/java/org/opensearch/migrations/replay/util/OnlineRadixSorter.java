@@ -58,4 +58,17 @@ public class OnlineRadixSorter<T> {
             items.set(index, item);
         }
     }
+
+    public boolean hasPending() {
+        return currentOffset < items.size();
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("OnlineRadixSorter{");
+        sb.append("items=").append(items);
+        sb.append(", currentOffset=").append(currentOffset);
+        sb.append('}');
+        return sb.toString();
+    }
 }

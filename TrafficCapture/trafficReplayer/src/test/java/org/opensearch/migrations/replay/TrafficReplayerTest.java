@@ -12,9 +12,12 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
+import javax.net.ssl.SSLException;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +26,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -147,6 +152,32 @@ class TrafficReplayerTest {
         }
         Assertions.assertEquals(3, byteArrays.size());
         Assertions.assertTrue(byteArrays.stream().allMatch(ba->ba.size()==2));
+    }
+
+    @Test
+    public void testMissingStreamCausesWarning() throws URISyntaxException, IOException, ExecutionException, InterruptedException {
+        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
+        var gotWarning = new AtomicBoolean();
+        var gotAnythingElse = new AtomicBoolean();
+        CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
+                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
+                        (id,request) -> { gotAnythingElse.set(true); },
+                        fullPair -> { gotAnythingElse.set(true); },
+                        accum -> gotWarning.set(true));
+        byte[] serializedChunks;
+        try (var baos = new ByteArrayOutputStream()) {
+            makeTrafficStream(Instant.now(), 3).writeDelimitedTo(baos);
+            serializedChunks = baos.toByteArray();
+        }
+        try (var bais = new ByteArrayInputStream(serializedChunks)) {
+            try (var trafficSource = new InputStreamOfTraffic(bais)) {
+                tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
+            }
+        }
+        trafficAccumulator.close();
+        Assertions.assertTrue(gotWarning.get());
+        Assertions.assertFalse(gotAnythingElse.get());
+
     }
 
     private static String collectBytesToUtf8String(List<byte[]> bytesList) {
