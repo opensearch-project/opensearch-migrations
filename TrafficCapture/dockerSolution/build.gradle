@@ -88,7 +88,6 @@ trafficComparatorServices.forEach {projectName, dockerImageName ->
 
 def javaContainerServices = [
         "trafficCaptureProxyServer": "capture_proxy",
-        "kafkaPrinter": "kafka_capture_puller",
         "trafficReplayer": "traffic_replayer"
 ]
 def baseImageProjectOverrides = [
@@ -125,7 +124,6 @@ task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
     dependsOn buildDockerImage_openSearchBenchmark
 
-    dependsOn buildDockerImage_kafkaPrinter
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer
     dependsOn buildDockerImage_trafficComparator

@@ -39,10 +39,7 @@ dependencies {
     implementation 'com.google.protobuf:protobuf-java:3.22.2'
 
     testImplementation project(':captureProtobufs')
-    testImplementation 'com.google.protobuf:protobuf-java:3.22.2'
-
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
-    testImplementation "com.google.protobuf:protobuf-java:3.22.2"
+    testImplementation project(path: ':testUtilities')
 }
 
 tasks.withType(Tar){

@@ -11,10 +11,10 @@ rootProject.name = 'TrafficCapture'
 include('captureKafkaOffloader',
         'captureOffloader',
         'captureProtobufs',
-        'kafkaPrinter',
         'nettyWireLogging',
         'trafficCaptureProxyServer',
         'trafficReplayer',
+        'testUtilities',
         'dockerSolution',
         'trafficCaptureProxyServerTest'
 )

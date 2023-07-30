@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -21,6 +22,13 @@ public class AggregatedRawResponse implements Serializable {
 
     public static Builder builder(Instant i) {
         return new Builder(i);
+    }
+
+    public byte[][] getCopyOfPackets() {
+            return responsePackets.stream()
+                    .map(kvp->kvp.getValue())
+                    .map(x->Arrays.copyOf(x,x.length))
+                    .toArray(byte[][]::new);
     }
 
     public static class Builder {
