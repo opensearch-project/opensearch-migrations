@@ -1,19 +1,36 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id "com.avast.gradle.docker-compose" version "0.16.12"
-    id "com.palantir.docker" version "0.35.0"
-    id "io.freefair.lombok" version "8.0.1"
-//    id 'de.qualersoft.jmeter' version '2.4.0'
+    //The 'com.bmushcko.docker-remote-api' line IS required (due to the remaining DockerBuildImage tasks) but W/O
+    // a specified version. The version is managed within the buildSrc/build.gradle file.
+    id 'com.bmuschko.docker-remote-api'
 }
+import org.opensearch.migrations.common.CommonUtils
+import org.opensearch.migrations.common.CommonConfigurations
+import java.security.MessageDigest
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
 // see https://github.com/apache/jmeter/issues/5322
 def withoutBom = {
     exclude group: 'org.apache.jmeter', module: 'bom'
 }
+
+def calculateDockerHash = { projectName ->
+    CommonUtils.calculateDockerHash(projectName, project)
+}
+
 dependencies {
+
+    implementation project(':trafficCaptureProxyServer')
+    compileOnly 'org.projectlombok:lombok:1.18.28'
+    annotationProcessor 'org.projectlombok:lombok:1.18.28'
+
+    testCompileOnly 'org.projectlombok:lombok:1.18.28'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.28'
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.5', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.5', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.5', withoutBom
+    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
 
     constraints {
         implementation('net.minidev:json-smart:2.4.9') {
@@ -43,38 +60,66 @@ dependencies {
     }
 }
 
+CommonConfigurations.applyCommonConfigurations(project)
 configurations {
     all {
-        resolutionStrategy.dependencySubstitution {
-            substitute module('org.apache.xmlgraphics:batik-codec') using module('org.apache.xmlgraphics:batik-all:1.15')
-        }
+        exclude group: 'org.apache.logging.log4j', module: 'log4j-slf4j-impl'
     }
 }
 
-docker {
-    name "nginx-simple"
-    files 'src/main/docker/nginx-simple/'
+
+def dockerFilesForExternalServices = [
+        "nginx": "nginx-perf-test-webserver"
+]
+
+// Create the static docker files that aren't hosting migrations java code from this repo
+dockerFilesForExternalServices.each { projectName, dockerImageName ->
+    task("buildDockerImage_${projectName}", type: DockerBuildImage) {
+        def hash = calculateDockerHash(projectName)
+        images.add("migrations/${dockerImageName}:$hash")
+        images.add("migrations/${dockerImageName}:latest")
+        inputDir = project.file("src/main/docker/${projectName}")
+    }
 }
-//
-//jmeter {
-//    tool {
-//        version = "5.5"
-//    }
-//}
-//
-//task runJMeter(type: de.qualersoft.jmeter.gradleplugin.task.JMeterRunTask) {
-//    jmxFile.set("Test.jmx")
-//    dependsOn(tasks.getByName("composeUp"))
-//}
-//
-//task jmeterReport(type: de.qualersoft.jmeter.gradleplugin.task.JMeterReportTask) {
-//    jmxFile.set("Test.jmx")
-//    dependsOn('runJMeter')
-//}
+
+def javaContainerServices = [
+        "trafficCaptureProxyServer": "capture_proxy",
+        "trafficCaptureProxyServerTest": "jmeter"
+]
+def baseImageProjectOverrides = [
+        "nginx": "nginx-perf-test-webserver"
+]
+
+def createContainerTasks = { projectName, dockerImageName ->
+    def dockerBuildDir = "build/docker/${projectName}"
+    CommonUtils.copyArtifact(project, projectName)
+
+    CommonUtils.createDockerfile(project, projectName, baseImageProjectOverrides, dockerFilesForExternalServices)
+}
+
+javaContainerServices.each(createContainerTasks)
+
+(javaContainerServices).forEach { projectName, dockerImageName ->
+    def dockerBuildDir = "build/docker/${projectName}"
+    task "buildDockerImage_${projectName}"(type: DockerBuildImage) {
+        dependsOn "createDockerfile_${projectName}"
+        inputDir = project.file("${dockerBuildDir}")
+        images.add("migrations/${dockerImageName}:${version}")
+        images.add("migrations/${dockerImageName}:latest")
+    }
+}
+
+
 
 dockerCompose {
     useComposeFiles.add("src/main/docker/docker-compose.yml")
-    //isRequiredBy(tasks.getByName('runJMeter'))
 }
 
-tasks.getByName('composeUp').dependsOn(tasks.getByName('docker'))
+task buildDockerImages {
+    dependsOn buildDockerImage_nginx
+    dependsOn buildDockerImage_trafficCaptureProxyServer
+    dependsOn buildDockerImage_trafficCaptureProxyServerTest
+}
+
+tasks.getByName('composeUp')
+        .dependsOn(tasks.getByName('buildDockerImages'))

@@ -1,4 +1,4 @@
-ARG NGINX_VERSION=1.23.4
+ARG NGINX_VERSION=1.25.1
 FROM nginx:${NGINX_VERSION}  as build
 
 RUN apt-get update
@@ -43,6 +43,7 @@ RUN NGINX_ARGS=$(nginx -V 2>&1 | sed -n -e 's/^.*arguments: //p') \
 
 FROM nginx:${NGINX_VERSION}
 
+# Installing VIM for the sake of users who would like to exec shells in the webserver container.
 RUN apt-get update
 RUN apt-get install -y vim
 
