@@ -41,7 +41,7 @@ repositories {
 
 dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
+    implementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     implementation group: 'org.bouncycastle', name: 'bcprov-jdk15on', version: '1.68'
