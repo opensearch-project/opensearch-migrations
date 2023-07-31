@@ -33,13 +33,13 @@ export class MSKUtilityStack extends Stack {
                     "ec2:DescribeVpcs",
                     "ec2:DescribeSecurityGroups",
                     "ec2:DescribeRouteTables",
-                    "ec2:DescribeVpcEndpoints",
-                    "ec2:DescribeVpcAttribute",
-                    "ec2:DescribeNetworkAcls",
+                    //"ec2:DescribeVpcEndpoints",
+                    //"ec2:DescribeVpcAttribute",
+                    //"ec2:DescribeNetworkAcls",
                     "kafka:UpdateConnectivity",
                     "kafka:DescribeClusterV2",
                     "kafka:GetBootstrapBrokers"],
-                resources: ["*"]
+                resources: [props.mskARN]
             })
             const lambdaExecDocument = new PolicyDocument({
                 statements: [lambdaInvokeStatement, mskUpdateConnectivityStatement]
@@ -95,7 +95,7 @@ export class MSKUtilityStack extends Stack {
         }
         else {
             const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, props.mskARN)
-            brokerEndpointsOutput = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")
+            brokerEndpointsOutput = `export MIGRATION_KAFKA_BROKER_ENDPOINTS=${mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")}`
             //brokerEndpointsOutput = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
         }
 
