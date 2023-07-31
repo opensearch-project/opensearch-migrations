@@ -151,17 +151,19 @@ public class ExpiringTrafficStreamMap {
         return accumulation;
     }
 
-    public Accumulation getOrCreate(String partitionId, String connectionId, Instant timestamp) {
+    public Accumulation getOrCreateWithoutExpiration(String partitionId, String connectionId) {
         var key = new ScopedConnectionIdKey(partitionId, connectionId);
-        var accumulation = connectionAccumulationMap.computeIfAbsent(key, k->{
+        return connectionAccumulationMap.computeIfAbsent(key, k -> {
             newConnectionCounter.incrementAndGet();
             return new Accumulation(connectionId);
         });
+    }
+
+    public void expireOldEntries(String partitionId, String connectionId, Accumulation accumulation, Instant timestamp) {
+        var key = new ScopedConnectionIdKey(partitionId, connectionId);
         if (!updateExpirationTrackers(partitionId, connectionId, new EpochMillis(timestamp), accumulation, 0)) {
             connectionAccumulationMap.remove(key);
-            return null;
         }
-        return accumulation;
     }
 
     public Accumulation remove(String partitionId, String id) {

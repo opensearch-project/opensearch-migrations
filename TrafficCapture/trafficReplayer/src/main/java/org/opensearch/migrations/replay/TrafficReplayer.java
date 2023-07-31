@@ -432,9 +432,6 @@ public class TrafficReplayer {
     public void runReplay(Stream<TrafficStream> trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         trafficChunkStream
-                .forEach(ts-> ts.getSubStreamList().stream()
-                        .forEach(o ->
-                                trafficToHttpTransactionAccumulator.accept(ts.getNodeId(), ts.getConnectionId(), o))
-                );
+                .forEach(ts-> trafficToHttpTransactionAccumulator.accept(ts));
     }
 }

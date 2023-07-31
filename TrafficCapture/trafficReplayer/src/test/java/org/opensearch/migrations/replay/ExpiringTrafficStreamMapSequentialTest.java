@@ -32,7 +32,10 @@ class ExpiringTrafficStreamMapSequentialTest {
         var expiredCountsPerLoop = new ArrayList<Integer>();
         for (int i=0; i<expectedExpirationCounts.length; ++i) {
             var ts = Instant.ofEpochSecond(i+1);
-            createdAccumulations.add(expiringMap.getOrCreate(TEST_NODE_ID_STRING, connectionGenerator.apply(i), ts));
+            var accumulation = expiringMap.getOrCreateWithoutExpiration(TEST_NODE_ID_STRING,
+                    connectionGenerator.apply(i));
+            createdAccumulations.add(accumulation);
+            expiringMap.expireOldEntries(TEST_NODE_ID_STRING, connectionGenerator.apply(i), accumulation, ts);
             createdAccumulations.get(i).rrPair.addResponseData(ts, ("Add"+i).getBytes(StandardCharsets.UTF_8));
             expiredCountsPerLoop.add(expiredAccumulations.size());
         }

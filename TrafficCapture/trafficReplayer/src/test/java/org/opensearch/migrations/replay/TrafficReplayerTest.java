@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+@Slf4j
 class TrafficReplayerTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
@@ -32,15 +34,17 @@ class TrafficReplayerTest {
     private static String FAKE_READ_PACKET_DATA = "Useless packet data for test";
     private static String FAKE_EXCEPTION_DATA = "Mock Exception Message for testing";
 
-    private static TrafficStream makeTrafficStream(Instant t) {
+    private static TrafficStream makeTrafficStream(Instant t, int trafficChunkNumber) {
         var fixedTimestamp = Timestamp.newBuilder()
                 .setSeconds(t.getEpochSecond())
                 .setNanos(t.getNano())
                 .build();
-        return TrafficStream.newBuilder()
-                .setNodeId(TEST_NODE_ID_STRING)
+        var tsb = TrafficStream.newBuilder()
+                .setNumber(trafficChunkNumber);
+        // TODO - add something for setNumberOfThisLastChunk.  There's no point in doing that now though
+        //        because the code doesn't make any distinction between the very last one and the previous ones
+        return tsb.setNodeId(TEST_NODE_ID_STRING)
                 .setConnectionId(TEST_TRAFFIC_STREAM_ID_STRING)
-                .setNumberOfThisLastChunk(1)
                 .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                         .setRead(ReadObservation.newBuilder()
                                 .setData(ByteString.copyFrom(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8)))
@@ -83,6 +87,7 @@ class TrafficReplayerTest {
                         .setWrite(WriteObservation.newBuilder()
                                 .build())
                         .build())
+                // Don't need to add more because this gets looped multiple times (with the same connectionId)
                 .build();
     }
 
@@ -91,10 +96,18 @@ class TrafficReplayerTest {
         final Instant timestamp = Instant.now();
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
-            AtomicInteger counter = new AtomicInteger();
+            AtomicInteger counter = new AtomicInteger(0);
             Assertions.assertTrue(new InputStreamOfTraffic(bais).supplyTrafficFromSource()
-                    .allMatch(ts->ts.equals(makeTrafficStream(timestamp.plus(counter.getAndIncrement(),
-                            ChronoUnit.SECONDS)))));
+                    .allMatch(ts-> {
+                        var i = counter.incrementAndGet();
+                        var expectedStream = makeTrafficStream(timestamp.plus(i-1, ChronoUnit.SECONDS), i);
+                        var isEqual = ts.equals(expectedStream);
+                        if (!isEqual) {
+                            log.error("Expected trafficStream: "+expectedStream);
+                            log.error("Observed trafficStream: "+ts);
+                        }
+                        return isEqual;
+                    }));
         }
     }
 
@@ -102,7 +115,7 @@ class TrafficReplayerTest {
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
             for (int i=0; i<numStreams; ++i) {
-                makeTrafficStream(timestamp.plus(i, ChronoUnit.SECONDS)).writeDelimitedTo(baos);
+                makeTrafficStream(timestamp.plus(i, ChronoUnit.SECONDS), i+1).writeDelimitedTo(baos);
             }
             serializedChunks = baos.toByteArray();
         }
@@ -110,7 +123,7 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testReader() throws IOException, URISyntaxException, InterruptedException {
+    public void testReader() throws IOException, URISyntaxException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
