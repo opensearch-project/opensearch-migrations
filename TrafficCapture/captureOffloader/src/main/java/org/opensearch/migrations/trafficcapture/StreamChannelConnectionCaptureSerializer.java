@@ -112,7 +112,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
                 getWireTypeForFieldIndex(TrafficObservation.getDescriptor(), fieldNumber));
     }
 
-    private void beginSubstreamObservationToCurrentStream(Instant timestamp, int captureTag, int captureClosureSize) throws IOException {
+    private void beginSubstreamObservation(Instant timestamp, int captureTag, int captureClosureSize) throws IOException {
 
         // i.e. 2 {
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
@@ -125,12 +125,6 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             captureClosureSize);
         // i.e. 1 { 1: 1234 2: 1234 }
         writeTimestampForNowToCurrentStream(timestamp);
-    }
-
-    private void beginWritingSubstreamsObservationToCurrentStream(Instant timestamp, int captureTag, int captureClosureSize) throws IOException {
-        beginSubstreamObservationToCurrentStream(timestamp, captureTag, captureClosureSize);
-        // i.e. 4 {
-        writeObservationTag(captureTag);
     }
 
     private void writeTimestampForNowToCurrentStream(Instant timestamp) throws IOException {
@@ -214,7 +208,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public void addCloseEvent(Instant timestamp) throws IOException {
-        beginSubstreamObservationToCurrentStream(timestamp, TrafficObservation.CLOSE_FIELD_NUMBER, 1);
+        beginSubstreamObservation(timestamp, TrafficObservation.CLOSE_FIELD_NUMBER, 1);
         getOrCreateCodedOutputStream().writeMessage(TrafficObservation.CLOSE_FIELD_NUMBER, CloseObservation.getDefaultInstance());
     }
 
@@ -235,8 +229,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             dataSize = CodedOutputStream.computeStringSize(dataFieldNumber, str);
             lengthSize = getOrCreateCodedOutputStream().computeInt32SizeNoTag(dataSize);
         }
-        beginWritingSubstreamsObservationToCurrentStream(timestamp, captureFieldNumber,
-                dataSize + lengthSize);
+        beginSubstreamObservation(timestamp, captureFieldNumber, dataSize + lengthSize);
+        // i.e. 4 {
+        writeObservationTag(captureFieldNumber);
         if (dataSize > 0) {
             getOrCreateCodedOutputStream().writeInt32NoTag(dataSize);
         }
@@ -307,7 +302,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, byteBuffer);
             captureClosureLength = CodedOutputStream.computeInt32SizeNoTag(dataSize + segmentCountSize);
         }
-        beginWritingSubstreamsObservationToCurrentStream(timestamp, captureFieldNumber, captureClosureLength + dataSize + segmentCountSize);
+        beginSubstreamObservation(timestamp, captureFieldNumber, captureClosureLength + dataSize + segmentCountSize);
+        // i.e. 4 {
+        writeObservationTag(captureFieldNumber);
         if (dataSize > 0) {
             // Write size of data after capture tag
             codedOutputStream.writeInt32NoTag(dataSize + segmentCountSize);
@@ -409,7 +406,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         int eomPairSize = CodedOutputStream.computeInt32Size(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength) +
                 CodedOutputStream.computeInt32Size(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
         int eomDataSize = eomPairSize + CodedOutputStream.computeInt32SizeNoTag(eomPairSize);
-        beginWritingSubstreamsObservationToCurrentStream(timestamp, TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER, eomDataSize);
+        beginSubstreamObservation(timestamp, TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER, eomDataSize);
+        // i.e. 15 {
+        writeObservationTag(TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER);
         getOrCreateCodedOutputStream().writeUInt32NoTag(eomPairSize);
         getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
         getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
