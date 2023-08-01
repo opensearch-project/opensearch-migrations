@@ -27,22 +27,23 @@ export class MSKUtilityStack extends Stack {
                 actions: ["lambda:InvokeFunction"],
                 resources: ["*"]
             })
-            const mskUpdateConnectivityStatement = new PolicyStatement({
+            // Updating connectivity for an MSK cluster requires some VPC permissions
+            // (https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonmanagedstreamingforapachekafka.html#amazonmanagedstreamingforapachekafka-cluster)
+            const describeVPCStatement = new PolicyStatement( {
                 effect: Effect.ALLOW,
                 actions: ["ec2:DescribeSubnets",
-                    "ec2:DescribeVpcs",
-                    "ec2:DescribeSecurityGroups",
-                    "ec2:DescribeRouteTables",
-                    //"ec2:DescribeVpcEndpoints",
-                    //"ec2:DescribeVpcAttribute",
-                    //"ec2:DescribeNetworkAcls",
-                    "kafka:UpdateConnectivity",
+                    "ec2:DescribeRouteTables"],
+                resources: ["*"]
+            })
+            const mskUpdateConnectivityStatement = new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ["kafka:UpdateConnectivity",
                     "kafka:DescribeClusterV2",
                     "kafka:GetBootstrapBrokers"],
                 resources: [props.mskARN]
             })
             const lambdaExecDocument = new PolicyDocument({
-                statements: [lambdaInvokeStatement, mskUpdateConnectivityStatement]
+                statements: [lambdaInvokeStatement, describeVPCStatement, mskUpdateConnectivityStatement]
             })
 
             const lambdaExecRole = new Role(this, 'mskAccessLambda', {

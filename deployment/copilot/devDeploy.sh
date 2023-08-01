@@ -91,7 +91,7 @@ export COMPOSE_DOCKER_CLI_BUILD=0
 
 if [ "$DESTROY_REGION" = true ] ; then
   set +e
-  # Reset AWS_DEFAULT_REGION as this will cause conflict with Copilot when interacting with multiple environments within the same AWS account
+  # Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
   export AWS_DEFAULT_REGION=""
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --yes
@@ -110,7 +110,7 @@ if [ "$DESTROY_REGION" = true ] ; then
 fi
 
 if [ "$DESTROY_ALL_COPILOT" = true ] ; then
-    # Reset AWS_DEFAULT_REGION as this will cause conflict with Copilot when interacting with multiple environments within the same AWS account
+    # Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
     export AWS_DEFAULT_REGION=""
     copilot app delete
     echo "Destroying a Copilot app will not remove generated manifest.yml files in the copilot/environments directory. These should be manually deleted before deploying again. "
@@ -143,7 +143,7 @@ printf "The following exports were added from CDK:\n%s\n" "$found_exports"
 
 cd ../../copilot
 
-# Reset AWS_DEFAULT_REGION as this will cause conflict with Copilot when interacting with multiple environments within the same AWS account
+# Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
 export AWS_DEFAULT_REGION=""
 
 # Allow script to continue on error for copilot services, as copilot will error when no changes are needed

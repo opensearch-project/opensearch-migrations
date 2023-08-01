@@ -62,8 +62,9 @@ The typical use case for this Copilot app is to initially use the `opensearch-se
 
 The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
 ```
-export MIGRATION_VPC_ID=vpc-123;
+export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
