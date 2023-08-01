@@ -213,8 +213,7 @@ public class TrafficReplayer {
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         getRecordedRequestReconstructCompleteHandler(requestFutureMap),
                         getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
-                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap)
-        );
+                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap));
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {
@@ -290,7 +289,8 @@ public class TrafficReplayer {
             if (log.isTraceEnabled()) {
                 log.trace("Done receiving captured stream for this " + rrPair.requestData);
             }
-            var resultantCf = responseInProgressMap.remove(rrPair.requestData)
+            var requestData = rrPair.requestData;
+            var resultantCf = responseInProgressMap.remove(requestData)
                     .map(f ->
                             f.handle((summary, t) -> {
                                 try {

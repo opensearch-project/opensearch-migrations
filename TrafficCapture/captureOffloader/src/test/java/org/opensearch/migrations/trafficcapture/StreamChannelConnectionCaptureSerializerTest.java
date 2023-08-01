@@ -7,6 +7,7 @@ import io.netty.buffer.Unpooled;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -69,6 +70,9 @@ class StreamChannelConnectionCaptureSerializerTest {
                                 .setFirstLineByteLength(17)
                                 .setHeadersByteLength(72)
                                 .build())
+                        .build())
+                .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                        .setClose(CloseObservation.newBuilder().build())
                         .build())
                 .build();
     }
@@ -193,6 +197,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         serializer.addEndOfFirstLineIndicator(17);
         serializer.addEndOfHeadersIndicator(72);
         serializer.commitEndOfHttpMessageIndicator(referenceTimestamp);
+        serializer.addCloseEvent(referenceTimestamp);
         serializer.flushCommitAndResetStream(true).get();
         bb.release();
 
@@ -202,7 +207,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         var reconstitutedTrafficStream = TrafficStream.parseFrom(onlyBuffer);
         Assertions.assertEquals(TEST_TRAFFIC_STREAM_ID_STRING, reconstitutedTrafficStream.getConnectionId());
         Assertions.assertEquals(TEST_NODE_ID_STRING, reconstitutedTrafficStream.getNodeId());
-        Assertions.assertEquals(5, reconstitutedTrafficStream.getSubStreamCount());
+        Assertions.assertEquals(6, reconstitutedTrafficStream.getSubStreamCount());
         Assertions.assertEquals(1, reconstitutedTrafficStream.getNumberOfThisLastChunk());
         Assertions.assertFalse(reconstitutedTrafficStream.hasNumber());
 
