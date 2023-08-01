@@ -34,9 +34,19 @@ The following script command can be executed to deploy both the CDK infrastructu
 ```
 Options:
 ```
---skip-bootstrap                Skips installing packages with npm for CDK, bootstrapping CDK, and building the docker images used by Copilot
---skip-copilot-init             Skips Copilot initialization of app, environments, and services
---destroy                       Cleans up all deployed resources from this script (CDK and Copilot)
+./devDeploy.sh -h
+
+Deploy migration solution infrastructure composed of resources deployed by CDK and Copilot
+
+Options:
+  --skip-bootstrap        Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
+  --skip-copilot-init     Skip one-time Copilot initialization of app, environments, and services
+  --copilot-app-name      [string, default: migration-copilot] Specify the Copilot application name to use for deployment
+  --destroy-region        Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given region and return to a clean state.
+  --destroy-all-copilot   Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
+  -r, --region            [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
+  -s, --stage             [string, default: dev] Specify the stage name to associate with the deployed resources
+
 ```
 
 Requirements:
@@ -52,8 +62,9 @@ The typical use case for this Copilot app is to initially use the `opensearch-se
 
 The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
 ```
-export MIGRATION_VPC_ID=vpc-123;
+export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;

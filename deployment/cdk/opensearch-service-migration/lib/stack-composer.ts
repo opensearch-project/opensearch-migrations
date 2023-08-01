@@ -11,7 +11,8 @@ import {HistoricalCaptureStack} from "./historical-capture-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
 
 export interface StackPropsExt extends StackProps {
-    readonly stage: string
+    readonly stage: string,
+    readonly copilotAppName: string
 }
 
 export class StackComposer {

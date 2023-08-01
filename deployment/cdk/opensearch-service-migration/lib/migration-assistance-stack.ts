@@ -104,7 +104,7 @@ export class MigrationAssistanceStack extends Stack {
 
         const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
             vpc: props.vpc,
-            allowAllOutbound: true,
+            allowAllOutbound: false,
         });
         comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
 
@@ -112,24 +112,6 @@ export class MigrationAssistanceStack extends Stack {
         const comparatorSQLiteEFS = new FileSystem(this, 'comparatorSQLiteEFS', {
             vpc: props.vpc,
             securityGroup: comparatorSQLiteSG
-        });
-
-        // Creates a security group with open access via ssh
-        const oinoSecurityGroup = new SecurityGroup(this, 'orchestratorSecurityGroup', {
-            vpc: props.vpc,
-            allowAllOutbound: true,
-        });
-        oinoSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.tcp(22));
-
-        // Create EC2 instance for analysis of cluster in VPC
-        const oino = new Instance(this, "orchestratorEC2Instance", {
-            vpc: props.vpc,
-            vpcSubnets: { subnetType: SubnetType.PUBLIC },
-            instanceType: InstanceType.of(InstanceClass.T2, InstanceSize.MICRO),
-            machineImage: MachineImage.latestAmazonLinux2(),
-            securityGroup: oinoSecurityGroup,
-            // Manually created for now, to be automated in future
-            //keyName: "es-node-key"
         });
 
         let publicSubnetString = props.vpc.publicSubnets.map(_ => _.subnetId).join(",")
@@ -145,6 +127,12 @@ export class MigrationAssistanceStack extends Stack {
         new CfnOutput(this, 'CopilotMigrationExports', {
             value: exports.join(";"),
             description: 'Exported migration resource values created by CDK that are needed by Copilot container deployments',
+        });
+        // Create export of MSK cluster ARN for Copilot stacks to use
+        new CfnOutput(this, 'migrationMSKClusterARN', {
+            value: mskCluster.attrArn,
+            exportName: `${props.copilotAppName}-${props.stage}-msk-cluster-arn`,
+            description: 'Migration MSK Cluster ARN'
         });
 
     }

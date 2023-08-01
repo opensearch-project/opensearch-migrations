@@ -1,9 +1,9 @@
 import {App} from 'aws-cdk-lib';
 import {Template} from 'aws-cdk-lib/assertions';
-import {StackComposer} from "../lib/stack-composer";
 import * as testDefaultValues from "./default-values-test.json";
 import {OpensearchServiceDomainCdkStack} from "../lib/opensearch-service-domain-cdk-stack";
 import {NetworkStack} from "../lib/network-stack";
+import {createStackComposer} from "./test-utils";
 
 test('Test primary context options are mapped with standard data type', () => {
     // The cdk.context.json and default-values.json files allow multiple data types
@@ -47,9 +47,7 @@ test('Test primary context options are mapped with standard data type', () => {
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -95,9 +93,7 @@ test('Test primary context options are mapped with only string data type', () =>
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -123,9 +119,7 @@ test('Test alternate context options are mapped with standard data type', () => 
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -146,9 +140,7 @@ test('Test alternate context options are mapped with only string data type', () 
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -162,9 +154,7 @@ test('Test openAccessPolicy setting creates access policy when enabled', () => {
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -180,9 +170,7 @@ test('Test openAccessPolicy setting does not create access policy when disabled'
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -198,9 +186,7 @@ test('Test openAccessPolicy setting is mapped with string data type', () => {
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -214,9 +200,7 @@ test( 'Test default stack is created with default values when no context options
         context: {}
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const defaultValues: { [x: string]: (string); } = testDefaultValues
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
@@ -262,9 +246,7 @@ test( 'Test default stack is created when empty context options are provided for
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)

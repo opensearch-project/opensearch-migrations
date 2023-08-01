@@ -9,6 +9,8 @@ type: Backend Service
 # Allow service-to-service communication with ECS Service Connect
 network:
   connect: true
+  vpc:
+    security_groups: [ "${MIGRATION_DOMAIN_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
