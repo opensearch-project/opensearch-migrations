@@ -2,8 +2,9 @@ import {App} from "aws-cdk-lib";
 import {StackComposer} from "../lib/stack-composer";
 import {Template} from "aws-cdk-lib/assertions";
 import {OpensearchServiceDomainCdkStack} from "../lib/opensearch-service-domain-cdk-stack";
+import {createStackComposer} from "./test-utils";
 
-test('Test missing domain name throws error', () => {
+test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
 
     const app = new App({
         context: {
@@ -11,27 +12,13 @@ test('Test missing domain name throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-       env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks =  createStackComposer(app)
 
-    expect(createStackFunc).toThrowError()
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainTemplate = Template.fromStack(domainStack)
+    domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
 
-test('Test missing engine version throws error', () => {
-
-    const app = new App({
-        context: {
-            engineVersion: ""
-        }
-    })
-
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
-
-    expect(createStackFunc).toThrowError()
-})
 
 test('Test invalid engine version format throws error', () => {
 
@@ -42,9 +29,7 @@ test('Test invalid engine version format throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })
@@ -57,9 +42,7 @@ test('Test ES 7.10 engine version format is parsed', () => {
         }
     })
 
-    const openSearchStacks =  new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -74,9 +57,7 @@ test('Test OS 1.3 engine version format is parsed', () => {
         }
     })
 
-    const openSearchStacks =  new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -107,9 +88,7 @@ test('Test access policy is parsed for proper array format', () => {
         }
     })
 
-    const openSearchStacks =  new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -134,9 +113,7 @@ test('Test access policy is parsed for proper block format', () => {
         }
     })
 
-    const openSearchStacks =  new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
@@ -152,9 +129,7 @@ test('Test access policy missing Statement throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })
@@ -167,9 +142,7 @@ test('Test access policy with empty Statement array throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })
@@ -182,9 +155,7 @@ test('Test access policy with empty Statement block throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })
@@ -198,9 +169,7 @@ test('Test access policy with improper Statement throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })
@@ -213,9 +182,7 @@ test('Test invalid TLS security policy throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })
@@ -228,9 +195,7 @@ test('Test invalid EBS volume type throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })
@@ -243,9 +208,7 @@ test('Test invalid domain removal policy type throws error', () => {
         }
     })
 
-    const createStackFunc = () => new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const createStackFunc = () => createStackComposer(app)
 
     expect(createStackFunc).toThrowError()
 })

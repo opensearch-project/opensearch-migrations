@@ -3,9 +3,10 @@ package org.opensearch.migrations.replay.netty;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
-public class BacksideSnifferHandler extends ChannelDuplexHandler {
+public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
 
     private final AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
 

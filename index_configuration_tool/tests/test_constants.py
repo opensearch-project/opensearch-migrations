@@ -38,7 +38,6 @@ BASE_INDICES_DATA = {
             }
         },
         MAPPINGS_KEY: {
-            # Strict mapping should be filtered out
             "dynamic": "strict"
         }
     },
@@ -50,7 +49,6 @@ BASE_INDICES_DATA = {
             }
         },
         MAPPINGS_KEY: {
-            "dynamic": "false",
             "id": {"type": "keyword"}
         }
     }

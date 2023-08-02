@@ -34,9 +34,19 @@ The following script command can be executed to deploy both the CDK infrastructu
 ```
 Options:
 ```
---skip-bootstrap                Skips installing packages with npm for CDK, bootstrapping CDK, and building the docker images used by Copilot
---skip-copilot-init             Skips Copilot initialization of app, environments, and services
---destroy                       Cleans up all deployed resources from this script (CDK and Copilot)
+./devDeploy.sh -h
+
+Deploy migration solution infrastructure composed of resources deployed by CDK and Copilot
+
+Options:
+  --skip-bootstrap        Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
+  --skip-copilot-init     Skip one-time Copilot initialization of app, environments, and services
+  --copilot-app-name      [string, default: migration-copilot] Specify the Copilot application name to use for deployment
+  --destroy-region        Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given region and return to a clean state.
+  --destroy-all-copilot   Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
+  -r, --region            [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
+  -s, --stage             [string, default: dev] Specify the stage name to associate with the deployed resources
+
 ```
 
 Requirements:
@@ -52,8 +62,9 @@ The typical use case for this Copilot app is to initially use the `opensearch-se
 
 The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
 ```
-export MIGRATION_VPC_ID=vpc-123;
+export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
@@ -83,7 +94,6 @@ copilot app init
 copilot env init --name dev
 
 // Initialize services with their respective required name
-copilot svc init --name kafka-puller
 copilot svc init --name traffic-replayer
 copilot svc init --name traffic-comparator
 copilot svc init --name traffic-comparator-jupyter
@@ -107,11 +117,31 @@ copilot env deploy --name dev
 copilot svc deploy --name traffic-comparator-jupyter --env dev
 copilot svc deploy --name traffic-comparator --env dev
 copilot svc deploy --name traffic-replayer --env dev
-copilot svc deploy --name kafka-puller --env dev
 
 copilot svc deploy --name elasticsearch --env dev
 copilot svc deploy --name capture-proxy --env dev
 copilot svc deploy --name opensearch-benchmark --env dev
+```
+
+### Running Benchmarks on the Deployed Solution
+
+Once the solution is deployed, the easiest way to test the solution is to exec into the benchmark container and run a benchmark test through, as the following steps illustrate
+
+```
+// Exec into container
+copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
+
+// Run benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy:443 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
+```
+
+After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same benchmark container to confirm
+```
+// Check source cluster
+curl https://capture-proxy:443/_cat/indices?v --insecure -u admin:admin
+
+// Check target cluster
+curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:Admin123!
 ```
 
 ### Executing Commands on a Deployed Service
@@ -121,7 +151,6 @@ A command shell can be opened in the service's container if that service has ena
 copilot svc exec -a migration-copilot -e dev -n traffic-comparator-jupyter -c "bash"
 copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "bash"
 copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "bash"
-copilot svc exec -a migration-copilot -e dev -n kafka-puller -c "bash"
 copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "bash"
 copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "bash"
 copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
@@ -129,7 +158,7 @@ copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
 
 ### Addons
 
-Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. An example of this can be seen in the [kafka-puller](kafka-puller/addons/taskRole.yml) service which has an `addons` directory and yaml file which adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK.
+Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. An example of this can be seen in the [traffic-replayer](traffic-replayer/addons/taskRole.yml) service which has an `addons` directory and yaml file which adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK.
 
 Official documentation on Addons can be found [here](https://aws.github.io/copilot-cli/docs/developing/addons/workload/).
 

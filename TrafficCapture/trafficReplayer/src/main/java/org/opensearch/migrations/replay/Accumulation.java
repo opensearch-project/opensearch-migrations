@@ -1,7 +1,11 @@
 package org.opensearch.migrations.replay;
 
+import org.opensearch.migrations.replay.util.OnlineRadixSorterForIntegratedKeys;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 public class Accumulation {
 
@@ -11,6 +15,8 @@ public class Accumulation {
         RESPONSE_SENT
     }
 
+    OnlineRadixSorterForIntegratedKeys<TrafficStream> trafficStreamsSorter;
+
     RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
 
@@ -18,8 +24,14 @@ public class Accumulation {
     AtomicInteger numberOfResets;
 
     public Accumulation(String connectionId) {
+        trafficStreamsSorter = new OnlineRadixSorterForIntegratedKeys<>(1,
+                ts->ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk());
         numberOfResets = new AtomicInteger();
         this.resetForRequest(new UniqueRequestKey(connectionId, 0));
+    }
+
+    void sequenceTrafficStream(TrafficStream ts, Consumer<TrafficStream> sortedVisitor) {
+        trafficStreamsSorter.add(ts, sortedVisitor);
     }
 
     public UniqueRequestKey getRequestId() {
@@ -35,6 +47,9 @@ public class Accumulation {
         final StringBuilder sb = new StringBuilder("Accumulation{");
         sb.append("rrPair=").append(rrPair);
         sb.append(", state=").append(state);
+        if (trafficStreamsSorter.hasPending()) {
+            sb.append(", sorter=").append(trafficStreamsSorter);
+        }
         sb.append('}');
         return sb.toString();
     }

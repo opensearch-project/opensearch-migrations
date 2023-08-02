@@ -6,61 +6,52 @@ On wings of the morning breeze
 Effortless migration
 ```
 
-This repo will contain code and documentation to assist in migrations and upgrades of OpenSearch clusters.
+This repo contains code, tools and documentation to assist in migrations to and upgrades of OpenSearch clusters.
+
+## Table of Contents
+
+- [OpenSearch Migrations](#opensearch-migrations)
+    - [Table of Contents](#table-of-contents)
+    - [Developer Setup](#setup-for-commits)
+    - [Traffic Capture](#traffic-capture)
+    - [Local Docker Solution](#local-docker-solution)
+    - [End-to-End Testing](#end-to-end-testing)
+    - [Cloud Deployment](#deploying-to-aws-with-copilot)
+    - [Security](#security)
+    - [License](#license)
 
 ## Setup for commits
 
-Developers must run the "install_githooks.sh" script in order to add the pre-commit hook.
+Developers must run the "install_githooks.sh" script in order to add any pre-commit hooks.
+At the moment, one pre-commit hook will be installed which runs a linting commandon the `*.py` files.
 
-## Docker Solution
+## Traffic Capture
 
 The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP
-traffic, which can then be offloaded and replayed to other HTTP server(s).
+traffic, which can then be offloaded and replayed to other HTTP(S) server(s).
+
+More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md) 
+
+### Local Docker Solution
+
+A containarized end-to-end solution can be deployed locally using Docker.
 
 More documentation on this solution can be found here:
-[TrafficCapture README](TrafficCapture/README.md)
+[Docker Solution](TrafficCapture/dockerSolution/README.md)
 
 ### End-to-End Testing
 
-Developers can run a test script which will verify the end-to-end Docker Solution.
-#### Pre-requisites
+Developers can run a test script which will verify the end-to-end Local Docker Solution.
 
-* Have all containers from Docker solution running.
-
-To run the test script, users must navigate to the [test directory](test/),
-install the required packages then run the script:
-
-```
-cd test
-pip install -r requirements.txt
-pytest tests.py
-```
-
-#### Notes 
-##### Ports Setup
-The test script, by default, uses the ports assigned to the containers in this
-[docker-compose file](TrafficCapture/dockerSolution/src/main/docker/docker-compose.yml), so if the Docker solution in
-it's current setup started with no issues, then the test script will run as is. If for any reason
-the user changed the ports in that file, they must also either, change the following environment variables:
-`PROXY_ENDPOINT`, `SOURCE_ENDPOINT`, `TARGET_ENDPOINT` and `JUPYTER_NOTEBOOK` respectively, or update the default value
-(which can be found below) for them in [tests.py](test/tests.py).
-
-The following are the default values for the only endpoints touched by this script:
-* `PROXY_ENDPOINT = https://localhost:9200`
-* `SOURCE_ENDPOINT = http://localhost:19200`
-* `TARGET_ENDPOINT = https://localhost:29200`
-* `JUPYTER_NOTEBOOK = http://localhost:8888/api`
-#### Clean Up
-The test script is implemented with a setup and teardown functions that are ran after 
-each and every test where additions made to the endpoints are deleted, *mostly* cleaning up after themselves, however,
-as we log all operations going through the proxy (which is capturing the traffic), those are only being 
-deleted after the Docker solution is shut down.
+More documentation on this test script can be found here:
+[End-to-End Testing](test/README.md)
 
 ## Deploying to AWS with Copilot
 
-The containerized services that this repo uses can be deployed to AWS with the use of [Copilot](https://aws.github.io/copilot-cli/)
+The containerized services that this repo provides can be deployed to AWS with the use of [Copilot](https://aws.github.io/copilot-cli/)
 
-Documentation for getting started and deploying these services can be found [here](deployment/copilot/README.md)
+Documentation for getting started and deploying these services can be found here:
+[AWS Deployment](deployment/copilot/README.md)
 
 ## Security
 

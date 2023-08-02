@@ -38,8 +38,6 @@ public class NettyScanningHttpProxy {
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
-                    //.handler(new LoggingHandler(LogLevel.INFO))
-                    //.childHandler(new HexDumpProxyInitializer(backsideHost, backsidePort))
                     .childHandler(new ProxyChannelInitializer(backsideUri, backsideSslContext, sslEngineSupplier,
                             connectionCaptureFactory))
                     .childOption(ChannelOption.AUTO_READ, false)

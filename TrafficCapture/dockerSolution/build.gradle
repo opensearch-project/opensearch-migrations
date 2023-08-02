@@ -1,9 +1,10 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id "com.avast.gradle.docker-compose" version "0.16.12"
-    id "com.bmuschko.docker-java-application" version "9.3.1"
+    id 'com.bmuschko.docker-remote-api'
 }
 
+import org.opensearch.migrations.common.CommonUtils
 import java.security.MessageDigest
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 import org.apache.tools.ant.taskdefs.condition.Os
@@ -21,19 +22,8 @@ ext {
     REALIZED_TRAFFIC_COMPARATOR_DIRECTORY = project.file(getTrafficComparatorDirectory())
  }
 
-def calculateDockerHash(String projectName) {
-    MessageDigest digest = MessageDigest.getInstance('SHA-256')
-    fileTree("src/main/docker/${projectName}")
-            .each( file ->
-            file.withInputStream { is ->
-                var buffer = new byte[1024]
-                int read
-                while ((read = is.read(buffer)) != -1) {
-                    digest.update(buffer, 0, read)
-                }
-            }
-    )
-    return digest.digest().encodeHex().toString()
+def calculateDockerHash = { projectName ->
+    CommonUtils.calculateDockerHash(projectName, project)
 }
 
 dependencies {
@@ -98,7 +88,6 @@ trafficComparatorServices.forEach {projectName, dockerImageName ->
 
 def javaContainerServices = [
         "trafficCaptureProxyServer": "capture_proxy",
-        "kafkaPrinter": "kafka_capture_puller",
         "trafficReplayer": "traffic_replayer"
 ]
 def baseImageProjectOverrides = [
@@ -108,46 +97,8 @@ def baseImageProjectOverrides = [
 javaContainerServices.each { projectName, dockerImageName ->
     def dockerBuildDir = "build/docker/${projectName}"
     def artifactsDir = "${dockerBuildDir}/jars";
-    task("copyArtifact_${projectName}", type: Copy) {
-        dependsOn ":${projectName}:build"
-        dependsOn ":${projectName}:jar"
-        from { project(":${projectName}").configurations.findByName("runtimeClasspath").files }
-        from { project(":${projectName}").tasks.getByName('jar') }
-        into artifactsDir
-        include "*.jar"
-        duplicatesStrategy = DuplicatesStrategy.WARN
-    }
-
-    task "createDockerfile_${projectName}"(type: com.bmuschko.gradle.docker.tasks.image.Dockerfile) {
-        dependsOn "copyArtifact_${projectName}"
-        destFile = project.file("${dockerBuildDir}/Dockerfile")
-        def baseImageOverrideProjectName = baseImageProjectOverrides.get(projectName)
-        // The netcat installation commands are hacky here.  It just happens to work out that the base images are
-        // using centos and that openjdk's already includes apt-get support.  We also don't need netcat for
-        // all of the images, though they aren't very big.
-        if (baseImageOverrideProjectName) {
-            def dependentDockerImageName = dockerFilesForExternalServices.get(baseImageOverrideProjectName)
-            def hashNonce = calculateDockerHash(baseImageOverrideProjectName)
-            from "migrations/${dependentDockerImageName}:${hashNonce}"
-            dependsOn "buildDockerImage_${baseImageOverrideProjectName}"
-            runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
-            runCommand("yum -y install nmap-ncat")
-        } else {
-            from 'openjdk:11-jre'
-            runCommand("apt-get update && apt-get install -y netcat")
-        }
-
-        copyFile("jars", "/jars")
-        // can't set the environment variable from the runtimeClasspath because the Dockerfile is
-        // constructed in the configuration phase and the classpath won't be realized until the
-        // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
-        // and it's simplest to pack that up into a helper script.
-        runCommand("printf \"#!/bin/sh\\njava -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
-        runCommand("chmod +x /runJavaWithClasspath.sh")
-        // container stay-alive
-        defaultCommand('tail', '-f', '/dev/null')
-        //defaultCommand('/runJavaWithClasspath.sh', '...')
-    }
+    CommonUtils.copyArtifact(project, projectName)
+    CommonUtils.createDockerfile(project, projectName, baseImageProjectOverrides, dockerFilesForExternalServices)
 }
 
 (javaContainerServices + trafficComparatorServices).forEach { projectName, dockerImageName ->
@@ -173,7 +124,6 @@ task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
     dependsOn buildDockerImage_openSearchBenchmark
 
-    dependsOn buildDockerImage_kafkaPrinter
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer
     dependsOn buildDockerImage_trafficComparator

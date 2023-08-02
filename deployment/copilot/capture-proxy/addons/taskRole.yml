@@ -1,3 +1,5 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
 # You can use any of these parameters to create conditions or mappings in your template.
 Parameters:
   App:
@@ -17,24 +19,24 @@ Resources:
       Description: Allow compute host to consume from MSK
       PolicyDocument:
         Version: '2012-10-17'
-        # We should enhance IAM policy here to further restrict the Resource
         Statement:
           - Action:
               - kafka-cluster:Connect
-              - kafka-cluster:DescribeCluster
             Effect: Allow
-            Resource: "*"
+            Resource:
+              - Fn::ImportValue: !Sub "${App}-${Env}-msk-cluster-arn"
           - Action:
-              - kafka-cluster:*Topic*
-              - kafka-cluster:ReadData
+              - kafka-cluster:CreateTopic
+              - kafka-cluster:DescribeTopic
               - kafka-cluster:WriteData
             Effect: Allow
-            Resource: "*"
-          - Action:
-              - kafka-cluster:AlterGroup
-              - kafka-cluster:DescribeGroup
-            Effect: Allow
-            Resource: "*"
+            Resource:
+              !Join
+              # Delimiter
+              - ''
+              # Values to join
+              - - { "Fn::Join" : [ ":topic", { "Fn::Split": [":cluster", {"Fn::ImportValue" : !Sub "${App}-${Env}-msk-cluster-arn"}]}] }
+                - "/*"
 
 Outputs:
   # 1. You need to output the IAM ManagedPolicy so that Copilot can add it as a managed policy to your ECS task role.

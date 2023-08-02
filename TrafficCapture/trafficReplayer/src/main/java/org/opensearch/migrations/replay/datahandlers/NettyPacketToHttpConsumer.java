@@ -85,7 +85,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         b.group(eventLoopGroup)
                 .channel(NioSocketChannel.class)
-                .handler(new BacksideSnifferHandler(responseBuilder))
+                .handler(new ChannelDuplexHandler())
                 .option(ChannelOption.AUTO_READ, false);
         String host = serverUri.getHost();
         int port = serverUri.getPort();
@@ -133,6 +133,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     private void addHttpTransactionHandlersToPipeline(ChannelPipeline pipeline) {
+        pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         pipeline.addLast(new HttpResponseDecoder());
         // TODO - switch this out to use less memory.
         // We only need to know when the response has been fully received, not the contents

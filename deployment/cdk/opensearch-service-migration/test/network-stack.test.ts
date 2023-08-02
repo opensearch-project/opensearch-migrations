@@ -2,6 +2,7 @@ import {App} from "aws-cdk-lib";
 import {StackComposer} from "../lib/stack-composer";
 import {NetworkStack} from "../lib/network-stack";
 import {Template} from "aws-cdk-lib/assertions";
+import {createStackComposer} from "./test-utils";
 
 test('Test vpcEnabled setting that is disabled does not create stack', () => {
     const app = new App({
@@ -10,9 +11,7 @@ test('Test vpcEnabled setting that is disabled does not create stack', () => {
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     openSearchStacks.stacks.forEach(function(stack) {
         expect(!(stack instanceof NetworkStack))
@@ -29,9 +28,7 @@ test('Test vpcEnabled setting that is enabled without existing resources creates
         }
     })
 
-    const openSearchStacks = new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}, stage: "unittest"
-    })
+    const openSearchStacks = createStackComposer(app)
 
     const networkStack: NetworkStack = (openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]) as NetworkStack
     const networkTemplate = Template.fromStack(networkStack)

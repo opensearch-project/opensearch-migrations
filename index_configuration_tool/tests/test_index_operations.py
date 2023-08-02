@@ -20,11 +20,8 @@ class TestSearchEndpoint(unittest.TestCase):
         index_settings = index_data[test_constants.INDEX1_NAME][test_constants.SETTINGS_KEY]
         self.assertTrue(test_constants.INDEX_KEY in index_settings)
         self.assertEqual({"is_filtered": False}, index_settings[test_constants.INDEX_KEY])
-        # Test that only strict mapping is filtered out
         index_mappings = index_data[test_constants.INDEX2_NAME][test_constants.MAPPINGS_KEY]
-        self.assertEqual(0, len(index_mappings))
-        index_mappings = index_data[test_constants.INDEX3_NAME][test_constants.MAPPINGS_KEY]
-        self.assertEqual("false", index_mappings["dynamic"])
+        self.assertEqual("strict", index_mappings["dynamic"])
 
     @responses.activate
     def test_create_indices(self):
