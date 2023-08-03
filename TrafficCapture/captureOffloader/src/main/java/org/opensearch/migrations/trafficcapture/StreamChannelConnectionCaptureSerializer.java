@@ -64,7 +64,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     private final static int MAX_ID_SIZE = 96;
 
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
-    private final Function<CodedOutputStream, CompletableFuture> closeHandler;
+    private final Function<CaptureSerializerResult, CompletableFuture> closeHandler;
     private final String nodeIdString;
     private final String connectionIdString;
     private CodedOutputStream currentCodedOutputStreamOrNull;
@@ -74,7 +74,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
-                                                    Function<CodedOutputStream, CompletableFuture> closeHandler) throws IOException {
+                                                    Function<CaptureSerializerResult, CompletableFuture> closeHandler) throws IOException {
         this.codedOutputStreamSupplier = codedOutputStreamSupplier;
         this.closeHandler = closeHandler;
         assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId)) +
@@ -164,7 +164,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         // i.e. 3: 1
         currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
         currentStream.flush();
-        var future = closeHandler.apply(currentStream);
+        var future = closeHandler.apply(new CaptureSerializerResult(currentStream, numFlushesSoFar));
         //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
         currentCodedOutputStreamOrNull = null;
         return future;
@@ -280,6 +280,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             bb = bb.slice();
             byteBuffer.position(byteBuffer.position() + chunkBytes);
             addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, ++dataCount, timestamp, bb);
+            if (getOrCreateCodedOutputStream().spaceLeft() < (availableCOSSpace - chunkBytes - trafficStreamOverhead)) {
+                log.warn("Writing segment substream to CodedOutputStream took more space than max calculated, this should be investigated");
+            }
             // 1 to N-1 chunked messages
             if (byteBuffer.position() < byteBuffer.limit()) {
                 flushCommitAndResetStream(false);

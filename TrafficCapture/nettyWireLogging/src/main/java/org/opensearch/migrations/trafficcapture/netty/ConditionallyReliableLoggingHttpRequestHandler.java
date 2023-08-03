@@ -1,7 +1,6 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -24,13 +23,11 @@ public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpR
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 if (t != null) {
                     log.warn("Got error: " + t.getMessage());
-                    ctx.close();
-                } else {
-                    try {
-                        super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
+                }
+                try {
+                    super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
             });
         } else {

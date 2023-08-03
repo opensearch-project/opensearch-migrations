@@ -14,36 +14,37 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory {
 
     private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
+    // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes and
+    // general Kafka message overhead
+    public static final int KAFKA_MESSAGE_OVERHEAD_BYTES = 500;
 
     private final String nodeId;
     // Potential future optimization here to use a direct buffer (e.g. nio) instead of byte array
     private final Producer<String, byte[]> producer;
     private final String topicNameForTraffic;
+    private final int messageSize;
     private final int bufferSize;
 
     public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer,
-                               String topicNameForTraffic, int bufferSize) {
+                               String topicNameForTraffic, int messageSize) {
         this.nodeId = nodeId;
-        // There is likely some default timeout/retry settings we should configure here to reduce any potential blocking
-        // i.e. the Kafka cluster is unavailable
         this.producer = producer;
         this.topicNameForTraffic = topicNameForTraffic;
-        this.bufferSize = bufferSize;
+        this.messageSize = messageSize;
+        this.bufferSize = messageSize - KAFKA_MESSAGE_OVERHEAD_BYTES;
     }
 
-    public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer, int bufferSize) {
-        this(nodeId, producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, bufferSize);
+    public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer, int messageSize) {
+        this(nodeId, producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, messageSize);
     }
 
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
-        AtomicLong supplierCallCounter = new AtomicLong();
         // This array is only an indirection to work around Java's constraint that lambda values are final
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
@@ -55,15 +56,17 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                 codedStreamToByteStreamMap.put(cos, bb);
                 return cos;
             },
-            (codedOutputStream) -> {
+            (captureSerializerResult) -> {
                 try {
+                    CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
                     ByteBuffer byteBuffer = codedStreamToByteStreamMap.get(codedOutputStream);
                     codedStreamToByteStreamMap.remove(codedOutputStream);
-                    String recordId = String.format("%s_%d", connectionId, supplierCallCounter.incrementAndGet());
+                    String recordId = String.format("%s.%d", connectionId, captureSerializerResult.getTrafficStreamIndex());
                     ProducerRecord<String, byte[]> record = new ProducerRecord<>(topicNameForTraffic, recordId,
                         Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
                     // Used to essentially wrap Future returned by Producer to CompletableFuture
                     CompletableFuture cf = new CompletableFuture<>();
+                    log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
                     // Async request to Kafka cluster
                     producer.send(record, handleProducerRecordSent(cf, recordId));
                     // Note that ordering is not guaranteed to be preserved here
@@ -78,14 +81,14 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
 
     private Callback handleProducerRecordSent(CompletableFuture cf, String recordId) {
         return (metadata, exception) -> {
-            cf.complete(metadata);
-
             if (exception != null) {
-                log.error(String.format("Error sending producer record: %s", recordId), exception);
+                log.error("Error sending producer record: {}", recordId, exception);
+                cf.completeExceptionally(exception);
             }
-            else if (log.isDebugEnabled()) {
-                log.debug(String.format("Kafka producer record: %s has finished sending for topic: %s and partition %d",
-                    recordId, metadata.topic(), metadata.partition()));
+            else {
+                log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
+                    recordId, metadata.topic(), metadata.partition());
+                cf.complete(metadata);
             }
         };
     }

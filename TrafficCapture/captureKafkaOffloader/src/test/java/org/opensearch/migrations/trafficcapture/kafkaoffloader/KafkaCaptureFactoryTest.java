@@ -1,9 +1,17 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import io.netty.buffer.Unpooled;
+import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.record.AbstractRecords;
+import org.apache.kafka.common.record.CompressionType;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,13 +21,16 @@ import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSeriali
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES;
 
 @ExtendWith(MockitoExtension.class)
 public class KafkaCaptureFactoryTest {
@@ -27,9 +38,56 @@ public class KafkaCaptureFactoryTest {
     public static final String TEST_NODE_ID_STRING = "test_node_id";
     @Mock
     private Producer<String, byte[]> mockProducer;
+    private String connectionId = "0242c0fffea82008-0000000a-00000003-62993a3207f92af6-9093ce33";
+    private String topic = "test_topic";
 
-    private String connectionId = "test1234";
 
+    @Test
+    public void testLargeRequestIsWithinKafkaMessageSizeLimit() throws IOException, ExecutionException, InterruptedException {
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
+
+        int messageSize = 1024*1024;
+        MockProducer<String, byte[]> producer = new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
+        KafkaCaptureFactory kafkaCaptureFactory =
+            new KafkaCaptureFactory(TEST_NODE_ID_STRING, producer, messageSize);
+        IChannelConnectionCaptureSerializer serializer = kafkaCaptureFactory.createOffloader(connectionId);
+
+        StringBuilder sb = new StringBuilder();
+        // Create over 1MB packet
+        for (int i = 0; i < 15000; i++) {
+            sb.append("{ \"create\": { \"_index\": \"office-index\" } }\n{ \"title\": \"Malone's Cones\", \"year\": 2013 }\n");
+        }
+        byte[] fakeDataBytes = sb.toString().getBytes(StandardCharsets.UTF_8);
+        var bb = Unpooled.wrappedBuffer(fakeDataBytes);
+        serializer.addReadEvent(referenceTimestamp, bb);
+        CompletableFuture future = serializer.flushCommitAndResetStream(true);
+        future.get();
+        for (ProducerRecord<String, byte[]> record : producer.history()) {
+            int recordSize = calculateRecordSize(record, null);
+            Assertions.assertTrue(recordSize <= messageSize);
+            int largeIdRecordSize = calculateRecordSize(record, connectionId + ".9999999999");
+            Assertions.assertTrue(largeIdRecordSize <= messageSize);
+        }
+        bb.release();
+        producer.close();
+    }
+
+    /**
+     * This size calculation is based off the Kafka client 3.5 version request size validation check done from the Producer side
+     * when Producer records are sent. Reference here: https://github.com/apache/kafka/blob/3.5/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1030-L1032
+     */
+    private int calculateRecordSize(ProducerRecord<String, byte[]> record, String recordKeySubstitute) {
+        StringSerializer stringSerializer = new StringSerializer();
+        ByteArraySerializer byteArraySerializer = new ByteArraySerializer();
+        String recordKey = recordKeySubstitute == null ? record.key() : recordKeySubstitute;
+        byte[] serializedKey = stringSerializer.serialize(record.topic(), record.headers(),  recordKey);
+        byte[] serializedValue = byteArraySerializer.serialize(record.topic(), record.headers(), record.value());
+        ApiVersions apiVersions = new ApiVersions();
+        stringSerializer.close();
+        byteArraySerializer.close();
+        return AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
+            CompressionType.NONE, serializedKey, serializedValue, record.headers().toArray());
+    }
 
     @Test
     public void testLinearOffloadingIsSuccessful() throws IOException {
@@ -60,17 +118,17 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertEquals(false, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(0).onCompletion(null, null);
+        recordSentCallbacks.get(0).onCompletion(generateRecordMetadata(topic, 1), null);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(1).onCompletion(null, null);
+        recordSentCallbacks.get(1).onCompletion(generateRecordMetadata(topic, 2), null);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(true, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(2).onCompletion(null, null);
+        recordSentCallbacks.get(2).onCompletion(generateRecordMetadata(topic, 1), null);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(true, cf2.isDone());
@@ -108,24 +166,29 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertEquals(false, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(2).onCompletion(null, null);
+        recordSentCallbacks.get(2).onCompletion(generateRecordMetadata(topic, 1), null);
 
         // Assert that even though particular final producer record has finished sending, its predecessors are incomplete
         // and thus this wrapper cf is also incomplete
         Assertions.assertEquals(false, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(1).onCompletion(null, null);
+        recordSentCallbacks.get(1).onCompletion(generateRecordMetadata(topic, 2), null);
 
         Assertions.assertEquals(false, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(0).onCompletion(null, null);
+        recordSentCallbacks.get(0).onCompletion(generateRecordMetadata(topic, 3), null);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(true, cf2.isDone());
         Assertions.assertEquals(true, cf3.isDone());
 
         mockProducer.close();
+    }
+
+    private RecordMetadata generateRecordMetadata(String topicName, int partition) {
+        TopicPartition topicPartition = new TopicPartition(topicName, partition);
+        return new RecordMetadata(topicPartition, 0, 0, 0, 0, 0);
     }
 }

@@ -99,7 +99,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         future.get();
         bb.release();
 
-        var outputBuffersList = new ArrayList<ByteBuffer>(outputBuffersCreated);
+        var outputBuffersList = new ArrayList<>(outputBuffersCreated);
 
         var reconstitutedTrafficStreamsList = new ArrayList<TrafficStream>();
         for (int i=0; i<2; ++i) {
@@ -228,7 +228,8 @@ class StreamChannelConnectionCaptureSerializerTest {
                 log.trace("Put COS: " + rval + " into map (keys="+ mapToKeyStrings(codedStreamToByteBuffersMap) +") with bytes=" + bytes);
                 return rval;
             },
-            (codedOutputStream) -> {
+            (captureSerializerResult) -> {
+            CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
             log.trace("Getting ready to flush for " + codedOutputStream);
             log.trace("Bytes written so far... " +
                     StandardCharsets.UTF_8.decode(codedStreamToByteBuffersMap.get(codedOutputStream).duplicate()));

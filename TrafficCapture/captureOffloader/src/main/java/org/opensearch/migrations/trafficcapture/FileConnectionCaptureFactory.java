@@ -10,10 +10,8 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 /**
@@ -68,7 +66,6 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
 
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
-        AtomicInteger supplierCallCounter = new AtomicInteger();
         // This array is only an indirection to work around Java's constraint that lambda values are final
         CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
         singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
@@ -80,8 +77,9 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
                 codedStreamToFileStreamMap.put(cos, bb);
                 return cos;
             },
-            (codedOutputStream) -> {
-                CompletableFuture cf = closeHandler(connectionId, codedStreamToFileStreamMap.get(codedOutputStream), codedOutputStream, supplierCallCounter.incrementAndGet());
+            (captureSerializerResult) -> {
+                CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
+                CompletableFuture cf = closeHandler(connectionId, codedStreamToFileStreamMap.get(codedOutputStream), codedOutputStream, captureSerializerResult.getTrafficStreamIndex());
                 singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
                 return singleAggregateCfRef[0];
             }

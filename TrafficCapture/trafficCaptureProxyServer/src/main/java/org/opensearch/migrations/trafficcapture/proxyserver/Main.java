@@ -11,6 +11,7 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
@@ -39,6 +40,7 @@ import java.util.stream.Stream;
 public class Main {
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
+    private final static String DEFAULT_KAFKA_CLIENT_ID = "KafkaLoggingProducer";
 
     static class Parameters {
         @Parameter(required = false,
@@ -54,13 +56,13 @@ public class Main {
         @Parameter(required = false,
                 names = {"--kafkaConfigFile"},
                 arity = 1,
-                description = "Kafka properties file")
+                description = "Kafka properties file for additional client customization.")
         String kafkaPropertiesFile;
         @Parameter(required = false,
                 names = {"--kafkaClientId"},
                 arity = 1,
                 description = "clientId to use for interfacing with Kafka.")
-        String kafkaClientId = "KafkaLoggingProducer";
+        String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
         @Parameter(required = false,
                 names = {"--kafkaConnection"},
                 arity = 1,
@@ -140,24 +142,7 @@ public class Main {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
         return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId, () ->
                 CodedOutputStream.newInstance(NullOutputStream.getInstance()),
-                cos -> CompletableFuture.completedFuture(null));
-    }
-
-
-    private static IConnectionCaptureFactory getKafkaConnectionFactory(String nodeId,
-                                                                       String kafkaPropsPath,
-                                                                       int bufferSize)
-            throws IOException {
-        Properties producerProps = new Properties();
-        if (kafkaPropsPath != null) {
-            try {
-                producerProps.load(new FileReader(kafkaPropsPath));
-            } catch (IOException e) {
-                log.error("Unable to locate provided Kafka producer properties file path: " + kafkaPropsPath);
-                throw e;
-            }
-        }
-        return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(producerProps), bufferSize);
+                captureSerializerResult -> CompletableFuture.completedFuture(null));
     }
 
     private static String getNodeId(Parameters params) {
@@ -170,24 +155,33 @@ public class Main {
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
-        } else if (params.kafkaPropertiesFile != null) {
-            if (params.kafkaConnection != null || params.mskAuthEnabled) {
-                log.warn("--kafkaConnection and --enableMSKAuth options are ignored when providing a Kafka properties file (--kafkaConfigFile) ");
-            }
-            return getKafkaConnectionFactory(nodeId, params.kafkaPropertiesFile, params.maximumTrafficStreamSize);
         } else if (params.kafkaConnection != null) {
             var kafkaProps = new Properties();
+            kafkaProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+            kafkaProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
+            // Property details: https://docs.confluent.io/platform/current/installation/configuration/producer-configs.html#delivery-timeout-ms
+            kafkaProps.put(ProducerConfig.ACKS_CONFIG, "1");
+            kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 1000);
+            kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 500);
+            kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 3000);
+
+            if (params.kafkaPropertiesFile != null) {
+                try {
+                    kafkaProps.load(new FileReader(params.kafkaPropertiesFile));
+                } catch (IOException e) {
+                    log.error("Unable to locate provided Kafka producer properties file path: " + params.kafkaPropertiesFile);
+                    throw e;
+                }
+            }
+
             kafkaProps.put("bootstrap.servers", params.kafkaConnection);
             kafkaProps.put("client.id", params.kafkaClientId);
-            kafkaProps.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-            kafkaProps.put("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
             if (params.mskAuthEnabled) {
                 kafkaProps.setProperty("security.protocol", "SASL_SSL");
                 kafkaProps.setProperty("sasl.mechanism", "AWS_MSK_IAM");
                 kafkaProps.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
                 kafkaProps.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
             }
-
             return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(kafkaProps), params.maximumTrafficStreamSize);
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
