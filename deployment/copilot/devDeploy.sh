@@ -98,7 +98,7 @@ if [ "$DESTROY_REGION" = true ] ; then
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name opensearch-benchmark --env $COPILOT_DEPLOYMENT_STAGE --yes
+  copilot svc delete -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot env delete -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE --yes
   rm ./environments/$COPILOT_DEPLOYMENT_STAGE/manifest.yml
   echo "Destroying a region will not remove the Copilot app level stack that gets created in each region. This must be manually deleted from CloudFormation or automatically removed by deleting the Copilot app"
@@ -164,7 +164,7 @@ if [ "$SKIP_COPILOT_INIT" = false ] ; then
 
   copilot svc init -a $COPILOT_APP_NAME --name elasticsearch
   copilot svc init -a $COPILOT_APP_NAME --name capture-proxy
-  copilot svc init -a $COPILOT_APP_NAME --name opensearch-benchmark
+  copilot svc init -a $COPILOT_APP_NAME --name migration-console
 fi
 
 
@@ -178,7 +178,7 @@ copilot svc deploy -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_D
 
 copilot svc deploy -a $COPILOT_APP_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name opensearch-benchmark --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE
 
 
 # Output deployment time

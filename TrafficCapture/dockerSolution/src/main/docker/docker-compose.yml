@@ -97,8 +97,8 @@ services:
       - COMPARISONS_DB_LOCATION=/shared/comparisons.db
     command: /bin/sh -c 'cd trafficComparator && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'
 
-  opensearch-benchmarks:
-    image: 'migrations/open_search_benchmark:latest'
+  migration-console:
+    image: 'migrations/migration_console:latest'
     networks:
       - migrations
     depends_on:
