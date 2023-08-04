@@ -1,15 +1,29 @@
 # Index Configuration Tool
 
-Python package that automates the creation of indices on a target cluster based on the contents of a source cluster. Index settings and index mappings are correctly copied over.
+Python package that automates the creation of indices on a target cluster based on the contents of a source cluster. 
+Index settings and index mappings are correctly copied over, but no data is transferred. 
+This tool seeks to eliminate the need to [specify index templates](https://github.com/awslabs/logstash-output-amazon_es#optional-parameters) when migrating data from one cluster to another.
+The tool currently supports ElasticSearch or OpenSearch as source and target.
 
-This tool seeks to automate [the steps outlined here](https://github.com/kartg/opensearch-migrations/tree/datastash/datastash#2-configure-index-templates-on-the-target-cluster) and eliminate the need for defining index templates on the target cluster when migrating data from one cluster to another. The tool currently supports ElasticSearch or OpenSearch as source and target.
+## Parameters
 
-If an identical index or an index with the same name but differing settings/mappings is already present on the target cluster, that index is skipped and left as-is on the target cluster. The tool completes by printing a report of all processed indices under 3 buckets:
+The first required input to the tool is a path to a [Data Prepper](https://github.com/opensearch-project/data-prepper) pipeline YAML file, which is parsed to obtain the source and target cluster endpoints.
+The second required input is an output path to which a modified version of the pipeline YAML file is written.
+This version of the pipeline adds an index inclusion configuration to the sink, specifying only those indices that were created by the index configuration tool.
+The tool also supports several optional flags:
+
+| Flag | Purpose |
+| ------------- | ------------- |
+| `-h, --help`    | Prints help text and exits |
+| `--report, -r`  | Prints a report of indices indicating which ones will be created, along with indices that are identical or have conflicting settings/mappings.  |
+| `--dryrun`      | Skips the actual creation of indices on the target cluster |
+
+### Reporting
+
+If `--report` is specified, the tool prints all processed indices organized into 3 buckets:
 * Successfully created on the target cluster
 * Skipped due to a conflict in settings/mappings
 * Skipped since the index configuration is identical on source and target
-
-The input to the tool is a Logstash configuration file that is then parsed to obtain source and target endpoints.
 
 ## Current Limitations
 
@@ -41,17 +55,22 @@ python -m pip install -r index_configuration_tool/requirements.txt
 After [setup](#setup), the tool can be executed using:
 
 ```shell
-python index_configuration_tool/main.py <path-to-Logstash-file>
+python index_configuration_tool/main.py <pipeline_yaml_path> <output_file>
 ```
-
-Usage information can also be printed by supplying the `-h` flag.
 
 ### Docker
 
-Replace `<path-to-Logstash-config-file>` in the command below with the path to your Logstash config file.
+First build the Docker image from the `Dockerfile`:
 
 ```shell
-confPath=<path-to-Logstash-config-file>; docker run -v $confPath:/tmp/conf.json -t kartg/index-configuration-tool /tmp/conf.json
+docker build -t fetch-migration .
+```
+
+Then run the `fetch-migration` image.
+Replace `<pipeline_yaml_path>` in the command below with the path to your Logstash config file:
+
+```shell
+docker run -p 4900:4900 -v <pipeline_yaml_path>:/code/input.yaml ict
 ```
 
 ## Development
@@ -87,8 +106,3 @@ Note that the `--omit` parameter must be specified to avoid tracking code covera
 python -m coverage report --omit "*/tests/*"
 python -m coverage html --omit "*/tests/*"
 ```
-
-### Lark
-
-The code uses [Lark](https://github.com/lark-parser/lark) for grammar definition, tree parsing and transformation.
-The Logstash parser grammar is adapted from [node-logstash](https://github.com/bpaquet/node-logstash/blob/master/lib/logstash_config.jison).
