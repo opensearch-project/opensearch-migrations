@@ -10,12 +10,20 @@ type: Backend Service
 network:
   connect: true
   vpc:
-    security_groups: [ "${MIGRATION_DOMAIN_SG_ID}" ]
+    security_groups: [ "${MIGRATION_DOMAIN_SG_ID}" "${MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
   # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
   build: ../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/Dockerfile
+
+storage:
+  volumes:
+    replayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
+      path: '/replayer-output'
+      read_only: false
+      efs:
+        id: ${MIGRATION_REPLAYER_OUTPUT_EFS_ID}
 
 cpu: 512       # Number of CPU units for the task.
 memory: 1024    # Amount of memory in MiB used by the task.

@@ -10,7 +10,7 @@ type: Backend Service
 network:
   connect: true
   vpc:
-    security_groups: [ "${MIGRATION_CAPTURE_MSK_SG_ID}", "${MIGRATION_DOMAIN_SG_ID}" ]
+    security_groups: [ "${MIGRATION_CAPTURE_MSK_SG_ID}", "${MIGRATION_DOMAIN_SG_ID}", "${MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
@@ -19,6 +19,19 @@ image:
     dockerfile: ../TrafficCapture/dockerSolution/build/docker/trafficReplayer/Dockerfile
 
 command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --auth-header-value Basic\\ YWRtaW46QWRtaW4xMjMh --kafka-traffic-brokers ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth | nc traffic-comparator 9220"
+
+storage:
+  volumes:
+    replayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
+      # Intent of this path is to allow multiple parallel running replayer directories
+      path: '/replayer-output/traffic-replayer'
+      read_only: false
+      efs:
+        id: ${MIGRATION_REPLAYER_OUTPUT_EFS_ID}
+
+## Set container environment variables
+#variables:
+#  SERVICE_NAME: traffic-replayer
 
 cpu: 1024       # Number of CPU units for the task.
 memory: 4096    # Amount of memory in MiB used by the task.

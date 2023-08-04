@@ -114,13 +114,27 @@ export class MigrationAssistanceStack extends Stack {
             securityGroup: comparatorSQLiteSG
         });
 
+        const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
+            vpc: props.vpc,
+            allowAllOutbound: false,
+        });
+        replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
+
+        // Create an EFS file system for Traffic Replayer output
+        const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
+            vpc: props.vpc,
+            securityGroup: replayerOutputSG
+        });
+
         let publicSubnetString = props.vpc.publicSubnets.map(_ => _.subnetId).join(",")
         let privateSubnetString = props.vpc.privateSubnets.map(_ => _.subnetId).join(",")
         const exports = [
             `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
             `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
             `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
-            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`]
+            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`,
+            `export MIGRATION_REPLAYER_OUTPUT_EFS_ID=${replayerOutputEFS.fileSystemId}`,
+            `export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=${replayerOutputSG.securityGroupId}`]
         if (publicSubnetString) exports.push(`export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`)
         if (privateSubnetString) exports.push(`export MIGRATION_PRIVATE_SUBNETS=${privateSubnetString}`)
 

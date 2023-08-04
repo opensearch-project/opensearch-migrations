@@ -52,6 +52,8 @@ services:
     image: 'migrations/traffic_replayer:latest'
     networks:
       - migrations
+    volumes:
+      - replayerOutput:/replayer-output/traffic-replayer
     depends_on:
       kafka:
         condition: service_started
@@ -101,6 +103,8 @@ services:
     image: 'migrations/migration_console:latest'
     networks:
       - migrations
+    volumes:
+      - replayerOutput:/replayer-output
     depends_on:
       - captureproxy
 
@@ -110,6 +114,8 @@ volumes:
   kafka_data:
     driver: local
   sharedComparatorSqlResults:
+    driver: local
+  replayerOutput:
     driver: local
 
 networks:
