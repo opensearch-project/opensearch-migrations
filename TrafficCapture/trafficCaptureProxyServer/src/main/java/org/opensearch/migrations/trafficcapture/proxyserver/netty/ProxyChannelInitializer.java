@@ -24,13 +24,11 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
 
     private final IConnectionCaptureFactory connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
-    private final URI backsideUri;
-    private final SslContext backsideSslContext;
+    private final BacksideConnectionPool backsideConnectionPool;
 
-    public ProxyChannelInitializer(URI backsideUri, SslContext backsideSslContext, Supplier<SSLEngine> sslEngineSupplier,
+    public ProxyChannelInitializer(BacksideConnectionPool backsideConnectionPool, Supplier<SSLEngine> sslEngineSupplier,
                                    IConnectionCaptureFactory connectionCaptureFactory) {
-        this.backsideUri = backsideUri;
-        this.backsideSslContext = backsideSslContext;
+        this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
     }
@@ -53,6 +51,6 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
         ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader,
                 this::shouldGuaranteeMessageOffloading));
-        ch.pipeline().addLast(new FrontsideHandler(backsideUri, backsideSslContext));
+        ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }
 }

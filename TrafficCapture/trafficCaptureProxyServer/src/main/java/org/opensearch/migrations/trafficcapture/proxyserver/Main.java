@@ -17,6 +17,7 @@ import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
@@ -96,6 +97,11 @@ public class Main {
                 arity = 1,
                 description = "Exposed port for clients to connect to this proxy.")
         int frontsidePort = 0;
+        @Parameter(required = false,
+                names = {"--numThreads"},
+                arity = 1,
+                description = "How many threads netty should create in its event loop group")
+        int numThreads;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -244,10 +250,11 @@ public class Main {
 
         sksOp.ifPresent(x->x.initHttpSSLConfig());
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
-
         try {
-            proxy.start(backsideUri, loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside),
-                    sksOp.map(sks-> (Supplier<SSLEngine>) () -> {
+            var backsideConnectionPool = new BacksideConnectionPool(backsideUri,
+                    loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside));
+            proxy.start(backsideConnectionPool, params.numThreads,
+                    sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
                         try {
                             var sslEngine = sks.createHTTPSSLEngine();
                             return sslEngine;

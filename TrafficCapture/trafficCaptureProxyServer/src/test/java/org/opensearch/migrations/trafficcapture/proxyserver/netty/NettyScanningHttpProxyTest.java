@@ -197,7 +197,8 @@ class NettyScanningHttpProxyTest {
             try {
                 URI testServerUri = new URI("http", null, SimpleHttpServer.LOCALHOST, underlyingPort,
                     null, null, null);
-                nshp.get().start(testServerUri,null, null, connectionCaptureFactory);
+                var connectionPool = new BacksideConnectionPool(testServerUri, null);
+                nshp.get().start(connectionPool,1, null, connectionCaptureFactory);
                 System.out.println("proxy port = "+port.intValue());
             } catch (InterruptedException | URISyntaxException e) {
                 throw new RuntimeException(e);

@@ -29,16 +29,18 @@ public class NettyScanningHttpProxy {
         return proxyPort;
     }
 
-    public void start(URI backsideUri, SslContext backsideSslContext, Supplier<SSLEngine> sslEngineSupplier,
-        IConnectionCaptureFactory connectionCaptureFactory) throws InterruptedException {
+    public void start(BacksideConnectionPool backsideConnectionPool,
+                      int numThreads,
+                      Supplier<SSLEngine> sslEngineSupplier,
+                      IConnectionCaptureFactory connectionCaptureFactory) throws InterruptedException {
         InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE);
-        bossGroup = new NioEventLoopGroup(1);
+        bossGroup = new NioEventLoopGroup(numThreads);
         workerGroup = new NioEventLoopGroup();
         ServerBootstrap serverBootstrap = new ServerBootstrap();
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
-                    .childHandler(new ProxyChannelInitializer(backsideUri, backsideSslContext, sslEngineSupplier,
+                    .childHandler(new ProxyChannelInitializer(backsideConnectionPool, sslEngineSupplier,
                             connectionCaptureFactory))
                     .childOption(ChannelOption.AUTO_READ, false)
                     .bind(proxyPort).sync().channel();
