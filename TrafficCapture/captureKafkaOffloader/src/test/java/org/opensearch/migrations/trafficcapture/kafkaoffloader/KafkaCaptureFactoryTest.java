@@ -53,10 +53,10 @@ public class KafkaCaptureFactoryTest {
         IChannelConnectionCaptureSerializer serializer = kafkaCaptureFactory.createOffloader(connectionId);
 
         StringBuilder sb = new StringBuilder();
-        // Create over 1MB packet
         for (int i = 0; i < 15000; i++) {
             sb.append("{ \"create\": { \"_index\": \"office-index\" } }\n{ \"title\": \"Malone's Cones\", \"year\": 2013 }\n");
         }
+        Assertions.assertTrue(sb.toString().getBytes().length > 1024*1024);
         byte[] fakeDataBytes = sb.toString().getBytes(StandardCharsets.UTF_8);
         var bb = Unpooled.wrappedBuffer(fakeDataBytes);
         serializer.addReadEvent(referenceTimestamp, bb);
@@ -73,8 +73,11 @@ public class KafkaCaptureFactoryTest {
     }
 
     /**
-     * This size calculation is based off the Kafka client 3.5 version request size validation check done from the Producer side
-     * when Producer records are sent. Reference here: https://github.com/apache/kafka/blob/3.5/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1030-L1032
+     * This size calculation is based off the KafkaProducer client request size validation check done when Producer
+     * records are sent. This validation appears to be consistent for several versions now, here is a reference to
+     * version 3.5 at the time of writing this: https://github.com/apache/kafka/blob/3.5/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1030-L1032.
+     * It is, however, subject to change which may make this test scenario more suited for an integration test where
+     * a KafkaProducer does not need to be mocked.
      */
     private int calculateRecordSize(ProducerRecord<String, byte[]> record, String recordKeySubstitute) {
         StringSerializer stringSerializer = new StringSerializer();

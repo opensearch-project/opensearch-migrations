@@ -267,7 +267,11 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
         // If our message is empty or can fit in the current CodedOutputStream no chunking is needed, and we can continue
         if (byteBuffer.limit() == 0 || messageAndOverheadBytesLeft <= getOrCreateCodedOutputStream().spaceLeft()) {
+            int startSpace = getOrCreateCodedOutputStream().spaceLeft();
             addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, byteBuffer);
+            if (getOrCreateCodedOutputStream().spaceLeft() < (startSpace - messageAndOverheadBytesLeft)) {
+                log.warn("Writing substream to CodedOutputStream took more space than max calculated, this should be investigated");
+            }
             return;
         }
 

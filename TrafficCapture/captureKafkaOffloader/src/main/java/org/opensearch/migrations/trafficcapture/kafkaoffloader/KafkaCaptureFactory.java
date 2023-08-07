@@ -27,7 +27,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     // Potential future optimization here to use a direct buffer (e.g. nio) instead of byte array
     private final Producer<String, byte[]> producer;
     private final String topicNameForTraffic;
-    private final int messageSize;
     private final int bufferSize;
 
     public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer,
@@ -35,7 +34,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         this.nodeId = nodeId;
         this.producer = producer;
         this.topicNameForTraffic = topicNameForTraffic;
-        this.messageSize = messageSize;
         this.bufferSize = messageSize - KAFKA_MESSAGE_OVERHEAD_BYTES;
     }
 
@@ -79,6 +77,16 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
             });
     }
 
+    /**
+     *  The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
+     *  documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
+     *  "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
+     *  and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
+     *
+     *  Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
+     *  retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
+     *  as well as basic retry backoff
+     */
     private Callback handleProducerRecordSent(CompletableFuture cf, String recordId) {
         return (metadata, exception) -> {
             if (exception != null) {
