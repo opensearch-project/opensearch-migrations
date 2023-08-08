@@ -156,10 +156,9 @@ public class Main {
         kafkaProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
         kafkaProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
         // Property details: https://docs.confluent.io/platform/current/installation/configuration/producer-configs.html#delivery-timeout-ms
-        kafkaProps.put(ProducerConfig.ACKS_CONFIG, "1");
-        kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 1000);
-        kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 500);
-        kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 3000);
+        kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10000);
+        kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
+        kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
 
         if (params.kafkaPropertiesFile != null) {
             try {
