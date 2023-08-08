@@ -235,7 +235,6 @@ class TestMain(unittest.TestCase):
         index_to_create = test_constants.INDEX3_NAME
         index_with_conflict = test_constants.INDEX2_NAME
         index_exact_match = test_constants.INDEX1_NAME
-        expected_output_path = "dummy"
         # Set up expected arguments to mocks so we can verify
         expected_create_payload = {index_to_create: test_constants.BASE_INDICES_DATA[index_to_create]}
         # Print report accepts a tuple. The elements of the tuple
@@ -252,13 +251,14 @@ class TestMain(unittest.TestCase):
         # Set up test input
         test_input = argparse.Namespace()
         test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        test_input.output_file = expected_output_path
+        # Default value for missing output file
+        test_input.output_file = ""
         test_input.report = True
         test_input.dryrun = False
         main.run(test_input)
         mock_create_indices.assert_called_once_with(expected_create_payload, test_constants.TARGET_ENDPOINT, ANY)
         mock_print_report.assert_called_once_with(expected_diff)
-        mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
+        mock_write_output.assert_not_called()
 
     @patch('main.print_report')
     @patch('main.write_output')
@@ -310,6 +310,15 @@ class TestMain(unittest.TestCase):
             main.write_output(test_input, {index_to_create}, expected_output_path)
             mock_open.assert_called_once_with(expected_output_path, 'w')
             mock_dump.assert_called_once_with(expected_output_data, ANY)
+
+    def test_missing_output_file_non_report(self):
+        # Set up test input
+        test_input = argparse.Namespace()
+        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
+        # Default value for missing output file
+        test_input.output_file = ""
+        test_input.report = False
+        self.assertRaises(ValueError, main.run, test_input)
 
 
 if __name__ == '__main__':

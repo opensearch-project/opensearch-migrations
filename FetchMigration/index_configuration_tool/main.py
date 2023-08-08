@@ -147,6 +147,9 @@ def print_report(index_differences: tuple[set, set, set]):  # pragma no cover
 
 
 def run(args: argparse.Namespace) -> None:
+    # Sanity check
+    if not args.report and len(args.output_file) == 0:
+        raise ValueError("No output file specified")
     # Parse and validate pipelines YAML file
     with open(args.config_file_path, 'r') as pipeline_file:
         dp_config = yaml.safe_load(pipeline_file)
@@ -170,7 +173,8 @@ def run(args: argparse.Namespace) -> None:
     indices_to_create = diff[0]
     if indices_to_create:
         # Write output YAML
-        write_output(dp_config, indices_to_create, args.output_file)
+        if len(args.output_file) > 0:
+            write_output(dp_config, indices_to_create, args.output_file)
         if not args.dryrun:
             index_data = dict()
             for index_name in indices_to_create:
@@ -191,16 +195,18 @@ if __name__ == '__main__':  # pragma no cover
         "along with indices that are identical or have conflicting settings/mappings.",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    # Positional, required arguments
+    # Required positional argument
     arg_parser.add_argument(
         "config_file_path",
         help="Path to the Data Prepper pipeline YAML file to parse for source and target endpoint information"
     )
+    # Optional positional argument
     arg_parser.add_argument(
         "output_file",
+        nargs='?', default="",
         help="Output path for the Data Prepper pipeline YAML file that will be generated"
     )
-    # Optional arguments
+    # Flags
     arg_parser.add_argument("--report", "-r", action="store_true",
                             help="Print a report of the index differences")
     arg_parser.add_argument("--dryrun", action="store_true",
