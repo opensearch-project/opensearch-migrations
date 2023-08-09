@@ -225,13 +225,15 @@ class TestMain(unittest.TestCase):
         test_config = next(iter(self.loaded_pipeline_config.values()))
         main.validate_pipeline_config(test_config)
 
+    @patch('index_operations.doc_count')
     @patch('main.write_output')
     @patch('main.print_report')
     @patch('index_operations.create_indices')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_report(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock,
-                        mock_print_report: MagicMock, mock_write_output: MagicMock):
+                        mock_print_report: MagicMock, mock_write_output: MagicMock, mock_doc_count: MagicMock):
+        mock_doc_count.return_value = 1
         index_to_create = test_constants.INDEX3_NAME
         index_with_conflict = test_constants.INDEX2_NAME
         index_exact_match = test_constants.INDEX1_NAME
@@ -257,15 +259,17 @@ class TestMain(unittest.TestCase):
         test_input.dryrun = False
         main.run(test_input)
         mock_create_indices.assert_called_once_with(expected_create_payload, test_constants.TARGET_ENDPOINT, ANY)
-        mock_print_report.assert_called_once_with(expected_diff)
+        mock_doc_count.assert_called()
+        mock_print_report.assert_called_once_with(expected_diff, 1)
         mock_write_output.assert_not_called()
 
+    @patch('index_operations.doc_count')
     @patch('main.print_report')
     @patch('main.write_output')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
-                        mock_print_report: MagicMock):
+                        mock_print_report: MagicMock, mock_doc_count: MagicMock):
         index_to_create = test_constants.INDEX1_NAME
         expected_output_path = "dummy"
         # Create mock data for indices on target
@@ -281,6 +285,7 @@ class TestMain(unittest.TestCase):
         test_input.report = False
         main.run(test_input)
         mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
+        mock_doc_count.assert_called()
         # Report should not be printed
         mock_print_report.assert_not_called()
 

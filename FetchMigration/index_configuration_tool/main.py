@@ -138,12 +138,13 @@ def get_index_differences(source: dict, target: dict) -> tuple[set, set, set]:
 
 # The order of data in the tuple is:
 # (indices to create), (identical indices), (indices with conflicts)
-def print_report(index_differences: tuple[set, set, set]):  # pragma no cover
+def print_report(index_differences: tuple[set, set, set], count: int):  # pragma no cover
     print("Identical indices in the target cluster (no changes will be made): " +
           utils.string_from_set(index_differences[1]))
     print("Indices in target cluster with conflicting settings/mappings: " +
           utils.string_from_set(index_differences[2]))
     print("Indices to create: " + utils.string_from_set(index_differences[0]))
+    print("Total documents to be moved: " + str(count))
 
 
 def run(args: argparse.Namespace) -> None:
@@ -159,18 +160,24 @@ def run(args: argparse.Namespace) -> None:
     # Endpoint is a tuple of (type, config)
     endpoint = get_supported_endpoint(pipeline_config, SOURCE_KEY)
     # Fetch all indices from source cluster
-    source_indices = fetch_all_indices_by_plugin(endpoint[1])
+    # TODO Refactor this to avoid duplication
+    source_endpoint, source_auth = get_endpoint_info(endpoint[1])
+    # verify boolean will be the inverse of the insecure SSL key, if present
+    should_verify_source = not is_insecure(endpoint[1])
+    source_indices = index_operations.fetch_all_indices(source_endpoint, source_auth, should_verify_source)
     # Fetch all indices from target cluster
-    # TODO Refactor this to avoid duplication with fetch_all_indices_by_plugin
     endpoint = get_supported_endpoint(pipeline_config, SINK_KEY)
     target_endpoint, target_auth = get_endpoint_info(endpoint[1])
     target_indices = index_operations.fetch_all_indices(target_endpoint, target_auth)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
-    if args.report:
-        print_report(diff)
     # The first element in the tuple is the set of indices to create
     indices_to_create = diff[0]
+    doc_count = 0
+    if indices_to_create:
+        doc_count = index_operations.doc_count(indices_to_create, source_endpoint, source_auth, should_verify_source)
+    if args.report:
+        print_report(diff, doc_count)
     if indices_to_create:
         # Write output YAML
         if len(args.output_file) > 0:

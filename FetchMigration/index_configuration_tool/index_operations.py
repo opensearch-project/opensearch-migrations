@@ -6,8 +6,10 @@ import requests
 # Constants
 SETTINGS_KEY = "settings"
 MAPPINGS_KEY = "mappings"
+COUNT_KEY = "count"
 __INDEX_KEY = "index"
 __ALL_INDICES_ENDPOINT = "*"
+__COUNT_ENDPOINT = "/_count"
 __INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version", "store"]
 
 
@@ -35,3 +37,10 @@ def create_indices(indices_data: dict, endpoint: str, auth_tuple: Optional[tuple
             resp.raise_for_status()
         except requests.exceptions.RequestException as e:
             print(f"Failed to create index [{index}] - {e!s}", file=sys.stderr)
+
+
+def doc_count(indices: set, endpoint: str, optional_auth: Optional[tuple] = None, verify: bool = True) -> int:
+    actual_endpoint = endpoint + ','.join(indices) + __COUNT_ENDPOINT
+    resp = requests.get(actual_endpoint, auth=optional_auth, verify=verify)
+    result = dict(resp.json())
+    return int(result[COUNT_KEY])

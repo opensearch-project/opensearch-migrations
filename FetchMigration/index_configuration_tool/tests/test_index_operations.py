@@ -45,6 +45,16 @@ class TestSearchEndpoint(unittest.TestCase):
                       body=requests.Timeout())
         index_operations.create_indices(test_data, test_constants.TARGET_ENDPOINT, None)
 
+    @responses.activate
+    def test_doc_count(self):
+        test_indices = {test_constants.INDEX1_NAME, test_constants.INDEX2_NAME}
+        expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_count"
+        mock_count_response = {"count": "10"}
+        responses.get(expected_count_endpoint, json=mock_count_response)
+        # Now send request
+        count_value = index_operations.doc_count(test_indices, test_constants.SOURCE_ENDPOINT)
+        self.assertEqual(10, count_value)
+
 
 if __name__ == '__main__':
     unittest.main()
