@@ -1,6 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.CharStreams;
 import org.junit.jupiter.api.Assertions;
@@ -54,6 +53,6 @@ public class SigV4AuthExcisionTest {
     }
 
     static JsonTransformer getJsonTransformer() {
-        return new TypeMappingJsonTransformer();
+        return new SigV4ExcisionJsonTransformer();
     }
 }

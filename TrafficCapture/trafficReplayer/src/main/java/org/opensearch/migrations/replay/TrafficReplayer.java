@@ -14,6 +14,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.CompositeJsonTransformer;
 import org.opensearch.migrations.transform.JoltJsonTransformer;
 import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.SigV4ExcisionJsonTransformer;
 import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
 import org.slf4j.event.Level;
 
@@ -49,7 +50,7 @@ public class TrafficReplayer {
             joltJsonTransformerBuilder = joltJsonTransformerBuilder.addAuthorizationOperation(authorizationHeader);
         }
         var joltJsonTransformer = joltJsonTransformerBuilder.build();
-        return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer());
+        return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer(), new SigV4ExcisionJsonTransformer());
     }
 
     public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
