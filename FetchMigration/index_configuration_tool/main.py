@@ -6,6 +6,8 @@ import index_operations
 import utils
 
 # Constants
+from endpoint_info import EndpointInfo
+
 SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
 SOURCE_KEY = "source"
 SINK_KEY = "sink"
@@ -36,19 +38,14 @@ def get_auth(input_data: dict) -> Optional[tuple]:
         return input_data[USER_KEY], input_data[PWD_KEY]
 
 
-def get_endpoint_info(plugin_config: dict) -> tuple:
+def get_endpoint_info(plugin_config: dict) -> EndpointInfo:
     # "hosts" can be a simple string, or an array of hosts for Logstash to hit.
     # This tool needs one accessible host, so we pick the first entry in the latter case.
-    endpoint = plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
-    endpoint += "/"
-    return endpoint, get_auth(plugin_config)
-
-
-def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
-    endpoint, auth_tuple = get_endpoint_info(plugin_config)
+    url = plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
+    url += "/"
     # verify boolean will be the inverse of the insecure SSL key, if present
     should_verify = not is_insecure(plugin_config)
-    return index_operations.fetch_all_indices(endpoint, auth_tuple, should_verify)
+    return EndpointInfo(url, get_auth(plugin_config), should_verify)
 
 
 def check_supported_endpoint(config: dict) -> Optional[tuple]:
@@ -161,21 +158,19 @@ def run(args: argparse.Namespace) -> None:
     endpoint = get_supported_endpoint(pipeline_config, SOURCE_KEY)
     # Fetch all indices from source cluster
     # TODO Refactor this to avoid duplication
-    source_endpoint, source_auth = get_endpoint_info(endpoint[1])
-    # verify boolean will be the inverse of the insecure SSL key, if present
-    should_verify_source = not is_insecure(endpoint[1])
-    source_indices = index_operations.fetch_all_indices(source_endpoint, source_auth, should_verify_source)
+    source_endpoint_info = get_endpoint_info(endpoint[1])
+    source_indices = index_operations.fetch_all_indices(source_endpoint_info)
     # Fetch all indices from target cluster
     endpoint = get_supported_endpoint(pipeline_config, SINK_KEY)
-    target_endpoint, target_auth = get_endpoint_info(endpoint[1])
-    target_indices = index_operations.fetch_all_indices(target_endpoint, target_auth)
+    target_endpoint_info = get_endpoint_info(endpoint[1])
+    target_indices = index_operations.fetch_all_indices(target_endpoint_info)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
     # The first element in the tuple is the set of indices to create
     indices_to_create = diff[0]
     doc_count = 0
     if indices_to_create:
-        doc_count = index_operations.doc_count(indices_to_create, source_endpoint, source_auth, should_verify_source)
+        doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)
     if args.report:
         print_report(diff, doc_count)
     if indices_to_create:
@@ -186,7 +181,7 @@ def run(args: argparse.Namespace) -> None:
             index_data = dict()
             for index_name in indices_to_create:
                 index_data[index_name] = source_indices[index_name]
-            index_operations.create_indices(index_data, target_endpoint, target_auth)
+            index_operations.create_indices(index_data, target_endpoint_info)
 
 
 if __name__ == '__main__':  # pragma no cover

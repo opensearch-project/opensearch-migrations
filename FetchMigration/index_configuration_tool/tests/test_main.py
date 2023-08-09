@@ -88,25 +88,26 @@ class TestMain(unittest.TestCase):
         # Simple base case
         test_config = create_plugin_config([host_input])
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertIsNone(result[1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertIsNone(result.auth)
+        self.assertTrue(result.verify_ssl)
         # Invalid auth config
         test_config = create_plugin_config([host_input], test_user)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertIsNone(result[1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertIsNone(result.auth)
         # Valid auth config
         test_config = create_plugin_config([host_input], user=test_user, password=test_password)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertEqual(test_user, result[1][0])
-        self.assertEqual(test_password, result[1][1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertEqual(test_user, result.auth[0])
+        self.assertEqual(test_password, result.auth[1])
         # Array of hosts uses the first entry
         test_config = create_plugin_config([host_input, "other_host"], test_user, test_password)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertEqual(test_user, result[1][0])
-        self.assertEqual(test_password, result[1][1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertEqual(test_user, result.auth[0])
+        self.assertEqual(test_password, result.auth[1])
 
     def test_get_index_differences_empty(self):
         # Base case should return an empty list
@@ -258,7 +259,7 @@ class TestMain(unittest.TestCase):
         test_input.report = True
         test_input.dryrun = False
         main.run(test_input)
-        mock_create_indices.assert_called_once_with(expected_create_payload, test_constants.TARGET_ENDPOINT, ANY)
+        mock_create_indices.assert_called_once_with(expected_create_payload, ANY)
         mock_doc_count.assert_called()
         mock_print_report.assert_called_once_with(expected_diff, 1)
         mock_write_output.assert_not_called()
