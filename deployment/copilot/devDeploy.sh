@@ -96,8 +96,7 @@ if [ "$DESTROY_REGION" = true ] ; then
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE --yes
+  copilot svc delete -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot env delete -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE --yes
   rm ./environments/$COPILOT_DEPLOYMENT_STAGE/manifest.yml
@@ -105,7 +104,7 @@ if [ "$DESTROY_REGION" = true ] ; then
 
   export AWS_DEFAULT_REGION=$REGION
   cd ../cdk/opensearch-service-migration
-  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoAdmin=true
+  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true
   exit 1
 fi
 
@@ -131,7 +130,7 @@ fi
 # This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
 # The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
-cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoAdmin=true -O cdkOutput.json --require-approval never --concurrency 3
+cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdkOutput.json --require-approval never --concurrency 3
 
 # Gather CDK output which includes export commands needed by Copilot, and make them available to the environment
 found_exports=$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)
@@ -161,9 +160,7 @@ if [ "$SKIP_COPILOT_INIT" = false ] ; then
   copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator-jupyter
   copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator
   copilot svc init -a $COPILOT_APP_NAME --name traffic-replayer
-
-  copilot svc init -a $COPILOT_APP_NAME --name elasticsearch
-  copilot svc init -a $COPILOT_APP_NAME --name capture-proxy
+  copilot svc init -a $COPILOT_APP_NAME --name capture-proxy-es
   copilot svc init -a $COPILOT_APP_NAME --name migration-console
 fi
 
@@ -175,9 +172,7 @@ copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE
-
-copilot svc deploy -a $COPILOT_APP_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE
 
 

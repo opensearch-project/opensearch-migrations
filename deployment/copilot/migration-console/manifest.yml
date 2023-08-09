@@ -10,7 +10,7 @@ type: Backend Service
 network:
   connect: true
   vpc:
-    security_groups: [ "${MIGRATION_DOMAIN_SG_ID}" "${MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID}" ]
+    security_groups: [ "${MIGRATION_DOMAIN_SG_ID}", "${MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
@@ -19,8 +19,8 @@ image:
 
 storage:
   volumes:
-    replayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
-      path: '/replayer-output'
+    sharedReplayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
+      path: '/shared-replayer-output'
       read_only: false
       efs:
         id: ${MIGRATION_REPLAYER_OUTPUT_EFS_ID}

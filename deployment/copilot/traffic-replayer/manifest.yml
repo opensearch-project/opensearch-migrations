@@ -22,16 +22,11 @@ command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.T
 
 storage:
   volumes:
-    replayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
-      # Intent of this path is to allow multiple parallel running replayer directories
-      path: '/replayer-output/traffic-replayer'
+    sharedReplayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
+      path: '/shared-replayer-output'
       read_only: false
       efs:
         id: ${MIGRATION_REPLAYER_OUTPUT_EFS_ID}
-
-## Set container environment variables
-#variables:
-#  SERVICE_NAME: traffic-replayer
 
 cpu: 1024       # Number of CPU units for the task.
 memory: 4096    # Amount of memory in MiB used by the task.

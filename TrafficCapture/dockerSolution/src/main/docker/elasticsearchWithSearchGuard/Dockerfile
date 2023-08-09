@@ -16,7 +16,6 @@ RUN sed 's/searchguard/plugins.security/g' $ELASTIC_SEARCH_CONFIG_FILE |  \
 # The following two commands are more convenient for development purposes,
 # but maybe not for a demo to show individual steps
 RUN /root/enableTlsConfig.sh $ELASTIC_SEARCH_CONFIG_FILE
-# Do this to disable HTTP auth
 RUN echo "searchguard.disabled: false" >> $ELASTIC_SEARCH_CONFIG_FILE
 
 #CMD tail -f /dev/null

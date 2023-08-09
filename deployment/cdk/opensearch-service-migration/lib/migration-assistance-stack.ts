@@ -145,7 +145,7 @@ export class MigrationAssistanceStack extends Stack {
         // Create export of MSK cluster ARN for Copilot stacks to use
         new CfnOutput(this, 'migrationMSKClusterARN', {
             value: mskCluster.attrArn,
-            exportName: `${props.copilotAppName}-${props.stage}-msk-cluster-arn`,
+            exportName: `${props.copilotAppName}-${props.copilotEnvName}-msk-cluster-arn`,
             description: 'Migration MSK Cluster ARN'
         });
 
