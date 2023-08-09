@@ -1,10 +1,8 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.EventLoop;
-import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.Promise;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +16,6 @@ import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 
@@ -31,21 +28,21 @@ import java.util.function.Supplier;
  * each netty event loop.
  */
 @Slf4j
-public class ExpiringSubstitutableItemPool<T> {
+public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
 
-    private static class Entry<T> {
+    private static class Entry<F> {
         Instant timestamp;
-        T value;
-        public Entry(T value) {
+        F future;
+        public Entry(F future) {
             timestamp = Instant.now();
-            this.value = value;
+            this.future = future;
         }
 
         @Override
         public String toString() {
             final StringBuilder sb = new StringBuilder("Entry{");
             sb.append("timestamp=").append(timestamp);
-            sb.append(", value=").append(value);
+            sb.append(", value=").append(future);
             sb.append('}');
             return sb.toString();
         }
@@ -125,22 +122,22 @@ public class ExpiringSubstitutableItemPool<T> {
     // Store in-progress futures that were the result of item builds in their "in-order"
     // creation time so that if the readyItems is empty, we can return a future that is
     // more likely to complete.
-    private final LinkedHashSet<Future<T>> inProgressItems;
-    private final Queue<Entry<T>> readyItems;
-    private final Supplier<Future<T>> itemSupplier;
-    private final Consumer<T> onExpirationConsumer;
+    private final LinkedHashSet<F> inProgressItems;
+    private final Queue<Entry<F>> readyItems;
+    private final Supplier<F> itemSupplier;
+    private final Consumer<F> onExpirationConsumer;
     @Getter
     private final EventLoop eventLoop;
     private Duration inactivityTimeout;
-    private GenericFutureListener<Future<T>> shuffleInProgressToReady;
+    private GenericFutureListener<F> shuffleInProgressToReady;
     @Getter
     private Stats stats = new Stats();
     private int poolSize;
 
     public ExpiringSubstitutableItemPool(@NonNull Duration inactivityTimeout,
                                          @NonNull EventLoop eventLoop,
-                                         @NonNull Supplier<Future<T>> itemSupplier,
-                                         @NonNull Consumer<T> onExpirationConsumer,
+                                         @NonNull Supplier<F> itemSupplier,
+                                         @NonNull Consumer<F> onExpirationConsumer,
                                          int numItemsToLoad, @NonNull Duration initialItemLoadInterval) {
         this(inactivityTimeout, eventLoop, itemSupplier, onExpirationConsumer);
         increaseCapacityWithSchedule(numItemsToLoad, initialItemLoadInterval);
@@ -148,8 +145,8 @@ public class ExpiringSubstitutableItemPool<T> {
 
     public ExpiringSubstitutableItemPool(@NonNull Duration inactivityTimeout,
                                          @NonNull EventLoop eventLoop,
-                                         @NonNull Supplier<Future<T>> itemSupplier,
-                                         @NonNull Consumer<T> onExpirationConsumer) {
+                                         @NonNull Supplier<F> itemSupplier,
+                                         @NonNull Consumer<F> onExpirationConsumer) {
         assert inactivityTimeout.multipliedBy(-1).isNegative() : "inactivityTimeout must be > 0";
         this.inProgressItems = new LinkedHashSet<>();
         this.readyItems = new ArrayDeque<>();
@@ -170,8 +167,7 @@ public class ExpiringSubstitutableItemPool<T> {
         f -> {
             inProgressItems.remove(f);
             if (f.isSuccess()) {
-                var itemValue = f.getNow();
-                readyItems.add(new Entry(itemValue));
+                readyItems.add(new Entry(f));
                 scheduleNextExpirationSweep(inactivityTimeout);
             } else {
                 // the calling context should track failures too - no reason to log
@@ -198,26 +194,7 @@ public class ExpiringSubstitutableItemPool<T> {
         return poolSize;
     }
 
-    public <T, R> Future<R> thenApply(Future<T> innerFuture,
-                                      Function<T, R> mapFn,
-                                      Supplier<Promise<R>> outerPromiseSupplier) {
-        var outerPromise = outerPromiseSupplier.get();
-        innerFuture.addListener(f -> {
-            if (f.isSuccess()) {
-                try {
-                    outerPromise.setSuccess(mapFn.apply(innerFuture.getNow()));
-                } catch (Exception e) {
-                    outerPromise.setFailure(e);
-                }
-            } else {
-                outerPromise.setFailure(f.cause());
-            }
-        });
-
-        return outerPromise;
-    }
-
-    public Future<T> getAvailableOrNewItem() {
+    public F getAvailableOrNewItem() {
         if (inactivityTimeout.isZero()) {
             throw new PoolClosedException();
         }
@@ -227,20 +204,16 @@ public class ExpiringSubstitutableItemPool<T> {
             if (item != null) {
                 stats.addHotGet();
                 beginLoadingNewItemIfNecessary();
-                var rval = new DefaultPromise<T>(eventLoop);
-                log.trace("returning cached item="+item.value);
-                rval.setSuccess(item.value);
                 stats.addWaitTime(Duration.between(startTime, Instant.now()));
-                return rval;
+                return item.future;
             }
         }
 
-        BiFunction<Future<T>,String,Future<T>> durationTrackingDecoratedItem =
-                (itemsFuture, label) -> thenApply(itemsFuture, i-> {
+        BiFunction<F,String,F> durationTrackingDecoratedItem =
+                (itemsFuture, label) -> (F) itemsFuture.addListener(f->{
                     stats.addWaitTime(Duration.between(startTime, Instant.now()));
-                    log.trace(label + "returning value="+i+" from future " + itemsFuture);
-                    return i;
-                }, ()->eventLoop.next().newPromise());
+                    log.trace(label + "returning value="+ f.get()+" from future " + itemsFuture);
+                });
         stats.addColdGet();
         var inProgressIt = inProgressItems.iterator();
 
@@ -290,7 +263,7 @@ public class ExpiringSubstitutableItemPool<T> {
                         "Secondly, a concurrent mutation of any sort while in this function " +
                         "should have been impossible since we're only modifying this object through a shared eventloop";
                 log.debug("Removing " + removedItem);
-                onExpirationConsumer.accept(removedItem.value);
+                onExpirationConsumer.accept(removedItem.future);
                 beginLoadingNewItemIfNecessary();
             }
         }

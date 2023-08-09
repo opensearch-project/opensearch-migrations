@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultPromise;
+import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,7 @@ class ExpiringSubstitutableItemPoolTest {
         var expiredItems = new ArrayList<Integer>();
         var eventLoop = new NioEventLoopGroup(1);
         var lastCreation = new AtomicReference<Instant>();
-        var pool = new ExpiringSubstitutableItemPool<Integer>(
+        var pool = new ExpiringSubstitutableItemPool<Future<Integer>,Integer>(
                 INACTIVITY_TIMEOUT, eventLoop.next(),
                 () -> {
                     var rval = new DefaultPromise<Integer>(eventLoop.next());
@@ -68,7 +69,13 @@ class ExpiringSubstitutableItemPoolTest {
                 item->{
                     expireCountdownLatch.countDown();
                     log.info("Expiring item: "+item);
-                    expiredItems.add(item);
+                    try {
+                        expiredItems.add(item.get());
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    } catch (ExecutionException e) {
+                        throw new RuntimeException(e);
+                    }
                 });
         for (int i = 0; i<NUM_POOLED_ITEMS; ++i) {
             Thread.sleep(TIME_BETWEEN_INITIAL_ITEMS.toMillis());
@@ -123,7 +130,8 @@ class ExpiringSubstitutableItemPoolTest {
                 pool.getStats().averageBuildTime().toMillis());
     }
 
-    private static Integer getNextItem(ExpiringSubstitutableItemPool<Integer> pool) throws InterruptedException, ExecutionException {
+    private static Integer getNextItem(ExpiringSubstitutableItemPool<Future<Integer>,Integer> pool)
+            throws InterruptedException, ExecutionException {
         return pool.getEventLoop().next().schedule(()->pool.getAvailableOrNewItem(),
                 0, TimeUnit.MILLISECONDS).get().get();
     }

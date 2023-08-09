@@ -6,13 +6,11 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.ssl.SslContext;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.JdkLoggerFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 
 import javax.net.ssl.SSLEngine;
-import java.net.URI;
 import java.util.function.Supplier;
 
 public class NettyScanningHttpProxy {

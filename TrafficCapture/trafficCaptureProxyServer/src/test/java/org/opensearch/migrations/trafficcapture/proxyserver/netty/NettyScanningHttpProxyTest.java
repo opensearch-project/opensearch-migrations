@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -197,7 +198,8 @@ class NettyScanningHttpProxyTest {
             try {
                 URI testServerUri = new URI("http", null, SimpleHttpServer.LOCALHOST, underlyingPort,
                     null, null, null);
-                var connectionPool = new BacksideConnectionPool(testServerUri, null);
+                var connectionPool = new BacksideConnectionPool(testServerUri, null,
+                        10, Duration.ofSeconds(10));
                 nshp.get().start(connectionPool,1, null, connectionCaptureFactory);
                 System.out.println("proxy port = "+port.intValue());
             } catch (InterruptedException | URISyntaxException e) {
