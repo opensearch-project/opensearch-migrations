@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "URI": "/",
+  "payload": "Content doesn't matter",
+  "headers": {
+      "Accept-Encoding": "gzip, compressed",
+      "Connection": "close",
+      "Host": "10.0.124.241",
+      "User-Agent": "ELB-HealthChecker/2.0"
+  }
+}
