@@ -19,4 +19,8 @@ dependencies {
     testImplementation project(':captureProtobufs')
     testImplementation 'org.mockito:mockito-core:4.6.1'
     testImplementation 'org.mockito:mockito-junit-jupiter:4.6.1'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+    testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 }

@@ -10,7 +10,10 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
@@ -39,6 +42,7 @@ import java.util.stream.Stream;
 public class Main {
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
+    public final static String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
 
     static class Parameters {
         @Parameter(required = false,
@@ -54,13 +58,13 @@ public class Main {
         @Parameter(required = false,
                 names = {"--kafkaConfigFile"},
                 arity = 1,
-                description = "Kafka properties file")
+                description = "Kafka properties file for additional client customization.")
         String kafkaPropertiesFile;
         @Parameter(required = false,
                 names = {"--kafkaClientId"},
                 arity = 1,
                 description = "clientId to use for interfacing with Kafka.")
-        String kafkaClientId = "KafkaLoggingProducer";
+        String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
         @Parameter(required = false,
                 names = {"--kafkaConnection"},
                 arity = 1,
@@ -103,11 +107,11 @@ public class Main {
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);
-            // Exactly one these 4 options are required.  See that exactly one is set by summing up their presence
-            if (Stream.of(p.traceDirectory, p.kafkaPropertiesFile, p.kafkaConnection, (p.noCapture?"":null))
+            // Exactly one these 3 options are required.  See that exactly one is set by summing up their presence
+            if (Stream.of(p.traceDirectory, p.kafkaConnection, (p.noCapture?"":null))
                     .mapToInt(s->s!=null?1:0).sum() != 1) {
-                throw new ParameterException("Expected exactly one of '--traceDirectory', '--kafkaConfigFile', " +
-                        "'--kafkaConnection', or '--noCapture' to be set");
+                throw new ParameterException("Expected exactly one of '--traceDirectory', '--kafkaConnection', or " +
+                    "'--noCapture' to be set");
             }
             return p;
         } catch (ParameterException e) {
@@ -140,55 +144,50 @@ public class Main {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
         return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId, () ->
                 CodedOutputStream.newInstance(NullOutputStream.getInstance()),
-                cos -> CompletableFuture.completedFuture(null));
+                captureSerializerResult -> CompletableFuture.completedFuture(null));
     }
 
-
-    private static IConnectionCaptureFactory getKafkaConnectionFactory(String nodeId,
-                                                                       String kafkaPropsPath,
-                                                                       int bufferSize)
-            throws IOException {
-        Properties producerProps = new Properties();
-        if (kafkaPropsPath != null) {
-            try {
-                producerProps.load(new FileReader(kafkaPropsPath));
-            } catch (IOException e) {
-                log.error("Unable to locate provided Kafka producer properties file path: " + kafkaPropsPath);
-                throw e;
-            }
-        }
-        return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(producerProps), bufferSize);
-    }
-
-    private static String getNodeId(Parameters params) {
+    private static String getNodeId() {
         return UUID.randomUUID().toString();
     }
 
+    static Properties buildKafkaProperties(Parameters params) throws IOException {
+        var kafkaProps = new Properties();
+        kafkaProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+        kafkaProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
+        // Property details: https://docs.confluent.io/platform/current/installation/configuration/producer-configs.html#delivery-timeout-ms
+        kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10000);
+        kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
+        kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
+
+        if (params.kafkaPropertiesFile != null) {
+            try {
+                kafkaProps.load(new FileReader(params.kafkaPropertiesFile));
+            } catch (IOException e) {
+                log.error("Unable to locate provided Kafka producer properties file path: " + params.kafkaPropertiesFile);
+                throw e;
+            }
+        }
+
+        kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, params.kafkaConnection);
+        kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, params.kafkaClientId);
+        if (params.mskAuthEnabled) {
+            kafkaProps.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+            kafkaProps.setProperty(SaslConfigs.SASL_MECHANISM, "AWS_MSK_IAM");
+            kafkaProps.setProperty(SaslConfigs.SASL_JAAS_CONFIG, "software.amazon.msk.auth.iam.IAMLoginModule required;");
+            kafkaProps.setProperty(SaslConfigs.SASL_CLIENT_CALLBACK_HANDLER_CLASS, "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
+        }
+        return kafkaProps;
+    }
+
     private static IConnectionCaptureFactory getConnectionCaptureFactory(Parameters params) throws IOException {
-        var nodeId = getNodeId(params);
+        var nodeId = getNodeId();
         // TODO - it might eventually be a requirement to do multiple types of offloading.
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
-        } else if (params.kafkaPropertiesFile != null) {
-            if (params.kafkaConnection != null || params.mskAuthEnabled) {
-                log.warn("--kafkaConnection and --enableMSKAuth options are ignored when providing a Kafka properties file (--kafkaConfigFile) ");
-            }
-            return getKafkaConnectionFactory(nodeId, params.kafkaPropertiesFile, params.maximumTrafficStreamSize);
         } else if (params.kafkaConnection != null) {
-            var kafkaProps = new Properties();
-            kafkaProps.put("bootstrap.servers", params.kafkaConnection);
-            kafkaProps.put("client.id", params.kafkaClientId);
-            kafkaProps.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-            kafkaProps.put("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
-            if (params.mskAuthEnabled) {
-                kafkaProps.setProperty("security.protocol", "SASL_SSL");
-                kafkaProps.setProperty("sasl.mechanism", "AWS_MSK_IAM");
-                kafkaProps.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
-                kafkaProps.setProperty("sasl.client.callback.handler.class", "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
-            }
-
-            return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(kafkaProps), params.maximumTrafficStreamSize);
+            return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(buildKafkaProperties(params)), params.maximumTrafficStreamSize);
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
         } else {

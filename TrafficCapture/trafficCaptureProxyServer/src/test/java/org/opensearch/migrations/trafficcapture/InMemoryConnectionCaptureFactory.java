@@ -48,7 +48,8 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
             var cos = CodedOutputStream.newInstance(bb);
             codedStreamToByteBufferMap.put(cos, bb);
             return cos;
-        }, (codedOutputStream) -> {
+        }, (captureSerializerResult) -> {
+            CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
             CompletableFuture cf = closeHandler(codedStreamToByteBufferMap.get(codedOutputStream));
             codedStreamToByteBufferMap.remove(codedOutputStream);
             singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
