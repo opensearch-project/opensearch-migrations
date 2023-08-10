@@ -1,6 +1,7 @@
 import copy
 import unittest
 
+import requests
 import responses
 from responses import matchers
 
@@ -32,6 +33,16 @@ class TestSearchEndpoint(unittest.TestCase):
                       match=[matchers.json_params_matcher(test_data[test_constants.INDEX2_NAME])])
         responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX3_NAME,
                       match=[matchers.json_params_matcher(test_data[test_constants.INDEX3_NAME])])
+        index_operations.create_indices(test_data, test_constants.TARGET_ENDPOINT, None)
+
+    @responses.activate
+    def test_create_indices_exception(self):
+        # Set up expected PUT calls with a mock response status
+        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        del test_data[test_constants.INDEX2_NAME]
+        del test_data[test_constants.INDEX3_NAME]
+        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX1_NAME,
+                      body=requests.Timeout())
         index_operations.create_indices(test_data, test_constants.TARGET_ENDPOINT, None)
 
 
