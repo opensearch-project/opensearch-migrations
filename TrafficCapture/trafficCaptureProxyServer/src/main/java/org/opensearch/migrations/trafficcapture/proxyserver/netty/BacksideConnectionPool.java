@@ -1,5 +1,8 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.logging.LogLevel;
+import org.slf4j.event.Level;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
@@ -17,6 +20,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.StringJoiner;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -36,59 +40,56 @@ public class BacksideConnectionPool {
         this.poolSize = poolSize;
     }
 
-    public ChannelFuture getOutboundConnectionFuture(EventLoop eventLoop, Class channelClass) {
+    public ChannelFuture getOutboundConnectionFuture(EventLoop eventLoop) {
         if (poolSize == 0) {
-            return buildConnectionFuture(eventLoop, channelClass);
+            return buildConnectionFuture(eventLoop);
         }
-        return getExpiringWarmChannelPool(eventLoop, channelClass).getAvailableOrNewItem();
+        return getExpiringWarmChannelPool(eventLoop).getAvailableOrNewItem();
     }
 
     private ExpiringSubstitutableItemPool<ChannelFuture, Void>
-    getExpiringWarmChannelPool(EventLoop eventLoop, Class channelClass) {
-        var channelClassToChannelPoolMap = (HashMap<Class,ExpiringSubstitutableItemPool<ChannelFuture, Void>>)
+    getExpiringWarmChannelPool(EventLoop eventLoop) {
+        var thisContextsConnectionCache = (ExpiringSubstitutableItemPool<ChannelFuture, Void>)
                 channelClassToConnectionCacheForEachThread.get();
-        if (channelClassToChannelPoolMap == null) {
-            channelClassToChannelPoolMap = new HashMap<>();
-            channelClassToConnectionCacheForEachThread.set(channelClassToChannelPoolMap);
-        }
-
-        var thisContextsConnectionCache = channelClassToChannelPoolMap.get(channelClass);
         if (thisContextsConnectionCache == null) {
             thisContextsConnectionCache =
                     new ExpiringSubstitutableItemPool<ChannelFuture, Void>(inactivityTimeout,
                             eventLoop,
-                            () -> buildConnectionFuture(eventLoop, channelClass),
+                            () -> buildConnectionFuture(eventLoop),
                             x->x.channel().close(), poolSize, Duration.ZERO);
-            channelClassToChannelPoolMap.put(channelClass, thisContextsConnectionCache);
-            if (channelClassToChannelPoolMap.size() > 1) {
-                log.warn("The connection pool for EventLoop=" + eventLoop + " has items for " +
-                        channelClassToChannelPoolMap.size() + " different connection types.  " +
-                        "Pools will co-exist indefinitely, " +
-                        "possibly creating more connections and using more resources.");
-                log.warn("Class types with disjoint pools for this event loop are " +
-                        channelClassToChannelPoolMap.keySet().stream()
-                                .map(c->c.getName())
-                                .collect(Collectors.joining(", ")));
+            if (log.isInfoEnabled()) {
+                final var finalChannelClassToChannelPoolMap = thisContextsConnectionCache;
+                logProgressAtInterval(Level.INFO, eventLoop,
+                        thisContextsConnectionCache, Duration.ofSeconds(30));
             }
+            channelClassToConnectionCacheForEachThread.set(thisContextsConnectionCache);
         }
 
         return thisContextsConnectionCache;
     }
 
-    private ChannelFuture buildConnectionFuture(EventLoop eventLoop, Class channelClass) {
+    private void logProgressAtInterval(Level logLevel, EventLoop eventLoop,
+                                       ExpiringSubstitutableItemPool<ChannelFuture, Void> channelPoolMap,
+                                       Duration frequency) {
+        eventLoop.schedule(() -> {
+            log.atLevel(logLevel).log(channelPoolMap.getStats().toString());
+            logProgressAtInterval(logLevel, eventLoop, channelPoolMap, frequency);
+        }, frequency.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
+    private ChannelFuture buildConnectionFuture(EventLoop eventLoop) {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         b.group(eventLoop)
-                .channel(channelClass)
+                .channel(NioSocketChannel.class)
                 .handler(new ChannelDuplexHandler())
                 .option(ChannelOption.AUTO_READ, false);
-        log.debug("Active - setting up backend connection");
         var f = b.connect(backsideUri.getHost(), backsideUri.getPort());
         var rval = new DefaultChannelPromise(f.channel());
         f.addListener((ChannelFutureListener) connectFuture -> {
             if (connectFuture.isSuccess()) {
                 // connection complete start to read first data
-                log.debug("Done setting up backend channel & it was successful");
+                log.debug("Done setting up backend channel & it was successful (" + connectFuture.channel() + ")");
                 if (backsideSslContext != null) {
                     var pipeline = connectFuture.channel().pipeline();
                     SSLEngine sslEngine = backsideSslContext.newEngine(connectFuture.channel().alloc());

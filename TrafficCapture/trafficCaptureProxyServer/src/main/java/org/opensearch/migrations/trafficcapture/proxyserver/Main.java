@@ -102,7 +102,7 @@ public class Main {
                 names = {"--numThreads"},
                 arity = 1,
                 description = "How many threads netty should create in its event loop group")
-        int numThreads;
+        int numThreads = 1;
         @Parameter(required = false,
         names = {"--destinationConnectionPoolSize"},
         arity = 1,

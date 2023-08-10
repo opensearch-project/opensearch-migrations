@@ -31,9 +31,8 @@ public class NettyScanningHttpProxy {
                       int numThreads,
                       Supplier<SSLEngine> sslEngineSupplier,
                       IConnectionCaptureFactory connectionCaptureFactory) throws InterruptedException {
-        InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE);
-        bossGroup = new NioEventLoopGroup(numThreads);
-        workerGroup = new NioEventLoopGroup();
+        bossGroup = new NioEventLoopGroup(1);
+        workerGroup = new NioEventLoopGroup(numThreads);
         ServerBootstrap serverBootstrap = new ServerBootstrap();
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)

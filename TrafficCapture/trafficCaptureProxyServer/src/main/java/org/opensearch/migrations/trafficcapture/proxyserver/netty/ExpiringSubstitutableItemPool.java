@@ -200,7 +200,9 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         }
         var startTime = Instant.now();
         {
+            log.trace("getAvailableOrNewItem: readyItems.size()="+readyItems.size());
             var item = readyItems.poll();
+            log.trace("getAvailableOrNewItem: item="+item + " remaining readyItems.size()="+readyItems.size());
             if (item != null) {
                 stats.addHotGet();
                 beginLoadingNewItemIfNecessary();

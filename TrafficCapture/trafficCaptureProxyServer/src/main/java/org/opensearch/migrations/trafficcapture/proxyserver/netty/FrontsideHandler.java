@@ -5,6 +5,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.logging.LogLevel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -26,9 +27,9 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
         final Channel inboundChannel = ctx.channel();
-        var f = backsideConnectionPool.getOutboundConnectionFuture(inboundChannel.eventLoop(),
-                ctx.channel().getClass());
-        f.addListener((ChannelFutureListener) future -> {
+        var outboundChannelFuture = backsideConnectionPool.getOutboundConnectionFuture(inboundChannel.eventLoop());
+        log.debug("Active - setting up backend connection with channel " + outboundChannelFuture.channel());
+        outboundChannelFuture.addListener((ChannelFutureListener) (future -> {
             if (future.isSuccess()) {
                 var pipeline = future.channel().pipeline();
                 pipeline.addLast(new BacksideHandler(inboundChannel));
@@ -38,15 +39,15 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                 log.debug("closing outbound channel because CONNECT future was not successful");
                 inboundChannel.close();
             }
-        });
-        outboundChannel = f.channel();
+        }));
+        outboundChannel = outboundChannelFuture.channel();
     }
 
     @Override
     public void channelRead(final ChannelHandlerContext ctx, Object msg) {
-        log.debug("frontend handler read: "+msg);
+        log.debug("frontend handler[" + this.outboundChannel + "] read: "+msg);
         if (outboundChannel.isActive()) {
-            log.debug("Writing data to backside handler");
+            log.debug("Writing data to backside handler " + outboundChannel);
             outboundChannel.writeAndFlush(msg)
                     .addListener((ChannelFutureListener) future -> {
                         if (future.isSuccess()) {
@@ -57,7 +58,10 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                             future.channel().close(); // close the backside
                         }
                     });
-        } // if the outbound channel has died, so be it... let this frontside finish with it's caller naturally
+            outboundChannel.config().setAutoRead(true);
+        } else { // if the outbound channel has died, so be it... let this frontside finish with it's caller naturally
+            log.warn("Output channel (" + outboundChannel + ") is NOT active");
+        }
     }
 
     public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
