@@ -267,10 +267,12 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
         // If our message is empty or can fit in the current CodedOutputStream no chunking is needed, and we can continue
         if (byteBuffer.limit() == 0 || messageAndOverheadBytesLeft <= getOrCreateCodedOutputStream().spaceLeft()) {
-            int startSpace = getOrCreateCodedOutputStream().spaceLeft();
+            int calculatedMinSpaceAfterMessage = getOrCreateCodedOutputStream().spaceLeft() - messageAndOverheadBytesLeft;
             addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, byteBuffer);
-            if (getOrCreateCodedOutputStream().spaceLeft() < (startSpace - messageAndOverheadBytesLeft)) {
-                log.warn("Writing substream to CodedOutputStream took more space than max calculated, this should be investigated");
+            if (getOrCreateCodedOutputStream().spaceLeft() < calculatedMinSpaceAfterMessage) {
+                log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
+                    "at least {} bytes remaining, this should be investigated", captureFieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
+                    getOrCreateCodedOutputStream().spaceLeft(), calculatedMinSpaceAfterMessage);
             }
             return;
         }
@@ -284,8 +286,11 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             bb = bb.slice();
             byteBuffer.position(byteBuffer.position() + chunkBytes);
             addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, ++dataCount, timestamp, bb);
-            if (getOrCreateCodedOutputStream().spaceLeft() < (availableCOSSpace - chunkBytes - trafficStreamOverhead)) {
-                log.warn("Writing segment substream to CodedOutputStream took more space than max calculated, this should be investigated");
+            int calculatedMinSpaceAfterMessage = availableCOSSpace - chunkBytes - trafficStreamOverhead;
+            if (getOrCreateCodedOutputStream().spaceLeft() < calculatedMinSpaceAfterMessage) {
+                log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
+                    "at least {} bytes remaining, this should be investigated", segmentFieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
+                    getOrCreateCodedOutputStream().spaceLeft(), calculatedMinSpaceAfterMessage);
             }
             // 1 to N-1 chunked messages
             if (byteBuffer.position() < byteBuffer.limit()) {

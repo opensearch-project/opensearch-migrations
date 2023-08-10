@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import io.netty.buffer.Unpooled;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
@@ -30,8 +31,8 @@ import java.util.concurrent.ExecutionException;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
-import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES;
 
+@Slf4j
 @ExtendWith(MockitoExtension.class)
 public class KafkaCaptureFactoryTest {
 
@@ -46,10 +47,10 @@ public class KafkaCaptureFactoryTest {
     public void testLargeRequestIsWithinKafkaMessageSizeLimit() throws IOException, ExecutionException, InterruptedException {
         final var referenceTimestamp = Instant.now(Clock.systemUTC());
 
-        int messageSize = 1024*1024;
+        int maxAllowableMessageSize = 1024*1024;
         MockProducer<String, byte[]> producer = new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
         KafkaCaptureFactory kafkaCaptureFactory =
-            new KafkaCaptureFactory(TEST_NODE_ID_STRING, producer, messageSize);
+            new KafkaCaptureFactory(TEST_NODE_ID_STRING, producer, maxAllowableMessageSize);
         IChannelConnectionCaptureSerializer serializer = kafkaCaptureFactory.createOffloader(connectionId);
 
         StringBuilder sb = new StringBuilder();
@@ -64,9 +65,9 @@ public class KafkaCaptureFactoryTest {
         future.get();
         for (ProducerRecord<String, byte[]> record : producer.history()) {
             int recordSize = calculateRecordSize(record, null);
-            Assertions.assertTrue(recordSize <= messageSize);
+            Assertions.assertTrue(recordSize <= maxAllowableMessageSize);
             int largeIdRecordSize = calculateRecordSize(record, connectionId + ".9999999999");
-            Assertions.assertTrue(largeIdRecordSize <= messageSize);
+            Assertions.assertTrue(largeIdRecordSize <= maxAllowableMessageSize);
         }
         bb.release();
         producer.close();
