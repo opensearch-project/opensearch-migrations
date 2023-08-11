@@ -17,16 +17,19 @@ buildscript {
 }
 
 plugins {
-    id 'org.opensearch.migrations.java-application-conventions'
-    id "com.github.spotbugs" version "4.7.3"
+    id 'java'
+    id 'application'
+  //  id "com.github.spotbugs" version "4.7.3"
 //    id 'checkstyle'
     id 'org.owasp.dependencycheck' version '8.2.1'
     id "io.freefair.lombok" version "8.0.1"
 }
-
+/*
 spotbugs {
     includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
 }
+
+ */
 
 //checkstyle {
 //    toolVersion = '10.9.3'
@@ -41,11 +44,20 @@ repositories {
 
 dependencies {
     implementation project(':captureProtobufs')
+    implementation 'org.json:json:20210307'
+
+    implementation 'javax.xml.bind:jaxb-api:2.3.1'
+    implementation 'org.glassfish.jaxb:jaxb-runtime:2.3.1'
+
+    implementation platform('software.amazon.awssdk:bom:2.20.102')
+    implementation 'software.amazon.awssdk:sdk-core:2.20.102'
+    implementation 'software.amazon.awssdk:auth:2.20.102'
+
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    implementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
+    implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
     implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.json', name: 'json', version: '20230227'
@@ -60,6 +72,7 @@ dependencies {
 
     testImplementation project(':testUtilities')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter', version: '5.9.2'
 }
 
 application {
