@@ -1,21 +1,29 @@
-# The manifest for the "opensearch-benchmark" service.
+# The manifest for the "migration-console" service.
 # Read the full specification for the "Backend Service" type at:
 #  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
 
 # Your service name will be used in naming your resources like log groups, ECS services, etc.
-name: opensearch-benchmark
+name: migration-console
 type: Backend Service
 
 # Allow service-to-service communication with ECS Service Connect
 network:
   connect: true
   vpc:
-    security_groups: [ "${MIGRATION_DOMAIN_SG_ID}" ]
+    security_groups: [ "${MIGRATION_DOMAIN_SG_ID}", "${MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID}" ]
 
 # Configuration for your containers and service.
 image:
   # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
-  build: ../TrafficCapture/dockerSolution/src/main/docker/openSearchBenchmark/Dockerfile
+  build: ../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/Dockerfile
+
+storage:
+  volumes:
+    sharedReplayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
+      path: '/shared-replayer-output'
+      read_only: false
+      efs:
+        id: ${MIGRATION_REPLAYER_OUTPUT_EFS_ID}
 
 cpu: 512       # Number of CPU units for the task.
 memory: 1024    # Amount of memory in MiB used by the task.

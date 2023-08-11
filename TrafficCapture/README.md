@@ -34,9 +34,9 @@ server, recording the packet traffic of the new interactions.
 
 Learn more about its functionality and setup here: [Traffic Replayer](trafficReplayer/README.md)
 
-### OpenSearch Benchmark
+### Migration Console
 
-A container with a [script](dockerSolution/src/main/docker/openSearchBenchmark/runTestBenchmarks.sh) to run different [OpenSearch Benchmark](https://github.com/opensearch-project/opensearch-benchmark) workloads
+A container with a [script](dockerSolution/src/main/docker/migrationConsole/runTestBenchmarks.sh) to run different [OpenSearch Benchmark](https://github.com/opensearch-project/opensearch-benchmark) workloads
 is brought up as part of the solution.
 
 The workloads are started with the Traffic Capture Proxy Server set as the target, which will capture the requests sent by OpenSearch Benchmark,
@@ -46,7 +46,7 @@ The Traffic Replayer's logs (Tuples consisting of a request, a pair of responses
 
 Note that the script must be manually started.
 
-Partial example output of OpenSearch Benchmark:
+Partial example output of the OpenSearch Benchmark tool:
 
 ```
 

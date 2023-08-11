@@ -21,7 +21,7 @@ usage() {
   echo "  --skip-bootstrap        Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images."
   echo "  --skip-copilot-init     Skip one-time Copilot initialization of app, environments, and services"
   echo "  --copilot-app-name      [string, default: migration-copilot] Specify the Copilot application name to use for deployment"
-  echo "  --destroy-region        Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given region and return to a clean state."
+  echo "  --destroy-env           Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state."
   echo "  --destroy-all-copilot   Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions."
   echo "  -r, --region            [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources."
   echo "  -s, --stage             [string, default: dev] Specify the stage name to associate with the deployed resources"
@@ -31,7 +31,7 @@ usage() {
 SKIP_BOOTSTRAP=false
 SKIP_COPILOT_INIT=false
 COPILOT_APP_NAME=migration-copilot
-DESTROY_REGION=false
+DESTROY_ENV=false
 DESTROY_ALL_COPILOT=false
 REGION=us-east-1
 STAGE=dev
@@ -50,8 +50,8 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    --destroy-region)
-      DESTROY_REGION=true
+    --destroy-env)
+      DESTROY_ENV=true
       shift # past argument
       ;;
     --destroy-all-copilot)
@@ -89,23 +89,22 @@ export CDK_DEPLOYMENT_STAGE=$STAGE
 export DOCKER_BUILDKIT=0
 export COMPOSE_DOCKER_CLI_BUILD=0
 
-if [ "$DESTROY_REGION" = true ] ; then
+if [ "$DESTROY_ENV" = true ] ; then
   set +e
   # Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
   export AWS_DEFAULT_REGION=""
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name opensearch-benchmark --env $COPILOT_DEPLOYMENT_STAGE --yes
+  copilot svc delete -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE --yes
+  copilot svc delete -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot env delete -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE --yes
   rm ./environments/$COPILOT_DEPLOYMENT_STAGE/manifest.yml
   echo "Destroying a region will not remove the Copilot app level stack that gets created in each region. This must be manually deleted from CloudFormation or automatically removed by deleting the Copilot app"
 
   export AWS_DEFAULT_REGION=$REGION
   cd ../cdk/opensearch-service-migration
-  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoAdmin=true
+  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true
   exit 1
 fi
 
@@ -131,7 +130,7 @@ fi
 # This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
 # The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
-cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c mskEnablePublicEndpoints=true --c enableDemoAdmin=true -O cdkOutput.json --require-approval never --concurrency 3
+cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdkOutput.json --require-approval never --concurrency 3
 
 # Gather CDK output which includes export commands needed by Copilot, and make them available to the environment
 found_exports=$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)
@@ -161,10 +160,8 @@ if [ "$SKIP_COPILOT_INIT" = false ] ; then
   copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator-jupyter
   copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator
   copilot svc init -a $COPILOT_APP_NAME --name traffic-replayer
-
-  copilot svc init -a $COPILOT_APP_NAME --name elasticsearch
-  copilot svc init -a $COPILOT_APP_NAME --name capture-proxy
-  copilot svc init -a $COPILOT_APP_NAME --name opensearch-benchmark
+  copilot svc init -a $COPILOT_APP_NAME --name capture-proxy-es
+  copilot svc init -a $COPILOT_APP_NAME --name migration-console
 fi
 
 
@@ -175,10 +172,8 @@ copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE
-
-copilot svc deploy -a $COPILOT_APP_NAME --name elasticsearch --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name opensearch-benchmark --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE
 
 
 # Output deployment time
