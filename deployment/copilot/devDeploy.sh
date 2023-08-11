@@ -21,7 +21,7 @@ usage() {
   echo "  --skip-bootstrap        Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images."
   echo "  --skip-copilot-init     Skip one-time Copilot initialization of app, environments, and services"
   echo "  --copilot-app-name      [string, default: migration-copilot] Specify the Copilot application name to use for deployment"
-  echo "  --destroy-region        Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given region and return to a clean state."
+  echo "  --destroy-env           Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state."
   echo "  --destroy-all-copilot   Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions."
   echo "  -r, --region            [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources."
   echo "  -s, --stage             [string, default: dev] Specify the stage name to associate with the deployed resources"
@@ -31,7 +31,7 @@ usage() {
 SKIP_BOOTSTRAP=false
 SKIP_COPILOT_INIT=false
 COPILOT_APP_NAME=migration-copilot
-DESTROY_REGION=false
+DESTROY_ENV=false
 DESTROY_ALL_COPILOT=false
 REGION=us-east-1
 STAGE=dev
@@ -50,8 +50,8 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    --destroy-region)
-      DESTROY_REGION=true
+    --destroy-env)
+      DESTROY_ENV=true
       shift # past argument
       ;;
     --destroy-all-copilot)
@@ -89,7 +89,7 @@ export CDK_DEPLOYMENT_STAGE=$STAGE
 export DOCKER_BUILDKIT=0
 export COMPOSE_DOCKER_CLI_BUILD=0
 
-if [ "$DESTROY_REGION" = true ] ; then
+if [ "$DESTROY_ENV" = true ] ; then
   set +e
   # Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
   export AWS_DEFAULT_REGION=""
