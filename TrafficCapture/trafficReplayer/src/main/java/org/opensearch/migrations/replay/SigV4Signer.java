@@ -30,16 +30,18 @@ public class SigV4Signer {
     public ArrayList<Byte> processedPayload;
     public HttpJsonMessageWithFaultingPayload message;
 
-    public SigV4Signer(HttpJsonMessageWithFaultingPayload message, DefaultCredentialsProvider credentialsProvider) {
+    public SigV4Signer(HttpJsonMessageWithFaultingPayload message, DefaultCredentialsProvider credentialsProvider, URI fullEndpoint) {
         this.message = message;
         this.credentialsProvider = credentialsProvider;
         this.signer = Aws4Signer.create();
-        String timeStamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").format(ZonedDateTime.now(ZoneOffset.UTC));
-        var host = ">>YOUR_HOST<<";
+
+        String host = fullEndpoint.getHost();
+        String protocol = fullEndpoint.getScheme();
+
         this.httpRequestBuilder = SdkHttpFullRequest.builder()
                 .method(SdkHttpMethod.fromValue(this.message.method()))
                 .uri(URI.create(this.message.uri()))
-                .protocol(this.message.protocol())
+                .protocol(protocol)
                 .host(host);
 
         this.processedPayload = new ArrayList<>();
