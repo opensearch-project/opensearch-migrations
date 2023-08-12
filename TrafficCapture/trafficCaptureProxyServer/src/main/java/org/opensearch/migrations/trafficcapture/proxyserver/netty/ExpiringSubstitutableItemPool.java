@@ -54,7 +54,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         @Getter
         private long nItemsCreated;
         @Getter
-        private long nExpiredItems;
+        private long nItemsExpired;
         @Getter
         private long nHotGets; // cache hits
         @Getter
@@ -70,7 +70,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
                     .add("nItemsCreated=" + nItemsCreated)
                     .add("nHotGets=" + nHotGets)
                     .add("nColdGets=" + nColdGets)
-                    .add("nExpiredItems=" + nExpiredItems)
+                    .add("nExpiredItems=" + nItemsExpired)
                     .add("avgDurationBuildingItems=" + averageBuildTime())
                     .add("avgWaitTimeForCallers=" + averageWaitTime())
                     .toString();
@@ -115,7 +115,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         }
 
         private void addExpiredItem() {
-            nExpiredItems++;
+            nItemsExpired++;
         }
     }
 
