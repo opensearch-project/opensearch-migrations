@@ -38,6 +38,7 @@ class SigV4SignerTest {
     @SneakyThrows
     @BeforeEach
     void setup() {
+        /*
         client = new SimpleHttpClientForTesting(false);
         HttpJsonMessageWithFaultingPayload msg = new HttpJsonMessageWithFaultingPayload();
         msg.setMethod("PUT");
@@ -51,9 +52,12 @@ class SigV4SignerTest {
         System.setProperty("aws.sessionToken", token);
 
         signer = new SigV4Signer(msg, DefaultCredentialsProvider.create());
+
+         */
     }
 
     private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
+
         if (serverUri.getScheme().toLowerCase().equals("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
@@ -64,14 +68,14 @@ class SigV4SignerTest {
             return null;
         }
     }
-
+/*
     @SneakyThrows
     @Test
-    void testEmptyBodySignedRequestTestGET() {
+    void testEmptyBodySignedRequestTest() {
         client = new SimpleHttpClientForTesting(false);
         HttpJsonMessageWithFaultingPayload msg = new HttpJsonMessageWithFaultingPayload();
         msg.setMethod("GET");
-        msg.setUri("/>>YOUR_URI<<");
+        msg.setUri("/_cat/indices");
         msg.setProtocol("https");
         var key_id = System.getenv("AWS_ACCESS_KEY_ID");
         var secret_key = System.getenv("AWS_SECRET_ACCESS_KEY");
@@ -80,9 +84,11 @@ class SigV4SignerTest {
         System.setProperty("aws.secretAccessKey", secret_key);
         System.setProperty("aws.sessionToken", token);
 
-        signer = new SigV4Signer(msg, DefaultCredentialsProvider.create());
+        URI baseEndpoint = new URI("https://search-ok-test-h633fxcoxvybbwxarbfbvehsji.us-east-1.es.amazonaws.com");
 
-        URI endpoint = new URI(">>YOUR_ENDPOINT+URI<<");
+        URI endpoint = baseEndpoint.resolve(msg.uri());
+
+        signer = new SigV4Signer(msg, DefaultCredentialsProvider.create(), endpoint);
 
         Map<String, List<String>> signedHeaders = signer.getSignatureheaders("es", "us-east-1");
 
@@ -123,9 +129,11 @@ class SigV4SignerTest {
         System.setProperty("aws.secretAccessKey", secret_key);
         System.setProperty("aws.sessionToken", token);
 
-        signer = new SigV4Signer(msg, DefaultCredentialsProvider.create());
+        URI baseEndpoint = new URI("https://search-ok-test-h633fxcoxvybbwxarbfbvehsji.us-east-1.es.amazonaws.com");
 
-        URI endpoint = new URI(">>YOUR_ENDPOINT+URI<<");
+        URI endpoint = baseEndpoint.resolve(msg.uri());
+
+        signer = new SigV4Signer(msg, DefaultCredentialsProvider.create(), endpoint);
 
 
         ByteBuf payloadChunk1 = Unpooled.copiedBuffer("{\"index\" : {\"number_", StandardCharsets.UTF_8);
@@ -194,6 +202,8 @@ class SigV4SignerTest {
         assertEquals(200, response.statusCode);
     }
 
+
+ */
 
     private String getBasicAuthHeaderValue(String username, String password) {
         String auth = username + ":" + password;

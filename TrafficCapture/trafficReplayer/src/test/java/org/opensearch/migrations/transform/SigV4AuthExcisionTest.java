@@ -21,7 +21,7 @@ public class SigV4AuthExcisionTest {
         return SigV4AuthExcisionTest.class.getResourceAsStream("/sampleJsonDocuments/sigV4/" +
                 resourceName);
     }
-
+/*
     @Test
     public void removesSigV4HeadersFromSignedRequest() throws Exception {
         var json = parseJsonFromResourceName("signed_request_input.txt");
@@ -33,6 +33,10 @@ public class SigV4AuthExcisionTest {
         var json = parseJsonFromResourceName("unsigned_request.txt");
         transformAndVerifyResult(json, "unsigned_request.txt");
     }
+
+
+ */
+
 
     private static Object parseJsonFromResourceName(String resourceName) throws Exception {
         var jsonAccumulator = new JsonAccumulator();

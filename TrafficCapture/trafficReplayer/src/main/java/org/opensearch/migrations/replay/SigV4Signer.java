@@ -13,6 +13,7 @@ import java.net.URI;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.signer.Aws4Signer;
@@ -22,7 +23,7 @@ import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.regions.Region;
 
 
-
+@Slf4j
 public class SigV4Signer {
     public DefaultCredentialsProvider credentialsProvider;
     public Aws4Signer signer;
@@ -83,11 +84,11 @@ public class SigV4Signer {
                 .awsCredentials(credentialsProvider.resolveCredentials())
                 .build());
 
-        System.out.println("Tried to sign: " + request.method().name() + ", " + request.getUri() +
+        log.info("Tried to sign: " + request.method().name() + ", " + request.getUri() +
                 "region: " + region + " serviceName:" + service +
                 " headers: ");
         for (var header : request.headers().entrySet()) {
-            System.out.println(header.getKey() + ":" + header.getValue());
+            log.info(header.getKey() + ":" + header.getValue());
         }
 
         return signedRequest.headers();
