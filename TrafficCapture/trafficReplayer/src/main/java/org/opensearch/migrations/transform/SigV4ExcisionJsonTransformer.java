@@ -1,5 +1,7 @@
 package org.opensearch.migrations.transform;
 
+import com.google.gson.Gson;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import java.net.URISyntaxException;
@@ -34,7 +36,7 @@ public class SigV4ExcisionJsonTransformer implements JsonTransformer {
     public Object transformJson(Object incomingJson) {
 
         if (!(incomingJson instanceof Map)) {
-            log.info("I got to line 37"); return transformHttpMessage((Map) incomingJson);
+            log.info("I got to line 37"); return incomingJson;
         } else {
             log.info("I got to line 39"); return transformHttpMessage((Map) incomingJson);
         }
@@ -59,13 +61,13 @@ public class SigV4ExcisionJsonTransformer implements JsonTransformer {
 
         log.info("OK92 - line 58");
 
-        System.setProperty("aws.accessKeyId", "your_access_keyid");
-        System.setProperty("aws.secretAccessKey", "your_secret_access_key");
-        System.setProperty("aws.sessionToken", "your_session_token");
+        System.setProperty("aws.accessKeyId", "accesskeyid");
+        System.setProperty("aws.secretAccessKey", "secretaccesskey");
+        System.setProperty("aws.sessionToken", "sessiontoken");
 
         log.info("OK92 - line 64");
         Object hostname = headers.get("Host");
-        URI baseEndpoint = new URI("https://" + ((String) hostname));
+        URI baseEndpoint = new URI("https://" + ((List<String>) hostname).get(0));
         log.info("OK92 - line 65");
 
         URI endpoint = baseEndpoint.resolve(msg.uri());
@@ -74,24 +76,38 @@ public class SigV4ExcisionJsonTransformer implements JsonTransformer {
         signer = new SigV4Signer(msg, DefaultCredentialsProvider.create(), endpoint);
         log.info("OK92 - line 71");
 
-        // PAYLOAD RELATED CODE
-
         //ByteBuf payloadChunk1 = Unpooled.copiedBuffer((String) httpMsg.get("payload"), StandardCharsets.UTF_8);
-        //signer.processNextPayload(payloadChunk1);
 
-        Object payloadObj = httpMsg.get("payload");
-        log.info("Payload object type: " + payloadObj.getClass().getName());
 
+        //log.info("Payload object type: " + payloadObj.getClass().getName());
+
+        Object payloadObject = httpMsg.get("payload");
+        if (payloadObject instanceof PayloadAccessFaultingMap) {
+            PayloadAccessFaultingMap payloadMap = (PayloadAccessFaultingMap) payloadObject;
+            log.info("OK92 - LINE 85 - DID I GET HERE ?!?!?!");
+            Object actualPayload = payloadMap.get(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY);
+
+            Gson gson = new Gson();
+            String jsonString = gson.toJson(actualPayload);
+            log.info(jsonString);
+            ByteBuf payloadChunk1 = Unpooled.copiedBuffer(jsonString, StandardCharsets.UTF_8);
+            payloadChunk1.readerIndex(0);
+
+            if (jsonString != "") {
+                log.info("OK92 - LINE 90 - DID I GET HERE ?!?!?!");
+                signer.processNextPayload(payloadChunk1);
+            }
+            else {
+                log.info("OK92 - LINE 92 - DID I GET HERE ?!?!?!");
+               // signer.processNextPayload((ByteBuf) httpMsg.get("payload"));
+            }
+
+            //log.info("OK92 - Line 87 - actualPayload:");
+            //log.info(actualPayload.toString());
+
+        }
 
         //signer.processNextPayload((ByteBuf) httpMsg.get("payload"));
-
-
-        /////////////////////////////
-
-
-        // GETTING THE SIGNATURE HEADERS
-
-
         log.info("OK92 - line 78");
         Map<String, List<String>> signatureHeaders = signer.getSignatureheaders("es", "us-east-1");
         log.info("OK92 - line 80");
@@ -104,15 +120,12 @@ public class SigV4ExcisionJsonTransformer implements JsonTransformer {
         log.info("OK92 : line 87");
         headerEntries.forEach(header -> log.info(header.getKey() + ": " + header.getValue()));
 
-        ////////////////////
+        // REMOVE ME LATER
 
+        Map<String, List<String>> existingHeaders = (Map<String, List<String>>) httpMsg.get("headers");
 
-
-
-        //headers.remove(AUTHORIZATION_KEYNAME);                These 2 lines were originally from Mikayla's PR
+        // headers.remove(AUTHORIZATION_KEYNAME);
         //headers.remove(SECURITY_TOKEN_KEYNAME);
-
-        // THIS HERE IS MAKING THE FINAL HEADERS USING THE SIGNATURE HEADERS
 
         for (Map.Entry<String, List<String>> entry : signatureHeaders.entrySet()) {
             String key = entry.getKey();
@@ -121,15 +134,6 @@ public class SigV4ExcisionJsonTransformer implements JsonTransformer {
             // If the signedHeaders has multiple values, concatenate them with a comma
             headers.put(key, String.join(", ", values));
         }
-
-
-        //////////////////
-
-        //ALL BELOW IS LOGGING and extra info
-
-        // REMOVE ME LATER - only for debugging/logging purposes.
-
-        Map<String, List<String>> existingHeaders = (Map<String, List<String>>) httpMsg.get("headers");
 
         log.info("OK92 - line 85");
         for (Map.Entry<String, Object> entry : headers.entrySet()) {
@@ -142,11 +146,15 @@ public class SigV4ExcisionJsonTransformer implements JsonTransformer {
         }
 
 
-        var finalHeaders = (Map) httpMsg.get(HttpJsonMessageWithFaultingPayload.HEADERS);
+        //var finalHeaders = (Map) httpMsg.get(HttpJsonMessageWithFaultingPayload.HEADERS);
         // print all members in finalHeaders
         log.info("OK92 - line 102");
-        finalHeaders.forEach((k, v) -> log.info(k + ": " + v));
+        //finalHeaders.forEach((k, v) -> log.info(k + ": " + v));
 
+
+        //headers.remove(AUTHORIZATION_KEYNAME);
+        // headers.remove(SECURITY_TOKEN_KEYNAME);
+        //return httpMsg;
 
 
         return httpMsg;
