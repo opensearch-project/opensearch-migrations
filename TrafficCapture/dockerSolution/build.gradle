@@ -44,7 +44,7 @@ task cloneComparatorRepoIfNeeded(type: Exec) {
 
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
-        "openSearchBenchmark": "open_search_benchmark"
+        "migrationConsole": "migration_console"
 ]
 // Create the static docker files that aren't hosting migrations java code from this repo
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
@@ -122,7 +122,7 @@ dockerCompose {
 
 task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
-    dependsOn buildDockerImage_openSearchBenchmark
+    dependsOn buildDockerImage_migrationConsole
 
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer

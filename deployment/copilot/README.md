@@ -68,6 +68,8 @@ export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
+export MIGRATION_REPLAYER_OUTPUT_EFS_ID=fs-124
+export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=sg-124
 export MIGRATION_PUBLIC_SUBNETS=subnet-123,subnet-124;
 export MIGRATION_PRIVATE_SUBNETS=subnet-125,subnet-126;
 export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
@@ -84,6 +86,8 @@ If using temporary environment credentials when initializing an environment:
 * When prompted ` Would you like to use the default configuration for a new environment?` select `Yes, use default.` as this will ultimately get ignored for what has been configured in the existing `manifest.yml`
 * The last prompt will ask for the desired deployment region and should be filled out as Copilot will store this internally.
 
+This Copilot app supports deploying the Capture Proxy and Elasticsearch as a single service `capture-proxy-es` (as shown below) or as separate services `capture-proxy` and `elasticsearch`
+
 **Note**: This app also contains `kafka-broker` and `kafka-zookeeper` services which are currently experimental and usage of MSK is preferred. These services do not need to be deployed, and as so are not listed below.
 ```
 // Initialize app
@@ -97,10 +101,8 @@ copilot env init --name dev
 copilot svc init --name traffic-replayer
 copilot svc init --name traffic-comparator
 copilot svc init --name traffic-comparator-jupyter
-
-copilot svc init --name elasticsearch
-copilot svc init --name capture-proxy
-copilot svc init --name opensearch-benchmark
+copilot svc init --name capture-proxy-es
+copilot svc init --name migration-console
 
 ```
 
@@ -117,28 +119,26 @@ copilot env deploy --name dev
 copilot svc deploy --name traffic-comparator-jupyter --env dev
 copilot svc deploy --name traffic-comparator --env dev
 copilot svc deploy --name traffic-replayer --env dev
-
-copilot svc deploy --name elasticsearch --env dev
-copilot svc deploy --name capture-proxy --env dev
-copilot svc deploy --name opensearch-benchmark --env dev
+copilot svc deploy --name capture-proxy-es --env dev
+copilot svc deploy --name migration-console --env dev
 ```
 
 ### Running Benchmarks on the Deployed Solution
 
-Once the solution is deployed, the easiest way to test the solution is to exec into the benchmark container and run a benchmark test through, as the following steps illustrate
+Once the solution is deployed, the easiest way to test the solution is to exec into the migration-console container and run a benchmark test through, as the following steps illustrate
 
 ```
 // Exec into container
-copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
+copilot svc exec -a migration-copilot -e dev -n migration-console -c "bash"
 
 // Run benchmark workload (i.e. geonames, nyc_taxis, http_logs)
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy:443 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy-es:443 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
 ```
 
-After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same benchmark container to confirm
+After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same migration-console container to confirm
 ```
 // Check source cluster
-curl https://capture-proxy:443/_cat/indices?v --insecure -u admin:admin
+curl https://capture-proxy-es:443/_cat/indices?v --insecure -u admin:admin
 
 // Check target cluster
 curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:Admin123!
@@ -153,7 +153,8 @@ copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "bash"
 copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "bash"
 copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "bash"
 copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "bash"
-copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
+copilot svc exec -a migration-copilot -e dev -n capture-proxy-es -c "bash"
+copilot svc exec -a migration-copilot -e dev -n migration-console -c "bash"
 ```
 
 ### Addons
