@@ -1,4 +1,3 @@
-import sys
 import requests
 
 from endpoint_info import EndpointInfo
@@ -36,7 +35,7 @@ def create_indices(indices_data: dict, endpoint: EndpointInfo):
             resp = requests.put(actual_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl, json=data_dict)
             resp.raise_for_status()
         except requests.exceptions.RequestException as e:
-            print(f"Failed to create index [{index}] - {e!s}", file=sys.stderr)
+            raise RuntimeError(f"Failed to create index [{index}] - {e!s}")
 
 
 def doc_count(indices: set, endpoint: EndpointInfo) -> int:

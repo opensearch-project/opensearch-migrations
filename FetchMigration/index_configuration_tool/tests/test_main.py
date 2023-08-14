@@ -265,13 +265,15 @@ class TestMain(unittest.TestCase):
         mock_write_output.assert_not_called()
 
     @patch('index_operations.doc_count')
+    @patch('main.dump_count_and_indices')
     @patch('main.print_report')
     @patch('main.write_output')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
-                        mock_print_report: MagicMock, mock_doc_count: MagicMock):
+                        mock_print_report: MagicMock, mock_dump: MagicMock, mock_doc_count: MagicMock):
         index_to_create = test_constants.INDEX1_NAME
+        mock_doc_count.return_value = 1
         expected_output_path = "dummy"
         # Create mock data for indices on target
         target_indices_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
@@ -287,8 +289,9 @@ class TestMain(unittest.TestCase):
         main.run(test_input)
         mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
         mock_doc_count.assert_called()
-        # Report should not be printed
+        # Report should not be printed, but dump should be invoked
         mock_print_report.assert_not_called()
+        mock_dump.assert_called_once_with(mock_doc_count.return_value, {index_to_create})
 
     @patch('yaml.dump')
     def test_write_output(self, mock_dump: MagicMock):

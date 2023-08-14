@@ -109,7 +109,6 @@ def write_output(yaml_data: dict, new_indices: set, output_path: str):
     source_config[INDICES_KEY] = source_indices
     with open(output_path, 'w') as out_file:
         yaml.dump(yaml_data, out_file)
-    print("Wrote output YAML pipeline to: " + output_path)
 
 
 # Computes differences in indices between source and target.
@@ -144,6 +143,20 @@ def print_report(index_differences: tuple[set, set, set], count: int):  # pragma
     print("Total documents to be moved: " + str(count))
 
 
+def dump_count_and_indices(count: int, indices: set):  # pragma no cover
+    print(count)
+    for index_name in indices:
+        print(index_name)
+
+
+def compute_endpoint_and_fetch_indices(config: dict, key: str) -> tuple[EndpointInfo, dict]:
+    endpoint = get_supported_endpoint(config, key)
+    # Endpoint is a tuple of (type, config)
+    endpoint_info = get_endpoint_info(endpoint[1])
+    indices = index_operations.fetch_all_indices(endpoint_info)
+    return endpoint_info, indices
+
+
 def run(args: argparse.Namespace) -> None:
     # Sanity check
     if not args.report and len(args.output_file) == 0:
@@ -154,16 +167,9 @@ def run(args: argparse.Namespace) -> None:
     # We expect the Data Prepper pipeline to only have a single top-level value
     pipeline_config = next(iter(dp_config.values()))
     validate_pipeline_config(pipeline_config)
-    # Endpoint is a tuple of (type, config)
-    endpoint = get_supported_endpoint(pipeline_config, SOURCE_KEY)
-    # Fetch all indices from source cluster
-    # TODO Refactor this to avoid duplication
-    source_endpoint_info = get_endpoint_info(endpoint[1])
-    source_indices = index_operations.fetch_all_indices(source_endpoint_info)
-    # Fetch all indices from target cluster
-    endpoint = get_supported_endpoint(pipeline_config, SINK_KEY)
-    target_endpoint_info = get_endpoint_info(endpoint[1])
-    target_indices = index_operations.fetch_all_indices(target_endpoint_info)
+    # Fetch EndpointInfo and indices
+    source_endpoint_info, source_indices = compute_endpoint_and_fetch_indices(pipeline_config, SOURCE_KEY)
+    target_endpoint_info, target_indices = compute_endpoint_and_fetch_indices(pipeline_config, SINK_KEY)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
     # The first element in the tuple is the set of indices to create
@@ -174,9 +180,13 @@ def run(args: argparse.Namespace) -> None:
     if args.report:
         print_report(diff, doc_count)
     if indices_to_create:
+        if not args.report:
+            dump_count_and_indices(doc_count, indices_to_create)
         # Write output YAML
         if len(args.output_file) > 0:
             write_output(dp_config, indices_to_create, args.output_file)
+            if args.report:
+                print("Wrote output YAML pipeline to: " + args.output_file)
         if not args.dryrun:
             index_data = dict()
             for index_name in indices_to_create:
@@ -213,6 +223,4 @@ if __name__ == '__main__':  # pragma no cover
                             help="Print a report of the index differences")
     arg_parser.add_argument("--dryrun", action="store_true",
                             help="Skips the actual creation of indices on the target cluster")
-    print("\n##### Starting index configuration tool... #####\n")
     run(arg_parser.parse_args())
-    print("\n##### Index configuration tool has completed! #####\n")

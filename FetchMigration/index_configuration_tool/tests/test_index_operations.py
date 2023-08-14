@@ -44,7 +44,8 @@ class TestSearchEndpoint(unittest.TestCase):
         del test_data[test_constants.INDEX3_NAME]
         responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX1_NAME,
                       body=requests.Timeout())
-        index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        self.assertRaises(RuntimeError, index_operations.create_indices, test_data,
+                          EndpointInfo(test_constants.TARGET_ENDPOINT))
 
     @responses.activate
     def test_doc_count(self):
