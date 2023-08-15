@@ -1,6 +1,8 @@
 import argparse
+import logging
 import time
 from typing import Optional, List
+import math
 
 import requests
 from prometheus_client import Metric
@@ -47,6 +49,9 @@ def check_if_complete(doc_count: Optional[int], in_flight: Optional[int], no_par
     # TODO Add a check for partitionsCompleted = indices
     if doc_count is not None and doc_count >= target:
         # Check for idle pipeline
+        logging.info("Target doc count reached, checking for idle pipeline...")
+        logging.debug("Idle pipeline metrics: " +
+                      ",".join(map(str, [in_flight, no_part_count, prev_no_part_count])))
         if in_flight is not None and in_flight == 0:
             # No-partitions metrics should steadily tick up
             if no_part_count is not None and no_part_count > prev_no_part_count > 0:
@@ -60,13 +65,20 @@ def run(args: MigrationMonitorParams, wait_seconds: int = 30) -> None:
     endpoint = EndpointInfo(args.dp_endpoint, default_auth, False)
     prev_no_partitions_count = 0
     terminal = False
+    logging.info("Starting migration monitor until target doc count: " + str(target_doc_count))
     while not terminal:
+        time.sleep(wait_seconds)
         # If the API call fails, the response is empty
         metrics = fetch_prometheus_metrics(endpoint)
         if metrics is not None:
             success_docs = get_metric_value(metrics, __DOC_SUCCESS_METRIC)
             rec_in_flight = get_metric_value(metrics, __RECORDS_IN_FLIGHT_METRIC)
             no_partitions_count = get_metric_value(metrics, __NO_PARTITIONS_METRIC)
+            if success_docs is not None:
+                completion_percentage: int = math.floor((success_docs * 100) / target_doc_count)
+                progress_message: str = "Completed " + str(success_docs) + \
+                                        " docs ( " + str(completion_percentage) + "% )"
+                logging.info(progress_message)
             terminal = check_if_complete(success_docs, rec_in_flight, no_partitions_count,
                                          prev_no_partitions_count, args.target_count)
             if not terminal:
@@ -76,6 +88,7 @@ def run(args: MigrationMonitorParams, wait_seconds: int = 30) -> None:
         if not terminal:
             time.sleep(wait_seconds)
     # Loop terminated, shut down the Data Prepper pipeline
+    logging.info("Migration monitor at terminal state, shutting down...\n")
     shutdown_pipeline(endpoint)
 
 
