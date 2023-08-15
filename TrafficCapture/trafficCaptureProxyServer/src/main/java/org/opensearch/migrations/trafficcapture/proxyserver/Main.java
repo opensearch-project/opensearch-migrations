@@ -20,6 +20,7 @@ import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
@@ -31,6 +32,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
@@ -100,6 +102,25 @@ public class Main {
                 arity = 1,
                 description = "Exposed port for clients to connect to this proxy.")
         int frontsidePort = 0;
+        @Parameter(required = false,
+                names = {"--numThreads"},
+                arity = 1,
+                description = "How many threads netty should create in its event loop group")
+        int numThreads = 1;
+        @Parameter(required = false,
+        names = {"--destinationConnectionPoolSize"},
+        arity = 1,
+        description = "Number of socket connections that should be maintained to the destination server " +
+                "to reduce the perceived latency to clients.  Each thread will have its own cache, so the " +
+                "total number of outstanding warm connections will be multiplied by numThreads.")
+        int destinationConnectionPoolSize = 0;
+        @Parameter(required = false,
+                names = {"--destinationConnectionPoolTimeout"},
+                arity = 1,
+                description = "Of the socket connections maintained by the destination connection pool, " +
+                        "how long after connection should the be recycled " +
+                        "(closed with a new connection taking its place)")
+        String destinationConnectionPoolTimeout = "PT30S";
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -243,10 +264,14 @@ public class Main {
 
         sksOp.ifPresent(x->x.initHttpSSLConfig());
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
-
         try {
-            proxy.start(backsideUri, loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside),
-                    sksOp.map(sks-> (Supplier<SSLEngine>) () -> {
+            var pooledConnectionTimeout = params.destinationConnectionPoolSize == 0 ? Duration.ZERO :
+                    Duration.parse(params.destinationConnectionPoolTimeout);
+            var backsideConnectionPool = new BacksideConnectionPool(backsideUri,
+                    loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside),
+                    params.destinationConnectionPoolSize, pooledConnectionTimeout);
+            proxy.start(backsideConnectionPool, params.numThreads,
+                    sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
                         try {
                             var sslEngine = sks.createHTTPSSLEngine();
                             return sslEngine;
