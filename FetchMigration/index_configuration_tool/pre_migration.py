@@ -197,7 +197,7 @@ def run(args: argparse.Namespace) -> None:
 if __name__ == '__main__':  # pragma no cover
     # Set up parsing for command line arguments
     arg_parser = argparse.ArgumentParser(
-        prog="python main.py",
+        prog="python pre_migration.py",
         description="This tool creates indices on a target cluster based on the contents of a source cluster.\n" +
         "The first input to the tool is a path to a Data Prepper pipeline YAML file, which is parsed to obtain " +
         "the source and target cluster endpoints.\nThe second input is an output path to which a modified version " +
