@@ -57,9 +57,6 @@ This optional stack will be used when the Domain is configured to be placed insi
 #### Migration Assistance Stack (OSServiceMigrationCDKStack-STAGE-REGION)
 This optional stack is used to house the migration assistance resources which are in the process of being developed to assist in migrating to an OpenSearch domain. It has dependencies on both the Domain and Network stacks.
 
-#### Historical Capture Stack (OSServiceHistoricalCDKStack-STAGE-REGION)
-This optional exploratory stack sets up a deployable Logstash ECS cluster for historical data migration. It is experimental and should only be used for development purposes. It has dependencies on both the Domain and Network stacks.
-
 ### Configuration Options
 
 The available configuration options are listed below. The vast majority of these options do not need to be provided, with only `domainName` and `engineVersion` being required. All non-required options can be provided as an empty string `""` or simply not included, and in each of these cases the option will be allocated with the CDK Domain default value
