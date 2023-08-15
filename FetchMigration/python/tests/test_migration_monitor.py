@@ -1,4 +1,3 @@
-import argparse
 import unittest
 from unittest.mock import patch, MagicMock, PropertyMock
 
@@ -10,6 +9,8 @@ import migration_monitor
 from endpoint_info import EndpointInfo
 
 # Constants
+from migration_monitor_params import MigrationMonitorParams
+
 TEST_ENDPOINT = "test"
 TEST_AUTH = ("user", "pass")
 TEST_FLAG = False
@@ -79,10 +80,8 @@ class TestMigrationMonitor(unittest.TestCase):
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run(self, mock_fetch: MagicMock, mock_get: MagicMock, mock_check: MagicMock, mock_sleep: MagicMock,
                  mock_shut: MagicMock):
-        test_input = argparse.Namespace()
-        # The values here don't matter since we've mocked the check method
-        test_input.dp_endpoint = "test"
-        test_input.target_count = 1
+        # The param values don't matter since we've mocked the check method
+        test_input = MigrationMonitorParams(1, "test")
         mock_get.return_value = None
         # Check will first fail, then pass
         mock_check.side_effect = [False, True]

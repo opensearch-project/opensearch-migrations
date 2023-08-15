@@ -1,4 +1,3 @@
-import argparse
 import copy
 import pickle
 import random
@@ -7,6 +6,7 @@ from typing import Optional
 from unittest.mock import patch, MagicMock, ANY
 
 import pre_migration
+from pre_migration_params import PreMigrationParams
 from tests import test_constants
 
 # Constants
@@ -251,13 +251,7 @@ class TestPreMigration(unittest.TestCase):
         index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
         # Fetch indices is called first for source, then for target
         mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
-        # Set up test input
-        test_input = argparse.Namespace()
-        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        # Default value for missing output file
-        test_input.output_file = ""
-        test_input.report = True
-        test_input.dryrun = False
+        test_input = PreMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, report=True)
         pre_migration.run(test_input)
         mock_create_indices.assert_called_once_with(expected_create_payload, ANY)
         mock_doc_count.assert_called()
@@ -265,13 +259,12 @@ class TestPreMigration(unittest.TestCase):
         mock_write_output.assert_not_called()
 
     @patch('index_operations.doc_count')
-    @patch('pre_migration.dump_count_and_indices')
     @patch('pre_migration.print_report')
     @patch('pre_migration.write_output')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
-                        mock_print_report: MagicMock, mock_dump: MagicMock, mock_doc_count: MagicMock):
+                        mock_print_report: MagicMock, mock_doc_count: MagicMock):
         index_to_create = test_constants.INDEX1_NAME
         mock_doc_count.return_value = 1
         expected_output_path = "dummy"
@@ -280,18 +273,14 @@ class TestPreMigration(unittest.TestCase):
         del target_indices_data[index_to_create]
         # Fetch indices is called first for source, then for target
         mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
-        # Set up test input
-        test_input = argparse.Namespace()
-        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        test_input.output_file = expected_output_path
-        test_input.dryrun = True
-        test_input.report = False
-        pre_migration.run(test_input)
+        test_input = PreMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, expected_output_path, dryrun=True)
+        test_result = pre_migration.run(test_input)
+        self.assertEqual(mock_doc_count.return_value, test_result.target_doc_count)
+        self.assertEqual({index_to_create}, test_result.created_indices)
         mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
         mock_doc_count.assert_called()
-        # Report should not be printed, but dump should be invoked
+        # Report should not be printed
         mock_print_report.assert_not_called()
-        mock_dump.assert_called_once_with(mock_doc_count.return_value, {index_to_create})
 
     @patch('yaml.dump')
     def test_write_output(self, mock_dump: MagicMock):
@@ -321,12 +310,7 @@ class TestPreMigration(unittest.TestCase):
             mock_dump.assert_called_once_with(expected_output_data, ANY)
 
     def test_missing_output_file_non_report(self):
-        # Set up test input
-        test_input = argparse.Namespace()
-        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        # Default value for missing output file
-        test_input.output_file = ""
-        test_input.report = False
+        test_input = PreMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH)
         self.assertRaises(ValueError, pre_migration.run, test_input)
 
 
