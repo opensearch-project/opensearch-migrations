@@ -42,6 +42,7 @@ repositories {
 dependencies {
     implementation project(':captureProtobufs')
 
+    implementation group: 'com.amazonaws.secretsmanager', name: 'aws-secretsmanager-caching-java', version: '1.0.2'
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
@@ -70,18 +71,6 @@ jar {
     manifest {
         attributes 'Main-Class': application.mainClass
     }
-}
-
-task uberJar(type: Jar) {
-    manifest {
-        attributes 'Main-Class': application.mainClass
-    }
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }
-    archiveBaseName = project.name + "-uber"
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    with jar
 }
 
 tasks.named('test') {

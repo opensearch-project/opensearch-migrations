@@ -67,7 +67,12 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     // Enable demo mode setting
     if (props.enableDemoAdmin) {
       adminUserName = "admin"
-      adminUserSecret = SecretValue.unsafePlainText("Admin123!")
+      const adminSecret = new Secret(this, "demoUserSecret", {
+        secretName: "demo-user-secret",
+        // This is unsafe and strictly for ease of use in a demo mode setup
+        secretStringValue: SecretValue.unsafePlainText("Admin123!")
+      })
+      adminUserSecret = adminSecret.secretValue;
     }
     const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
         {enabled: true, availabilityZoneCount: props.availabilityZoneCount} : undefined
@@ -116,8 +121,13 @@ export class OpensearchServiceDomainCdkStack extends Stack {
 
     this.domainEndpoint = domain.domainEndpoint
 
+    const exports = [
+      `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`
+    ]
+    if (adminUserName) exports.push(`export MIGRATION_DOMAIN_USER_NAME=${adminUserName}`)
+    if (adminUserSecret) exports.push(`export MIGRATION_DOMAIN_USER_SECRET=${adminUserSecret}`)
     new CfnOutput(this, 'CopilotDomainExports', {
-      value: `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`,
+      value: exports.join(";"),
       description: 'Exported Domain resource values created by CDK that are needed by Copilot container deployments',
     });
   }
