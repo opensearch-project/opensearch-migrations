@@ -37,7 +37,7 @@ class ReportResults(FrameworkStep):
 
         self._log_results(passing_expectations, failing_expectations, untested_expectations)
 
-        readme_url = "https://github.com/opensearch-project/opensearch-migrations/blob/main/upgrades/README.md"
+        readme_url = "https://github.com/opensearch-project/opensearch-migrations/blob/main/experimental/README.md"
         help_blurb = ("For more information about how to interpret these results, please consult the Upgrade Testing"
                       f" Framework's README file: {readme_url}")
         self.logger.info(help_blurb)

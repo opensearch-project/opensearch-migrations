@@ -10,7 +10,7 @@ The UTF is based around the following concepts:
 * A sequence of "Steps" that are executed in a set order as part of a "Workflow"
 * A "Runner" that takes a Workflow and executes the steps in it sequentially, while managing things like error handling, logging, and state
 * A shared "State" that exists in-memory of the process and enables the results of one step to be re-used by a later step
-* A "Test Config" JSON file that encapsulates the specific upgrade to be tested (e.g. snapshot/restore from ES 7.10.2 to OS 1.3.6).  This package will contain a collection of pre-canned Test Configs (`./test_configs/`) that should represent the limits of the UTF's knowledge about what is true about how Upgrades work.  In other words - if there isn't a Test Config file in the included collection that covers the specific cluster setup and upgrade type you're interested in, the UTF is not testing that setup/upgrade type.
+* A "Test Config" JSON file that encapsulates the specific upgrade to be tested (e.g. snapshot/restore from ES 7.10.2 to OS 1.3.6).  This package will contain a collection of pre-canned Test Configs (`./test_configs/`) that should represent the limits of the UTF's knowledge about what is true about how upgrades work.  In other words - if there isn't a Test Config file in the included collection that covers the specific cluster setup and upgrade type you're interested in, the UTF is not testing that setup/upgrade type.
 * A set of "Test Actions" that are performed at various points in a Workflow via an existing library called the [Robot Framework](https://robotframework.org/?tab=2#getting-started).  These are currently at `./upgrade_testing_framework/robot_test_defs/`
 * A set of "Expectations" that represent things we expect to be true about the upgrade specified in the Test Config file (number of documents should remain the same before/after).  Each Expectation has an Expectation ID that is used to track which Test Actions are associated with a given Expectation, and determine if the Expectation was true or not.  These Expectation IDs are associated with each Test Action as a tag that the UTF search for and enable selective invocation.
 * A "Knowledge Base" that represents all the Expectations we're currently tracking and (hopefully) testing, currently located at `../knowledge_base/`.
@@ -64,7 +64,7 @@ At the end of a UTF run, the final results of the test should be printed to STDO
         "doy-format-date-range-query-bug"
     ]
 }
-[ReportResults] For more information about how to interpret these results, please consult the Upgrade Testing Framework's README file: https://github.com/opensearch-project/opensearch-migrations/blob/main/upgrades/README.md
+[ReportResults] For more information about how to interpret these results, please consult the Upgrade Testing Framework's README file: https://github.com/opensearch-project/opensearch-migrations/blob/main/experimental/README.md
 [FrameworkRunner] Step Succeeded: ReportResults
 ```
 
