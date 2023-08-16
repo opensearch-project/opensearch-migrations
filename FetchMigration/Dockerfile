@@ -14,5 +14,5 @@ COPY python/*.py .
 # update PATH
 ENV PATH=/root/.local:$PATH
 
-# make sure you include the -u flag to have our stdout logged
-ENTRYPOINT python -u ./main.py -r $ICT_CODE_PATH/input.yaml $DATA_PREPPER_PATH/pipelines/pipelines.yaml; $DATA_PREPPER_PATH/bin/data-prepper
+# Include the -u flag to have stdout logged
+ENTRYPOINT python -u ./orchestrator.py $DATA_PREPPER_PATH $ICT_CODE_PATH/input.yaml https://localhost:4900
