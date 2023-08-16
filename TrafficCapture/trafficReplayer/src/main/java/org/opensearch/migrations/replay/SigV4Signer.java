@@ -1,20 +1,23 @@
 package org.opensearch.migrations.replay;
 
 
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
-import javax.xml.bind.DatatypeConverter;
+import java.security.NoSuchAlgorithmException;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
+
 import io.netty.buffer.ByteBuf;
-import java.io.InputStream;
-import java.net.URI;
-import java.util.Collections;
+
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.signer.Aws4Signer;
 import software.amazon.awssdk.auth.signer.params.Aws4SignerParams;
@@ -25,55 +28,37 @@ import software.amazon.awssdk.regions.Region;
 
 @Slf4j
 public class SigV4Signer {
-    public DefaultCredentialsProvider credentialsProvider;
-    public Aws4Signer signer;
-    public SdkHttpFullRequest.Builder httpRequestBuilder;
-    public ArrayList<Byte> processedPayload;
-    public HttpJsonMessageWithFaultingPayload message;
+    private AwsCredentialsProvider credentialsProvider;
+    private Aws4Signer signer;
+    private SdkHttpFullRequest.Builder httpRequestBuilder;
+    private IHttpMessage httpMessagePreamble;
+    private MessageDigest messageDigest;
 
-    public SigV4Signer(HttpJsonMessageWithFaultingPayload message, DefaultCredentialsProvider credentialsProvider, URI fullEndpoint) {
-        this.message = message;
+    public SigV4Signer(IHttpMessage message, AwsCredentialsProvider credentialsProvider) {
+        this.httpMessagePreamble = message;
         this.credentialsProvider = credentialsProvider;
         this.signer = Aws4Signer.create();
 
-        String host = fullEndpoint.getHost();
-        String protocol = fullEndpoint.getScheme();
-
         this.httpRequestBuilder = SdkHttpFullRequest.builder()
-                .method(SdkHttpMethod.fromValue(this.message.method()))
-                .uri(URI.create(this.message.uri()))
-                .protocol(protocol)
-                .host(host);
+                .method(SdkHttpMethod.fromValue(message.method()))
+                .host(message.getFirstHeader("host"));
 
-        this.processedPayload = new ArrayList<>();
-
+        try {
+            this.messageDigest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public void processNextPayload(ByteBuf payloadChunk) {
-
-        // append new chunks to the existing payload
-        byte[] chunkBytes = new byte[payloadChunk.readableBytes()];
-        payloadChunk.readBytes(chunkBytes);
-        for (byte b : chunkBytes) {
-            this.processedPayload.add(b);
-        }
+    public void processNextPayload(ByteBuffer payloadChunk) {
+        messageDigest.update(payloadChunk);
     }
 
     public Map<String, List<String>> getSignatureheaders(String service, String region) throws Exception {
-
-        byte[] payloadBytes = new byte[this.processedPayload.size()];
-        for (int i = 0; i < this.processedPayload.size(); i++) {
-            payloadBytes[i] = this.processedPayload.get(i);
-        }
-
-        InputStream payloadStream = ReplayUtils.byteArraysToInputStream(
-                Collections.singletonList(payloadBytes)
-        );
-        this.httpRequestBuilder.contentStreamProvider(() -> payloadStream);
         String timeStamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").format(ZonedDateTime.now(ZoneOffset.UTC));
         httpRequestBuilder.appendHeader("Content-Type", "application/json");
         httpRequestBuilder.appendHeader("x-amz-date", timeStamp);
-        String payloadHash = computeSha256Hash(payloadBytes);
+        String payloadHash = binaryToHex(messageDigest.digest());
         this.httpRequestBuilder.appendHeader("x-amz-content-sha256", payloadHash);
 
         SdkHttpFullRequest request = this.httpRequestBuilder.build(); // Is this the right time?
@@ -95,10 +80,12 @@ public class SigV4Signer {
 
     }
 
-    public static String computeSha256Hash(byte[] payloadBytes) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        byte[] digest = md.digest(payloadBytes);
-        return DatatypeConverter.printHexBinary(digest).toLowerCase();
+    public static String binaryToHex(byte[] bytesToEncode) throws Exception {
+        return IntStream.range(0, bytesToEncode.length)
+                .map(idx -> bytesToEncode[idx])
+                .mapToObj(b -> Integer.toHexString(0xff & b))
+                .map(h -> h.length() == 1 ? ("0" + h) : h)
+                .collect(Collectors.joining());
     }
 }
 

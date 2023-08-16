@@ -5,8 +5,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.JoltJsonTransformer;
+import org.opensearch.migrations.transform.JsonJoltTransformer;
 
 import java.time.Duration;
 import java.util.AbstractMap;
@@ -30,10 +29,10 @@ public class HeaderTransformerTest {
         final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null, null,
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var jsonHandler = JoltJsonTransformer.newBuilder()
+        var jsonHandler = JsonJoltTransformer.newBuilder()
                 .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
                 .build();
-        var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, testPacketCapture, "TEST");
+        var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, testPacketCapture, null, "TEST");
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
@@ -84,7 +83,7 @@ public class HeaderTransformerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, "Basic YWRtaW46YWRtaW4="),
-                testPacketCapture, "TEST");
+                testPacketCapture, null, "TEST");
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\n" +
@@ -108,7 +107,7 @@ public class HeaderTransformerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, null),
-                testPacketCapture, "TEST");
+                testPacketCapture, null, "TEST");
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)

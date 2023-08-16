@@ -12,10 +12,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
-import org.opensearch.migrations.transform.JoltJsonTransformer;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
+import org.opensearch.migrations.transform.JsonJoltTransformer;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -52,10 +51,10 @@ public class PayloadRepackingTest {
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
-        var transformerBuilder = JoltJsonTransformer.newBuilder();
+        var transformerBuilder = JsonJoltTransformer.newBuilder();
 
-        if (doGzip) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.ADD_GZIP); }
-        if (doChunked) { transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.MAKE_CHUNKED); }
+        if (doGzip) { transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP); }
+        if (doChunked) { transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.MAKE_CHUNKED); }
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
@@ -73,14 +72,14 @@ public class PayloadRepackingTest {
                 referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder));
     }
 
-    private static void runPipelineAndValidate(JsonTransformer transformer,
+    private static void runPipelineAndValidate(IJsonTransformer transformer,
                                                String extraHeaders,
                                                List<String> stringParts,
                                                DefaultHttpHeaders expectedRequestHeaders,
                                                Function<StringBuilder,String> expectedOutputGenerator) throws Exception {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
                 new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>()));
-        var transformingHandler = new HttpJsonTransformingConsumer(transformer, testPacketCapture, "TEST");
+        var transformingHandler = new HttpJsonTransformingConsumer(transformer, testPacketCapture, null, "TEST");
 
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var headerString = "GET / HTTP/1.1\n" +
@@ -130,12 +129,12 @@ public class PayloadRepackingTest {
 
     @Test
     public void testJsonPayloadTransformation() throws Exception {
-        var transformerBuilder = JoltJsonTransformer.newBuilder();
+        var transformerBuilder = JsonJoltTransformer.newBuilder();
 
         ObjectMapper mapper = new ObjectMapper();
         var simpleTransform = mapper.readValue(simplePayloadTransform,
                 new TypeReference<LinkedHashMap<String, Object>>(){});
-        transformerBuilder.addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.PASS_THRU);
+        transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.PASS_THRU);
         transformerBuilder.addOperationObject(simpleTransform);
 
         var jsonPayload = "{\"top\": {\"A\": 1,\"B\": 2}}";

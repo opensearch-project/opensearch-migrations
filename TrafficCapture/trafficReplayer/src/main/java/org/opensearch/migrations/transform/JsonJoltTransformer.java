@@ -4,17 +4,17 @@ import com.bazaarvoice.jolt.Chainr;
 
 import java.util.List;
 
-public class JoltJsonTransformer implements JsonTransformer {
+public class JsonJoltTransformer implements IJsonTransformer {
 
     Chainr spec;
 
 
-    public JoltJsonTransformer(List<Object> joltOperationsSpecList) {
+    public JsonJoltTransformer(List<Object> joltOperationsSpecList) {
         this.spec = Chainr.fromSpec(joltOperationsSpecList);
     }
 
-    public static JoltJsonTransformBuilder newBuilder() {
-        return new JoltJsonTransformBuilder();
+    public static JsonJoltTransformBuilder newBuilder() {
+        return new JsonJoltTransformBuilder();
     }
 
     @Override

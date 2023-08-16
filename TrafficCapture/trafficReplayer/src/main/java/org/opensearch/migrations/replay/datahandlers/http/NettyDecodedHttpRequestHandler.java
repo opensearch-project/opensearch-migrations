@@ -2,41 +2,34 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter {
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD = 32;
-    /**
-     * This is stored as part of a closure for the pipeline continuation that will be triggered
-     * once it becomes apparent if we need to process the payload stream or if we can pass it
-     * through as is.
-     */
-    final IPacketFinalizingConsumer packetReceiver;
-    final JsonTransformer transformer;
+
+    final RequestPipelineOrchestrator requestPipelineOrchestrator;
+    final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
 
-    public NettyDecodedHttpRequestHandler(JsonTransformer transformer,
+    public NettyDecodedHttpRequestHandler(IJsonTransformer transformer,
                                           List<List<Integer>> chunkSizes,
-                                          IPacketFinalizingConsumer packetReceiver,
+                                          RequestPipelineOrchestrator requestPipelineOrchestrator,
                                           String diagnosticLabel) {
-        this.packetReceiver = packetReceiver;
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
+        this.requestPipelineOrchestrator = requestPipelineOrchestrator;
         this.diagnosticLabel = "[" + diagnosticLabel + "] ";
     }
 
@@ -55,16 +48,15 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
 
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));
-            var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, packetReceiver, diagnosticLabel);
             var pipeline = ctx.pipeline();
             try {
                 var httpJsonMessage = transform(transformer, parseHeadersIntoMessage(request));
-                handlePayloadNeutralTransformation(ctx, request, httpJsonMessage, pipelineOrchestrator);
+                handlePayloadNeutralTransformation(ctx, request, httpJsonMessage);
             } catch (PayloadNotLoadedException pnle) {
                 log.debug("The transforms for this message require payload manipulation, " +
                         "all content handlers are being loaded.");
                 // make a fresh message and its headers
-                pipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer);
+                requestPipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer);
                 ctx.fireChannelRead(parseHeadersIntoMessage(request));
             }
         } else if (msg instanceof HttpContent) {
@@ -77,7 +69,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private static HttpJsonMessageWithFaultingPayload transform(JsonTransformer transformer,
+    private static HttpJsonMessageWithFaultingPayload transform(IJsonTransformer transformer,
                                                                 HttpJsonMessageWithFaultingPayload httpJsonMessage) {
         var returnedObject = transformer.transformJson(httpJsonMessage);
         if (returnedObject != httpJsonMessage) {
@@ -89,8 +81,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
 
     private void handlePayloadNeutralTransformation(ChannelHandlerContext ctx,
                                                     HttpRequest request,
-                                                    HttpJsonMessageWithFaultingPayload httpJsonMessage,
-                                                    RequestPipelineOrchestrator pipelineOrchestrator)
+                                                    HttpJsonMessageWithFaultingPayload httpJsonMessage)
     {
         var pipeline = ctx.pipeline();
         if (headerFieldsAreIdentical(request, httpJsonMessage)) {
@@ -104,19 +95,19 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             log.info(diagnosticLabel + "There were changes to the headers that require the message to be reformatted " +
                     "through this pipeline but the content (payload) doesn't need to be transformed.  " +
                     "Content Handlers are not being added to the pipeline");
-            pipelineOrchestrator.addBaselineHandlers(pipeline);
+            requestPipelineOrchestrator.addBaselineHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
             RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
         } else {
             log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
                     "reformatted, adding Content Handlers to this pipeline.");
-            pipelineOrchestrator.addContentRepackingHandlers(pipeline);
+            requestPipelineOrchestrator.addContentRepackingHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
         }
     }
 
     private boolean headerFieldsAreIdentical(HttpRequest request, HttpJsonMessageWithFaultingPayload httpJsonMessage) {
-        if (!request.uri().equals(httpJsonMessage.uri()) ||
+        if (!request.uri().equals(httpJsonMessage.path()) ||
                 !request.method().toString().equals(httpJsonMessage.method())) {
             return false;
         }
@@ -130,7 +121,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
 
     private static HttpJsonMessageWithFaultingPayload parseHeadersIntoMessage(HttpRequest request) {
         var jsonMsg = new HttpJsonMessageWithFaultingPayload();
-        jsonMsg.setUri(request.uri().toString());
+        jsonMsg.setPath(request.uri().toString());
         jsonMsg.setMethod(request.method().toString());
         jsonMsg.setProtocol(request.protocolVersion().text());
         var headers = request.headers().entries().stream()

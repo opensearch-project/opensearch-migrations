@@ -11,11 +11,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.transform.CompositeJsonTransformer;
-import org.opensearch.migrations.transform.JoltJsonTransformer;
-import org.opensearch.migrations.transform.JsonTransformer;
-import org.opensearch.migrations.transform.SigV4ExcisionJsonTransformer;
-import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
+import org.opensearch.migrations.transform.IAuthTransformer;
+import org.opensearch.migrations.transform.JsonCompositeTransformer;
+import org.opensearch.migrations.transform.JsonJoltTransformer;
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.JsonTypeMappingTransformer;
 import org.slf4j.event.Level;
 
 import javax.net.ssl.SSLException;
@@ -43,25 +43,28 @@ public class TrafficReplayer {
 
     private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
 
-    public static JsonTransformer buildDefaultJsonTransformer(String newHostName,
-                                                              String authorizationHeader) {
-        var joltJsonTransformerBuilder = JoltJsonTransformer.newBuilder()
+    public static IJsonTransformer buildDefaultJsonTransformer(String newHostName,
+                                                               String authorizationHeader) {
+        var joltJsonTransformerBuilder = JsonJoltTransformer.newBuilder()
                 .addHostSwitchOperation(newHostName);
         if (authorizationHeader != null) {
             joltJsonTransformerBuilder = joltJsonTransformerBuilder.addAuthorizationOperation(authorizationHeader);
         }
         var joltJsonTransformer = joltJsonTransformerBuilder.build();
-        return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer(), new SigV4ExcisionJsonTransformer());
+        return new JsonCompositeTransformer(joltJsonTransformer, new JsonTypeMappingTransformer());
     }
 
     public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
             throws SSLException {
         this(serverUri, allowInsecureConnections,
-                buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader));
+                buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader),
+                null);
     }
     
-    public TrafficReplayer(URI serverUri, boolean allowInsecureConnections,
-                           JsonTransformer jsonTransformer)
+    public TrafficReplayer(URI serverUri,
+                           boolean allowInsecureConnections,
+                           IJsonTransformer jsonTransformer,
+                           IAuthTransformer authTransformer)
             throws SSLException
     {
         if (serverUri.getPort() < 0) {
@@ -73,7 +76,7 @@ public class TrafficReplayer {
         if (serverUri.getScheme() == null) {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
-        packetHandlerFactory = new PacketToTransformingHttpHandlerFactory(serverUri, jsonTransformer,
+        packetHandlerFactory = new PacketToTransformingHttpHandlerFactory(serverUri, jsonTransformer, authTransformer,
                 loadSslContext(serverUri, allowInsecureConnections));
     }
 
@@ -113,8 +116,16 @@ public class TrafficReplayer {
         @Parameter(required = false,
                 names = {"--auth-header-value"},
                 arity = 1,
-                description = "Value to use for the \"authorization\" header of each request")
+                description = "Value to use for the \"authorization\" header of each request " +
+                        "(cannot be used with --sigv4-auth-header)")
         String authHeaderValue;
+        @Parameter(required = false,
+                names = {"--sigv4-auth-header"},
+                arity = 0,
+                description = "Use AWS SigV4 to sign each request.  " +
+                        "DefaultCredentialsProvider is used to resolve credentials.  " +
+                        "(cannot be used with --auth-header-value)")
+        boolean useSigV4;
         @Parameter(required = false,
                 names = {"-o", "--output"},
                 arity=1,
