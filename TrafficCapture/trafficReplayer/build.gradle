@@ -61,6 +61,8 @@ dependencies {
 
     testImplementation project(':testUtilities')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
+    testImplementation 'org.mockito:mockito-core:4.6.1'
+    testImplementation 'org.mockito:mockito-junit-jupiter:4.6.1'
 }
 
 application {

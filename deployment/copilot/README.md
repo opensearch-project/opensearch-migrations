@@ -56,6 +56,13 @@ Requirements:
 * AWS credentials have been configured
 * CDK and Copilot CLIs have been installed
 
+#### How is an Authorization header set for requests from the Replayer to the target cluster?
+
+There is a level of precedence that will determine which or if any Auth header should be added to outgoing Replayer requests, which is listed below:
+1. `[--auth-header-value]` or `[--aws-auth-header-user, --aws-auth-header-secret]` are provided to the deployment script and will be used
+2. If the CDK deploys a target cluster with a configured FGAC user (see `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` CDK context options [here](../cdk/opensearch-service-migration/README.md)) or is running in demo mode (see `enableDemoAdmin` CDK context option), this username and secret key will be used for the Auth header
+3. Lastly, the Replayer will not use an explicit Auth header and instead use the same Auth header from the capture source cluster request, if one exists
+
 ### Deploy commands one at a time
 
 The following sections list out commands line-by-line for deploying this solution
@@ -79,9 +86,9 @@ export MIGRATION_PUBLIC_SUBNETS=subnet-123,subnet-124;
 export MIGRATION_PRIVATE_SUBNETS=subnet-125,subnet-126;
 export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
 ```
-Copilot will generate one additional export from these
+Additionally, if not using the deploy script, the following export is needed for the Replayer service:
 ```
-export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://vpc-domain-endpoint:443 --insecure --kafka-traffic-brokers b-2.migrationmskcluster:9098,b-1.migrationmskcluster:9098 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user admin --aws-auth-header-secret arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc" | nc traffic-comparator 9220
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user $MIGRATION_DOMAIN_USER_NAME --aws-auth-header-secret $MIGRATION_DOMAIN_USER_SECRET | nc traffic-comparator 9220"
 ```
 
 #### Setting up existing Copilot infrastructure

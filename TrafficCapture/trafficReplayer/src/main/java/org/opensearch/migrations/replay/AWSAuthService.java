@@ -11,8 +11,12 @@ public class AWSAuthService implements AutoCloseable {
 
     private final SecretCache secretCache;
 
+    public AWSAuthService(SecretCache secretCache) {
+        this.secretCache = secretCache;
+    }
+
     public AWSAuthService() {
-        secretCache = new SecretCache();
+        this(new SecretCache());
     }
 
     // SecretId here can be either the unique name of the secret or the secret ARN
