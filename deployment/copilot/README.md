@@ -75,7 +75,7 @@ The provided CDK will output export commands once deployed that can be ran on a 
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
 export MIGRATION_DOMAIN_USER_NAME=admin
-export MIGRATION_DOMAIN_USER_SECRET=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_DOMAIN_USER_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
@@ -88,7 +88,7 @@ export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafk
 ```
 Additionally, if not using the deploy script, the following export is needed for the Replayer service:
 ```
-export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user $MIGRATION_DOMAIN_USER_NAME --aws-auth-header-secret $MIGRATION_DOMAIN_USER_SECRET | nc traffic-comparator 9220"
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user $MIGRATION_DOMAIN_USER_NAME --aws-auth-header-secret $MIGRATION_DOMAIN_USER_SECRET_ARN | nc traffic-comparator 9220"
 ```
 
 #### Setting up existing Copilot infrastructure

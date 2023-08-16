@@ -181,7 +181,7 @@ elif [ -n "${REPLAY_AWS_AUTH_HEADER_USER}" ]; then
   auth_header_args="--aws-auth-header-user ${REPLAY_AWS_AUTH_HEADER_USER} --aws-auth-header-secret ${REPLAY_AWS_AUTH_HEADER_SECRET}"
 # Use CDK environment variables for a target cluster user if detected
 elif [ -n "${MIGRATION_DOMAIN_USER_NAME}" ]; then
-  auth_header_args="--aws-auth-header-user ${MIGRATION_DOMAIN_USER_NAME} --aws-auth-header-secret ${MIGRATION_DOMAIN_USER_SECRET}"
+  auth_header_args="--aws-auth-header-user ${MIGRATION_DOMAIN_USER_NAME} --aws-auth-header-secret ${MIGRATION_DOMAIN_USER_SECRET_ARN}"
 else
   echo "No auth header options detected for Replayer, defaulting to not specifying an explicit auth header"
 fi
