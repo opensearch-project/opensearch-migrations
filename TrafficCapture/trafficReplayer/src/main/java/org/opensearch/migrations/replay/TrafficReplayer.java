@@ -98,6 +98,24 @@ public class TrafficReplayer {
         return true;
     }
 
+    private static String validateAndReturnAuthHeader(String authHeaderValue, AWSAuthService awsAuthService, String awsAuthHeaderUser, String awsAuthHeaderSecret) {
+        if (authHeaderValue != null && (awsAuthHeaderUser != null || awsAuthHeaderSecret != null)) {
+            throw new ParameterException("[--auth-header-value] and [--aws-auth-header-user, --aws-auth-header-secret] are mutually exclusive " +
+                "sets of authorization header parameters");
+        }
+        if (authHeaderValue == null && awsAuthHeaderUser == null && awsAuthHeaderSecret == null) {
+            return null;
+        }
+        if (authHeaderValue != null) {
+            return authHeaderValue;
+        }
+
+        if (awsAuthHeaderUser == null || awsAuthHeaderSecret == null) {
+            throw new ParameterException("[--aws-auth-header-user, --aws-auth-header-secret] must both be provided if specified");
+        }
+        return awsAuthService.getBasicAuthHeaderFromSecret(awsAuthHeaderUser, awsAuthHeaderSecret);
+    }
+
     static class Parameters {
         @Parameter(required = true,
                 arity = 1,
@@ -111,8 +129,18 @@ public class TrafficReplayer {
         @Parameter(required = false,
                 names = {"--auth-header-value"},
                 arity = 1,
-                description = "Value to use for the \"authorization\" header of each request")
+                description = "Prepared value to use for the \"authorization\" header of each request")
         String authHeaderValue;
+        @Parameter(required = false,
+            names = {"--aws-auth-header-user"},
+            arity = 1,
+            description = "Plaintext username to use for the username section of a constructed \"authorization\" header for each request")
+        String awsAuthHeaderUser;
+        @Parameter(required = false,
+            names = {"--aws-auth-header-secret"},
+            arity = 1,
+            description = "Secret ARN or Secret name from AWS Secrets Manager to use for the password section of a constructed \"authorization\" header for each request")
+        String awsAuthHeaderSecret;
         @Parameter(required = false,
                 names = {"-o", "--output"},
                 arity=1,
@@ -185,7 +213,14 @@ public class TrafficReplayer {
             return;
         }
 
-        var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
+        String authHeader;
+        // This one time retrieval does not warrant a need for our underlying AWSAuthService cache, however in the future it is
+        // likely this structure will change, and we will have other needs for this
+        try (AWSAuthService awsAuthService = params.awsAuthHeaderSecret != null ? new AWSAuthService() : null) {
+            authHeader = validateAndReturnAuthHeader(params.authHeaderValue, awsAuthService, params.awsAuthHeaderUser, params.awsAuthHeaderSecret);
+        }
+
+        var tr = new TrafficReplayer(uri, authHeader, params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {

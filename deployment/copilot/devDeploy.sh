@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Automation script to deploy the migration solution pipeline to AWS for development use case. The current requirement
 # for use is having valid AWS credentials available to the environment
@@ -18,13 +18,16 @@ usage() {
   echo "Deploy migration solution infrastructure composed of resources deployed by CDK and Copilot"
   echo ""
   echo "Options:"
-  echo "  --skip-bootstrap        Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images."
-  echo "  --skip-copilot-init     Skip one-time Copilot initialization of app, environments, and services"
-  echo "  --copilot-app-name      [string, default: migration-copilot] Specify the Copilot application name to use for deployment"
-  echo "  --destroy-env           Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state."
-  echo "  --destroy-all-copilot   Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions."
-  echo "  -r, --region            [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources."
-  echo "  -s, --stage             [string, default: dev] Specify the stage name to associate with the deployed resources"
+  echo "  --skip-bootstrap          Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images."
+  echo "  --skip-copilot-init       Skip one-time Copilot initialization of app, environments, and services"
+  echo "  --copilot-app-name        [string, default: migration-copilot] Specify the Copilot application name to use for deployment"
+  echo "  --destroy-env             Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state."
+  echo "  --destroy-all-copilot     Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions."
+  echo "  --auth-header-value       [string, default: null] Prepared \"authorization\" header to provide the Replayer, i.e. Basic YWRtaW46QWRtaW4xMjMh. This will override a CDK configured FGAC master user auth header if setup"
+  echo "  --aws-auth-header-user    [string, default: null] Plaintext username to provide the Replayer to construct an \"authorization\" header. Used in conjunction with --aws-auth-header-secret. This will override a CDK configured FGAC master user auth header if setup"
+  echo "  --aws-auth-header-secret  [string, default: null] Secret ARN or Secret name from AWS Secrets Manager to provide the Replayer to construct an \"authorization\" header. Used in conjunction with --aws-auth-header-user. This will override a CDK configured FGAC master user auth header if setup"
+  echo "  -r, --region              [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources."
+  echo "  -s, --stage               [string, default: dev] Specify the stage name to associate with the deployed resources"
   exit 1
 }
 
@@ -35,6 +38,10 @@ DESTROY_ENV=false
 DESTROY_ALL_COPILOT=false
 REGION=us-east-1
 STAGE=dev
+
+REPLAY_AUTH_HEADER=""
+REPLAY_AWS_AUTH_HEADER_USER=""
+REPLAY_AWS_AUTH_HEADER_SECRET=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --skip-bootstrap)
@@ -58,6 +65,21 @@ while [[ $# -gt 0 ]]; do
       DESTROY_ALL_COPILOT=true
       shift # past argument
       ;;
+    --auth-header-value)
+      REPLAY_AUTH_HEADER="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --aws-auth-header-user)
+      REPLAY_AWS_AUTH_HEADER_USER="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --aws-auth-header-secret)
+      REPLAY_AWS_AUTH_HEADER_SECRET="$2"
+      shift # past argument
+      shift # past value
+      ;;
     -r|--region)
       REGION="$2"
       shift # past argument
@@ -80,6 +102,16 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "${REPLAY_AUTH_HEADER}" && ( -n "${REPLAY_AWS_AUTH_HEADER_USER}" || -n "${REPLAY_AWS_AUTH_HEADER_SECRET}" ) ]]; then
+    echo "[--auth-header-value] and [--aws-auth-header-user, --aws-auth-header-secret] are mutually exclusive sets of authorization header parameters"
+    exit 1
+fi
+
+if [[ ( -n "${REPLAY_AWS_AUTH_HEADER_USER}" || -n "${REPLAY_AWS_AUTH_HEADER_SECRET}" ) && (  -z "${REPLAY_AWS_AUTH_HEADER_USER}" || -z "${REPLAY_AWS_AUTH_HEADER_SECRET}" ) ]]; then
+    echo "[--aws-auth-header-user, --aws-auth-header-secret] must both be provided if specified"
+    exit 1
+fi
 
 COPILOT_DEPLOYMENT_STAGE=$STAGE
 export AWS_DEFAULT_REGION=$REGION
@@ -139,6 +171,25 @@ printf "The following exports were added from CDK:\n%s\n" "$found_exports"
 
 # Future enhancement needed here to make our Copilot deployment able to be reran without error even if no changes are deployed
 # === Copilot Deployment ===
+
+# Construct Replayer image docker command
+auth_header_args=""
+# Use arguments passed to script to override default auth header values
+if [ -n "${REPLAY_AUTH_HEADER}" ]; then
+  auth_header_args="--auth-header-value ${REPLAY_AUTH_HEADER}"
+elif [ -n "${REPLAY_AWS_AUTH_HEADER_USER}" ]; then
+  auth_header_args="--aws-auth-header-user ${REPLAY_AWS_AUTH_HEADER_USER} --aws-auth-header-secret ${REPLAY_AWS_AUTH_HEADER_SECRET}"
+# Use CDK environment variables for a target cluster user if detected
+elif [ -n "${MIGRATION_DOMAIN_USER_NAME}" ]; then
+  auth_header_args="--aws-auth-header-user ${MIGRATION_DOMAIN_USER_NAME} --aws-auth-header-secret ${MIGRATION_DOMAIN_USER_SECRET_ARN}"
+else
+  echo "No auth header options detected for Replayer, defaulting to not specifying an explicit auth header"
+fi
+replay_command_base="/bin/sh -c \"/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --kafka-traffic-brokers ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth "
+replay_command_end=" | nc traffic-comparator 9220\""
+replay_command="${replay_command_base}${auth_header_args}${replay_command_end}"
+echo "Constructed replay command: ${replay_command}"
+export MIGRATION_REPLAYER_COMMAND="${replay_command}"
 
 cd ../../copilot
 
