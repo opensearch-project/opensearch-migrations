@@ -165,8 +165,8 @@ fi
 cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdkOutput.json --require-approval never --concurrency 3
 
 # Gather CDK output which includes export commands needed by Copilot, and make them available to the environment
-found_exports=$(grep -o "export[^\"]" cdkOutput.json)
-eval "$(grep -o "export[^\"]" cdkOutput.json)"
+found_exports=$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)
+eval "$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json)"
 printf "The following exports were added from CDK:\n%s\n" "$found_exports"
 
 # Future enhancement needed here to make our Copilot deployment able to be reran without error even if no changes are deployed
@@ -186,7 +186,7 @@ else
   echo "No auth header options detected for Replayer, defaulting to not specifying an explicit auth header"
 fi
 replay_command_base="/bin/sh -c \"/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --kafka-traffic-brokers ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth "
-replay_command_end="\" | nc traffic-comparator 9220"
+replay_command_end=" | nc traffic-comparator 9220\""
 replay_command="${replay_command_base}${auth_header_args}${replay_command_end}"
 echo "Constructed replay command: ${replay_command}"
 export MIGRATION_REPLAYER_COMMAND="${replay_command}"

@@ -39,13 +39,16 @@ Options:
 Deploy migration solution infrastructure composed of resources deployed by CDK and Copilot
 
 Options:
-  --skip-bootstrap        Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
-  --skip-copilot-init     Skip one-time Copilot initialization of app, environments, and services
-  --copilot-app-name      [string, default: migration-copilot] Specify the Copilot application name to use for deployment
-  --destroy-region        Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given region and return to a clean state.
-  --destroy-all-copilot   Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
-  -r, --region            [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
-  -s, --stage             [string, default: dev] Specify the stage name to associate with the deployed resources
+  --skip-bootstrap          Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
+  --skip-copilot-init       Skip one-time Copilot initialization of app, environments, and services
+  --copilot-app-name        [string, default: migration-copilot] Specify the Copilot application name to use for deployment
+  --destroy-env             Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
+  --destroy-all-copilot     Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
+  --auth-header-value       [string, default: null] Prepared "authorization" header to provide the Replayer, i.e. Basic YWRtaW46QWRtaW4xMjMh. This will override a CDK configured FGAC master user auth header if setup
+  --aws-auth-header-user    [string, default: null] Plaintext username to provide the Replayer to construct an "authorization" header. Used in conjunction with --aws-auth-header-secret. This will override a CDK configured FGAC master user auth header if setup
+  --aws-auth-header-secret  [string, default: null] Secret ARN or Secret name from AWS Secrets Manager to provide the Replayer to construct an "authorization" header. Used in conjunction with --aws-auth-header-user. This will override a CDK configured FGAC master user auth header if setup
+  -r, --region              [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
+  -s, --stage               [string, default: dev] Specify the stage name to associate with the deployed resources
 
 ```
 
@@ -60,10 +63,12 @@ The following sections list out commands line-by-line for deploying this solutio
 #### Importing values from CDK
 The typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) that Copilot requires, and then deploy the desired Copilot services. Documentation for setting up and deploying these resources can be found in the CDK [README](../cdk/opensearch-service-migration/README.md).
 
-The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
+The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses i.e.:
 ```
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_DOMAIN_USER_NAME=admin
+export MIGRATION_DOMAIN_USER_SECRET=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
@@ -73,6 +78,10 @@ export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=sg-124
 export MIGRATION_PUBLIC_SUBNETS=subnet-123,subnet-124;
 export MIGRATION_PRIVATE_SUBNETS=subnet-125,subnet-126;
 export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
+```
+Copilot will generate one additional export from these
+```
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://vpc-domain-endpoint:443 --insecure --kafka-traffic-brokers b-2.migrationmskcluster:9098,b-1.migrationmskcluster:9098 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user admin --aws-auth-header-secret arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc" | nc traffic-comparator 9220
 ```
 
 #### Setting up existing Copilot infrastructure

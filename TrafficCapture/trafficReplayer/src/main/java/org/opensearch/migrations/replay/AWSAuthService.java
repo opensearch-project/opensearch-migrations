@@ -29,9 +29,7 @@ public class AWSAuthService implements AutoCloseable {
      */
     public String getBasicAuthHeaderFromSecret(String username, String secretId) {
         String authHeaderString = username + ":" + getSecret(secretId);
-        String authHeaderBase64 = "Basic " + Base64.getEncoder().encodeToString(authHeaderString.getBytes(Charset.defaultCharset()));
-        log.error("Header: " + authHeaderBase64);
-        return authHeaderBase64;
+        return "Basic " + Base64.getEncoder().encodeToString(authHeaderString.getBytes(Charset.defaultCharset()));
     }
 
     @Override
