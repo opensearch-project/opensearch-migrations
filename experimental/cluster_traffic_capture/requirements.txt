@@ -1,2 +1,2 @@
--e ../experimental/cluster_migration_core
+-e ../cluster_migration_core
 -e .

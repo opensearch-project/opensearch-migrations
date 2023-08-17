@@ -3,10 +3,10 @@ name: python-tests
 on:
   push:
     paths:
-      - 'cluster_migration_core/**.py'
+      - 'experimental/cluster_migration_core/**.py'
   pull_request:
     paths:
-      - 'cluster_migration_core/**.py'
+      - 'experimental/cluster_migration_core/**.py'
 
 jobs:
   test-linux:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: ./cluster_migration_core
+        working-directory: ./experimental/cluster_migration_core
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -30,8 +30,8 @@ jobs:
           python -m pip install -r requirements.txt coverage pytest-cov
       - name: Run Tests with Coverage
         run: |
-          python -m pytest unit_tests/ --cov=cluster_migration_core --cov-report=xml --cov-branch
+          python -m pytest unit_tests/ --cov=experimental/cluster_migration_core --cov-report=xml --cov-branch
       - name: Upload Coverage Report
         uses: codecov/codecov-action@v3
         with:
-          files: cluster_migration_core/coverage.xml
+          files: experimental/cluster_migration_core/coverage.xml
