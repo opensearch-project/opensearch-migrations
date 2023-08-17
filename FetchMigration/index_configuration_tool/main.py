@@ -6,6 +6,8 @@ import index_operations
 import utils
 
 # Constants
+from endpoint_info import EndpointInfo
+
 SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
 SOURCE_KEY = "source"
 SINK_KEY = "sink"
@@ -36,19 +38,14 @@ def get_auth(input_data: dict) -> Optional[tuple]:
         return input_data[USER_KEY], input_data[PWD_KEY]
 
 
-def get_endpoint_info(plugin_config: dict) -> tuple:
+def get_endpoint_info(plugin_config: dict) -> EndpointInfo:
     # "hosts" can be a simple string, or an array of hosts for Logstash to hit.
     # This tool needs one accessible host, so we pick the first entry in the latter case.
-    endpoint = plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
-    endpoint += "/"
-    return endpoint, get_auth(plugin_config)
-
-
-def fetch_all_indices_by_plugin(plugin_config: dict) -> dict:
-    endpoint, auth_tuple = get_endpoint_info(plugin_config)
+    url = plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
+    url += "/"
     # verify boolean will be the inverse of the insecure SSL key, if present
     should_verify = not is_insecure(plugin_config)
-    return index_operations.fetch_all_indices(endpoint, auth_tuple, should_verify)
+    return EndpointInfo(url, get_auth(plugin_config), should_verify)
 
 
 def check_supported_endpoint(config: dict) -> Optional[tuple]:
@@ -112,7 +109,6 @@ def write_output(yaml_data: dict, new_indices: set, output_path: str):
     source_config[INDICES_KEY] = source_indices
     with open(output_path, 'w') as out_file:
         yaml.dump(yaml_data, out_file)
-    print("Wrote output YAML pipeline to: " + output_path)
 
 
 # Computes differences in indices between source and target.
@@ -138,44 +134,64 @@ def get_index_differences(source: dict, target: dict) -> tuple[set, set, set]:
 
 # The order of data in the tuple is:
 # (indices to create), (identical indices), (indices with conflicts)
-def print_report(index_differences: tuple[set, set, set]):  # pragma no cover
+def print_report(index_differences: tuple[set, set, set], count: int):  # pragma no cover
     print("Identical indices in the target cluster (no changes will be made): " +
           utils.string_from_set(index_differences[1]))
     print("Indices in target cluster with conflicting settings/mappings: " +
           utils.string_from_set(index_differences[2]))
     print("Indices to create: " + utils.string_from_set(index_differences[0]))
+    print("Total documents to be moved: " + str(count))
+
+
+def dump_count_and_indices(count: int, indices: set):  # pragma no cover
+    print(count)
+    for index_name in indices:
+        print(index_name)
+
+
+def compute_endpoint_and_fetch_indices(config: dict, key: str) -> tuple[EndpointInfo, dict]:
+    endpoint = get_supported_endpoint(config, key)
+    # Endpoint is a tuple of (type, config)
+    endpoint_info = get_endpoint_info(endpoint[1])
+    indices = index_operations.fetch_all_indices(endpoint_info)
+    return endpoint_info, indices
 
 
 def run(args: argparse.Namespace) -> None:
+    # Sanity check
+    if not args.report and len(args.output_file) == 0:
+        raise ValueError("No output file specified")
     # Parse and validate pipelines YAML file
     with open(args.config_file_path, 'r') as pipeline_file:
         dp_config = yaml.safe_load(pipeline_file)
     # We expect the Data Prepper pipeline to only have a single top-level value
     pipeline_config = next(iter(dp_config.values()))
     validate_pipeline_config(pipeline_config)
-    # Endpoint is a tuple of (type, config)
-    endpoint = get_supported_endpoint(pipeline_config, SOURCE_KEY)
-    # Fetch all indices from source cluster
-    source_indices = fetch_all_indices_by_plugin(endpoint[1])
-    # Fetch all indices from target cluster
-    # TODO Refactor this to avoid duplication with fetch_all_indices_by_plugin
-    endpoint = get_supported_endpoint(pipeline_config, SINK_KEY)
-    target_endpoint, target_auth = get_endpoint_info(endpoint[1])
-    target_indices = index_operations.fetch_all_indices(target_endpoint, target_auth)
+    # Fetch EndpointInfo and indices
+    source_endpoint_info, source_indices = compute_endpoint_and_fetch_indices(pipeline_config, SOURCE_KEY)
+    target_endpoint_info, target_indices = compute_endpoint_and_fetch_indices(pipeline_config, SINK_KEY)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
-    if args.report:
-        print_report(diff)
     # The first element in the tuple is the set of indices to create
     indices_to_create = diff[0]
+    doc_count = 0
     if indices_to_create:
+        doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)
+    if args.report:
+        print_report(diff, doc_count)
+    if indices_to_create:
+        if not args.report:
+            dump_count_and_indices(doc_count, indices_to_create)
         # Write output YAML
-        write_output(dp_config, indices_to_create, args.output_file)
+        if len(args.output_file) > 0:
+            write_output(dp_config, indices_to_create, args.output_file)
+            if args.report:
+                print("Wrote output YAML pipeline to: " + args.output_file)
         if not args.dryrun:
             index_data = dict()
             for index_name in indices_to_create:
                 index_data[index_name] = source_indices[index_name]
-            index_operations.create_indices(index_data, target_endpoint, target_auth)
+            index_operations.create_indices(index_data, target_endpoint_info)
 
 
 if __name__ == '__main__':  # pragma no cover
@@ -191,20 +207,20 @@ if __name__ == '__main__':  # pragma no cover
         "along with indices that are identical or have conflicting settings/mappings.",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    # Positional, required arguments
+    # Required positional argument
     arg_parser.add_argument(
         "config_file_path",
         help="Path to the Data Prepper pipeline YAML file to parse for source and target endpoint information"
     )
+    # Optional positional argument
     arg_parser.add_argument(
         "output_file",
+        nargs='?', default="",
         help="Output path for the Data Prepper pipeline YAML file that will be generated"
     )
-    # Optional arguments
+    # Flags
     arg_parser.add_argument("--report", "-r", action="store_true",
                             help="Print a report of the index differences")
     arg_parser.add_argument("--dryrun", action="store_true",
                             help="Skips the actual creation of indices on the target cluster")
-    print("\n##### Starting index configuration tool... #####\n")
     run(arg_parser.parse_args())
-    print("\n##### Index configuration tool has completed! #####\n")

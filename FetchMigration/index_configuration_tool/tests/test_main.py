@@ -88,25 +88,26 @@ class TestMain(unittest.TestCase):
         # Simple base case
         test_config = create_plugin_config([host_input])
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertIsNone(result[1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertIsNone(result.auth)
+        self.assertTrue(result.verify_ssl)
         # Invalid auth config
         test_config = create_plugin_config([host_input], test_user)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertIsNone(result[1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertIsNone(result.auth)
         # Valid auth config
         test_config = create_plugin_config([host_input], user=test_user, password=test_password)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertEqual(test_user, result[1][0])
-        self.assertEqual(test_password, result[1][1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertEqual(test_user, result.auth[0])
+        self.assertEqual(test_password, result.auth[1])
         # Array of hosts uses the first entry
         test_config = create_plugin_config([host_input, "other_host"], test_user, test_password)
         result = main.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result[0])
-        self.assertEqual(test_user, result[1][0])
-        self.assertEqual(test_password, result[1][1])
+        self.assertEqual(expected_endpoint, result.url)
+        self.assertEqual(test_user, result.auth[0])
+        self.assertEqual(test_password, result.auth[1])
 
     def test_get_index_differences_empty(self):
         # Base case should return an empty list
@@ -225,17 +226,18 @@ class TestMain(unittest.TestCase):
         test_config = next(iter(self.loaded_pipeline_config.values()))
         main.validate_pipeline_config(test_config)
 
+    @patch('index_operations.doc_count')
     @patch('main.write_output')
     @patch('main.print_report')
     @patch('index_operations.create_indices')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_report(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock,
-                        mock_print_report: MagicMock, mock_write_output: MagicMock):
+                        mock_print_report: MagicMock, mock_write_output: MagicMock, mock_doc_count: MagicMock):
+        mock_doc_count.return_value = 1
         index_to_create = test_constants.INDEX3_NAME
         index_with_conflict = test_constants.INDEX2_NAME
         index_exact_match = test_constants.INDEX1_NAME
-        expected_output_path = "dummy"
         # Set up expected arguments to mocks so we can verify
         expected_create_payload = {index_to_create: test_constants.BASE_INDICES_DATA[index_to_create]}
         # Print report accepts a tuple. The elements of the tuple
@@ -252,21 +254,26 @@ class TestMain(unittest.TestCase):
         # Set up test input
         test_input = argparse.Namespace()
         test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        test_input.output_file = expected_output_path
+        # Default value for missing output file
+        test_input.output_file = ""
         test_input.report = True
         test_input.dryrun = False
         main.run(test_input)
-        mock_create_indices.assert_called_once_with(expected_create_payload, test_constants.TARGET_ENDPOINT, ANY)
-        mock_print_report.assert_called_once_with(expected_diff)
-        mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
+        mock_create_indices.assert_called_once_with(expected_create_payload, ANY)
+        mock_doc_count.assert_called()
+        mock_print_report.assert_called_once_with(expected_diff, 1)
+        mock_write_output.assert_not_called()
 
+    @patch('index_operations.doc_count')
+    @patch('main.dump_count_and_indices')
     @patch('main.print_report')
     @patch('main.write_output')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
-                        mock_print_report: MagicMock):
+                        mock_print_report: MagicMock, mock_dump: MagicMock, mock_doc_count: MagicMock):
         index_to_create = test_constants.INDEX1_NAME
+        mock_doc_count.return_value = 1
         expected_output_path = "dummy"
         # Create mock data for indices on target
         target_indices_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
@@ -281,8 +288,10 @@ class TestMain(unittest.TestCase):
         test_input.report = False
         main.run(test_input)
         mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
-        # Report should not be printed
+        mock_doc_count.assert_called()
+        # Report should not be printed, but dump should be invoked
         mock_print_report.assert_not_called()
+        mock_dump.assert_called_once_with(mock_doc_count.return_value, {index_to_create})
 
     @patch('yaml.dump')
     def test_write_output(self, mock_dump: MagicMock):
@@ -310,6 +319,15 @@ class TestMain(unittest.TestCase):
             main.write_output(test_input, {index_to_create}, expected_output_path)
             mock_open.assert_called_once_with(expected_output_path, 'w')
             mock_dump.assert_called_once_with(expected_output_data, ANY)
+
+    def test_missing_output_file_non_report(self):
+        # Set up test input
+        test_input = argparse.Namespace()
+        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
+        # Default value for missing output file
+        test_input.output_file = ""
+        test_input.report = False
+        self.assertRaises(ValueError, main.run, test_input)
 
 
 if __name__ == '__main__':
