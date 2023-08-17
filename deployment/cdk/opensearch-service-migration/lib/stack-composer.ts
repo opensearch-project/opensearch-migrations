@@ -60,9 +60,9 @@ export class StackComposer {
         const mskARN = getContextForType('mskARN', 'string')
         const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
         const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
-        const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
-        const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
+        const dpPipelineTemplatePath = getContextForType('dpPipelineTemplatePath', 'string')
+        const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
 
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
@@ -195,7 +195,7 @@ export class StackComposer {
         if (historicalCaptureEnabled && networkStack) {
             const historicalCaptureStack = new HistoricalCaptureStack(scope, "historicalCaptureStack", {
                 vpc: networkStack.vpc,
-                logstashConfigFilePath: logstashConfigFilePath,
+                dpPipelineTemplatePath: dpPipelineTemplatePath,
                 sourceEndpoint: sourceClusterEndpoint,
                 targetEndpoint: opensearchStack.domainEndpoint,
                 stackName: `OSServiceHistoricalCDKStack-${stage}-${region}`,

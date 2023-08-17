@@ -4,5 +4,6 @@
   "tlsSecurityPolicy": "TLS_1_2",
   "enforceHTTPS": true,
   "nodeToNodeEncryptionEnabled": true,
-  "encryptionAtRestEnabled": true
+  "encryptionAtRestEnabled": true,
+  "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
 }
