@@ -5,7 +5,7 @@ import io.netty.handler.ssl.SslContext;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
-import org.opensearch.migrations.transform.IAuthTransformer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.net.URI;
@@ -14,16 +14,16 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
     private final NioEventLoopGroup eventLoopGroup;
     private final URI serverUri;
     private final IJsonTransformer jsonTransformer;
-    private final IAuthTransformer authTransformer;
+    private final IAuthTransformerFactory authTransformerFactory;
     private final SslContext sslContext;
 
     public PacketToTransformingHttpHandlerFactory(URI serverUri,
                                                   IJsonTransformer jsonTransformer,
-                                                  IAuthTransformer authTransformer,
+                                                  IAuthTransformerFactory authTransformerFactory,
                                                   SslContext sslContext) {
         this.serverUri = serverUri;
         this.jsonTransformer = jsonTransformer;
-        this.authTransformer = authTransformer;
+        this.authTransformerFactory = authTransformerFactory;
         this.sslContext = sslContext;
         this.eventLoopGroup = new NioEventLoopGroup();
     }
@@ -33,9 +33,10 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
     }
 
     @Override
-    public IPacketFinalizingConsumer<AggregatedTransformedResponse> create(String diagnosticLabel) {
+    public IPacketFinalizingConsumer<AggregatedTransformedResponse> create(RawPackets responsePackets,
+                                                                           String diagnosticLabel) {
         return new HttpJsonTransformingConsumer(jsonTransformer, createNettyHandler(diagnosticLabel),
-                authTransformer, diagnosticLabel);
+                authTransformerFactory, diagnosticLabel);
     }
 
     public void stopGroup() {

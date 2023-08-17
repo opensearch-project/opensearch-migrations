@@ -40,7 +40,6 @@ public class JsonJoltTransformBuilder {
         ADD_GZIP(CANNED_OPERATION.ADD_GZIP.joltOperationTransformName),
         MAKE_CHUNKED(CANNED_OPERATION.MAKE_CHUNKED.joltOperationTransformName),
         PASS_THRU(CANNED_OPERATION.PASS_THRU.joltOperationTransformName),
-        ADD_ADMIN_AUTH("addAdminAuth", 1),
         HOST_SWITCH("hostSwitch", 1);
 
         private final String value;
@@ -99,10 +98,6 @@ public class JsonJoltTransformBuilder {
 
     public JsonJoltTransformBuilder addHostSwitchOperation(String hostname) {
         return addOperationObject(getOperationWithSubstitutions(OPERATION.HOST_SWITCH, hostname));
-    }
-
-    public JsonJoltTransformBuilder addAuthorizationOperation(String value) {
-        return addOperationObject(getOperationWithSubstitutions(OPERATION.ADD_ADMIN_AUTH, value));
     }
 
     public JsonJoltTransformBuilder addCannedOperation(CANNED_OPERATION operation) {

@@ -6,9 +6,11 @@ import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.transform.IAuthTransformer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.util.ArrayList;
@@ -39,15 +41,17 @@ public class RequestPipelineOrchestrator {
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer packetReceiver;
     final String diagnosticLabel;
-    final IAuthTransformer authTransfomer;
+    @Getter
+    final IAuthTransformerFactory authTransfomerFactory;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
                                        IPacketFinalizingConsumer packetReceiver,
-                                       IAuthTransformer authTransfomer,
+                                       IAuthTransformerFactory incomingAuthTransformerFactory,
                                        String diagnosticLabel) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
-        this.authTransfomer = authTransfomer;
+        this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
+                IAuthTransformerFactory.NullAuthTransformerFactory.instance;
         this.diagnosticLabel = diagnosticLabel;
     }
 
@@ -65,12 +69,15 @@ public class RequestPipelineOrchestrator {
         }
     }
 
-    void addContentRepackingHandlers(ChannelPipeline pipeline) {
-        addContentParsingHandlers(pipeline, null);
+    void addContentRepackingHandlers(ChannelPipeline pipeline,
+                                     IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
+        addContentParsingHandlers(pipeline, null, authTransfomer);
     }
 
-    void addJsonParsingHandlers(ChannelPipeline pipeline, IJsonTransformer transformer) {
-        addContentParsingHandlers(pipeline, transformer);
+    void addJsonParsingHandlers(ChannelPipeline pipeline,
+                                IJsonTransformer transformer,
+                                IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
+        addContentParsingHandlers(pipeline, transformer, authTransfomer);
     }
 
     void addInitialHandlers(ChannelPipeline pipeline, IJsonTransformer transformer) {
@@ -87,11 +94,13 @@ public class RequestPipelineOrchestrator {
         // Note3: ByteBufs will be sent through when there were pending bytes left to be parsed by the
         //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
         //        NettyDecodedHttpRequestHandler is removed.
-        pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, this, diagnosticLabel));
+        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler(transformer, chunkSizes, this, diagnosticLabel));
         addLoggingHandler(pipeline, "B");
     }
 
-    void addContentParsingHandlers(ChannelPipeline pipeline, IJsonTransformer transformer) {
+    void addContentParsingHandlers(ChannelPipeline pipeline,
+                                   IJsonTransformer transformer,
+                                   IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
         log.debug("Adding content parsing handlers to pipeline");
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
@@ -111,7 +120,7 @@ public class RequestPipelineOrchestrator {
             addLoggingHandler(pipeline, "F");
         }
         if (authTransfomer != null) {
-            pipeline.addLast(new NettyJsonContentAwsSigner());
+            pipeline.addLast(new NettyJsonContentAuthSigner(authTransfomer));
         }
         // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks

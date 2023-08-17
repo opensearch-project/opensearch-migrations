@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.transform.IAuthTransformer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.nio.charset.StandardCharsets;
@@ -58,14 +59,14 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
 
     public HttpJsonTransformingConsumer(IJsonTransformer transformer,
                                         IPacketFinalizingConsumer transformedPacketReceiver,
-                                        IAuthTransformer authTransformer,
+                                        IAuthTransformerFactory authTransformerFactory,
                                         String diagnosticLabel) {
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
         pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver,
-                authTransformer, diagnosticLabel);
+                authTransformerFactory, diagnosticLabel);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
     }
 

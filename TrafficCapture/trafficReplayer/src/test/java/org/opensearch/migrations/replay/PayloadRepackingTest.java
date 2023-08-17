@@ -41,7 +41,7 @@ public class PayloadRepackingTest {
     public static Arguments[] makeCombinations() {
         List<Object> allBools = List.of(true, false);
         Stream<List<Object>> seedLists = allBools.stream().map(b->List.of(b));
-        return expandList(expandList(seedLists, allBools), allBools)
+        return expandList(seedLists, allBools)
                .map(list->Arguments.of(list.toArray(Object[]::new)))
                 .toArray(Arguments[]::new);
     }

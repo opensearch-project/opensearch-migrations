@@ -8,15 +8,19 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.IAuthTransformer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonTypeMappingTransformer;
+import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
@@ -41,30 +45,29 @@ import java.util.stream.Stream;
 @Slf4j
 public class TrafficReplayer {
 
+    public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
 
-    public static IJsonTransformer buildDefaultJsonTransformer(String newHostName,
-                                                               String authorizationHeader) {
+    public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
         var joltJsonTransformerBuilder = JsonJoltTransformer.newBuilder()
                 .addHostSwitchOperation(newHostName);
-        if (authorizationHeader != null) {
-            joltJsonTransformerBuilder = joltJsonTransformerBuilder.addAuthorizationOperation(authorizationHeader);
-        }
         var joltJsonTransformer = joltJsonTransformerBuilder.build();
         return new JsonCompositeTransformer(joltJsonTransformer, new JsonTypeMappingTransformer());
     }
 
-    public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
+    public TrafficReplayer(URI serverUri,
+                           IAuthTransformerFactory authTransformerFactory,
+                           boolean allowInsecureConnections)
             throws SSLException {
         this(serverUri, allowInsecureConnections,
-                buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader),
+                buildDefaultJsonTransformer(serverUri.getHost()),
                 null);
     }
     
     public TrafficReplayer(URI serverUri,
                            boolean allowInsecureConnections,
                            IJsonTransformer jsonTransformer,
-                           IAuthTransformer authTransformer)
+                           IAuthTransformerFactory authTransformer)
             throws SSLException
     {
         if (serverUri.getPort() < 0) {
@@ -117,15 +120,16 @@ public class TrafficReplayer {
                 names = {"--auth-header-value"},
                 arity = 1,
                 description = "Value to use for the \"authorization\" header of each request " +
-                        "(cannot be used with --sigv4-auth-header)")
+                        "(cannot be used with " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG + ")")
         String authHeaderValue;
         @Parameter(required = false,
-                names = {"--sigv4-auth-header"},
+                names = {SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG},
                 arity = 0,
-                description = "Use AWS SigV4 to sign each request.  " +
+                description = "Use AWS SigV4 to sign each request with the specified service name and region.  " +
+                        "(e.g. es,us-east-1)  " +
                         "DefaultCredentialsProvider is used to resolve credentials.  " +
                         "(cannot be used with --auth-header-value)")
-        boolean useSigV4;
+        String useSigV4ServiceAndRegion;
         @Parameter(required = false,
                 names = {"-o", "--output"},
                 arity=1,
@@ -198,7 +202,7 @@ public class TrafficReplayer {
             return;
         }
 
-        var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
+        var tr = new TrafficReplayer(uri, buildAuthTransformerFactory(params), params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
@@ -208,6 +212,34 @@ public class TrafficReplayer {
                     log.info("reached the end of the ingestion output stream");
                 }
             }
+        }
+    }
+
+    private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
+        if (params.authHeaderValue != null && params.useSigV4ServiceAndRegion != null) {
+            throw new RuntimeException("Cannot specify --auth-header-value AND " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG);
+        }
+        if (params.authHeaderValue != null) {
+            var authHeaderValue = params.authHeaderValue;
+            return new StaticAuthTransformerFactory(authHeaderValue);
+        } else if (params.useSigV4ServiceAndRegion != null) {
+            var serviceAndRegion = params.useSigV4ServiceAndRegion.split(",");
+            if (serviceAndRegion.length != 2) {
+                throw new RuntimeException("Format for " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG + " must be " +
+                        "'SERVICE_NAME,REGION', such as 'es,us-east-1'");
+            }
+            String serviceName = serviceAndRegion[0];
+            String region = serviceAndRegion[1];
+            DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
+
+            return new IAuthTransformerFactory() {
+                @Override
+                public IAuthTransformer getAuthTransformer(IHttpMessage httpMessage) {
+                    return new SigV4Signer(defaultCredentialsProvider, serviceName, region);
+                }
+            };
+        } else {
+            return null;
         }
     }
 
@@ -423,11 +455,10 @@ public class TrafficReplayer {
     }
 
     private DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>
-    writeToSocketAndClose(HttpMessageAndTimestamp request, String diagnosticLabel)
-    {
+    writeToSocketAndClose(HttpMessageAndTimestamp request, String diagnosticLabel) {
         try {
             log.debug("Assembled request/response - starting to write to socket");
-            var packetHandler = packetHandlerFactory.create(diagnosticLabel);
+            var packetHandler = packetHandlerFactory.create(null, diagnosticLabel);
             for (var packetData : request.packetBytes) {
                 log.debug("sending "+packetData.length+" bytes to the packetHandler");
                 var consumeFuture = packetHandler.consumeBytes(packetData);
@@ -448,4 +479,5 @@ public class TrafficReplayer {
         trafficChunkStream
                 .forEach(ts-> trafficToHttpTransactionAccumulator.accept(ts));
     }
+
 }

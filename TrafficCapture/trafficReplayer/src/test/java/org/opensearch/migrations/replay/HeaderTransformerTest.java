@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
+import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import java.time.Duration;
 import java.util.AbstractMap;
@@ -81,9 +82,10 @@ public class HeaderTransformerTest {
         final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null, null,
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
-                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, "Basic YWRtaW46YWRtaW4="),
-                testPacketCapture, null, "TEST");
+                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
+                testPacketCapture, httpBasicAuthTransformer, "TEST");
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\n" +
@@ -106,7 +108,7 @@ public class HeaderTransformerTest {
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
-                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME, null),
+                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
                 testPacketCapture, null, "TEST");
 
         Random r = new Random(2);
