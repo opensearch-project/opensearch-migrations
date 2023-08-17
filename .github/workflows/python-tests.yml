@@ -3,10 +3,10 @@ name: python-tests
 on:
   push:
     paths:
-      - 'cluster_migration_core/**.py'
+      - 'experimental/cluster_migration_core/**.py'
   pull_request:
     paths:
-      - 'cluster_migration_core/**.py'
+      - 'experimental/cluster_migration_core/**.py'
 
 jobs:
   test-linux:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: ./cluster_migration_core
+        working-directory: ./experimental/cluster_migration_core
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
