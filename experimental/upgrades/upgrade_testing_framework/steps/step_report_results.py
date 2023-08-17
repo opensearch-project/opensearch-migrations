@@ -42,7 +42,7 @@ class ReportResults(FrameworkStep):
                       f" Framework's README file: {readme_url}")
         self.logger.info(help_blurb)
 
-        kb_url = "https://github.com/opensearch-project/opensearch-migrations/tree/main/knowledge_base"
+        kb_url = "https://github.com/opensearch-project/opensearch-migrations/tree/main/experimental/knowledge_base"
         kb_blurb = (f"You can find the expectation definitions here: {kb_url}")
         self.logger.info(kb_blurb)
 
