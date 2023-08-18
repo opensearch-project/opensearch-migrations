@@ -10,7 +10,7 @@ to ensure that changes will make it into containers to be launched.
 
 ### Running the Docker Solution
 
-While in the TrafficCapture directory, run the following command:
+While Docker is running, in the TrafficCapture directory run the following command:
 
 `./gradlew :dockerSolution:composeUp`
 
