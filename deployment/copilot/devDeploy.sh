@@ -184,7 +184,7 @@ else
   echo "No auth header options detected for Replayer, defaulting to not specifying an explicit auth header"
 fi
 replay_command_base="/bin/sh -c \"/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --kafka-traffic-brokers ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth "
-replay_command="${replay_command_base}${auth_header_args}
+replay_command="${replay_command_base}${auth_header_args}"
 echo "Constructed replay command: ${replay_command}"
 export MIGRATION_REPLAYER_COMMAND="${replay_command}"
 
