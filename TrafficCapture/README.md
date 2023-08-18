@@ -90,8 +90,45 @@ will send requests to `capture-proxy-domain.com`, using the auth combo `admin`/`
 
 Support for Sigv4 signing and other auth options may be a future option.
 
+#### Understanding Data from the Replayer
+
+The Migration Console can be used to access and help interpret the data from the replayer.
+
+The data generated from the replayer is stored on an Elastic File System volume shared between the Replayer and Migration Console.
+It is mounted to the Migration Console at the path `/shared_replayer_output`. The Replayer generates files named `output_tuples.log`.
+These files are rolled over as they hit 10 Mb to a series of `output_tuples-%d{yyyy-MM-dd-HH:mm}.log` files.
+
+The data in these files is in the format of JSON lines, each of which is a log message containing a specific request-response-response tuple.
+The body of the messages is sometimes gzipped which makes it difficult to represent as text in a JSON. Therefore, the body field of all requests
+and responses is base64 encoded before it is logged. This makes the files stable, but not human-readable.
+
+We have provided a utility script that can parse these files and output them to a human-readable format: the bodies are
+base64 decoded, un-gzipped if applicable, and parsed as JSON if applicable. They're then saved back to JSON format on disk.
+
+To use this utility from the Migration Console,
+```sh
+$ ./humanReadableLogs.py --help
+usage: humanReadableLogs.py [-h] [--outfile OUTFILE] infile
+
+positional arguments:
+  infile             Path to input logged tuple file.
+
+options:
+  -h, --help         show this help message and exit
+  --outfile OUTFILE  Path for output human readable tuple file.
+
+# By default, the output file is the same path as the input file, but the file name is preface with `readable-`.
+$ ./humanReadableLogs.py /shared_replayer_output/tuples.log
+Input file: /shared_replayer_output/tuples.log; Output file: /shared_replayer_output/readable-tuples.log
+
+# A specific output file can also be specified.
+$ ./humanReadableLogs.py /shared_replayer_output/tuples.log --outfile local-tuples.log
+Input file: /shared_replayer_output/tuples.log; Output file: local-tuples.log
+```
+
 ### Capture Kafka Offloader
 
 The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.
 
 Learn more about its functionality and setup here: [Capture Kafka Offloader](captureKafkaOffloader/README.md)
+

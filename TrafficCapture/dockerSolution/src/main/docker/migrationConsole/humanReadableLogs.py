@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
 
-# Find log files in /shared_replayer_output
-# User can select one or more files (down the line, specific time ranges?)
-# Load file, read each line as json.
-# Extract `message`, do the same un-base64 and possibly un-gzip as the comparator
-
-# ./humanReadableLogs /shared_replayer_output/output_tuple.log /shared_replayer_output/readable_tuples.json
-
 import argparse
-import pathlib
-import json
 import base64
 import gzip
+import json
+import pathlib
 from typing import Optional
 
 LOG_JSON_TUPLE_FIELD = "message"
@@ -92,13 +85,15 @@ def parse_tuple(line):
 
 if __name__ == "__main__":
     args = parse_args()
-    print(args.infile)
     if args.outfile:
         outfile = args.outfile
     else:
         outfile = args.infile.parent / f"readable-{args.infile.name}"
-    print(f"Will output to {outfile}")
+    print(f"Input file: {args.infile}; Output file: {outfile}")
     with open(args.infile, 'r') as in_f:
         with open(outfile, 'w') as out_f:
             for line in in_f:
                 print(parse_tuple(line), file=out_f)
+
+# TODO: add some try/catching
+# TODO: add a progress indicator for large files
