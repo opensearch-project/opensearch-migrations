@@ -26,7 +26,7 @@ import java.util.concurrent.CompletionException;
  * transformation and the headers present (such as for gzipped or chunked encodings).
  *
  * There will be a number of reasons that we need to reuse the source captured packets - both today
- * (for the output to the comparator) and in the future (for retrying transient network errors or
+ * (for the output to efs) and in the future (for retrying transient network errors or
  * transformation errors).  With that in mind, the HttpJsonTransformer now keeps track of all of
  * the ByteBufs passed into it and can redrive them through the underlying network packet handler.
  * Cases where that would happen with this edit are where the payload wasn't being modified, nor
@@ -52,7 +52,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     private final List<List<Integer>> chunkSizes;
     // This is here for recovery, in case anything goes wrong with a transformation & we want to
     // just dump it directly.  Notice that we're already storing all of the bytes until the response
-    // comes back so that we can format the output that goes to the comparator.  These should be
+    // comes back so that we can format the output that goes to the to EFS and eventually the comparator.  These should be
     // backed by the exact same byte[] arrays, so the memory consumption should already be absorbed.
     private final List<ByteBuf> chunks;
 
