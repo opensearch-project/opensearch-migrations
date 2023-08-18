@@ -125,8 +125,6 @@ if [ "$DESTROY_ENV" = true ] ; then
   set +e
   # Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
   export AWS_DEFAULT_REGION=""
-  copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --yes
@@ -186,8 +184,7 @@ else
   echo "No auth header options detected for Replayer, defaulting to not specifying an explicit auth header"
 fi
 replay_command_base="/bin/sh -c \"/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --kafka-traffic-brokers ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth "
-replay_command_end=" | nc traffic-comparator 9220\""
-replay_command="${replay_command_base}${auth_header_args}${replay_command_end}"
+replay_command="${replay_command_base}${auth_header_args}
 echo "Constructed replay command: ${replay_command}"
 export MIGRATION_REPLAYER_COMMAND="${replay_command}"
 
@@ -208,8 +205,6 @@ if [ "$SKIP_COPILOT_INIT" = false ] ; then
   #copilot env init -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $REGION
 
   # Init services
-  copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator-jupyter
-  copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator
   copilot svc init -a $COPILOT_APP_NAME --name traffic-replayer
   copilot svc init -a $COPILOT_APP_NAME --name capture-proxy-es
   copilot svc init -a $COPILOT_APP_NAME --name migration-console
@@ -220,8 +215,6 @@ fi
 copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE
 
 # Deploy services
-copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE

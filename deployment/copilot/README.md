@@ -8,7 +8,7 @@ Copilot is a tool for deploying containerized applications on AWS ECS. Official 
 ###### Docker
 Docker is used by Copilot to build container images. If not installed, follow the steps [here](https://docs.docker.com/engine/install/) to set up. Later versions are recommended.
 ###### Git
-Git is used by the opensearch-migrations repo to fetch associated repositories (such as the traffic-comparator repo) for constructing their respective Dockerfiles. Steps to set up can be found [here](https://github.com/git-guides/install-git).
+Git is used by the opensearch-migrations repo. Steps to set up can be found [here](https://github.com/git-guides/install-git).
 ###### Java 11
 Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 11.
 
@@ -78,8 +78,6 @@ export MIGRATION_DOMAIN_USER_NAME=admin
 export MIGRATION_DOMAIN_USER_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
-export MIGRATION_COMPARATOR_EFS_ID=fs-123;
-export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
 export MIGRATION_REPLAYER_OUTPUT_EFS_ID=fs-124
 export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=sg-124
 export MIGRATION_PUBLIC_SUBNETS=subnet-123,subnet-124;
@@ -88,7 +86,7 @@ export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafk
 ```
 Additionally, if not using the deploy script, the following export is needed for the Replayer service:
 ```
-export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user $MIGRATION_DOMAIN_USER_NAME --aws-auth-header-secret $MIGRATION_DOMAIN_USER_SECRET_ARN | nc traffic-comparator 9220"
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user $MIGRATION_DOMAIN_USER_NAME --aws-auth-header-secret $MIGRATION_DOMAIN_USER_SECRET_ARN"
 ```
 
 #### Setting up existing Copilot infrastructure
@@ -115,8 +113,6 @@ copilot env init --name dev
 
 // Initialize services with their respective required name
 copilot svc init --name traffic-replayer
-copilot svc init --name traffic-comparator
-copilot svc init --name traffic-comparator-jupyter
 copilot svc init --name capture-proxy-es
 copilot svc init --name migration-console
 
@@ -132,8 +128,6 @@ Currently, it seems that Copilot does not support deploying all services at once
 copilot env deploy --name dev
 
 // Deploy services to a deployed environment
-copilot svc deploy --name traffic-comparator-jupyter --env dev
-copilot svc deploy --name traffic-comparator --env dev
 copilot svc deploy --name traffic-replayer --env dev
 copilot svc deploy --name capture-proxy-es --env dev
 copilot svc deploy --name migration-console --env dev
@@ -164,8 +158,6 @@ curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:A
 
 A command shell can be opened in the service's container if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
 ```
-copilot svc exec -a migration-copilot -e dev -n traffic-comparator-jupyter -c "bash"
-copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "bash"
 copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "bash"
 copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "bash"
 copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "bash"
