@@ -10,7 +10,6 @@ import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -58,8 +57,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     private final List<ByteBuf> chunks;
 
     public HttpJsonTransformingConsumer(IJsonTransformer transformer,
-                                        IPacketFinalizingConsumer transformedPacketReceiver,
-                                        IAuthTransformerFactory authTransformerFactory,
+                                        IAuthTransformerFactory authTransformerFactory, IPacketFinalizingConsumer transformedPacketReceiver,
                                         String diagnosticLabel) {
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));

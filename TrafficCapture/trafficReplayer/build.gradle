@@ -18,19 +18,15 @@ buildscript {
 
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
-    //id "com.github.spotbugs" version "4.7.3"
+    id "com.github.spotbugs" version "4.7.3"
 //    id 'checkstyle'
     id 'org.owasp.dependencycheck' version '8.2.1'
     id "io.freefair.lombok" version "8.0.1"
 }
-/*
+
 spotbugs {
     includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
 }
-
-
- */
-
 
 //checkstyle {
 //    toolVersion = '10.9.3'
@@ -46,7 +42,6 @@ repositories {
 dependencies {
     implementation project(':captureProtobufs')
 
-    implementation platform('software.amazon.awssdk:bom:2.20.102')
     implementation 'software.amazon.awssdk:sdk-core:2.20.102'
     implementation 'software.amazon.awssdk:auth:2.20.102'
 

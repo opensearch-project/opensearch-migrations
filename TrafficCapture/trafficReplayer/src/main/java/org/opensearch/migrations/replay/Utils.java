@@ -37,7 +37,7 @@ public class Utils {
 
     public static String packetsToStringTruncated(List<byte[]> packetStream) {
         return packetsToStringTruncated(Optional.ofNullable(packetStream).map(p->p.stream()).orElse(null),
-                1024);
+                MAX_BYTES_SHOWN_FOR_TO_STRING);
     }
 
     public static String packetsToStringTruncated(Stream<byte[]> packetStream, int maxBytesToShow) {

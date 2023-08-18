@@ -35,7 +35,7 @@ public class AddCompressionEncodingTest {
         var compressingTransformer = new HttpJsonTransformingConsumer(
                 JsonJoltTransformer.newBuilder()
                         .addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP)
-                        .build(), testPacketCapture, null, "TEST");
+                        .build(), null, testPacketCapture, "TEST");
 
         final var payloadPartSize = 511;
         final var numParts = 1025;

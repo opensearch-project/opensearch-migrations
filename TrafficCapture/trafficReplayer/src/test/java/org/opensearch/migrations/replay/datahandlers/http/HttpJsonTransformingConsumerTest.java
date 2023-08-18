@@ -20,7 +20,7 @@ class HttpJsonTransformingConsumerTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null,null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(JsonJoltTransformer.newBuilder().build(),
-                testPacketCapture, null, "TEST");
+                null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -43,7 +43,7 @@ class HttpJsonTransformingConsumerTest {
                 JsonJoltTransformer.newBuilder()
                         .addHostSwitchOperation("test.domain")
                         .build(),
-                testPacketCapture, null, "TEST");
+                null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -81,7 +81,7 @@ class HttpJsonTransformingConsumerTest {
             }
         });
         var transformingHandler =
-                new HttpJsonTransformingConsumer(complexTransformer,  testPacketCapture, null, "TEST");
+                new HttpJsonTransformingConsumer(complexTransformer, null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {

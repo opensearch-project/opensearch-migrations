@@ -35,7 +35,7 @@ public class RequestPipelineOrchestrator {
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
-    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.of(LogLevel.INFO);
+    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
     public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
     public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
     private final List<List<Integer>> chunkSizes;

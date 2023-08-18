@@ -451,7 +451,7 @@ public class TrafficReplayer {
     writeToSocketAndClose(HttpMessageAndTimestamp request, String diagnosticLabel) {
         try {
             log.debug("Assembled request/response - starting to write to socket");
-            var packetHandler = packetHandlerFactory.create(null, diagnosticLabel);
+            var packetHandler = packetHandlerFactory.create(diagnosticLabel);
             for (var packetData : request.packetBytes) {
                 log.debug("sending "+packetData.length+" bytes to the packetHandler");
                 var consumeFuture = packetHandler.consumeBytes(packetData);

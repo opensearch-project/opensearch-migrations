@@ -4,6 +4,9 @@ import java.util.List;
 import java.util.Map;
 
 public interface IHttpMessage {
+    String APPLICATION_JSON = "application/json";
+    String CONTENT_TYPE = "content-type";
+
     String method();
 
     String path();
@@ -13,7 +16,8 @@ public interface IHttpMessage {
     Map<String,Object> headersMap();
 
     default String getFirstHeader(String key) {
-        return getAllMatchingHeaders(key).get(0);
+        var all = getAllMatchingHeaders(key);
+        return all == null ? null : all.get(0);
     }
 
     List<String> getAllMatchingHeaders(String key);

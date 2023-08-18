@@ -16,8 +16,6 @@ import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -132,8 +130,8 @@ public class TestUtils {
                                        Function<StringBuilder, String> expectedOutputGenerator) throws Exception {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
                 new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>()));
-        var transformingHandler = new HttpJsonTransformingConsumer(transformer, testPacketCapture,
-                authTransformer, "TEST");
+        var transformingHandler = new HttpJsonTransformingConsumer(transformer, authTransformer, testPacketCapture,
+                "TEST");
 
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var headerString = "GET / HTTP/1.1\n" +

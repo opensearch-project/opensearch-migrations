@@ -46,11 +46,11 @@ public class SigV4SigningTransformationTest {
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
         expectedRequestHeaders.add("host", "localhost");
-        expectedRequestHeaders.add("Content-Length", "46");
+        expectedRequestHeaders.add("Content-Length".toLowerCase(), "46");
         expectedRequestHeaders.add("Authorization",
                 "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, " +
-                        "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, " +
-                        "Signature=ebdda0a0532e8ebb1d883f6c4c70b006f76b4d39b1c8178a62933b92a079d9a5");
+                        "SignedHeaders=host;x-amz-content-sha256;x-amz-date, " +
+                        "Signature=46ad866ac326bca20ce2f48529e40485c03a0f9565a171d9b75f7ca298e26fa0");
         expectedRequestHeaders.add("x-amz-content-sha256",
                         "fc0e8e9a1f7697f510bfdd4d55b8612df8a0140b4210967efd87ee9cb7104362");
         expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");

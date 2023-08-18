@@ -20,6 +20,7 @@ import java.util.stream.Stream;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.signer.Aws4Signer;
@@ -78,19 +79,17 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         getSignatureHeadersViaSdk(msg).forEach(kvp -> msg.headers().put(kvp.getKey(), kvp.getValue()));
     }
 
-    public Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(HttpJsonMessageWithFaultingPayload msg) {
+    public Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(IHttpMessage msg) {
         var signer = Aws4Signer.create();
         var httpRequestBuilder = SdkHttpFullRequest.builder()
                 .method(SdkHttpMethod.fromValue(msg.method()))
                 .protocol(protocol)
                 .host(msg.getFirstHeader("host"));
 
-//        String timeStamp = DateTimeFormatter
-//                .ofPattern("yyyyMMdd'T'HHmmss'Z'")
-//                .withZone(ZoneOffset.UTC)
-//                .format(timestampSupplier == null ? Clock.fixed(Instant.now(), ZoneOffset.UTC) : timestampSupplier.get());
-        httpRequestBuilder.appendHeader("Content-Type", "application/json");
-        //httpRequestBuilder.appendHeader("x-amz-date", timeStamp);
+        var contentType = msg.getFirstHeader(IHttpMessage.CONTENT_TYPE);
+        if (contentType != null) {
+            httpRequestBuilder.appendHeader("Content-Type", contentType);
+        }
         String payloadHash = binaryToHex(messageDigest.digest());
         httpRequestBuilder.appendHeader("x-amz-content-sha256", payloadHash);
 
