@@ -6,8 +6,6 @@ import unittest
 import os
 import logging
 import time
-import requests
-from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
 
