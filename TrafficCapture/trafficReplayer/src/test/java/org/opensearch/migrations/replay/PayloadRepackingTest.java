@@ -5,24 +5,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
-import org.opensearch.migrations.transform.IJsonTransformer;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -67,43 +60,9 @@ public class PayloadRepackingTest {
         expectedRequestHeaders.add("host", "localhost");
         expectedRequestHeaders.add("Content-Length", "46");
 
-        runPipelineAndValidate(transformerBuilder.build(), null, stringParts,
-                expectedRequestHeaders,
+        TestUtils.runPipelineAndValidate(transformerBuilder.build(), null,null,
+                stringParts, expectedRequestHeaders,
                 referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder));
-    }
-
-    private static void runPipelineAndValidate(IJsonTransformer transformer,
-                                               String extraHeaders,
-                                               List<String> stringParts,
-                                               DefaultHttpHeaders expectedRequestHeaders,
-                                               Function<StringBuilder,String> expectedOutputGenerator) throws Exception {
-        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
-                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>()));
-        var transformingHandler = new HttpJsonTransformingConsumer(transformer, testPacketCapture, null, "TEST");
-
-        var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
-        var headerString = "GET / HTTP/1.1\n" +
-                "host: localhost\n" +
-                (extraHeaders == null ? "" : extraHeaders) +
-                "content-length: " + contentLength + "\n\n";
-        var referenceStringBuilder = new StringBuilder();
-        var allConsumesFuture = TestUtils.chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,
-                        stringParts, referenceStringBuilder, headerString);
-
-        var innermostFinalizeCallCount = new AtomicInteger();
-        DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> finalizationFuture =
-                allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest(),
-                        ()->"PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture");
-        finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse, t) -> {
-            Assertions.assertNull(t);
-            Assertions.assertNotNull(aggregatedRawResponse);
-            // do nothing but check connectivity between the layers in the bottom most handler
-            innermostFinalizeCallCount.incrementAndGet();
-        }), ()->"PayloadRepackingTest.runPipelineAndValidate.assertCheck");
-        finalizationFuture.get();
-
-        TestUtils.verifyCapturedResponseMatchesExpectedPayload(testPacketCapture.getBytesCaptured(),
-                expectedRequestHeaders, expectedOutputGenerator.apply(referenceStringBuilder));
     }
 
     String simplePayloadTransform = "" +
@@ -146,8 +105,8 @@ public class PayloadRepackingTest {
         expectedRequestHeaders.add("content-type", "application/json; charset=UTF-8");
         expectedRequestHeaders.add("Content-Length", "55");
 
-        runPipelineAndValidate(transformerBuilder.build(), extraHeaders, List.of(jsonPayload),
-                expectedRequestHeaders,
+        TestUtils.runPipelineAndValidate(transformerBuilder.build(), null,
+                extraHeaders, List.of(jsonPayload), expectedRequestHeaders,
                 x -> "{\"top\":[{\"Name\":\"A\",\"Value\":1},{\"Name\":\"B\",\"Value\":2}]}");
     }
 }

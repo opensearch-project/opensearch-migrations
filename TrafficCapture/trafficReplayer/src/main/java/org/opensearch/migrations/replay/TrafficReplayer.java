@@ -8,11 +8,9 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -61,7 +59,7 @@ public class TrafficReplayer {
             throws SSLException {
         this(serverUri, allowInsecureConnections,
                 buildDefaultJsonTransformer(serverUri.getHost()),
-                null);
+                authTransformerFactory);
     }
     
     public TrafficReplayer(URI serverUri,
@@ -124,7 +122,7 @@ public class TrafficReplayer {
         String authHeaderValue;
         @Parameter(required = false,
                 names = {SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG},
-                arity = 0,
+                arity = 1,
                 description = "Use AWS SigV4 to sign each request with the specified service name and region.  " +
                         "(e.g. es,us-east-1)  " +
                         "DefaultCredentialsProvider is used to resolve credentials.  " +
@@ -232,12 +230,7 @@ public class TrafficReplayer {
             String region = serviceAndRegion[1];
             DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
 
-            return new IAuthTransformerFactory() {
-                @Override
-                public IAuthTransformer getAuthTransformer(IHttpMessage httpMessage) {
-                    return new SigV4Signer(defaultCredentialsProvider, serviceName, region);
-                }
-            };
+            return httpMessage -> new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
         } else {
             return null;
         }

@@ -4,12 +4,16 @@ package org.opensearch.migrations.replay;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.ZonedDateTime;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.ZoneOffset;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -27,15 +31,30 @@ import software.amazon.awssdk.regions.Region;
 
 @Slf4j
 public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransformer {
+    private final static HashSet<String> AUTH_HEADERS_TO_PULL;
+    static {
+        AUTH_HEADERS_TO_PULL = new HashSet<String>() {{
+            add("authorization");
+            add("x-amz-content-sha256");
+            add("x-amz-date");
+            add("x-amz-security-token");
+        }};
+    }
+
     private MessageDigest messageDigest;
     private AwsCredentialsProvider credentialsProvider;
     private String service;
     private String region;
+    private String protocol;
+    private Supplier<Clock> timestampSupplier; // for unit testing
 
-    public SigV4Signer(AwsCredentialsProvider credentialsProvider, String service, String region) {
+    public SigV4Signer(AwsCredentialsProvider credentialsProvider, String service, String region, String protocol,
+                       Supplier<Clock> timestampSupplier) {
         this.credentialsProvider = credentialsProvider;
         this.service = service;
         this.region = region;
+        this.protocol = protocol;
+        this.timestampSupplier = timestampSupplier;
 
         try {
             this.messageDigest = MessageDigest.getInstance("SHA-256");
@@ -63,28 +82,35 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         var signer = Aws4Signer.create();
         var httpRequestBuilder = SdkHttpFullRequest.builder()
                 .method(SdkHttpMethod.fromValue(msg.method()))
+                .protocol(protocol)
                 .host(msg.getFirstHeader("host"));
 
-        String timeStamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").format(ZonedDateTime.now(ZoneOffset.UTC));
+//        String timeStamp = DateTimeFormatter
+//                .ofPattern("yyyyMMdd'T'HHmmss'Z'")
+//                .withZone(ZoneOffset.UTC)
+//                .format(timestampSupplier == null ? Clock.fixed(Instant.now(), ZoneOffset.UTC) : timestampSupplier.get());
         httpRequestBuilder.appendHeader("Content-Type", "application/json");
-        httpRequestBuilder.appendHeader("x-amz-date", timeStamp);
+        //httpRequestBuilder.appendHeader("x-amz-date", timeStamp);
         String payloadHash = binaryToHex(messageDigest.digest());
         httpRequestBuilder.appendHeader("x-amz-content-sha256", payloadHash);
 
-        SdkHttpFullRequest request = httpRequestBuilder.build(); // Is this the right time?
+        SdkHttpFullRequest request = httpRequestBuilder.build();
 
-        SdkHttpFullRequest signedRequest = signer.sign(request, Aws4SignerParams.builder()
+        var signingParamsBuilder = Aws4SignerParams.builder()
                 .signingName(service)
                 .signingRegion(Region.of(region))
-                .awsCredentials(credentialsProvider.resolveCredentials())
-                .build());
+                .awsCredentials(credentialsProvider.resolveCredentials());
+        if (timestampSupplier != null) {
+            signingParamsBuilder.signingClockOverride(timestampSupplier.get());
+        }
+        var signedRequest = signer.sign(request, signingParamsBuilder.build());
 
         log.info("Tried to sign: " + request.method().name() + ", " + request.getUri() +
                 "region: " + region + " serviceName:" + service +
                 " headers: ");
 
         return signedRequest.headers().entrySet().stream().filter(kvp->
-                kvp.getKey().equals(""));
+                AUTH_HEADERS_TO_PULL.contains(kvp.getKey().toLowerCase()));
     }
 
 

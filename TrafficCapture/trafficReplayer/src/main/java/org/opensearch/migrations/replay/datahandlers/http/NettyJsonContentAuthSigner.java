@@ -6,6 +6,7 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import org.opensearch.migrations.transform.IAuthTransformer;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
@@ -15,6 +16,7 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
 
     public NettyJsonContentAuthSigner(IAuthTransformer.StreamingFullMessageTransformer signer) {
         this.signer = signer;
+        this.receivedHttpContents = new ArrayList<>();
     }
 
     @Override
@@ -22,7 +24,7 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
             httpMessage = (HttpJsonMessageWithFaultingPayload) msg;
         } else if (msg instanceof HttpContent) {
-            receivedHttpContents.add((HttpContent) msg);
+            receivedHttpContents.add(((HttpContent) msg).retainedDuplicate());
             var httpContent = (HttpContent) msg;
             signer.consumeNextPayloadPart(httpContent.content().nioBuffer());
             if  (msg instanceof LastHttpContent) {
@@ -36,6 +38,9 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     private void finalizeSignature(ChannelHandlerContext ctx) {
         signer.finalize(httpMessage);
         ctx.fireChannelRead(httpMessage);
-        receivedHttpContents.stream().forEach(content->ctx.fireChannelRead(content));
+        receivedHttpContents.stream().forEach(content->{
+            ctx.fireChannelRead(content);
+            content.content().release();
+        });
     }
 }

@@ -9,7 +9,6 @@ import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.JsonCompositeTransformer;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -55,7 +54,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
             IAuthTransformer authTransformer =
                     requestPipelineOrchestrator.authTransfomerFactory.getAuthTransformer(originalHttpJsonMessage);
             try {
-                handlePayloadNeutralTransformation(ctx, request, transform(transformer, originalHttpJsonMessage),
+                handlePayloadNeutralTransformationOrThrow(ctx, request, transform(transformer, originalHttpJsonMessage),
                         authTransformer);
             } catch (PayloadNotLoadedException pnle) {
                 log.debug("The transforms for this message require payload manipulation, " +
@@ -75,12 +74,6 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
         }
     }
 
-    private static IAuthTransformer.StreamingFullMessageTransformer
-    getAuthTransformerAsStreamingTransformer(IAuthTransformer authTransformer) {
-        return (authTransformer instanceof IAuthTransformer.StreamingFullMessageTransformer) ?
-                (IAuthTransformer.StreamingFullMessageTransformer) authTransformer : null;
-    }
-
     private static HttpJsonMessageWithFaultingPayload transform(IJsonTransformer transformer,
                                                                 HttpJsonMessageWithFaultingPayload httpJsonMessage) {
         var returnedObject = transformer.transformJson(httpJsonMessage);
@@ -91,10 +84,10 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
         return httpJsonMessage;
     }
 
-    private void handlePayloadNeutralTransformation(ChannelHandlerContext ctx,
-                                                    HttpRequest request,
-                                                    HttpJsonMessageWithFaultingPayload httpJsonMessage,
-                                                    IAuthTransformer authTransformer)
+    private void handlePayloadNeutralTransformationOrThrow(ChannelHandlerContext ctx,
+                                                           HttpRequest request,
+                                                           HttpJsonMessageWithFaultingPayload httpJsonMessage,
+                                                           IAuthTransformer authTransformer)
     {
         // if the auth transformer only requires header manipulations, just do it right away, otherwise,
         // if it's a streaming transformer, require content parsing and send it in there
@@ -135,6 +128,12 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
             ((IAuthTransformer.HeadersOnlyTransformer) authTransformer).rewriteHeaders(httpJsonMessage);
         }
         return httpJsonMessage;
+    }
+
+    private static IAuthTransformer.StreamingFullMessageTransformer
+    getAuthTransformerAsStreamingTransformer(IAuthTransformer authTransformer) {
+        return (authTransformer instanceof IAuthTransformer.StreamingFullMessageTransformer) ?
+                (IAuthTransformer.StreamingFullMessageTransformer) authTransformer : null;
     }
 
     private boolean headerFieldsAreIdentical(HttpRequest request, HttpJsonMessageWithFaultingPayload httpJsonMessage) {
