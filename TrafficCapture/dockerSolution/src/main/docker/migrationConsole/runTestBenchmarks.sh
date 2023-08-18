@@ -52,7 +52,6 @@ fi
 
 # Construct the final client options string
 base_options_string="use_ssl:true,verify_certs:false"
-final_string="${base_options_string}${auth_string}"
 client_options="${base_options_string}${auth_string}"
 
 echo "Running opensearch-benchmark workloads against ${ENDPOINT}"
