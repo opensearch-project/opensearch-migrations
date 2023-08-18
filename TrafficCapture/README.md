@@ -73,6 +73,23 @@ Running check-cluster-health                                                   [
 Running index-append                                                           [100% done]
 ```
 
+The `runTestBenchmarks` tool has a few configurable options. It will attempt to guess the correct endpoint to send traffic to,
+and it will automatically attach the basic auth user/password `admin`/`admin`.
+
+To set a custom endpoint, specify it with `--endpoint`, for example `./runTestBenchmarks --endpoint https://capture-proxy-domain.com:9200`.
+
+To set custom basic auth params, use `--auth_user` and `--auth_pass`. To prevent the script from attaching _any_ auth params, use the `--no_auth` flag.
+This flag overrides any other auth params, so if you use both `--auth_user` and `--no_auth`, the end result will be no auth being applied.
+
+As an example of including multiple options:
+```sh
+./runTestBenchmarks --endpoint https://capture-proxy-domain.com:9200 --auth_pass Admin123!
+```
+
+will send requests to `capture-proxy-domain.com`, using the auth combo `admin`/`Admin123!`.
+
+Support for Sigv4 signing and other auth options may be a future option.
+
 ### Capture Kafka Offloader
 
 The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.
