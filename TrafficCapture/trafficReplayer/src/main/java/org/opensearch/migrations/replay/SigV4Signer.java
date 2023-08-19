@@ -94,14 +94,15 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
                                               Aws4SignerParams signerParams,
                                               SdkChecksum contentFlexibleChecksum) {
             var contentChecksum = mutableRequest.headers().get(AMZ_CONTENT_SHA_256);
-            return contentChecksum == null ? null : contentChecksum.get(0);
+            return contentChecksum != null ? contentChecksum.get(0) :
+                    super.calculateContentHash(mutableRequest, signerParams, contentFlexibleChecksum);
         }
     }
 
     public Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(IHttpMessage msg) {
         var signer = new AwsSignerWithPrecomputedContentHash();
-        var httpRequestBuilder = SdkHttpFullRequest.builder()
-                .method(SdkHttpMethod.fromValue(msg.method()))
+        var httpRequestBuilder = SdkHttpFullRequest.builder();
+        httpRequestBuilder.method(SdkHttpMethod.fromValue(msg.method()))
                 .uri(URI.create(msg.path()))
                 .protocol(protocol)
                 .host(msg.getFirstHeader("host"));
