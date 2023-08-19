@@ -14,13 +14,9 @@ comparator repo will be checked out to the build directory and that will be used
 the directory wasn't present and there wasn't an environment variable specifying a directory. Once a directory exists,
 it will be mounted to the traffic-comparator and jupyter services.
 
-Netcat is still used to connect several of the components and we're still working on improving the resiliency story
-between these containers. The long term approach is to replace fixed streams with message bus approaches directly (i.e.
-Kafka).  In the short term, we can and are beginning, to leverage things like conditions on dependent services.
-
 ### Running the Docker Solution
 
-While in the TrafficCapture directory, run the following command:
+While Docker is running, in the TrafficCapture directory run the following command:
 
 `./gradlew :dockerSolution:composeUp`
 
