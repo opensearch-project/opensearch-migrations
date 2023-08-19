@@ -1,21 +1,16 @@
 package org.opensearch.migrations.replay;
 
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.ZoneOffset;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import lombok.extern.slf4j.Slf4j;
@@ -24,21 +19,30 @@ import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.signer.Aws4Signer;
+import software.amazon.awssdk.auth.signer.internal.BaseAws4Signer;
 import software.amazon.awssdk.auth.signer.params.Aws4SignerParams;
+import software.amazon.awssdk.core.checksums.SdkChecksum;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
 import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.utils.BinaryUtils;
 
 
 @Slf4j
 public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransformer {
-    private final static HashSet<String> AUTH_HEADERS_TO_PULL;
+    private final static HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
+    private final static HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
+
+    public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
+
     static {
-        AUTH_HEADERS_TO_PULL = new HashSet<String>() {{
+        AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<String>() {{
             add("authorization");
-            add("x-amz-content-sha256");
             add("x-amz-date");
             add("x-amz-security-token");
+        }};
+        AUTH_HEADERS_TO_PULL_WITH_PAYLOAD = new HashSet<String>(AUTH_HEADERS_TO_PULL_NO_PAYLOAD) {{
+            add(AMZ_CONTENT_SHA_256);
         }};
     }
 
@@ -56,12 +60,6 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         this.region = region;
         this.protocol = protocol;
         this.timestampSupplier = timestampSupplier;
-
-        try {
-            this.messageDigest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     @Override
@@ -71,6 +69,16 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
 
     @Override
     public void consumeNextPayloadPart(ByteBuffer payloadChunk) {
+        if (payloadChunk.remaining() <= 0) {
+            return;
+        }
+        if (messageDigest == null) {
+            try {
+                this.messageDigest = MessageDigest.getInstance("SHA-256");
+            } catch (NoSuchAlgorithmException e) {
+                throw new RuntimeException(e);
+            }
+        }
         messageDigest.update(payloadChunk);
     }
 
@@ -79,10 +87,22 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         getSignatureHeadersViaSdk(msg).forEach(kvp -> msg.headers().put(kvp.getKey(), kvp.getValue()));
     }
 
+    private static class AwsSignerWithPrecomputedContentHash extends BaseAws4Signer {
+        public AwsSignerWithPrecomputedContentHash() {}
+
+        protected String calculateContentHash(SdkHttpFullRequest.Builder mutableRequest,
+                                              Aws4SignerParams signerParams,
+                                              SdkChecksum contentFlexibleChecksum) {
+            var contentChecksum = mutableRequest.headers().get(AMZ_CONTENT_SHA_256);
+            return contentChecksum == null ? null : contentChecksum.get(0);
+        }
+    }
+
     public Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(IHttpMessage msg) {
-        var signer = Aws4Signer.create();
+        var signer = new AwsSignerWithPrecomputedContentHash();
         var httpRequestBuilder = SdkHttpFullRequest.builder()
                 .method(SdkHttpMethod.fromValue(msg.method()))
+                .uri(URI.create(msg.path()))
                 .protocol(protocol)
                 .host(msg.getFirstHeader("host"));
 
@@ -90,8 +110,11 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         if (contentType != null) {
             httpRequestBuilder.appendHeader("Content-Type", contentType);
         }
-        String payloadHash = binaryToHex(messageDigest.digest());
-        httpRequestBuilder.appendHeader("x-amz-content-sha256", payloadHash);
+        if (messageDigest != null) {
+            byte[] bytesToEncode = messageDigest.digest();
+            String payloadHash = BinaryUtils.toHex(bytesToEncode);
+            httpRequestBuilder.appendHeader(AMZ_CONTENT_SHA_256, payloadHash);
+        }
 
         SdkHttpFullRequest request = httpRequestBuilder.build();
 
@@ -104,21 +127,10 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         }
         var signedRequest = signer.sign(request, signingParamsBuilder.build());
 
-        log.info("Tried to sign: " + request.method().name() + ", " + request.getUri() +
-                "region: " + region + " serviceName:" + service +
-                " headers: ");
-
+        var headersToReturn = messageDigest == null ?
+                AUTH_HEADERS_TO_PULL_NO_PAYLOAD : AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
         return signedRequest.headers().entrySet().stream().filter(kvp->
-                AUTH_HEADERS_TO_PULL.contains(kvp.getKey().toLowerCase()));
-    }
-
-
-    public static String binaryToHex(byte[] bytesToEncode) {
-        return IntStream.range(0, bytesToEncode.length)
-                .map(idx -> bytesToEncode[idx])
-                .mapToObj(b -> Integer.toHexString(0xff & b))
-                .map(h -> h.length() == 1 ? ("0" + h) : h)
-                .collect(Collectors.joining());
+                headersToReturn.contains(kvp.getKey().toLowerCase()));
     }
 }
 

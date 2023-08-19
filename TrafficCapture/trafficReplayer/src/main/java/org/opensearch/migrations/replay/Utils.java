@@ -20,7 +20,7 @@ import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
 
 public class Utils {
-    public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 128;
+    public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 4096;
     /**
      * See https://en.wikipedia.org/wiki/Fold_(higher-order_function)
      */

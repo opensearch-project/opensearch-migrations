@@ -50,11 +50,6 @@ public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Ob
         return Collections.unmodifiableMap(headers());
     }
 
-    @Override
-    public List<String> getAllMatchingHeaders(String key) {
-        return ((List<String>) (headers().get(key)));
-    }
-
     public ListKeyAdaptingCaseInsensitiveHeadersMap headers() {
         return (ListKeyAdaptingCaseInsensitiveHeadersMap) this.get(HEADERS);
     }

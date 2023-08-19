@@ -20,5 +20,7 @@ public interface IHttpMessage {
         return all == null ? null : all.get(0);
     }
 
-    List<String> getAllMatchingHeaders(String key);
+    default List<String> getAllMatchingHeaders(String key) {
+        return ((List<String>) (headersMap().get(key)));
+    }
 }

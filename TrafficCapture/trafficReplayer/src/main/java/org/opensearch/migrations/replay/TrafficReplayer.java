@@ -16,6 +16,7 @@ import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonTypeMappingTransformer;
+import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -29,6 +30,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.StringJoiner;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -44,6 +46,8 @@ import java.util.stream.Stream;
 public class TrafficReplayer {
 
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
+    public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
+    public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
 
     public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
@@ -115,10 +119,11 @@ public class TrafficReplayer {
                 description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
         @Parameter(required = false,
-                names = {"--auth-header-value"},
+                names = {AUTH_HEADER_VALUE_ARG},
                 arity = 1,
                 description = "Value to use for the \"authorization\" header of each request " +
-                        "(cannot be used with " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG + ")")
+                        "(cannot be used with " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG +
+                        " or " + REMOVE_AUTH_HEADER_VALUE_ARG + ")")
         String authHeaderValue;
         @Parameter(required = false,
                 names = {SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG},
@@ -126,8 +131,15 @@ public class TrafficReplayer {
                 description = "Use AWS SigV4 to sign each request with the specified service name and region.  " +
                         "(e.g. es,us-east-1)  " +
                         "DefaultCredentialsProvider is used to resolve credentials.  " +
-                        "(cannot be used with --auth-header-value)")
+                        "(cannot be used with " + AUTH_HEADER_VALUE_ARG + " or " + REMOVE_AUTH_HEADER_VALUE_ARG + ")")
         String useSigV4ServiceAndRegion;
+        @Parameter(required = false,
+                names = {REMOVE_AUTH_HEADER_VALUE_ARG},
+                arity = 0,
+                description = "Remove the authorization header if present and do not replace it with anything.  " +
+                        "(cannot be used with " + AUTH_HEADER_VALUE_ARG + " or " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG
+                        + ")")
+        boolean removeAuthHeader;
         @Parameter(required = false,
                 names = {"-o", "--output"},
                 arity=1,
@@ -214,8 +226,13 @@ public class TrafficReplayer {
     }
 
     private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
-        if (params.authHeaderValue != null && params.useSigV4ServiceAndRegion != null) {
-            throw new RuntimeException("Cannot specify --auth-header-value AND " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG);
+        if (params.authHeaderValue != null && params.useSigV4ServiceAndRegion != null && params.removeAuthHeader) {
+            throw new RuntimeException("Cannot specify more than one: " +
+                    new StringJoiner(", ")
+                            .add(AUTH_HEADER_VALUE_ARG)
+                            .add(SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG)
+                            .add(REMOVE_AUTH_HEADER_VALUE_ARG)
+                            .toString());
         }
         if (params.authHeaderValue != null) {
             var authHeaderValue = params.authHeaderValue;
@@ -231,6 +248,8 @@ public class TrafficReplayer {
             DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
 
             return httpMessage -> new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
+        } else if (params.removeAuthHeader) {
+            return RemovingAuthTransformerFactory.instance;
         } else {
             return null;
         }
