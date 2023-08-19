@@ -33,7 +33,7 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
-        log.debug("inactive channel - closing");
+        log.debug("inactive channel - closing (" + ctx.channel() + ")");
         FrontsideHandler.closeAndFlush(writeBackChannel);
     }
 

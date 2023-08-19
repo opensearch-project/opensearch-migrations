@@ -50,7 +50,7 @@ public class SigV4SigningTransformationTest {
         expectedRequestHeaders.add("Authorization",
                 "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, " +
                         "SignedHeaders=host;x-amz-content-sha256;x-amz-date, " +
-                        "Signature=46ad866ac326bca20ce2f48529e40485c03a0f9565a171d9b75f7ca298e26fa0");
+                        "Signature=4cb1c423e6fe61216fbaa11398260af7f8daa85e74cd41428711e4df5cd70c97");
         expectedRequestHeaders.add("x-amz-content-sha256",
                         "fc0e8e9a1f7697f510bfdd4d55b8612df8a0140b4210967efd87ee9cb7104362");
         expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");

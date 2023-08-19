@@ -2,35 +2,26 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpMethod;
-import io.netty.handler.codec.http.HttpObjectDecoder;
 import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
-import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpRequestHandler;
-import org.opensearch.migrations.trafficcapture.netty.LoggingHttpRequestHandler;
 import org.opensearch.migrations.trafficcapture.netty.LoggingHttpResponseHandler;
 
 import javax.net.ssl.SSLEngine;
 import java.io.IOException;
-import java.net.URI;
 import java.util.function.Supplier;
 
 public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
 
     private final IConnectionCaptureFactory connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
-    private final URI backsideUri;
-    private final SslContext backsideSslContext;
+    private final BacksideConnectionPool backsideConnectionPool;
 
-    public ProxyChannelInitializer(URI backsideUri, SslContext backsideSslContext, Supplier<SSLEngine> sslEngineSupplier,
+    public ProxyChannelInitializer(BacksideConnectionPool backsideConnectionPool, Supplier<SSLEngine> sslEngineSupplier,
                                    IConnectionCaptureFactory connectionCaptureFactory) {
-        this.backsideUri = backsideUri;
-        this.backsideSslContext = backsideSslContext;
+        this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
     }
@@ -53,6 +44,6 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
         ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader,
                 this::shouldGuaranteeMessageOffloading));
-        ch.pipeline().addLast(new FrontsideHandler(backsideUri, backsideSslContext));
+        ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }
 }

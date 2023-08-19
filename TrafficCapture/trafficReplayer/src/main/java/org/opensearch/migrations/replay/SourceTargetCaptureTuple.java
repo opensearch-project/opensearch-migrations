@@ -1,6 +1,8 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.json.HTTP;
 import org.json.JSONObject;
 
@@ -39,6 +41,7 @@ public class SourceTargetCaptureTuple {
 
     public static class TupleToFileWriter {
         OutputStream outputStream;
+        Logger tupleLogger = LogManager.getLogger("OutputTupleJsonLogger");
 
         public TupleToFileWriter(OutputStream outputStream){
             this.outputStream = outputStream;
@@ -132,7 +135,7 @@ public class SourceTargetCaptureTuple {
         public void writeJSON(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject jsonObject = toJSONObject(triple);
 
-            log.trace("Writing json tuple to output stream for " + triple);
+            tupleLogger.info(jsonObject.toString());
             outputStream.write((jsonObject.toString()+"\n").getBytes(StandardCharsets.UTF_8));
             outputStream.flush();
         }

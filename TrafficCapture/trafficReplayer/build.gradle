@@ -45,6 +45,9 @@ dependencies {
     implementation 'software.amazon.awssdk:sdk-core:2.20.102'
     implementation 'software.amazon.awssdk:auth:2.20.102'
 
+    // TODO - upgrade this to 2.x so that we don't pollute the jar-space with two versions of AWS SDK
+    implementation group: 'com.amazonaws.secretsmanager', name: 'aws-secretsmanager-caching-java', version: '1.0.2'
+
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
@@ -63,6 +66,8 @@ dependencies {
 
     testImplementation project(':testUtilities')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
+    testImplementation 'org.mockito:mockito-core:4.6.1'
+    testImplementation 'org.mockito:mockito-junit-jupiter:4.6.1'
 }
 
 application {
@@ -73,18 +78,6 @@ jar {
     manifest {
         attributes 'Main-Class': application.mainClass
     }
-}
-
-task uberJar(type: Jar) {
-    manifest {
-        attributes 'Main-Class': application.mainClass
-    }
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }
-    archiveBaseName = project.name + "-uber"
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    with jar
 }
 
 tasks.named('test') {

@@ -12,7 +12,8 @@ import {MSKUtilityStack} from "./msk-utility-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
-    readonly copilotAppName: string
+    readonly copilotAppName: string,
+    readonly copilotEnvName: string
 }
 
 export class StackComposer {

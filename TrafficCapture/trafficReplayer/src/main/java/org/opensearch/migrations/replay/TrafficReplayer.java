@@ -30,6 +30,9 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,6 +51,8 @@ public class TrafficReplayer {
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
+    public static final String AWS_AUTH_HEADER_USER_ARG = "--aws-auth-header-user";
+    public static final String AWS_AUTH_HEADER_SECRET_ARG = "--aws-auth-header-secret";
     private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
 
     public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
@@ -118,44 +123,62 @@ public class TrafficReplayer {
                 arity = 0,
                 description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
+
+
+        @Parameter(required = false,
+                names = {REMOVE_AUTH_HEADER_VALUE_ARG},
+                arity = 0,
+                description = "Remove the authorization header if present and do not replace it with anything.  " +
+                        "(cannot be used with other auth arguments)")
+        boolean removeAuthHeader;
         @Parameter(required = false,
                 names = {AUTH_HEADER_VALUE_ARG},
                 arity = 1,
-                description = "Value to use for the \"authorization\" header of each request " +
-                        "(cannot be used with " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG +
-                        " or " + REMOVE_AUTH_HEADER_VALUE_ARG + ")")
+                description = "Static alue to use for the \"authorization\" header of each request " +
+                        "(cannot be used with other auth arguments)")
         String authHeaderValue;
+        @Parameter(required = false,
+                names = {AWS_AUTH_HEADER_USER_ARG},
+                arity = 1,
+                description = "Plaintext username to use for the username section of a constructed \"authorization\" " +
+                        "header for each request" +
+                        "(cannot be used with other auth arguments)")
+        String awsAuthHeaderUser;
+        @Parameter(required = false,
+                names = {AWS_AUTH_HEADER_SECRET_ARG},
+                arity = 1,
+                description = "Secret ARN or Secret name from AWS Secrets Manager to use for the password section " +
+                        "of a constructed \"authorization\" header for each request" +
+                        "(cannot be used with other auth arguments)")
+        String awsAuthHeaderSecret;
         @Parameter(required = false,
                 names = {SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG},
                 arity = 1,
                 description = "Use AWS SigV4 to sign each request with the specified service name and region.  " +
                         "(e.g. es,us-east-1)  " +
                         "DefaultCredentialsProvider is used to resolve credentials.  " +
-                        "(cannot be used with " + AUTH_HEADER_VALUE_ARG + " or " + REMOVE_AUTH_HEADER_VALUE_ARG + ")")
+                        "(cannot be used with other auth arguments)")
         String useSigV4ServiceAndRegion;
-        @Parameter(required = false,
-                names = {REMOVE_AUTH_HEADER_VALUE_ARG},
-                arity = 0,
-                description = "Remove the authorization header if present and do not replace it with anything.  " +
-                        "(cannot be used with " + AUTH_HEADER_VALUE_ARG + " or " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG
-                        + ")")
-        boolean removeAuthHeader;
-        @Parameter(required = false,
-                names = {"-o", "--output"},
-                arity=1,
-                description = "output file to hold the request/response traces for the source and target cluster")
-        String outputFilename;
+
+
         @Parameter(required = false,
                 names = {"-i", "--input"},
                 arity=1,
                 description = "input file to read the request/response traces for the source cluster")
         String inputFilename;
         @Parameter(required = false,
+                names = {"-o", "--output"},
+                arity=1,
+                description = "output file to hold the request/response traces for the source and target cluster")
+        String outputFilename;
+
+        @Parameter(required = false,
                 names = {"-t", "--packet-timeout-seconds"},
                 arity = 1,
                 description = "assume that connections were terminated after this many " +
                         "seconds of inactivity observed in the captured stream")
         int observedPacketConnectionTimeout = 30;
+
         @Parameter(required = false,
             names = {"--kafka-traffic-brokers"},
             arity=1,
@@ -225,17 +248,41 @@ public class TrafficReplayer {
         }
     }
 
+    /**
+     * Java doesn't have a notion of constexpr like C++ does, so this cannot be used within the
+     * parameters' annotation descriptions, but it's still useful to break the documentation
+     * aspect out from the core logic below.
+     */
+    private static String formatAuthArgFlagsAsString() {
+        return List.of(REMOVE_AUTH_HEADER_VALUE_ARG,
+                        AUTH_HEADER_VALUE_ARG,
+                        "(" + AWS_AUTH_HEADER_USER_ARG + " AND " + AWS_AUTH_HEADER_SECRET_ARG + ")",
+                        SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG).stream()
+                .collect(Collectors.joining(", "));
+    }
+
     private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
-        if (params.authHeaderValue != null && params.useSigV4ServiceAndRegion != null && params.removeAuthHeader) {
-            throw new RuntimeException("Cannot specify more than one: " +
-                    new StringJoiner(", ")
-                            .add(AUTH_HEADER_VALUE_ARG)
-                            .add(SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG)
-                            .add(REMOVE_AUTH_HEADER_VALUE_ARG)
-                            .toString());
+        if (params.removeAuthHeader &&
+                params.authHeaderValue != null &&
+                params.useSigV4ServiceAndRegion != null &&
+                (params.awsAuthHeaderUser != null || params.awsAuthHeaderSecret != null)) {
+            throw new RuntimeException("Cannot specify more than one auth option: " +
+                    formatAuthArgFlagsAsString());
         }
-        if (params.authHeaderValue != null) {
-            var authHeaderValue = params.authHeaderValue;
+
+        var authHeaderValue = params.authHeaderValue;
+        if (params.awsAuthHeaderUser != null || params.awsAuthHeaderSecret != null) {
+            if (params.awsAuthHeaderUser == null || params.awsAuthHeaderSecret == null) {
+                throw new ParameterException("[" + AWS_AUTH_HEADER_USER_ARG + ", " + AWS_AUTH_HEADER_SECRET_ARG +
+                        "] must both be provided when either is specified");
+            }
+            try (AWSAuthService awsAuthService = new AWSAuthService()) {
+                authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(params.awsAuthHeaderUser,
+                        params.awsAuthHeaderSecret);
+            }
+        }
+
+        if (authHeaderValue != null) {
             return new StaticAuthTransformerFactory(authHeaderValue);
         } else if (params.useSigV4ServiceAndRegion != null) {
             var serviceAndRegion = params.useSigV4ServiceAndRegion.split(",");
@@ -251,7 +298,7 @@ public class TrafficReplayer {
         } else if (params.removeAuthHeader) {
             return RemovingAuthTransformerFactory.instance;
         } else {
-            return null;
+            return null; // default is to do nothing to auth headers
         }
     }
 

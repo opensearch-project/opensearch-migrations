@@ -47,6 +47,11 @@ Resources:
               # Values to join
               - - { "Fn::Join" : [ ":group", { "Fn::Split": [":cluster", {"Fn::ImportValue" : !Sub "${App}-${Env}-msk-cluster-arn"}]}] }
                 - "/*"
+          - Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Effect: Allow
+            Resource: "*"
 
 Outputs:
   # 1. You need to output the IAM ManagedPolicy so that Copilot can add it as a managed policy to your ECS task role.
