@@ -7,7 +7,9 @@ RUN apt-get update && \
     pip3 install opensearch-benchmark
 
 COPY runTestBenchmarks.sh /root/
-RUN chmod ugo+x /root/runTestBenchmarks.sh
+COPY humanReadableLogs.py /root/
+RUN chmod ug+x /root/runTestBenchmarks.sh
+RUN chmod ug+x /root/humanReadableLogs.py
 WORKDIR /root
 
 CMD tail -f /dev/null
