@@ -107,7 +107,7 @@ def parse_body_value(raw_value: str, content_encoding: Optional[str],
     return decoded
 
 
-def parse_tuple(line: str, line_no: int):
+def parse_tuple(line: str, line_no: int) -> dict:
     item = json.loads(line)
     message = item[LOG_JSON_TUPLE_FIELD]
     tuple = json.loads(message)
@@ -143,4 +143,4 @@ if __name__ == "__main__":
         with open(args.infile, 'r') as in_f:
             with open(outfile, 'w') as out_f:
                 for i, line in tqdm(enumerate(in_f)):
-                    print(parse_tuple(line, i + 1), file=out_f)
+                    print(json.dumps(parse_tuple(line, i + 1)), file=out_f)

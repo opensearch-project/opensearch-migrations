@@ -8,8 +8,8 @@ RUN apt-get update && \
 
 COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
-RUN chmod ugo+x /root/runTestBenchmarks.sh
-RUN chmod ugo+x /root/humanReadableLogs.py
+RUN chmod ug+x /root/runTestBenchmarks.sh
+RUN chmod ug+x /root/humanReadableLogs.py
 WORKDIR /root
 
 CMD tail -f /dev/null
