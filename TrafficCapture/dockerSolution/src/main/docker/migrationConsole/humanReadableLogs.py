@@ -79,31 +79,56 @@ def parse_args():
     return parser.parse_args()
 
 
+def decode_chunked(data: bytes) -> bytes:
+    newdata = []
+    next_newline = data.index(b'\r\n')
+    chunk = data[next_newline + 2:]
+    while len(chunk) > 7:  # the final EOM chunk is 7 bytes
+        next_newline = chunk.index(b'\r\n')
+        newdata.append(chunk[:next_newline])
+        chunk = chunk[next_newline + 2:]
+    return b''.join(newdata)
+
+
 def parse_body_value(raw_value: str, content_encoding: Optional[str],
-                     content_type: Optional[str], is_bulk: bool, line_no: int):
+                     content_type: Optional[str], is_bulk: bool, is_chunked_transfer: bool, line_no: int):
+    # Body is base64 decoded
     try:
         b64decoded = base64.b64decode(raw_value)
     except Exception as e:
         logger.error(f"Body value on line {line_no} could not be decoded: {e}. Skipping parsing body value.")
         return None
+
+    # Decoded data is un-chunked, if applicable
+    if is_chunked_transfer:
+        contiguous_data = decode_chunked(b64decoded)
+    else:
+        contiguous_data = b64decoded
+
+    # Data is un-gzipped, if applicable
     is_gzipped = content_encoding is not None and content_encoding == CONTENT_ENCODING_GZIP
-    is_json = content_type is not None and CONTENT_TYPE_JSON in content_type
     if is_gzipped:
         try:
-            unzipped = gzip.decompress(b64decoded)
+            unzipped = gzip.decompress(contiguous_data)
         except Exception as e:
             logger.error(f"Body value on line {line_no} should be gzipped but could not be unzipped: {e}. "
                          "Skipping parsing body value.")
-            return b64decoded
+            return contiguous_data
     else:
-        unzipped = b64decoded
+        unzipped = contiguous_data
+
+    # Data is decoded to utf-8 string
     try:
         decoded = unzipped.decode("utf-8")
     except Exception as e:
         logger.error(f"Body value on line {line_no} could not be decoded to utf-8: {e}. "
                      "Skipping parsing body value.")
         return unzipped
+
+    # Data is parsed as json, if applicable
+    is_json = content_type is not None and CONTENT_TYPE_JSON in content_type
     if is_json and len(decoded) > 0:
+        # Data is parsed as a bulk json, if applicable
         if is_bulk:
             try:
                 return [json.loads(line) for line in decoded.splitlines()]
@@ -135,9 +160,12 @@ def parse_tuple(line: str, line_no: int) -> dict:
         if base64value is None:
             # This component has no body element, which is potentially valid.
             continue
-        value = parse_body_value(base64value, content_encoding, content_type, is_bulk_path, line_no)
         content_encoding = get_element(CONTENT_ENCODING_PATH[body_path], tuple, try_lowercase_keys=True)
         content_type = get_element(CONTENT_TYPE_PATH[body_path], tuple, try_lowercase_keys=True)
+        is_chunked_transfer = get_element(TRANSFER_ENCODING_PATH[body_path],
+                                          tuple, try_lowercase_keys=True) == TRANSFER_ENCODING_CHUNKED
+        value = parse_body_value(base64value, content_encoding, content_type, is_bulk_path,
+                                 is_chunked_transfer, line_no)
         if value and type(value) != bytes:
             set_element(body_path, tuple, value)
     return tuple
