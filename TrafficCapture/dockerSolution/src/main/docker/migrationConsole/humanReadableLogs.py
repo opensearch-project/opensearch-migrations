@@ -18,17 +18,24 @@ BASE64_ENCODED_TUPLE_PATHS = ["request.body", "primaryResponse.body", "shadowRes
 # TODO: I'm not positive about the capitalization of the Content-Encoding and Content-Type headers.
 # This version worked on my test cases, but not guaranteed to work in all cases.
 CONTENT_ENCODING_PATH = {
-    BASE64_ENCODED_TUPLE_PATHS[0]: "request.content-encoding",
-    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.content-encoding",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.content-encoding"
+    BASE64_ENCODED_TUPLE_PATHS[0]: "request.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.Content-Encoding"
 }
 CONTENT_TYPE_PATH = {
-    BASE64_ENCODED_TUPLE_PATHS[0]: "request.content-type",
-    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.content-type",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.content-type"
+    BASE64_ENCODED_TUPLE_PATHS[0]: "request.Content-Type",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.Content-Type",
+    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.Content-Type"
 }
+TRANSFER_ENCODING_PATH = {
+    BASE64_ENCODED_TUPLE_PATHS[0]: "request.Transfer-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.Transfer-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.Transfer-Encoding"
+}
+
 CONTENT_TYPE_JSON = "application/json"
 CONTENT_ENCODING_GZIP = "gzip"
+TRANSFER_ENCODING_CHUNKED = "chunked"
 URI_PATH = "request.Request-URI"
 BULK_URI_PATH = "_bulk"
 
@@ -37,12 +44,18 @@ class DictionaryPathException(Exception):
     pass
 
 
-def get_element(element: str, dict_: dict, raise_on_error=False) -> Optional[any]:
+def get_element(element: str, dict_: dict, raise_on_error=False, try_lowercase_keys=False) -> Optional[any]:
+    """This has a limited version of case-insensitivity. It specifically only checks the provided key
+    and an all lower-case version of the key (if `try_lowercase_keys` is True)."""
     keys = element.split('.')
     rv = dict_
     for key in keys:
         try:
-            rv = rv[key]
+            if key in rv:
+                rv = rv[key]
+                continue
+            if try_lowercase_keys and key.lower() in rv:
+                rv = rv[key.lower()]
         except KeyError:
             if raise_on_error:
                 raise DictionaryPathException(f"Key {key} was not present.")
@@ -122,10 +135,10 @@ def parse_tuple(line: str, line_no: int) -> dict:
         if base64value is None:
             # This component has no body element, which is potentially valid.
             continue
-        content_encoding = get_element(CONTENT_ENCODING_PATH[body_path], tuple)
-        content_type = get_element(CONTENT_TYPE_PATH[body_path], tuple)
         value = parse_body_value(base64value, content_encoding, content_type, is_bulk_path, line_no)
-        if value:
+        content_encoding = get_element(CONTENT_ENCODING_PATH[body_path], tuple, try_lowercase_keys=True)
+        content_type = get_element(CONTENT_TYPE_PATH[body_path], tuple, try_lowercase_keys=True)
+        if value and type(value) != bytes:
             set_element(body_path, tuple, value)
     return tuple
 
