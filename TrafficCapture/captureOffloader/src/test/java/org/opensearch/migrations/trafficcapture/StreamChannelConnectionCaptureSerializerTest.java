@@ -129,7 +129,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
         // Arbitrarily picking small buffer that can hold the overhead TrafficStream bytes as well as some
         // data bytes but not all the data bytes and require chunking
-        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 55);
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 85);
 
         var bb = Unpooled.wrappedBuffer(packetBytes);
         serializer.addWriteEvent(referenceTimestamp, bb);
@@ -161,7 +161,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
         // Arbitrarily picking small buffer size that can only hold one empty message
         var serializer = createSerializerWithTestHandler(outputBuffersCreated,
-                TEST_NODE_ID_STRING.length() + 40);
+                TEST_NODE_ID_STRING.length() + 60);
         var bb = Unpooled.buffer(0);
         serializer.addWriteEvent(referenceTimestamp, bb);
         serializer.addWriteEvent(referenceTimestamp, bb);
