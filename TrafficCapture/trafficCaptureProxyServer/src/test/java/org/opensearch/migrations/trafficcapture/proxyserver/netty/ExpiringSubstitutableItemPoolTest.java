@@ -122,8 +122,7 @@ class ExpiringSubstitutableItemPoolTest {
             Assertions.assertEquals(NUM_POOLED_ITEMS+i, getNextItem(pool));
         }
 
-        // Need more investigation here to determine consistency
-        //Assertions.assertEquals(15, pool.getStats().getNItemsCreated());
+        Assertions.assertEquals(15, pool.getStats().getNItemsCreated());
         Assertions.assertEquals(11, pool.getStats().getNHotGets()+pool.getStats().getNColdGets());
         Assertions.assertEquals(4, pool.getStats().getNItemsExpired());
 
