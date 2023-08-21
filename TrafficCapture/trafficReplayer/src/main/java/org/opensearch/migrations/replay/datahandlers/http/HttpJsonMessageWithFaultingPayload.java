@@ -2,10 +2,12 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
-public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> {
+public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> implements IHttpMessage {
     public final static String METHOD = "method";
     public final static String URI = "URI";
     public final static String PROTOCOL = "protocol";
@@ -19,24 +21,33 @@ public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Ob
         super(m);
     }
 
+    @Override
     public String method() {
         return (String) this.get(METHOD);
     }
     public void setMethod(String value) {
         this.put(METHOD, value);
     }
-    public String uri() {
+    @Override
+    public String path() {
         return (String) this.get(URI);
     }
-    public void setUri(String value) {
+    public void setPath(String value) {
         this.put(URI, value);
     }
 
+    @Override
     public String protocol() {
         return (String) this.get(PROTOCOL);
     }
     public void setProtocol(String value) {
         this.put(PROTOCOL, value);
+    }
+
+
+    @Override
+    public Map<String, Object> headersMap() {
+        return Collections.unmodifiableMap(headers());
     }
 
     public ListKeyAdaptingCaseInsensitiveHeadersMap headers() {

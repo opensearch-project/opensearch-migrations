@@ -106,7 +106,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     }
 
     private void finalizeFixedContentStream(ChannelHandlerContext ctx) {
-        bufferedJsonMessage.headers().put(CONTENT_LENGTH_HEADER_NAME, contentBytesReceived).toString();
+        bufferedJsonMessage.headers().put(CONTENT_LENGTH_HEADER_NAME, contentBytesReceived);
         ctx.fireChannelRead(bufferedJsonMessage);
         bufferedJsonMessage = null;
         ctx.fireChannelRead(bufferedContents);

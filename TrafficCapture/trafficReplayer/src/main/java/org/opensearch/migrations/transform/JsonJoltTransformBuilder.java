@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
-public class JoltJsonTransformBuilder {
+public class JsonJoltTransformBuilder {
 
     private static String getSubstitutionTemplate(int i) {
         return "%%SUBSTITION_" + (i+1) + "%%";
@@ -40,7 +40,6 @@ public class JoltJsonTransformBuilder {
         ADD_GZIP(CANNED_OPERATION.ADD_GZIP.joltOperationTransformName),
         MAKE_CHUNKED(CANNED_OPERATION.MAKE_CHUNKED.joltOperationTransformName),
         PASS_THRU(CANNED_OPERATION.PASS_THRU.joltOperationTransformName),
-        ADD_ADMIN_AUTH("addAdminAuth", 1),
         HOST_SWITCH("hostSwitch", 1);
 
         private final String value;
@@ -73,7 +72,7 @@ public class JoltJsonTransformBuilder {
     }
 
     public static Map<String, Object> loadResourceAsJson(ObjectMapper mapper, String path) throws IOException {
-        try (InputStream inputStream = JoltJsonTransformBuilder.class.getResourceAsStream(path)) {
+        try (InputStream inputStream = JsonJoltTransformBuilder.class.getResourceAsStream(path)) {
             return mapper.readValue(inputStream, TYPE_REFERENCE_FOR_MAP_TYPE);
         }
     }
@@ -87,7 +86,7 @@ public class JoltJsonTransformBuilder {
     private Map<String, Object> getOperationWithSubstitutions(OPERATION operation, String...substitutions) {
         var path = "/jolt/operations/" + operation.value + ".jolt.template";
         assert substitutions.length == operation.numberOfTemplateSubstitutions;
-        try (InputStream inputStream = JoltJsonTransformBuilder.class.getResourceAsStream(path)) {
+        try (InputStream inputStream = JsonJoltTransformBuilder.class.getResourceAsStream(path)) {
             var contentBytes = inputStream.readAllBytes();
             var contentsStr = new String(contentBytes, StandardCharsets.UTF_8);
             for (int i=0; i<substitutions.length; ++i) {
@@ -97,27 +96,23 @@ public class JoltJsonTransformBuilder {
         }
     }
 
-    public JoltJsonTransformBuilder addHostSwitchOperation(String hostname) {
+    public JsonJoltTransformBuilder addHostSwitchOperation(String hostname) {
         return addOperationObject(getOperationWithSubstitutions(OPERATION.HOST_SWITCH, hostname));
     }
 
-    public JoltJsonTransformBuilder addAuthorizationOperation(String value) {
-        return addOperationObject(getOperationWithSubstitutions(OPERATION.ADD_ADMIN_AUTH, value));
-    }
-
-    public JoltJsonTransformBuilder addCannedOperation(CANNED_OPERATION operation) {
+    public JsonJoltTransformBuilder addCannedOperation(CANNED_OPERATION operation) {
         return addOperationObject(parseSpecOperationFromResource(operation.joltOperationTransformName));
     }
 
-    public JoltJsonTransformBuilder addOperationObject(Map<String, Object> stringObjectMap) {
+    public JsonJoltTransformBuilder addOperationObject(Map<String, Object> stringObjectMap) {
         chainedSpec.add(stringObjectMap);
         return this;
     }
 
-    public JsonTransformer build() {
+    public IJsonTransformer build() {
         if (chainedSpec.size() == 0) {
             addCannedOperation(CANNED_OPERATION.PASS_THRU);
         }
-        return new JoltJsonTransformer((List) chainedSpec);
+        return new JsonJoltTransformer((List) chainedSpec);
     }
 }

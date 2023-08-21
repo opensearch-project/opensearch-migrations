@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
  * This is an experimental JsonTransformer that is meant to perform basic URI and payload transformations
  * to excise index type mappings for relevant operations.
  */
-public class TypeMappingJsonTransformer implements JsonTransformer {
+public class JsonTypeMappingTransformer implements IJsonTransformer {
     /**
      * This is used to match a URI of the form /INDEX/TYPE/foo... so that it can be
      * transformed into /INDEX/foo...

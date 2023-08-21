@@ -6,9 +6,12 @@ import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.IAuthTransformer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,12 +41,17 @@ public class RequestPipelineOrchestrator {
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer packetReceiver;
     final String diagnosticLabel;
+    @Getter
+    final IAuthTransformerFactory authTransfomerFactory;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
                                        IPacketFinalizingConsumer packetReceiver,
+                                       IAuthTransformerFactory incomingAuthTransformerFactory,
                                        String diagnosticLabel) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
+        this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
+                IAuthTransformerFactory.NullAuthTransformerFactory.instance;
         this.diagnosticLabel = diagnosticLabel;
     }
 
@@ -61,15 +69,18 @@ public class RequestPipelineOrchestrator {
         }
     }
 
-    void addContentRepackingHandlers(ChannelPipeline pipeline) {
-        addContentParsingHandlers(pipeline, null);
+    void addContentRepackingHandlers(ChannelPipeline pipeline,
+                                     IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
+        addContentParsingHandlers(pipeline, null, authTransfomer);
     }
 
-    void addJsonParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
-        addContentParsingHandlers(pipeline, transformer);
+    void addJsonParsingHandlers(ChannelPipeline pipeline,
+                                IJsonTransformer transformer,
+                                IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
+        addContentParsingHandlers(pipeline, transformer, authTransfomer);
     }
 
-    void addInitialHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
+    void addInitialHandlers(ChannelPipeline pipeline, IJsonTransformer transformer) {
         pipeline.addFirst(HTTP_REQUEST_DECODER_NAME, new HttpRequestDecoder());
         addLoggingHandler(pipeline, "A");
         // IN:  Netty HttpRequest(1) + HttpContent(1) blocks (which may be compressed) + EndOfInput + ByteBuf
@@ -83,11 +94,13 @@ public class RequestPipelineOrchestrator {
         // Note3: ByteBufs will be sent through when there were pending bytes left to be parsed by the
         //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
         //        NettyDecodedHttpRequestHandler is removed.
-        pipeline.addLast(new NettyDecodedHttpRequestHandler(transformer, chunkSizes, packetReceiver, diagnosticLabel));
+        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler(transformer, chunkSizes, this, diagnosticLabel));
         addLoggingHandler(pipeline, "B");
     }
 
-    void addContentParsingHandlers(ChannelPipeline pipeline, JsonTransformer transformer) {
+    void addContentParsingHandlers(ChannelPipeline pipeline,
+                                   IJsonTransformer transformer,
+                                   IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
         log.debug("Adding content parsing handlers to pipeline");
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
@@ -106,25 +119,29 @@ public class RequestPipelineOrchestrator {
             pipeline.addLast(new NettyJsonBodySerializeHandler());
             addLoggingHandler(pipeline, "F");
         }
+        if (authTransfomer != null) {
+            pipeline.addLast(new NettyJsonContentAuthSigner(authTransfomer));
+            addLoggingHandler(pipeline, "G");
+        }
         // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
         pipeline.addLast(new NettyJsonContentCompressor());
-        addLoggingHandler(pipeline, "G");
+        addLoggingHandler(pipeline, "H");
         // IN:  Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks + EndOfInput
         // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + ByteBufs(2)
         pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
-        addLoggingHandler(pipeline, "H");
+        addLoggingHandler(pipeline, "I");
         addBaselineHandlers(pipeline);
     }
 
     void addBaselineHandlers(ChannelPipeline pipeline) {
-        addLoggingHandler(pipeline, "I");
+        addLoggingHandler(pipeline, "J");
         //  IN: ByteBufs(2) + HttpJsonMessage(4) with headers only + HttpContent(1) (if the repackaging handlers were skipped)
         // OUT: ByteBufs(3) which are sized similarly to how they were received
         pipeline.addLast(new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes)));
         // IN:  ByteBufs(3)
         // OUT: nothing - terminal!  ByteBufs are routed to the packet handler!
-        addLoggingHandler(pipeline, "J");
+        addLoggingHandler(pipeline, "K");
         pipeline.addLast(OFFLOADING_HANDLER_NAME,
                 new NettySendByteBufsToPacketHandlerHandler(packetReceiver, diagnosticLabel));
     }

@@ -2,14 +2,14 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.util.Map;
 
 public class NettyJsonBodyConvertHandler extends ChannelInboundHandlerAdapter {
-    private final JsonTransformer transformer;
+    private final IJsonTransformer transformer;
 
-    public NettyJsonBodyConvertHandler(JsonTransformer transformer) {
+    public NettyJsonBodyConvertHandler(IJsonTransformer transformer) {
         this.transformer = transformer;
     }
 
