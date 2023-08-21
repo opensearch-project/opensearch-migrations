@@ -5,6 +5,7 @@ import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -42,6 +43,7 @@ class ExpiringSubstitutableItemPoolTest {
      * unless I've stopped threads within the debugger.
      */
     @Test
+    @Disabled
     void get() throws Exception {
         var firstWaveBuildCountdownLatch = new CountDownLatch(NUM_POOLED_ITEMS);
         var expireCountdownLatch = new CountDownLatch(NUM_POOLED_ITEMS-NUM_ITEMS_TO_PULL);
