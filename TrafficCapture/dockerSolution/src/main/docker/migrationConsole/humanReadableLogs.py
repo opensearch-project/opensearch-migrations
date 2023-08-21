@@ -166,7 +166,7 @@ def parse_tuple(line: str, line_no: int) -> dict:
                                           tuple, try_lowercase_keys=True) == TRANSFER_ENCODING_CHUNKED
         value = parse_body_value(base64value, content_encoding, content_type, is_bulk_path,
                                  is_chunked_transfer, line_no)
-        if value and type(value) != bytes:
+        if value and type(value) is not bytes:
             set_element(body_path, tuple, value)
     return tuple
 
