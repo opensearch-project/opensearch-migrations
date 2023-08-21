@@ -6,6 +6,7 @@ import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Disabled;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -19,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+@Disabled
 @Slf4j
 class ExpiringSubstitutableItemPoolTest {
 

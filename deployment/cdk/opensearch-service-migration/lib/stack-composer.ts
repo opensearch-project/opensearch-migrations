@@ -7,7 +7,6 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
-import {HistoricalCaptureStack} from "./historical-capture-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
 
 export interface StackPropsExt extends StackProps {
@@ -186,25 +185,6 @@ export class StackComposer {
             mskUtilityStack.addDependency(migrationStack)
             this.stacks.push(mskUtilityStack)
         }
-
-        // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited
-        // Note: Future work to provide orchestration between historical capture and migration assistance as the current
-        // state will potentially have both stacks trying to add the same data
-        if (historicalCaptureEnabled && networkStack) {
-            const historicalCaptureStack = new HistoricalCaptureStack(scope, "historicalCaptureStack", {
-                vpc: networkStack.vpc,
-                logstashConfigFilePath: logstashConfigFilePath,
-                sourceEndpoint: sourceClusterEndpoint,
-                targetEndpoint: opensearchStack.domainEndpoint,
-                stackName: `OSServiceHistoricalCDKStack-${stage}-${region}`,
-                description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
-                ...props,
-            })
-
-            historicalCaptureStack.addDependency(opensearchStack)
-            this.stacks.push(historicalCaptureStack)
-        }
-
 
         function getContextForType(optionName: string, expectedType: string): any {
             const option = scope.node.tryGetContext(optionName)
