@@ -51,8 +51,7 @@ public class TrafficReplayer {
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
-    public static final String AWS_AUTH_HEADER_USER_ARG = "--aws-auth-header-user";
-    public static final String AWS_AUTH_HEADER_SECRET_ARG = "--aws-auth-header-secret";
+    public static final String AWS_AUTH_HEADER_USER_AND_SECRET_ARG = "--auth-header-user-and-secret";
     private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
 
     public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
@@ -134,23 +133,18 @@ public class TrafficReplayer {
         @Parameter(required = false,
                 names = {AUTH_HEADER_VALUE_ARG},
                 arity = 1,
-                description = "Static alue to use for the \"authorization\" header of each request " +
+                description = "Static value to use for the \"authorization\" header of each request " +
                         "(cannot be used with other auth arguments)")
         String authHeaderValue;
         @Parameter(required = false,
-                names = {AWS_AUTH_HEADER_USER_ARG},
-                arity = 1,
-                description = "Plaintext username to use for the username section of a constructed \"authorization\" " +
-                        "header for each request" +
+                names = {AWS_AUTH_HEADER_USER_AND_SECRET_ARG},
+                arity = 2,
+                description = "<USERNAME> <SECRET_ARN> pair to specify " +
+                        "\"authorization\" header value for each request.  " +
+                        "The USERNAME specifies the plaintext user and the SECRET_ARN specifies the ARN or " +
+                        "Secret name from AWS Secrets Manager to retrieve the password from for the password section" +
                         "(cannot be used with other auth arguments)")
-        String awsAuthHeaderUser;
-        @Parameter(required = false,
-                names = {AWS_AUTH_HEADER_SECRET_ARG},
-                arity = 1,
-                description = "Secret ARN or Secret name from AWS Secrets Manager to use for the password section " +
-                        "of a constructed \"authorization\" header for each request" +
-                        "(cannot be used with other auth arguments)")
-        String awsAuthHeaderSecret;
+        List<String> awsAuthHeaderUserAndSecret;
         @Parameter(required = false,
                 names = {SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG},
                 arity = 1,
@@ -256,7 +250,7 @@ public class TrafficReplayer {
     private static String formatAuthArgFlagsAsString() {
         return List.of(REMOVE_AUTH_HEADER_VALUE_ARG,
                         AUTH_HEADER_VALUE_ARG,
-                        "(" + AWS_AUTH_HEADER_USER_ARG + " AND " + AWS_AUTH_HEADER_SECRET_ARG + ")",
+                        AWS_AUTH_HEADER_USER_AND_SECRET_ARG,
                         SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG).stream()
                 .collect(Collectors.joining(", "));
     }
@@ -265,20 +259,20 @@ public class TrafficReplayer {
         if (params.removeAuthHeader &&
                 params.authHeaderValue != null &&
                 params.useSigV4ServiceAndRegion != null &&
-                (params.awsAuthHeaderUser != null || params.awsAuthHeaderSecret != null)) {
+                params.awsAuthHeaderUserAndSecret != null) {
             throw new RuntimeException("Cannot specify more than one auth option: " +
                     formatAuthArgFlagsAsString());
         }
 
         var authHeaderValue = params.authHeaderValue;
-        if (params.awsAuthHeaderUser != null || params.awsAuthHeaderSecret != null) {
-            if (params.awsAuthHeaderUser == null || params.awsAuthHeaderSecret == null) {
-                throw new ParameterException("[" + AWS_AUTH_HEADER_USER_ARG + ", " + AWS_AUTH_HEADER_SECRET_ARG +
-                        "] must both be provided when either is specified");
+        if (params.awsAuthHeaderUserAndSecret != null) {
+            if (params.awsAuthHeaderUserAndSecret.size() != 2) {
+                throw new ParameterException(AWS_AUTH_HEADER_USER_AND_SECRET_ARG +
+                        " must specify two arguments, <USERNAME> <SECRET_ARN>");
             }
             try (AWSAuthService awsAuthService = new AWSAuthService()) {
-                authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(params.awsAuthHeaderUser,
-                        params.awsAuthHeaderSecret);
+                authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(params.awsAuthHeaderUserAndSecret.get(0),
+                        params.awsAuthHeaderUserAndSecret.get(1));
             }
         }
 
