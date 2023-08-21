@@ -3,10 +3,10 @@ package org.opensearch.migrations.transform;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class CompositeJsonTransformer implements JsonTransformer {
-    List<JsonTransformer> jsonTransformerList;
+public class JsonCompositeTransformer implements IJsonTransformer {
+    List<IJsonTransformer> jsonTransformerList;
 
-    public CompositeJsonTransformer(JsonTransformer... jsonTransformers) {
+    public JsonCompositeTransformer(IJsonTransformer... jsonTransformers) {
         this.jsonTransformerList = List.of(jsonTransformers);
     }
 

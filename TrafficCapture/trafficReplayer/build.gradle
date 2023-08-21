@@ -42,7 +42,12 @@ repositories {
 dependencies {
     implementation project(':captureProtobufs')
 
+    implementation 'software.amazon.awssdk:sdk-core:2.20.102'
+    implementation 'software.amazon.awssdk:auth:2.20.102'
+
+    // TODO - upgrade this to 2.x so that we don't pollute the jar-space with two versions of AWS SDK
     implementation group: 'com.amazonaws.secretsmanager', name: 'aws-secretsmanager-caching-java', version: '1.0.2'
+
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'

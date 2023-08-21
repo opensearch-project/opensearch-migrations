@@ -2,41 +2,35 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.IAuthTransformer;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter {
+public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInboundHandlerAdapter {
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD = 32;
-    /**
-     * This is stored as part of a closure for the pipeline continuation that will be triggered
-     * once it becomes apparent if we need to process the payload stream or if we can pass it
-     * through as is.
-     */
-    final IPacketFinalizingConsumer packetReceiver;
-    final JsonTransformer transformer;
+
+    final RequestPipelineOrchestrator requestPipelineOrchestrator;
+    final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
 
-    public NettyDecodedHttpRequestHandler(JsonTransformer transformer,
-                                          List<List<Integer>> chunkSizes,
-                                          IPacketFinalizingConsumer packetReceiver,
-                                          String diagnosticLabel) {
-        this.packetReceiver = packetReceiver;
+    public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
+                                                            List<List<Integer>> chunkSizes,
+                                                            RequestPipelineOrchestrator requestPipelineOrchestrator,
+                                                            String diagnosticLabel) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
+        this.requestPipelineOrchestrator = requestPipelineOrchestrator;
         this.diagnosticLabel = "[" + diagnosticLabel + "] ";
     }
 
@@ -55,17 +49,20 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
 
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));
-            var pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, packetReceiver, diagnosticLabel);
             var pipeline = ctx.pipeline();
+            var originalHttpJsonMessage = parseHeadersIntoMessage(request);
+            IAuthTransformer authTransformer =
+                    requestPipelineOrchestrator.authTransfomerFactory.getAuthTransformer(originalHttpJsonMessage);
             try {
-                var httpJsonMessage = transform(transformer, parseHeadersIntoMessage(request));
-                handlePayloadNeutralTransformation(ctx, request, httpJsonMessage, pipelineOrchestrator);
+                handlePayloadNeutralTransformationOrThrow(ctx, request, transform(transformer, originalHttpJsonMessage),
+                        authTransformer);
             } catch (PayloadNotLoadedException pnle) {
                 log.debug("The transforms for this message require payload manipulation, " +
                         "all content handlers are being loaded.");
                 // make a fresh message and its headers
-                pipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer);
-                ctx.fireChannelRead(parseHeadersIntoMessage(request));
+                requestPipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer,
+                        getAuthTransformerAsStreamingTransformer(authTransformer));
+                ctx.fireChannelRead(handleAuthHeaders(parseHeadersIntoMessage(request), authTransformer));
             }
         } else if (msg instanceof HttpContent) {
             ctx.fireChannelRead(msg);
@@ -77,7 +74,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private static HttpJsonMessageWithFaultingPayload transform(JsonTransformer transformer,
+    private static HttpJsonMessageWithFaultingPayload transform(IJsonTransformer transformer,
                                                                 HttpJsonMessageWithFaultingPayload httpJsonMessage) {
         var returnedObject = transformer.transformJson(httpJsonMessage);
         if (returnedObject != httpJsonMessage) {
@@ -87,13 +84,23 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
         return httpJsonMessage;
     }
 
-    private void handlePayloadNeutralTransformation(ChannelHandlerContext ctx,
-                                                    HttpRequest request,
-                                                    HttpJsonMessageWithFaultingPayload httpJsonMessage,
-                                                    RequestPipelineOrchestrator pipelineOrchestrator)
+    private void handlePayloadNeutralTransformationOrThrow(ChannelHandlerContext ctx,
+                                                           HttpRequest request,
+                                                           HttpJsonMessageWithFaultingPayload httpJsonMessage,
+                                                           IAuthTransformer authTransformer)
     {
+        // if the auth transformer only requires header manipulations, just do it right away, otherwise,
+        // if it's a streaming transformer, require content parsing and send it in there
+        handleAuthHeaders(httpJsonMessage, authTransformer);
+        var streamingAuthTransformer = getAuthTransformerAsStreamingTransformer(authTransformer);
+
         var pipeline = ctx.pipeline();
-        if (headerFieldsAreIdentical(request, httpJsonMessage)) {
+        if (streamingAuthTransformer != null) {
+            log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
+                    "reformatted, adding Content Handlers to this pipeline.");
+            requestPipelineOrchestrator.addContentRepackingHandlers(pipeline, streamingAuthTransformer);
+            ctx.fireChannelRead(httpJsonMessage);
+        } else if (headerFieldsAreIdentical(request, httpJsonMessage)) {
             log.info(diagnosticLabel + "Transformation isn't necessary.  " +
                     "Clearing pipeline to let the parent context redrive directly.");
             while (pipeline.first() != null) {
@@ -104,19 +111,33 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
             log.info(diagnosticLabel + "There were changes to the headers that require the message to be reformatted " +
                     "through this pipeline but the content (payload) doesn't need to be transformed.  " +
                     "Content Handlers are not being added to the pipeline");
-            pipelineOrchestrator.addBaselineHandlers(pipeline);
+            requestPipelineOrchestrator.addBaselineHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
             RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
         } else {
             log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
                     "reformatted, adding Content Handlers to this pipeline.");
-            pipelineOrchestrator.addContentRepackingHandlers(pipeline);
+            requestPipelineOrchestrator.addContentRepackingHandlers(pipeline, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         }
     }
 
+    private static HttpJsonMessageWithFaultingPayload
+    handleAuthHeaders(HttpJsonMessageWithFaultingPayload httpJsonMessage, IAuthTransformer authTransformer) {
+        if (authTransformer != null && authTransformer instanceof IAuthTransformer.HeadersOnlyTransformer) {
+            ((IAuthTransformer.HeadersOnlyTransformer) authTransformer).rewriteHeaders(httpJsonMessage);
+        }
+        return httpJsonMessage;
+    }
+
+    private static IAuthTransformer.StreamingFullMessageTransformer
+    getAuthTransformerAsStreamingTransformer(IAuthTransformer authTransformer) {
+        return (authTransformer instanceof IAuthTransformer.StreamingFullMessageTransformer) ?
+                (IAuthTransformer.StreamingFullMessageTransformer) authTransformer : null;
+    }
+
     private boolean headerFieldsAreIdentical(HttpRequest request, HttpJsonMessageWithFaultingPayload httpJsonMessage) {
-        if (!request.uri().equals(httpJsonMessage.uri()) ||
+        if (!request.uri().equals(httpJsonMessage.path()) ||
                 !request.method().toString().equals(httpJsonMessage.method())) {
             return false;
         }
@@ -130,7 +151,7 @@ public class NettyDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter
 
     private static HttpJsonMessageWithFaultingPayload parseHeadersIntoMessage(HttpRequest request) {
         var jsonMsg = new HttpJsonMessageWithFaultingPayload();
-        jsonMsg.setUri(request.uri().toString());
+        jsonMsg.setPath(request.uri().toString());
         jsonMsg.setMethod(request.method().toString());
         jsonMsg.setProtocol(request.protocolVersion().text());
         var headers = request.headers().entries().stream()

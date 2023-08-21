@@ -21,13 +21,13 @@ class JsonTransformerTest {
     }
 
     private Map<String, Object> parseStringAsJson(String jsonStr) throws JsonProcessingException {
-        return mapper.readValue(jsonStr, JoltJsonTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
+        return mapper.readValue(jsonStr, JsonJoltTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
     }
 
     @SneakyThrows
     private Map<String, Object> parseSampleRequestFromResource(String path) {
-        try (InputStream inputStream = JoltJsonTransformBuilder.class.getResourceAsStream("/requests/"+path)) {
-            return mapper.readValue(inputStream, JoltJsonTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
+        try (InputStream inputStream = JsonJoltTransformBuilder.class.getResourceAsStream("/requests/"+path)) {
+            return mapper.readValue(inputStream, JsonJoltTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
         }
     }
 
@@ -41,8 +41,8 @@ class JsonTransformerTest {
     public void testSimpleTransform() throws JsonProcessingException {
         final String TEST_DOCUMENT = "{\"Hello\":\"world\"}";
         var documentJson = parseStringAsJson(TEST_DOCUMENT);
-        var transformer = JoltJsonTransformer.newBuilder()
-                .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.PASS_THRU)
+        var transformer = JsonJoltTransformer.newBuilder()
+                .addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.PASS_THRU)
                 .build();
         var transformedDocument = transformer.transformJson(documentJson);
         var finalOutputStr = emitJson(transformedDocument);
@@ -54,7 +54,7 @@ class JsonTransformerTest {
     public void testHttpTransform() throws IOException {
         var testResourceName = "parsed/post_formUrlEncoded_withFixedLength.json";
         final var documentJson = parseSampleRequestFromResource(testResourceName);
-        var transformer = JoltJsonTransformer.newBuilder()
+        var transformer = JsonJoltTransformer.newBuilder()
                 .addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING)
                 .build();
         var transformedDocument = transformer.transformJson(documentJson);

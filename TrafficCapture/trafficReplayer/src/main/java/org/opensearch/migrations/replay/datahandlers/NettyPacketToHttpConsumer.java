@@ -152,6 +152,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
     @Override
     public DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(ByteBuf packetData) {
+        responseBuilder.addRequestPacket(packetData.duplicate());
         log.debug("Scheduling write of packetData["+packetData+"]" +
                 " hash=" + System.identityHashCode(packetData));
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),

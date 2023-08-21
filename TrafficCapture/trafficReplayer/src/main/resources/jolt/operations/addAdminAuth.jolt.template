@@ -1,8 +1,0 @@
-{
-  "operation": "modify-overwrite-beta",
-  "spec": {
-    "headers": {
-      "authorization": "%%SUBSTITION_1%%"
-    }
-  }
-}

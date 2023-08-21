@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
@@ -11,7 +10,8 @@ import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -56,14 +56,15 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     // backed by the exact same byte[] arrays, so the memory consumption should already be absorbed.
     private final List<ByteBuf> chunks;
 
-    public HttpJsonTransformingConsumer(JsonTransformer transformer,
-                                        IPacketFinalizingConsumer transformedPacketReceiver,
+    public HttpJsonTransformingConsumer(IJsonTransformer transformer,
+                                        IAuthTransformerFactory authTransformerFactory, IPacketFinalizingConsumer transformedPacketReceiver,
                                         String diagnosticLabel) {
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
-        pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver, diagnosticLabel);
+        pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver,
+                authTransformerFactory, diagnosticLabel);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
     }
 

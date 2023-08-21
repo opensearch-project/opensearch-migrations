@@ -6,9 +6,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
-import org.opensearch.migrations.transform.JoltJsonTransformer;
+import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
+import org.opensearch.migrations.transform.JsonJoltTransformer;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -34,9 +33,9 @@ public class AddCompressionEncodingTest {
                 null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var compressingTransformer = new HttpJsonTransformingConsumer(
-                JoltJsonTransformer.newBuilder()
-                        .addCannedOperation(JoltJsonTransformBuilder.CANNED_OPERATION.ADD_GZIP)
-                        .build(), testPacketCapture, "TEST");
+                JsonJoltTransformer.newBuilder()
+                        .addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP)
+                        .build(), null, testPacketCapture, "TEST");
 
         final var payloadPartSize = 511;
         final var numParts = 1025;

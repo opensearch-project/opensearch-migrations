@@ -1,13 +1,12 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
 
 import java.util.AbstractMap;
 import java.util.AbstractSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -22,17 +21,15 @@ import java.util.Set;
 @Slf4j
 public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
-    public static final String CONTENT_TYPE = "content-type";
-    public static final String APPLICATION_JSON = "application/json";
     public static final String INLINED_JSON_BODY_DOCUMENT_KEY = "inlinedJsonBody";
 
     private final boolean isJson;
     private Object onlyValue;
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
-        isJson = Optional.ofNullable(headers.get(CONTENT_TYPE))
+        isJson = Optional.ofNullable(headers.get(IHttpMessage.CONTENT_TYPE))
                 .map(list->list.stream()
-                        .anyMatch(s->s.startsWith(APPLICATION_JSON))).orElse(false);
+                        .anyMatch(s->s.startsWith(IHttpMessage.APPLICATION_JSON))).orElse(false);
     }
 
     @Override
