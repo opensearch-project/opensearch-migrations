@@ -5,11 +5,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import software.amazon.awssdk.services.secretsmanager.SecretsManagerAsyncClient;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
 
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -19,18 +17,17 @@ import static org.mockito.Mockito.when;
 public class AWSAuthServiceTest {
 
     @Mock
-    private SecretsManagerAsyncClient secretsManagerClient;
+    private SecretsManagerClient secretsManagerClient;
 
     @Test
-    public void testBasicAuthHeaderFromSecret() throws ExecutionException, InterruptedException {
+    public void testBasicAuthHeaderFromSecret() {
         String testSecretId = "testSecretId";
         String testUsername = "testAdmin";
         String expectedResult = "Basic dGVzdEFkbWluOmFkbWluUGFzcw==";
 
         GetSecretValueResponse response = GetSecretValueResponse.builder().secretString("adminPass").build();
-        CompletableFuture<GetSecretValueResponse> responseFuture = CompletableFuture.completedFuture(response);
 
-        when(secretsManagerClient.getSecretValue(any(Consumer.class))).thenReturn(responseFuture);
+        when(secretsManagerClient.getSecretValue(any(Consumer.class))).thenReturn(response);
 
         AWSAuthService awsAuthService = new AWSAuthService(secretsManagerClient);
         String header = awsAuthService.getBasicAuthHeaderFromSecret(testUsername, testSecretId);

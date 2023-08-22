@@ -255,8 +255,7 @@ public class TrafficReplayer {
                 .collect(Collectors.joining(", "));
     }
 
-    private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params)
-        throws ExecutionException, InterruptedException {
+    private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
         if (params.removeAuthHeader &&
                 params.authHeaderValue != null &&
                 params.useSigV4ServiceAndRegion != null &&
