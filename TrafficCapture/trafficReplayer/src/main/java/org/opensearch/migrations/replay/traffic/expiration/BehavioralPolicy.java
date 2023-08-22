@@ -14,7 +14,7 @@ import java.time.Instant;
 public class BehavioralPolicy {
     public void onDataArrivingBeforeTheStartOfTheCurrentProcessingWindow(
             String partitionId, String connectionId, Instant timestamp, Instant endOfWindow) {
-        log.error("Could not update the expiration of an object whose timestamp is before the " +
+        log.atError().setMessage(()->"Could not update the expiration of an object whose timestamp is before the " +
                 "oldest point in time that packets are still being processed for this partition.  " +
                 "This means that there was larger than expected temporal jitter in packets.  " +
                 "That means that traffic for this connection may have already been reported as expired " +
@@ -27,7 +27,7 @@ public class BehavioralPolicy {
 
     public void onNewDataArrivingAfterItsAccumulationHasBeenExpired(
             String partitionId, String connectionId, Instant lastPacketTimestamp, Instant endOfWindow) {
-        log.error("New data has arrived, but during the processing of this Accumulation object, " +
+        log.atError().setMessage(()->"New data has arrived, but during the processing of this Accumulation object, " +
                 "the Accumulation was expired.  This indicates that the minimumGuaranteedLifetime " +
                 "must be set to at least " + Duration.between(lastPacketTimestamp, endOfWindow) +
                 ".  The beginning of the valid time window is currently " + endOfWindow +
@@ -37,7 +37,7 @@ public class BehavioralPolicy {
 
     public void onNewDataArrivingWithATimestampThatIsAlreadyExpired(
             String partitionId, String connectionId, Instant timestamp, Instant endOfWindow) {
-        log.error("New data has arrived, but during the processing of this Accumulation object, " +
+        log.atError().setMessage(()->"New data has arrived, but during the processing of this Accumulation object, " +
                 "the Accumulation was expired.  This indicates that the minimumGuaranteedLifetime " +
                 "must be set to at least " + Duration.between(timestamp, endOfWindow) +
                 ".  The beginning of the valid time window is currently " + endOfWindow +
@@ -49,7 +49,7 @@ public class BehavioralPolicy {
                                                                      Instant timestamp, Accumulation accumulation,
                                                                      int attempts) {
         if (attempts > ExpiringTrafficStreamMap.DEFAULT_NUM_TIMESTAMP_UPDATE_ATTEMPTS) {
-            log.error("A race condition was detected while trying to update the most recent timestamp " +
+            log.atError().setMessage(()->"A race condition was detected while trying to update the most recent timestamp " +
                     "(" + timestamp + ") of " + "accumulation (" + accumulation + ") for " +
                     partitionId + "/" + connectionId + ".  Giving up after " + attempts + " attempts.  " +
                     "Data for this connection may be corrupted.");

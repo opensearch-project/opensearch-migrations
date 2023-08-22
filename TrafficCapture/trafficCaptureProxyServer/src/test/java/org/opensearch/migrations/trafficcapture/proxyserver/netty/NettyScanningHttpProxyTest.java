@@ -110,7 +110,7 @@ class NettyScanningHttpProxyTest {
                         })
                         .toArray(TrafficStream[]::new);
         Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
-        log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
+        log.atInfo().setMessage(()->"Recorded traffic stream:\n" + recordedTrafficStreams[0]).log();
         var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
         Assertions.assertEquals(NUM_INTERACTIONS*2, coalescedTrafficList.size());
         int counter = 0;

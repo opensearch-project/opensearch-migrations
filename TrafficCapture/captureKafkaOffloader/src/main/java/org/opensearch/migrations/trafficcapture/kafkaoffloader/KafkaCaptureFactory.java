@@ -64,7 +64,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                         Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
                     // Used to essentially wrap Future returned by Producer to CompletableFuture
                     CompletableFuture cf = new CompletableFuture<>();
-                    log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
+                    log.atDebug().log("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
                     // Async request to Kafka cluster
                     producer.send(record, handleProducerRecordSent(cf, recordId));
                     // Note that ordering is not guaranteed to be preserved here
@@ -90,11 +90,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     private Callback handleProducerRecordSent(CompletableFuture cf, String recordId) {
         return (metadata, exception) -> {
             if (exception != null) {
-                log.error("Error sending producer record: {}", recordId, exception);
+                log.atError().setCause(exception).log("Error sending producer record: {}", recordId);
                 cf.completeExceptionally(exception);
             }
             else {
-                log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
+                log.atDebug().log("Kafka producer record: {} has finished sending for topic: {} and partition {}",
                     recordId, metadata.topic(), metadata.partition());
                 cf.complete(metadata);
             }

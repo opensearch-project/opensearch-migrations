@@ -4,11 +4,12 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
 
-@Log4j2
+@Slf4j
 public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<FullHttpResponse> {
 
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
@@ -50,7 +51,7 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         doneReadingRequest = true;
-        log.trace("inactive channel - closing");
+        log.atTrace().setMessage(()->"inactive channel - closing").log();
         triggerResponseCallbackAndRemoveCallback();
         super.channelInactive(ctx);
     }

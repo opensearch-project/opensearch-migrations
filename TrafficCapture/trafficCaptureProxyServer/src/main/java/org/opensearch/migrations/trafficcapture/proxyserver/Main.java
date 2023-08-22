@@ -185,7 +185,7 @@ public class Main {
             try {
                 kafkaProps.load(new FileReader(params.kafkaPropertiesFile));
             } catch (IOException e) {
-                log.error("Unable to locate provided Kafka producer properties file path: " + params.kafkaPropertiesFile);
+                log.atError().setMessage(()->"Unable to locate provided Kafka producer properties file path: " + params.kafkaPropertiesFile).log();
                 throw e;
             }
         }

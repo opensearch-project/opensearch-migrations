@@ -28,7 +28,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
     public void channelActive(ChannelHandlerContext ctx) {
         final Channel inboundChannel = ctx.channel();
         var outboundChannelFuture = backsideConnectionPool.getOutboundConnectionFuture(inboundChannel.eventLoop());
-        log.debug("Active - setting up backend connection with channel " + outboundChannelFuture.channel());
+        log.atDebug().setMessage(()->"Active - setting up backend connection with channel " + outboundChannelFuture.channel());
         outboundChannelFuture.addListener((ChannelFutureListener) (future -> {
             if (future.isSuccess()) {
                 var pipeline = future.channel().pipeline();
@@ -36,7 +36,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                 inboundChannel.read();
             } else {
                 // Close the connection if the connection attempt has failed.
-                log.debug("closing outbound channel because CONNECT future was not successful");
+                log.atDebug().setMessage(()->"closing outbound channel because CONNECT future was not successful").log();
                 inboundChannel.close();
             }
         }));
@@ -45,27 +45,27 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(final ChannelHandlerContext ctx, Object msg) {
-        log.debug("frontend handler[" + this.outboundChannel + "] read: "+msg);
+        log.atDebug().setMessage(()->"frontend handler[" + this.outboundChannel + "] read: "+msg).log();
         if (outboundChannel.isActive()) {
-            log.debug("Writing data to backside handler " + outboundChannel);
+            log.atDebug().setMessage(()->"Writing data to backside handler " + outboundChannel).log();
             outboundChannel.writeAndFlush(msg)
                     .addListener((ChannelFutureListener) future -> {
                         if (future.isSuccess()) {
                             ctx.channel().read(); // kickoff another read for the frontside
                         } else {
-                            log.debug("closing outbound channel because WRITE future was not successful due to: ",
-                                    future.cause());
+                            log.atDebug().setCause(future.cause())
+                                    .setMessage(()->"closing outbound channel because WRITE future was not successful due to").log();
                             future.channel().close(); // close the backside
                         }
                     });
             outboundChannel.config().setAutoRead(true);
         } else { // if the outbound channel has died, so be it... let this frontside finish with it's caller naturally
-            log.warn("Output channel (" + outboundChannel + ") is NOT active");
+            log.atWarn().setMessage(()->"Output channel (" + outboundChannel + ") is NOT active");
         }
     }
 
     public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-        log.debug("channelRead COMPLETE");
+        log.atDebug().setMessage(()->"channelRead COMPLETE").log();
         ctx.fireChannelReadComplete();
     }
 

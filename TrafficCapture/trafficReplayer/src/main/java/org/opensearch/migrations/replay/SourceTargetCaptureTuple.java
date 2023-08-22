@@ -74,8 +74,8 @@ public class SourceTargetCaptureTuple {
             try {
                 return jsonFromHttpDataUnsafe(data);
             } catch (Exception e) {
-                log.warn("Putting what may be a bogus value in the output because transforming it " +
-                        "into json threw an exception");
+                log.atWarn().setMessage(()->"Putting what may be a bogus value in the output because transforming it " +
+                        "into json threw an exception").log();
                 return new JSONObject(Map.of("Exception", e.toString()));
             }
         }
@@ -89,7 +89,7 @@ public class SourceTargetCaptureTuple {
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
-            //log.warn("TODO: These durations are not measuring the same values!");
+            //log.atWarn().setMessage(()->"TODO: These durations are not measuring the same values!").log();
             meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
                 Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(), triple.sourcePair.responseData.getLastPacketTimestamp())));
             meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,

@@ -19,6 +19,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
@@ -31,7 +32,7 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-@Log4j2
+@Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
 
     DiagnosticTrackableCompletableFuture<String, Channel> fullyInitializedChannelFuture;
@@ -67,11 +68,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             }
 
             if (foundIssue == null) {
-                log.trace("User Event=" + evt);
+                log.atTrace().setMessage(()->"User Event=" + evt).log();
                 super.userEventTriggered(ctx, evt);
             } else {
-                log.warn("exception event in ssl handshake (" + evt +
-                        ") - triggering callback and eating the event", foundIssue);
+                log.atWarn().setMessage(()->"exception event in ssl handshake (" + evt +
+                        ") - triggering callback and eating the event" + foundIssue);
                 onExceptionCaughtConsumer.accept(foundIssue);
             }
         }
@@ -89,7 +90,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 .option(ChannelOption.AUTO_READ, false);
         String host = serverUri.getHost();
         int port = serverUri.getPort();
-        log.debug("Active - setting up backend connection to " + host + ":" + port);
+        log.atDebug().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
         var outboundChannelFuture = b.connect(host, port);
         //outboundChannel = outboundChannelFuture.channel();
         responseWatchHandler = new BacksideHttpWatcherHandler(responseBuilder);
@@ -99,7 +100,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         outboundChannelFuture.addListener((ChannelFutureListener) future -> {
             if (future.isSuccess()) {
                 // connection complete start to read first data
-                log.debug(diagnosticLabel + "Done setting up backend channel & it was successful");
+                log.atDebug().setMessage(()->diagnosticLabel + "Done setting up backend channel & it was successful").log();
                 var pipeline = future.channel().pipeline();
                 pipeline.addFirst(new LoggingHandler("PRE_EVERYTHING", LogLevel.TRACE));
                 if (sslContext != null) {
@@ -124,9 +125,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 }
             } else {
                 // Close the connection if the connection attempt has failed.
-                log.warn(diagnosticLabel + " CONNECT future was not successful, so setting the channel future's " +
-                        "result to an exception");
-                log.warn(future.cause());
+                log.atWarn().setCause(future.cause())
+                        .setMessage(()->diagnosticLabel + " CONNECT future was not successful, so setting the channel future's " +
+                        "result to an exception").log();
                 fullyInitializedChannelFuture.future.completeExceptionally(future.cause());
             }
         });
@@ -153,18 +154,18 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     @Override
     public DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(ByteBuf packetData) {
         responseBuilder.addRequestPacket(packetData.duplicate());
-        log.debug("Scheduling write of packetData["+packetData+"]" +
+        log.atDebug().setMessage(()->"Scheduling write of packetData["+packetData+"]" +
                 " hash=" + System.identityHashCode(packetData));
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
 //                writePacketAndUpdateFuture(packetData, completableFuture, channel);
         return fullyInitializedChannelFuture.getDeferredFutureThroughHandle((channel, channelInitException) -> {
             if (channelInitException == null) {
-                log.trace("outboundChannelFuture has finished - retriggering consumeBytes" +
+                log.atTrace().setMessage(()->"outboundChannelFuture has finished - retriggering consumeBytes" +
                         " hash=" + System.identityHashCode(packetData));
                 writePacketAndUpdateFuture(packetData, completableFuture, channel);
             } else {
-                log.warn(diagnosticLabel + "outbound channel was not set up successfully, NOT writing bytes " +
+                log.atWarn().setMessage(()->diagnosticLabel + "outbound channel was not set up successfully, NOT writing bytes " +
                         " hash=" + System.identityHashCode(packetData));
                 completableFuture.future.completeExceptionally(channelInitException);
             }
@@ -180,7 +181,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     Throwable cause = null;
                     try {
                         if (!future.isSuccess()) {
-                            log.warn(diagnosticLabel + "closing outbound channel because WRITE future was not successful " +
+                            log.atWarn().setMessage(()->diagnosticLabel + "closing outbound channel because WRITE future was not successful " +
                                     future.cause() + " hash=" + System.identityHashCode(packetData) +
                                     " will be sending the exception to " + completableFuture);
                             future.channel().close(); // close the backside
@@ -190,11 +191,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         cause = e;
                     }
                     if (cause == null) {
-                        log.debug("Signaling previously returned CompletableFuture packet write was successful: "
+                        log.atDebug().setMessage(()->"Signaling previously returned CompletableFuture packet write was successful: "
                                 + packetData + " hash=" + System.identityHashCode(packetData));
                         completableFuture.future.complete(null);
                     } else {
-                        log.trace("Signaling previously returned CompletableFuture packet write had an exception : "
+                        log.atTrace().setMessage(()->"Signaling previously returned CompletableFuture packet write had an exception : "
                                 + packetData + " hash=" + System.identityHashCode(packetData));
                         completableFuture.future.completeExceptionally(cause);
                     }

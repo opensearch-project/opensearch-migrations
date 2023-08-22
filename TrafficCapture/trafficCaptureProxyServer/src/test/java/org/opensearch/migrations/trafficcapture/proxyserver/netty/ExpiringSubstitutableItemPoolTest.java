@@ -70,7 +70,7 @@ class ExpiringSubstitutableItemPoolTest {
                 },
                 item->{
                     expireCountdownLatch.countDown();
-                    log.info("Expiring item: "+item);
+                    log.atInfo().setMessage(()->"Expiring item: "+item).log();
                     try {
                         expiredItems.add(item.get());
                     } catch (InterruptedException e) {
@@ -81,26 +81,26 @@ class ExpiringSubstitutableItemPoolTest {
                 });
         for (int i = 0; i<NUM_POOLED_ITEMS; ++i) {
             Thread.sleep(TIME_BETWEEN_INITIAL_ITEMS.toMillis());
-            log.info("instructing builder to add item now");
+            log.atInfo().setMessage(()->"instructing builder to add item now").log();
             pool.increaseCapacity(1);
         }
 
-        log.debug("waiting for firstWaveBuildCountdownLatch");
-        log.info("Pool=" + pool);
+        log.atDebug().setMessage(()->"waiting for firstWaveBuildCountdownLatch").log();
+        log.atInfo().setMessage(()->"Pool=" + pool).log();
         firstWaveBuildCountdownLatch.await();
-        log.info("Done waiting for firstWaveBuildCountdownLatch");
-        log.info("Pool=" + pool);
+        log.atInfo().setMessage(()->"Done waiting for firstWaveBuildCountdownLatch").log();
+        log.atInfo().setMessage(()->"Pool=" + pool).log();
         for (int i=1; i<=NUM_ITEMS_TO_PULL; ++i) {
             Assertions.assertEquals(i, getNextItem(pool));
         }
-        log.trace("Awaiting the last items to expire (lastCreationTime=" + lastCreation.get() +
+        log.atTrace().setMessage(()->"Awaiting the last items to expire (lastCreationTime=" + lastCreation.get() +
                 " timeout=" + INACTIVITY_TIMEOUT);
         expireCountdownLatch.await(); // wait for the 4 other original items to expire
-        log.trace("Done waiting");
+        log.atTrace().setMessage(()->"Done waiting").log();
         {
             var nowInstant = Instant.now();
             var limitInstant = lastCreation.get().plus(INACTIVITY_TIMEOUT);
-            log.debug("nowInstant=" + nowInstant + " limitInstant=" + limitInstant +
+            log.atDebug().setMessage(()->"nowInstant=" + nowInstant + " limitInstant=" + limitInstant +
                     " gap = " + Duration.between(limitInstant,nowInstant) +
                     " limit is before now = "  + limitInstant.isBefore(nowInstant));
             Assertions.assertTrue(limitInstant.isBefore(nowInstant));
@@ -119,7 +119,7 @@ class ExpiringSubstitutableItemPoolTest {
         Assertions.assertTrue(pool.getStats().getNItemsExpired() >= 4);
 
         for (int i=1; i<=NUM_POOLED_ITEMS*2; ++i) {
-            log.info("Pool=" + pool);
+            log.atInfo().setMessage(()->"Pool=" + pool).log();
             Assertions.assertEquals(NUM_POOLED_ITEMS+i, getNextItem(pool));
         }
 
@@ -141,7 +141,7 @@ class ExpiringSubstitutableItemPoolTest {
     private static Integer getIntegerItem(AtomicInteger builtItemCursor,
                                           AtomicReference<Instant> lastCreation,
                                           CountDownLatch countdownLatchToUse) {
-        log.info("Building item (" +builtItemCursor.hashCode() + ") " + (builtItemCursor.get()+1));
+        log.atInfo().setMessage(()->"Building item (" +builtItemCursor.hashCode() + ") " + (builtItemCursor.get()+1));
         countdownLatchToUse.countDown();
         lastCreation.set(Instant.now());
         return Integer.valueOf(builtItemCursor.incrementAndGet());

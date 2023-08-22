@@ -21,9 +21,7 @@ public class RequestResponsePacketPair {
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
-        if (log.isTraceEnabled()) {
-            log.trace(this + " Adding request data: " + new String(data, StandardCharsets.UTF_8));
-        }
+        log.atTrace().setMessage(()->this + " Adding request data: " + new String(data, StandardCharsets.UTF_8));
         if (requestData == null) {
             requestData = new HttpMessageAndTimestamp(packetTimeStamp);
         }
@@ -32,9 +30,7 @@ public class RequestResponsePacketPair {
     }
 
     public void addResponseData(Instant packetTimeStamp, byte[] data) {
-        if (log.isTraceEnabled()) {
-            log.trace(this + " Adding response data: " + new String(data, StandardCharsets.UTF_8));
-        }
+        log.atTrace().setMessage(()->this + " Adding response data: " + new String(data, StandardCharsets.UTF_8));
         if (responseData == null) {
             responseData = new HttpMessageAndTimestamp(packetTimeStamp);
         }

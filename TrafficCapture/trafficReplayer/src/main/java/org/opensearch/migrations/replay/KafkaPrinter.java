@@ -98,7 +98,7 @@ public class KafkaPrinter {
             try (InputStream input = new FileInputStream(params.kafkaTrafficPropertyFile)) {
                 properties.load(input);
             } catch (IOException ex) {
-                log.error("Unable to load properties from kafka.properties file.");
+                log.atError().setMessage(()->"Unable to load properties from kafka.properties file.").log();
                 return;
             }
         }
@@ -117,12 +117,12 @@ public class KafkaPrinter {
             consumer.subscribe(Collections.singleton(topic));
             pipeRecordsToProtoBufDelimited(consumer, getDelimitedProtoBufOutputter(System.out));
         } catch (WakeupException e) {
-            log.info("Wake up exception!");
+            log.atInfo().setMessage(()->"Wake up exception!").log();
         } catch (Exception e) {
-            log.error("Unexpected exception", e);
+            log.atError().setCause(e).setMessage(()->"Unexpected exception").log();
         } finally {
             consumer.close();
-            log.info("This consumer close successfully.");
+            log.atInfo().setMessage(()->"This consumer close successfully.").log();
         }
     }
 

@@ -17,7 +17,8 @@ public class KafkaBehavioralPolicy {
      * @return Null if no exception should be thrown, otherwise provide the exception that will be thrown by the calling class
      */
     public RuntimeException onInvalidKafkaRecord(ConsumerRecord<String, byte[]> record, InvalidProtocolBufferException e) {
-        log.error("Unable to parse incoming traffic stream with record id: {} from error: ", record.key(), e);
+        log.atError().setCause(e)
+                .log("Unable to parse incoming traffic stream with record id: {} from error: ", record.key());
         return null;
     }
 }

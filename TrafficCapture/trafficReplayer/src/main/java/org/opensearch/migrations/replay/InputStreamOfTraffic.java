@@ -29,10 +29,10 @@ public class InputStreamOfTraffic implements ITrafficCaptureSource {
                     return null;
                 }
                 var ts = builder.build();
-                log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+                log.atTrace().log("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
                 return ts;
             } catch (IOException e) {
-                log.error("Got exception while reading input: "+e);
+                log.atError().setCause(e).setMessage(()->"Got exception while reading input").log();
                 throw new RuntimeException(e);
             }
         }).takeWhile(Objects::nonNull);

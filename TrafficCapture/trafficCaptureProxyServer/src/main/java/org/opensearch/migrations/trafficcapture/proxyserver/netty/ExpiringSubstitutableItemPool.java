@@ -200,9 +200,9 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         }
         var startTime = Instant.now();
         {
-            log.trace("getAvailableOrNewItem: readyItems.size()="+readyItems.size());
+            log.atTrace().setMessage(()->"getAvailableOrNewItem: readyItems.size()="+readyItems.size());
             var item = readyItems.poll();
-            log.trace("getAvailableOrNewItem: item="+item + " remaining readyItems.size()="+readyItems.size());
+            log.atTrace().setMessage(()->"getAvailableOrNewItem: item="+item + " remaining readyItems.size()="+readyItems.size());
             if (item != null) {
                 stats.addHotGet();
                 beginLoadingNewItemIfNecessary();
@@ -214,7 +214,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         BiFunction<F,String,F> durationTrackingDecoratedItem =
                 (itemsFuture, label) -> (F) itemsFuture.addListener(f->{
                     stats.addWaitTime(Duration.between(startTime, Instant.now()));
-                    log.trace(label + "returning value="+ f.get()+" from future " + itemsFuture);
+                    log.atTrace().setMessage(()->label + "returning value="+ f.getNow()+" from future " + itemsFuture);
                 });
         stats.addColdGet();
         var inProgressIt = inProgressItems.iterator();
@@ -249,12 +249,12 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
 
     private void expireItems() {
         var thresholdTimestamp = Instant.now().minus(this.inactivityTimeout);
-        log.debug("expiration threshold = " + thresholdTimestamp);
+        log.atDebug().setMessage(()->"expiration threshold = " + thresholdTimestamp).log();
         while (!readyItems.isEmpty()) {
             var oldestItem = readyItems.peek();
             var gap = Duration.between(thresholdTimestamp, oldestItem.timestamp);
             if (!gap.isNegative()) {
-                log.debug("scheduling next sweep for " + gap);
+                log.atDebug().setMessage(()->"scheduling next sweep for " + gap).log();
                 scheduleNextExpirationSweep(gap);
                 return;
             } else {
@@ -264,7 +264,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
                         "so with a fixed item timeout, nothing should ever be able to cut back in time.  " +
                         "Secondly, a concurrent mutation of any sort while in this function " +
                         "should have been impossible since we're only modifying this object through a shared eventloop";
-                log.debug("Removing " + removedItem);
+                log.atDebug().setMessage(()->"Removing " + removedItem).log();
                 onExpirationConsumer.accept(removedItem.future);
                 beginLoadingNewItemIfNecessary();
             }

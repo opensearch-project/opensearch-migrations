@@ -42,8 +42,8 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        log.debug("Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
-        log.trace("HR: old currentFuture="+currentFuture);
+        log.atDebug().setMessage(()->"Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
+        log.atTrace().setMessage(()->"HR: old currentFuture="+currentFuture).log();
         if (currentFuture.future.isDone()) {
             if (currentFuture.future.isCompletedExceptionally()) {
                 packetReceiverCompletionFutureRef.set(currentFuture.getDeferredFutureThroughHandle((v,t)->
@@ -51,8 +51,8 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                         ()->"handlerRemoved: packetReceiverCompletionFuture receiving exceptional value"));
                 return;
             } else if (currentFuture.get() == null) {
-                log.info("The handler responsible for writing data to the server was detached before writing " +
-                        "bytes.  Throwing a NoContentException so that the calling context can handle appropriately.");
+                log.atInfo().setMessage(()->"The handler responsible for writing data to the server was detached before writing " +
+                        "bytes.  Throwing a NoContentException so that the calling context can handle appropriately.").log();
                 packetReceiverCompletionFutureRef.set(
                         StringTrackableCompletableFuture.failedFuture(new NoContentException(),
                                 ()->"Setting NoContentException to the exposed CompletableFuture" +
@@ -93,7 +93,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                         ()->"ignoring return type of packetReceiver.finalizeRequest() but waiting for it to finish"),
                 ()->"Waiting for packetReceiver.finalizeRequest() and will return once that is done");
         packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
-        log.trace("HR: new currentFuture="+currentFuture);
+        log.atTrace().setMessage(()->"HR: new currentFuture="+currentFuture).log();
         super.handlerRemoved(ctx);
     }
 
@@ -113,18 +113,18 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (msg instanceof ByteBuf) {
-            log.trace("read the following message and sending it to consumeBytes: " + msg +
+            log.atTrace().setMessage(()->"read the following message and sending it to consumeBytes: " + msg +
                     " hashCode=" + System.identityHashCode(msg) +
                     " ctx hash=" + System.identityHashCode(ctx));
             var bb = ((ByteBuf) msg).retain();
-            log.trace("CR: old currentFuture="+currentFuture);
+            log.atTrace().setMessage(()->"CR: old currentFuture="+currentFuture).log();
             // I don't want to capture the *this* object, the preexisting value of the currentFuture field only
             final var preexistingFutureForCapture = currentFuture;
             var numBytesToSend = bb.readableBytes();
             currentFuture = currentFuture.thenCompose(v-> {
-                log.trace("chaining consumingBytes with " + msg + " lastFuture=" + preexistingFutureForCapture);
+                log.atTrace().setMessage(()->"chaining consumingBytes with " + msg + " lastFuture=" + preexistingFutureForCapture).log();
                 var rval = packetReceiver.consumeBytes(bb);
-                log.trace("packetReceiver.consumeBytes()="+rval);
+                log.atTrace().setMessage(()->"packetReceiver.consumeBytes()="+rval);
                 bb.release();
                 return rval.map(cf->cf.thenApply(ignore->false),
                         ()->"this NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is going to return a" +
@@ -132,7 +132,7 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
             },
                     ()->"NettySendByteBufsToPacketHandlerHandler.channelRead waits for the previous future " +
                             "to finish before writing the next set of " + numBytesToSend + " bytes ");
-            log.trace("CR: new currentFuture="+currentFuture);
+            log.atTrace().setMessage(()->"CR: new currentFuture="+currentFuture).log();
         } else if (msg instanceof LastHttpContent || msg instanceof EndOfInput) {
             currentFuture = currentFuture.map(cf->cf.thenApply(ignore->true),
                     ()->"this NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is prepared to return a " +

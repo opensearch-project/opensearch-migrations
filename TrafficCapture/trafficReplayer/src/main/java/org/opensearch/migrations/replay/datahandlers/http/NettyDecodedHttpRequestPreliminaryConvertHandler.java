@@ -38,7 +38,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
             var request = (HttpRequest) msg;
-            log.info(new StringBuilder(diagnosticLabel)
+            log.atInfo().setMessage(()->new StringBuilder(diagnosticLabel)
                     .append(" parsed request: ")
                     .append(request.method())
                     .append(" ")
@@ -57,8 +57,8 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
                 handlePayloadNeutralTransformationOrThrow(ctx, request, transform(transformer, originalHttpJsonMessage),
                         authTransformer);
             } catch (PayloadNotLoadedException pnle) {
-                log.debug("The transforms for this message require payload manipulation, " +
-                        "all content handlers are being loaded.");
+                log.atDebug().setMessage(()->"The transforms for this message require payload manipulation, " +
+                        "all content handlers are being loaded.").log();
                 // make a fresh message and its headers
                 requestPipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer,
                         getAuthTransformerAsStreamingTransformer(authTransformer));
@@ -96,27 +96,27 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
 
         var pipeline = ctx.pipeline();
         if (streamingAuthTransformer != null) {
-            log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
-                    "reformatted, adding Content Handlers to this pipeline.");
+            log.atInfo().setMessage(()->diagnosticLabel + "New headers have been specified that require the payload stream to be " +
+                    "reformatted, adding Content Handlers to this pipeline.").log();
             requestPipelineOrchestrator.addContentRepackingHandlers(pipeline, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         } else if (headerFieldsAreIdentical(request, httpJsonMessage)) {
-            log.info(diagnosticLabel + "Transformation isn't necessary.  " +
-                    "Clearing pipeline to let the parent context redrive directly.");
+            log.atInfo().setMessage(()->diagnosticLabel + "Transformation isn't necessary.  " +
+                    "Clearing pipeline to let the parent context redrive directly.").log();
             while (pipeline.first() != null) {
                 pipeline.removeFirst();
             }
         } else if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                 headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
-            log.info(diagnosticLabel + "There were changes to the headers that require the message to be reformatted " +
+            log.atInfo().setMessage(()->diagnosticLabel + "There were changes to the headers that require the message to be reformatted " +
                     "through this pipeline but the content (payload) doesn't need to be transformed.  " +
                     "Content Handlers are not being added to the pipeline");
             requestPipelineOrchestrator.addBaselineHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
             RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
         } else {
-            log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
-                    "reformatted, adding Content Handlers to this pipeline.");
+            log.atInfo().setMessage(()->diagnosticLabel + "New headers have been specified that require the payload stream to be " +
+                    "reformatted, adding Content Handlers to this pipeline.").log();
             requestPipelineOrchestrator.addContentRepackingHandlers(pipeline, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         }

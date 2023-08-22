@@ -97,7 +97,7 @@ class ExpiringKeyQueue extends
                                    BehavioralPolicy behavioralPolicy,
                                    ConcurrentHashMap<String, Boolean> keyMap,
                                    EpochMillis earlierTimesToPreserve) {
-        log.debug("Expiring entries before " + earlierTimesToPreserve);
+        log.atDebug().setMessage(()->"Expiring entries before " + earlierTimesToPreserve).log();
         for (var connectionId : keyMap.keySet()) {
             var key = new ScopedConnectionIdKey(partitionId, connectionId);
             var accumulation = connectionAccumulatorMap.get(key);

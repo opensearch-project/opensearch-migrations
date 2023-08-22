@@ -23,7 +23,7 @@ class JsonEmitterTest {
         var pac = jse.getChunkAndContinuations(originalTree, 10*1024);
         while (true) {
             var asBytes = new byte[pac.partialSerializedContents.readableBytes()];
-            log.info("Got "+asBytes.length+" bytes back");
+            log.atInfo().setMessage(()->"Got "+asBytes.length+" bytes back").log();
             pac.partialSerializedContents.readBytes(asBytes);
             var nextChunkStr = new String(asBytes, StandardCharsets.UTF_8);
             writer.append(nextChunkStr);

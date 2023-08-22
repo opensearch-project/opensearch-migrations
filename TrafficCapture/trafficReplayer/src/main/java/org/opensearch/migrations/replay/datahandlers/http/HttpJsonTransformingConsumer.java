@@ -89,7 +89,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
         if (log.isTraceEnabled()) {
             byte[] copy = new byte[nextRequestPacket.readableBytes()];
             nextRequestPacket.duplicate().readBytes(copy);
-            log.trace("HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
+            log.atTrace().setMessage(()->"HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
                     + new String(copy, StandardCharsets.UTF_8));
         }
         return StringTrackableCompletableFuture.completedFuture(null, ()->"initialValue")
@@ -106,9 +106,9 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
             }
         } catch (Exception e) {
             if (e instanceof NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException) {
-                log.debug("Caught IncompleteJsonBodyException when sending the end of content", e);
+                log.atDebug().setCause(e).setMessage(()->"Caught IncompleteJsonBodyException when sending the end of content").log();
             } else {
-                log.warn("Caught exception when sending the end of content", e);
+                log.atWarn().setCause(e).setMessage(()->"Caught exception when sending the end of content").log();
             }
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, e);
         } finally {
@@ -149,7 +149,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                                         completedFuture(null, ()->"Initial value"),
                                 (dcf, bb) -> dcf.thenCompose(v -> {
                                     var rval = packetConsumer.consumeBytes(bb);
-                                    log.error("packetConsumer.consumeBytes()="+rval);
+                                    log.atError().setMessage(()->"packetConsumer.consumeBytes()="+rval);
                                     return rval;
                                 },
                                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation collect()")));

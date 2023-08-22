@@ -136,7 +136,7 @@ public class JsonEmitter {
      * @throws IOException
      */
     public PartialOutputAndContinuation getChunkAndContinuations(Object object, int minBytes) throws IOException {
-        log.trace("getChunkAndContinuations(..., "+minBytes+")");
+        log.atTrace().setMessage(()->"getChunkAndContinuations(..., "+minBytes+")");
         return getChunkAndContinuationsHelper(walkTreeWithContinuations(object), minBytes);
     }
 
@@ -161,7 +161,7 @@ public class JsonEmitter {
         if (compositeByteBuf.numComponents() > NUM_SEGMENT_THRESHOLD ||
                 compositeByteBuf.readableBytes() > minBytes) {
             var byteBuf = outputStream.recycleByteBufRetained();
-            log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + continuation");
+            log.atDebug().setMessage(()->"getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + continuation");
             return new PartialOutputAndContinuation(byteBuf,
                     () -> getChunkAndContinuationsHelper(nextFragmentSupplier, minBytes));
         }
@@ -172,10 +172,10 @@ public class JsonEmitter {
                 throw new RuntimeException(e);
             }
             var byteBuf = outputStream.recycleByteBufRetained();
-            log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + null");
+            log.atDebug().setMessage(()->"getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + null");
             return new PartialOutputAndContinuation(byteBuf, null);
         }
-        log.trace("getChunkAndContinuationsHelper->recursing with " + outputStream.compositeByteBuf.readableBytes() +
+        log.atTrace().setMessage(()->"getChunkAndContinuationsHelper->recursing with " + outputStream.compositeByteBuf.readableBytes() +
                 " written bytes buffered");
         return getChunkAndContinuationsHelper(nextFragmentSupplier.supplier.get(), minBytes);
     }
@@ -213,7 +213,7 @@ public class JsonEmitter {
      * @return
      */
     private FragmentSupplier walkTreeWithContinuations(Object o) {
-        log.trace("walkTree... "+o);
+        log.atTrace().setMessage(()->"walkTree... "+o).log();
         if (o instanceof Map.Entry) {
             var kvp = (Map.Entry<String,Object>) o;
             writeFieldName(kvp.getKey());

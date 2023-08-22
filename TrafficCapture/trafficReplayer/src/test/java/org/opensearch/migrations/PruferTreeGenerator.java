@@ -126,12 +126,12 @@ public class PruferTreeGenerator<T> {
             var parent = pruferSequenceArray[i];
             var child = nodesWithOneLinkLeft.poll();
             if (log.isTraceEnabled()) {
-                log.trace("Adding link from {} -> {}", child, parent);
+                log.atTrace().log("Adding link from {} -> {}", child, parent);
             }
             edges.add(Link.builder().from(child).to(parent).build());
             removeLinkForNode(parent, nodeDegrees, nodesWithOneLinkLeft);
             if (log.isTraceEnabled()) {
-                log.trace("degrees: " + arrayAsString(nodeDegrees));
+                log.atTrace().setMessage(()->"degrees: " + arrayAsString(nodeDegrees));
             }
         }
 

@@ -89,7 +89,7 @@ public class BacksideConnectionPool {
         f.addListener((ChannelFutureListener) connectFuture -> {
             if (connectFuture.isSuccess()) {
                 // connection complete start to read first data
-                log.debug("Done setting up backend channel & it was successful (" + connectFuture.channel() + ")");
+                log.atDebug().setMessage(()->"Done setting up backend channel & it was successful (" + connectFuture.channel() + ")");
                 if (backsideSslContext != null) {
                     var pipeline = connectFuture.channel().pipeline();
                     SSLEngine sslEngine = backsideSslContext.newEngine(connectFuture.channel().alloc());

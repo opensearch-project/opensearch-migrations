@@ -137,7 +137,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
                  return;
             }
         } catch (Exception e) {
-            log.warn("writing headers directly to chunks w/ sizes didn't work: "+e);
+            log.atWarn().setMessage(()->"writing headers directly to chunks w/ sizes didn't work: "+e).log();
         }
 
         try (var baos = new ByteArrayOutputStream()) {
@@ -161,17 +161,17 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
                 (ResourceLeakDetector<CompositeByteBuf>) ResourceLeakDetectorFactory.instance().newResourceLeakDetector(cbb.getClass());
         rld.track(cbb);
         cbb.addComponents(true, bufs);
-        log.debug("cbb.refcnt="+cbb.refCnt());
+        log.atDebug().setMessage(()->"cbb.refcnt="+cbb.refCnt());
         try (var bbos = new ByteBufOutputStream(cbb)) {
             writeHeadersIntoStream(httpJson, bbos);
         }
-        log.debug("post write cbb.refcnt="+cbb.refCnt());
+        log.atDebug().setMessage(()->"post write cbb.refcnt="+cbb.refCnt());
         int debugCounter = 0;
         for (var bb : bufs) {
-            log.debug("bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
+            log.atDebug().log("bb[{}].refcnt={}",debugCounter, bb.refCnt());
             ctx.fireChannelRead(bb);
             bb.release();
-            log.debug("Post fire & decrement - bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
+            log.atDebug().log("Post fire & decrement - bb[{}].refcnt={}", debugCounter, bb.refCnt());
             debugCounter++;
         }
         cbb.release();

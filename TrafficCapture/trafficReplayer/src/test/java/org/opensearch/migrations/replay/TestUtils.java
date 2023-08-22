@@ -56,7 +56,7 @@ public class TestUtils {
 
     static DiagnosticTrackableCompletableFuture<String,Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
                                                                                IPacketConsumer transformingHandler) {
-        log.info("Sending string to transformer: "+s);
+        log.atInfo().setMessage(()->"Sending string to transformer: "+s).log();
         referenceStringBuilder.append(s);
         var bytes = s.getBytes(StandardCharsets.UTF_8);
         return transformingHandler.consumeBytes(bytes);
@@ -88,7 +88,7 @@ public class TestUtils {
                                                              String expectedPayloadString)
             throws IOException
     {
-        log.warn("\n\nBeginning verification pipeline\n\n");
+        log.atWarn().setMessage(()->"\n\nBeginning verification pipeline\n\n").log();
 
         AtomicReference<FullHttpRequest> fullHttpRequestAtomicReference = new AtomicReference<>();
         EmbeddedChannel unpackVerifier = new EmbeddedChannel(

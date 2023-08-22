@@ -56,7 +56,7 @@ class KafkaProtobufConsumerTest {
         // This assertion will fail the test case if not completed within its duration, as would be the case if there
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> trafficStream.limit(numTrafficStreams).forEach(stream -> {
-            log.trace("Stream has substream count: " + stream.getSubStreamCount());
+            log.atTrace().setMessage(()->"Stream has substream count: " + stream.getSubStreamCount());
             Assertions.assertInstanceOf(TrafficStream.class, stream);
             Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
         }));
@@ -99,7 +99,7 @@ class KafkaProtobufConsumerTest {
         // This assertion will fail the test case if not completed within its duration, as would be the case if there
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> trafficStream.limit(numTrafficStreams).forEach(stream -> {
-            log.trace("Stream has substream count: " + stream.getSubStreamCount());
+            log.atTrace().setMessage(()->"Stream has substream count: " + stream.getSubStreamCount());
             Assertions.assertInstanceOf(TrafficStream.class, stream);
             Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
         }));
@@ -206,7 +206,7 @@ class KafkaProtobufConsumerTest {
                 e.printStackTrace();
             }
             var record = new ConsumerRecord(TEST_TOPIC_NAME, 0, offsetStart+i, Instant.now().toString(), data);
-            log.trace("adding record");
+            log.atTrace().setMessage(()->"adding record").log();
             mockConsumer.addRecord(record);
         }
     }

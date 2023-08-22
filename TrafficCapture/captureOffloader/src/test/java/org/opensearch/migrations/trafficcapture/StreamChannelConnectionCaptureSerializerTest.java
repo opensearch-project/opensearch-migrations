@@ -148,7 +148,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         String reconstructedData = "";
         for (TrafficObservation observation : observations) {
             var stringChunk = observation.getWriteSegment().getData().toStringUtf8();
-            log.trace("stringChunk=" + stringChunk);
+            log.atTrace().setMessage(()->"stringChunk=" + stringChunk).log();
             reconstructedData += stringChunk;
         }
         Assertions.assertEquals(packetData, reconstructedData);
@@ -225,23 +225,23 @@ class StreamChannelConnectionCaptureSerializerTest {
                 ByteBuffer bytes = ByteBuffer.allocate(bufferSize);
                 var rval = CodedOutputStream.newInstance(bytes);
                 codedStreamToByteBuffersMap.put(rval, bytes);
-                log.trace("Put COS: " + rval + " into map (keys="+ mapToKeyStrings(codedStreamToByteBuffersMap) +") with bytes=" + bytes);
+                log.atTrace().setMessage(()->"Put COS: " + rval + " into map (keys="+ mapToKeyStrings(codedStreamToByteBuffersMap) +") with bytes=" + bytes);
                 return rval;
             },
             (captureSerializerResult) -> {
             CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
-            log.trace("Getting ready to flush for " + codedOutputStream);
-            log.trace("Bytes written so far... " +
+            log.atTrace().setMessage(()->"Getting ready to flush for " + codedOutputStream).log();
+            log.atTrace().setMessage(()->"Bytes written so far... " +
                     StandardCharsets.UTF_8.decode(codedStreamToByteBuffersMap.get(codedOutputStream).duplicate()));
                 CompletableFuture cf = CompletableFuture.runAsync(() -> {
                     try {
                         codedOutputStream.flush();
-                        log.trace("Just flushed for " + codedOutputStream);
+                        log.atTrace().setMessage(()->"Just flushed for " + codedOutputStream).log();
                         var bb = codedStreamToByteBuffersMap.get(codedOutputStream);
                         bb.position(0);
                         var bytesWritten = codedOutputStream.getTotalBytesWritten();
                         bb.limit(bytesWritten);
-                        log.trace("Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
+                        log.atTrace().setMessage(()->"Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
                         outputBuffers.add(bb);
                     } catch (IOException e) {
                         throw new RuntimeException(e);

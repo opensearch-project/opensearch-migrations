@@ -270,9 +270,11 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             int calculatedMinSpaceAfterMessage = getOrCreateCodedOutputStream().spaceLeft() - messageAndOverheadBytesLeft;
             addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, byteBuffer);
             if (getOrCreateCodedOutputStream().spaceLeft() < calculatedMinSpaceAfterMessage) {
-                log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
-                    "at least {} bytes remaining, this should be investigated", captureFieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
-                    getOrCreateCodedOutputStream().spaceLeft(), calculatedMinSpaceAfterMessage);
+                log.atWarn().log("Writing a substream (capture type: {}) for Traffic Stream: {}.{} left {} " +
+                                "bytes in the CodedOutputStream but we calculated at least {} bytes remaining, " +
+                                "this should be investigated",
+                        captureFieldNumber, connectionIdString, (numFlushesSoFar + 1),
+                        getOrCreateCodedOutputStream().spaceLeft(), calculatedMinSpaceAfterMessage);
             }
             return;
         }
@@ -288,8 +290,10 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, ++dataCount, timestamp, bb);
             int calculatedMinSpaceAfterMessage = availableCOSSpace - chunkBytes - trafficStreamOverhead;
             if (getOrCreateCodedOutputStream().spaceLeft() < calculatedMinSpaceAfterMessage) {
-                log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
-                    "at least {} bytes remaining, this should be investigated", segmentFieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
+                log.atWarn().log("Writing a substream (capture type: {}) for Traffic Stream: {}.{} left {} " +
+                                "bytes in the CodedOutputStream but we calculated at least {} bytes remaining, " +
+                                "this should be investigated",
+                        segmentFieldNumber, connectionIdString, (numFlushesSoFar + 1),
                     getOrCreateCodedOutputStream().spaceLeft(), calculatedMinSpaceAfterMessage);
             }
             // 1 to N-1 chunked messages

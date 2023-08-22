@@ -40,7 +40,7 @@ class NettyJsonToByteBufHandlerTest {
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             if (msg instanceof ByteBuf) {
                 var incomingBytes = ((ByteBuf) msg).readableBytes();
-                log.warn("validation handler got "+incomingBytes+" bytes");
+                log.atWarn().setMessage(()->"validation handler got "+incomingBytes+" bytes").log();
                 chunkSizesReceivedList.add(incomingBytes);
                 totalBytesRead += incomingBytes;
             } else {
@@ -53,7 +53,7 @@ class NettyJsonToByteBufHandlerTest {
     @Test
     public void testThatHttpContentsAreRepackagedToChunkSizeSpec() {
         for (int i=0; i<10; ++i) {
-            log.error("Testing w/ random seed="+i);
+            log.atError().log("Testing w/ random seed=", i);
             testWithSeed(new Random(i));
         }
     }
@@ -91,11 +91,10 @@ class NettyJsonToByteBufHandlerTest {
         Assertions.assertTrue(validationHandler.chunkSizesReceivedList.size() >
                 sharedInProgressChunkSizes.size()+1);
     }
-
     static byte nonce = 0;
     private int writeAndCheck(EmbeddedChannel channel, ArrayList<Integer> sizesWrittenList, int len) {
         var bytes = new byte[len];
-        log.warn("Writing "+len);
+        log.atWarn().setMessage(()->"Writing "+len).log();
         sizesWrittenList.add(len);
         Arrays.fill(bytes, nonce++);
         var httpContent = new DefaultHttpContent(Unpooled.wrappedBuffer(bytes));

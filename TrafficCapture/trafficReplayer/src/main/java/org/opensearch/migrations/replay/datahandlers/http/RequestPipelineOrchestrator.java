@@ -101,12 +101,12 @@ public class RequestPipelineOrchestrator {
     void addContentParsingHandlers(ChannelPipeline pipeline,
                                    IJsonTransformer transformer,
                                    IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
-        log.debug("Adding content parsing handlers to pipeline");
+        log.atDebug().setMessage(()->"Adding content parsing handlers to pipeline").log();
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
         pipeline.addLast(new HttpContentDecompressor());
         if (transformer != null) {
-            log.debug("Adding JSON handlers to pipeline");
+            log.atDebug().setMessage(()->"Adding JSON handlers to pipeline").log();
             //  IN: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) blocks
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
             addLoggingHandler(pipeline, "C");

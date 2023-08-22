@@ -61,7 +61,8 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
             try (InputStream input = new FileInputStream(propertyFilePath)) {
                 kafkaProps.load(input);
             } catch (IOException ex) {
-                log.error("Unable to load properties from kafka properties file with path: {}", propertyFilePath);
+                log.atError().setMessage(()->"Unable to load properties from kafka properties file with path: " +
+                        propertyFilePath).log();
                 throw ex;
             }
         }
@@ -89,14 +90,16 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     records = consumer.poll(CONSUMER_POLL_TIMEOUT);
                 }
                 catch (RuntimeException e) {
-                    log.warn("Unable to poll the topic: {} with our Kafka consumer... Ending message consumption now", topic);
+                    log.atWarn().log("Unable to poll the topic: {} with our Kafka consumer... " +
+                            "Ending message consumption now", topic);
                     throw e;
                 }
                 Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
                     try {
                         TrafficStream ts = TrafficStream.parseFrom(record.value());
                         // Ensure we increment trafficStreamsRead even at a higher log level
-                        log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+                        log.atTrace().log("Parsed traffic stream #{}: {}",
+                                trafficStreamsRead.incrementAndGet(), ts);
                         return ts;
                     } catch (InvalidProtocolBufferException e) {
                         RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
@@ -110,7 +113,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
             }).takeWhile(Objects::nonNull);
             return generatedStream.flatMap(stream -> stream);
         } catch (Exception e) {
-            log.error("Terminating Kafka traffic stream");
+            log.atError().setMessage(()->"Terminating Kafka traffic stream").log();
             throw e;
         }
     }
@@ -118,7 +121,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
     @Override
     public void close() throws IOException {
         consumer.close();
-        log.info("Kafka consumer closed successfully.");
+        log.atInfo().setMessage(()->"Kafka consumer closed successfully.").log();
     }
 
 }

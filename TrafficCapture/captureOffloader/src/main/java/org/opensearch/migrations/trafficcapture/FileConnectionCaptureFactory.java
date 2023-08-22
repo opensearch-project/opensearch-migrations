@@ -56,7 +56,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
                 byte[] filledBytes = Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position());
                 fs.write(filledBytes);
                 fs.flush();
-                log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
+                log.atWarn().setMessage(()->"NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers").log();
                 //codedStreamToFileStreamMap.remove(stream);
             } catch (IOException e) {
                 throw new RuntimeException(e);

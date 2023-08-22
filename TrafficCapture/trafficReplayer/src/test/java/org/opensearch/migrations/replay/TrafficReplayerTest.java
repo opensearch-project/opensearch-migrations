@@ -114,8 +114,8 @@ class TrafficReplayerTest {
                         var expectedStream = makeTrafficStream(timestamp.plus(i-1, ChronoUnit.SECONDS), i);
                         var isEqual = ts.equals(expectedStream);
                         if (!isEqual) {
-                            log.error("Expected trafficStream: "+expectedStream);
-                            log.error("Observed trafficStream: "+ts);
+                            log.atError().setMessage(()->"Expected trafficStream: "+expectedStream).log();
+                            log.atError().setMessage(()->"Observed trafficStream: "+ts).log();
                         }
                         return isEqual;
                     }));

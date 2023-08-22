@@ -103,7 +103,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         trafficOffloader.addCloseEvent(Instant.now());
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
-                log.warn("Got error: " + t.getMessage());
+                log.atWarn().setMessage(()->"Got error: " + t.getMessage());
                 ctx.close();
             } else {
                 try {
