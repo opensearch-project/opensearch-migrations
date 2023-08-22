@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -212,6 +213,75 @@ class StreamChannelConnectionCaptureSerializerTest {
         Assertions.assertFalse(reconstitutedTrafficStream.hasNumber());
 
         Assertions.assertEquals(groundTruth, reconstitutedTrafficStream);
+    }
+
+    @Test
+    public void testEndOfSegmentsIndicationAddedWhenChunking() throws IOException, ExecutionException, InterruptedException {
+        final var referenceTimestamp = Instant.ofEpochMilli(1686593191*1000);
+        String packetData = "";
+        for (int i = 0; i < 500; i++) {
+            packetData += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        }
+        byte[] packetBytes = packetData.getBytes(StandardCharsets.UTF_8);
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        // Arbitrarily picking small buffer that can hold the overhead TrafficStream bytes as well as some
+        // data bytes but not all the data bytes and require chunking
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 85);
+
+        var bb = Unpooled.wrappedBuffer(packetBytes);
+        serializer.addWriteEvent(referenceTimestamp, bb);
+        CompletableFuture future = serializer.flushCommitAndResetStream(true);
+        future.get();
+        bb.release();
+
+        List<TrafficObservation> observations = new ArrayList<>();
+        for (ByteBuffer buffer : outputBuffersCreated) {
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.addAll(trafficStream.getSubStreamList());
+        }
+
+        int foundEndOfSegments = 0;
+        for (TrafficObservation observation : observations) {
+            if (observation.hasSegmentEnd()) {
+                foundEndOfSegments++;
+                EndOfSegmentsIndication endOfSegment = observation.getSegmentEnd();
+                Assertions.assertEquals(EndOfSegmentsIndication.getDefaultInstance(), endOfSegment);
+            }
+        }
+        Assertions.assertEquals(1, foundEndOfSegments);
+    }
+
+    @Test
+    public void testEndOfSegmentsIndicationNotAddedWhenNotChunking() throws IOException, ExecutionException, InterruptedException {
+        final var referenceTimestamp = Instant.ofEpochMilli(1686593191*1000);
+        String packetData = "";
+        for (int i = 0; i < 10; i++) {
+            packetData += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        }
+        byte[] packetBytes = packetData.getBytes(StandardCharsets.UTF_8);
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        // Buffer size should be large enough to hold all packetData and overhead
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 500);
+
+        var bb = Unpooled.wrappedBuffer(packetBytes);
+        serializer.addWriteEvent(referenceTimestamp, bb);
+        CompletableFuture future = serializer.flushCommitAndResetStream(true);
+        future.get();
+        bb.release();
+
+        List<TrafficObservation> observations = new ArrayList<>();
+        for (ByteBuffer buffer : outputBuffersCreated) {
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.addAll(trafficStream.getSubStreamList());
+        }
+
+        int foundEndOfSegments = 0;
+        for (TrafficObservation observation : observations) {
+            if (observation.hasSegmentEnd()) {
+                foundEndOfSegments++;
+            }
+        }
+        Assertions.assertEquals(0, foundEndOfSegments);
     }
 
     private StreamChannelConnectionCaptureSerializer
