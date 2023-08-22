@@ -55,11 +55,7 @@ Requirements:
 
 #### How is an Authorization header set for requests from the Replayer to the target cluster?
 
-There is a level of precedence that will determine which or if any Auth header should be added to outgoing Replayer requests, which is listed below.
-1. If the user provides an explicit auth header option to the Replayer, such as providing a static value auth header or using a user and secret arn pair, this mechanism will be used for the auth header of outgoing requests. The options can be found as Parameters [here](../../TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/TrafficReplayer.java)
-2. If the devDeploy script is used and its Replayer command has not been altered (as in the case of 1.) and CDK deploys a target cluster with a configured FGAC user (see `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` CDK context options [here](../cdk/opensearch-service-migration/README.md)) or is running in demo mode (see `enableDemoAdmin` CDK context option), this user and secret arn pair will be provided in the Replay command for the Auth header
-3. If the user provides no auth header option and incoming captured requests have an auth header, this auth header will be reused for outgoing requests
-4. If the user provides no auth header option and incoming captured requests have no auth header, then no auth header will be used for outgoing requests
+See Replayer explanation [here](../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
 
 ### Deploy commands one at a time
 
