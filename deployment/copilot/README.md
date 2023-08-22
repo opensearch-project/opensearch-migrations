@@ -39,16 +39,13 @@ Options:
 Deploy migration solution infrastructure composed of resources deployed by CDK and Copilot
 
 Options:
-  --skip-bootstrap          Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
-  --skip-copilot-init       Skip one-time Copilot initialization of app, environments, and services
-  --copilot-app-name        [string, default: migration-copilot] Specify the Copilot application name to use for deployment
-  --destroy-env             Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
-  --destroy-all-copilot     Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
-  --auth-header-value       [string, default: null] Prepared "authorization" header to provide the Replayer, i.e. Basic YWRtaW46QWRtaW4xMjMh. This will override a CDK configured FGAC master user auth header if setup
-  --aws-auth-header-user    [string, default: null] Plaintext username to provide the Replayer to construct an "authorization" header. Used in conjunction with --aws-auth-header-secret. This will override a CDK configured FGAC master user auth header if setup
-  --aws-auth-header-secret  [string, default: null] Secret ARN or Secret name from AWS Secrets Manager to provide the Replayer to construct an "authorization" header. Used in conjunction with --aws-auth-header-user. This will override a CDK configured FGAC master user auth header if setup
-  -r, --region              [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
-  -s, --stage               [string, default: dev] Specify the stage name to associate with the deployed resources
+  --skip-bootstrap                      Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
+  --skip-copilot-init                   Skip one-time Copilot initialization of app, environments, and services
+  --copilot-app-name                    [string, default: migration-copilot] Specify the Copilot application name to use for deployment
+  --destroy-env                         Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
+  --destroy-all-copilot                 Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
+  -r, --region                          [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
+  -s, --stage                           [string, default: dev] Specify the stage name to associate with the deployed resources
 
 ```
 
@@ -58,10 +55,7 @@ Requirements:
 
 #### How is an Authorization header set for requests from the Replayer to the target cluster?
 
-There is a level of precedence that will determine which or if any Auth header should be added to outgoing Replayer requests, which is listed below:
-1. `[--auth-header-value]` or `[--aws-auth-header-user, --aws-auth-header-secret]` are provided to the deployment script and will be used
-2. If the CDK deploys a target cluster with a configured FGAC user (see `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` CDK context options [here](../cdk/opensearch-service-migration/README.md)) or is running in demo mode (see `enableDemoAdmin` CDK context option), this username and secret key will be used for the Auth header
-3. Lastly, the Replayer will not use an explicit Auth header and instead use the same Auth header from the capture source cluster request, if one exists
+See Replayer explanation [here](../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
 
 ### Deploy commands one at a time
 
@@ -74,8 +68,7 @@ The provided CDK will output export commands once deployed that can be ran on a 
 ```
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
-export MIGRATION_DOMAIN_USER_NAME=admin
-export MIGRATION_DOMAIN_USER_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
@@ -88,7 +81,7 @@ export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafk
 ```
 Additionally, if not using the deploy script, the following export is needed for the Replayer service:
 ```
-export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user $MIGRATION_DOMAIN_USER_NAME --aws-auth-header-secret $MIGRATION_DOMAIN_USER_SECRET_ARN | nc traffic-comparator 9220"
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --auth-header-user-and-secret $MIGRATION_DOMAIN_USER_AND_SECRET_ARN | nc traffic-comparator 9220"
 ```
 
 #### Setting up existing Copilot infrastructure
