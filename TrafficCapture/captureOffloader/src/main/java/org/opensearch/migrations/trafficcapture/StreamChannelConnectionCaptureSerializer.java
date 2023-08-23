@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -253,10 +254,10 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         }
 
         // The message bytes here are not optimizing for space and instead are calculated on the worst case estimate of
-        // the potentially required bytes for simplicity. This could leave ~5 bytes of unused space in the CodedOutputStream
-        // when considering the case of a message that does not need segments or the case of a smaller segment created
+        // the potentially required bytes for simplicity. This could leave ~25 bytes of unused space in the CodedOutputStream
+        // when considering the case of a message that does not need segments or ~5 for the case of a smaller segment created
         // from a much larger message
-        int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForMessage(timestamp,
+        int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForSegmentedMessage(timestamp,
             segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, 2, byteBuffer, numFlushesSoFar + 1);
         int trafficStreamOverhead = messageAndOverheadBytesLeft - byteBuffer.capacity();
 
@@ -298,6 +299,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
                 messageAndOverheadBytesLeft = messageAndOverheadBytesLeft - chunkBytes;
             }
         }
+        writeEndOfSegmentMessage(timestamp);
 
     }
 
@@ -424,5 +426,10 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         getOrCreateCodedOutputStream().writeUInt32NoTag(eomPairSize);
         getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
         getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+    }
+
+    private void writeEndOfSegmentMessage(Instant timestamp) throws IOException {
+        beginSubstreamObservation(timestamp, TrafficObservation.SEGMENTEND_FIELD_NUMBER, 1);
+        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.SEGMENTEND_FIELD_NUMBER, EndOfSegmentsIndication.getDefaultInstance());
     }
 }
