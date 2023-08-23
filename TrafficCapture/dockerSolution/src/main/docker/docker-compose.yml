@@ -3,7 +3,7 @@ services:
 
 
   # Run combined instance of Capture Proxy and Elasticsearch
-  capture_proxy_es:
+  capture-proxy-es:
     image: 'migrations/capture_proxy:latest'
     networks:
       - migrations
@@ -18,7 +18,7 @@ services:
       - kafka
 
 # Run separate instances of Capture Proxy and Elasticsearch
-#  captureproxy:
+#  capture-proxy:
 #    image: 'migrations/capture_proxy:latest'
 #    networks:
 #      - migrations
