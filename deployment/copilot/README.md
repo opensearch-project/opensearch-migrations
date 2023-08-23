@@ -140,14 +140,23 @@ Once the solution is deployed, the easiest way to test the solution is to exec i
 // Exec into container
 copilot svc exec -a migration-copilot -e dev -n migration-console -c "bash"
 
-// Run benchmark workload (i.e. geonames, nyc_taxis, http_logs)
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy-es:443 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
+// Run opensearch-benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+
+// Option 1: Automated script
+./runTestBenchmarks.sh
+
+// Option 2: Manually execute command
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy-es:9200 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
 ```
 
 After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same migration-console container to confirm
 ```
+// Option 1: Automated script
+./catIndices.sh
+
+// Option 2: Manually execute cluster requests
 // Check source cluster
-curl https://capture-proxy-es:443/_cat/indices?v --insecure -u admin:admin
+curl https://capture-proxy-es:9200/_cat/indices?v --insecure -u admin:admin
 
 // Check target cluster
 curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:Admin123!
