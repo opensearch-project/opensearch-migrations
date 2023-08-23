@@ -30,10 +30,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.StringJoiner;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -529,8 +526,7 @@ public class TrafficReplayer {
 
     public void runReplay(Stream<TrafficStream> trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
-        trafficChunkStream
-                .forEach(ts-> trafficToHttpTransactionAccumulator.accept(ts));
+        trafficChunkStream.forEach(ts-> trafficToHttpTransactionAccumulator.accept(ts));
     }
 
 }
