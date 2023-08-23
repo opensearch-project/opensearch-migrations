@@ -19,24 +19,24 @@ import java.util.Scanner;
 @Slf4j
 public class SourceTargetCaptureTuple {
     private RequestResponsePacketPair sourcePair;
-    private final List<byte[]> shadowRequestData;
-    private final List<byte[]> shadowResponseData;
+    private final List<byte[]> targetRequestData;
+    private final List<byte[]> targetResponseData;
     private final AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus;
     private final Throwable errorCause;
-    Duration shadowResponseDuration;
+    Duration targetResponseDuration;
 
     public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
-                                    List<byte[]> shadowRequestData,
-                                    List<byte[]> shadowResponseData,
+                                    List<byte[]> targetRequestData,
+                                    List<byte[]> targetResponseData,
                                     AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus,
                                     Throwable errorCause,
-                                    Duration shadowResponseDuration) {
+                                    Duration targetResponseDuration) {
         this.sourcePair = sourcePair;
-        this.shadowRequestData = shadowRequestData;
-        this.shadowResponseData = shadowResponseData;
+        this.targetRequestData = targetRequestData;
+        this.targetResponseData = targetResponseData;
         this.transformationStatus = transformationStatus;
         this.errorCause = errorCause;
-        this.shadowResponseDuration = shadowResponseDuration;
+        this.targetResponseDuration = targetResponseDuration;
     }
 
     public static class TupleToFileWriter {
@@ -87,25 +87,26 @@ public class SourceTargetCaptureTuple {
 
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
-            meta.put("primaryRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
-            meta.put("shadowRequest", jsonFromHttpData(triple.shadowRequestData));
+            meta.put("sourceRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
+            meta.put("targetRequest", jsonFromHttpData(triple.targetRequestData));
             //log.warn("TODO: These durations are not measuring the same values!");
-            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
+            meta.put("sourceResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
                 Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(), triple.sourcePair.responseData.getLastPacketTimestamp())));
-            meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
-                    triple.shadowResponseDuration));
+            meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData,
+                    triple.targetResponseDuration));
             meta.put("connectionId", triple.sourcePair.connectionId);
 
             return meta;
         }
 
         /**
-         * Writes a "triple" object to an output stream as a JSON object.
-         * The JSON triple is output on one line, and has three objects: "request", "primaryResponse",
-         * and "shadowResponse". An example of the format is below.
+         * Writes a tuple object to an output stream as a JSON object.
+         * The JSON tuple is output on one line, and has several objects: "sourceRequest", "sourceResponse",
+         * "targetRequest", and "targetResponse". The "connectionId" is also included to aid in debugging.
+         * An example of the format is below.
          * <p>
          * {
-         *   "request": {
+         *   "sourceRequest": {
          *     "Request-URI": XYZ,
          *     "Method": XYZ,
          *     "HTTP-Version": XYZ
@@ -113,7 +114,15 @@ public class SourceTargetCaptureTuple {
          *     "header-1": XYZ,
          *     "header-2": XYZ
          *   },
-         *   "primaryResponse": {
+         *   "targetRequest": {
+         *     "Request-URI": XYZ,
+         *     "Method": XYZ,
+         *     "HTTP-Version": XYZ
+         *     "body": XYZ,
+         *     "header-1": XYZ,
+         *     "header-2": XYZ
+         *   },
+         *   "sourceResponse": {
          *     "HTTP-Version": ABC,
          *     "Status-Code": ABC,
          *     "Reason-Phrase": ABC,
@@ -121,14 +130,15 @@ public class SourceTargetCaptureTuple {
          *     "body": ABC,
          *     "header-1": ABC
          *   },
-         *   "shadowResponse": {
+         *   "targetResponse": {
          *     "HTTP-Version": ABC,
          *     "Status-Code": ABC,
          *     "Reason-Phrase": ABC,
          *     "response_time_ms": 123,
          *     "body": ABC,
          *     "header-2": ABC
-         *   }
+         *   },
+         *   "connectionId": "0242acfffe1d0008-0000000c-00000003-0745a19f7c3c5fc9-121001ff.0"
          * }
          *
          * @param  triple  the RequestResponseResponseTriple object to be converted into json and written to the stream.
@@ -147,9 +157,9 @@ public class SourceTargetCaptureTuple {
         final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
         sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
         sb.append("\n sourcePair=").append(sourcePair);
-        sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
-        sb.append("\n shadowRequestData=").append(Utils.packetsToStringTruncated(shadowRequestData));
-        sb.append("\n shadowResponseData=").append(Utils.packetsToStringTruncated(shadowResponseData));
+        sb.append("\n targetResponseDuration=").append(targetResponseDuration);
+        sb.append("\n targetRequestData=").append(Utils.packetsToStringTruncated(targetRequestData));
+        sb.append("\n targetResponseData=").append(Utils.packetsToStringTruncated(targetResponseData));
         sb.append("\n transformStatus=").append(transformationStatus);
         sb.append("\n errorCause=").append(errorCause==null ? "null" : errorCause.toString());
         sb.append('}');
