@@ -48,7 +48,6 @@ public class SourceTargetCaptureTuple {
         }
 
         private JSONObject jsonFromHttpDataUnsafe(List<byte[]> data) throws IOException {
-
             SequenceInputStream collatedStream = ReplayUtils.byteArraysToInputStream(data);
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
@@ -88,12 +87,14 @@ public class SourceTargetCaptureTuple {
 
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             JSONObject meta = new JSONObject();
-            meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
+            meta.put("primaryRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
+            meta.put("shadowRequest", jsonFromHttpData(triple.shadowRequestData));
             //log.warn("TODO: These durations are not measuring the same values!");
             meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
                 Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(), triple.sourcePair.responseData.getLastPacketTimestamp())));
             meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
                     triple.shadowResponseDuration));
+            meta.put("connectionId", triple.sourcePair.connectionId);
 
             return meta;
         }
