@@ -54,11 +54,12 @@ public class TrafficReplayer {
 
     public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, allowInsecureConnections,
+        this(serverUri, allowInsecureConnections, 1,
                 buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader));
     }
     
-    public TrafficReplayer(URI serverUri, boolean allowInsecureConnections,
+    public TrafficReplayer(URI serverUri,
+                           boolean allowInsecureConnections, int numSendingThreads,
                            JsonTransformer jsonTransformer)
             throws SSLException
     {
@@ -72,7 +73,7 @@ public class TrafficReplayer {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
         packetHandlerFactory = new PacketToTransformingHttpHandlerFactory(serverUri, jsonTransformer,
-                loadSslContext(serverUri, allowInsecureConnections));
+                loadSslContext(serverUri, allowInsecureConnections), numSendingThreads, 1);
     }
 
     private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
@@ -248,7 +249,8 @@ public class TrafficReplayer {
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         getRecordedRequestReconstructCompleteHandler(requestFutureMap),
                         getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
-                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap));
+                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap),
+                        connId -> packetHandlerFactory.closeConnection(connId));
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {
@@ -292,14 +294,14 @@ public class TrafficReplayer {
     private BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp>
     getRecordedRequestReconstructCompleteHandler(ConcurrentHashMap<HttpMessageAndTimestamp,
             DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>> requestFutureMap) {
-        return (connId, request) -> {
-            var requestPushFuture = writeToSocketAndClose(request, connId.toString());
+        return (requestKey, request) -> {
+            var requestPushFuture = writeToSocket(request, requestKey);
             requestFutureMap.put(request, requestPushFuture);
             try {
                 var rval = requestPushFuture.get();
-                log.trace("Summary response value for " + connId + " returned=" + rval);
+                log.atTrace().setMessage(()->"Summary response value for " + requestKey + " returned=" + rval).log();
             } catch (ExecutionException e) {
-                log.warn("Got an ExecutionException for " + connId + ": ", e);
+                log.atWarn().setCause(e).setMessage(()->"Got an ExecutionException for " + requestKey).log();
                 // eating this exception is the RIGHT thing to do here!  Future invocations
                 // of get() or chained invocations will continue to expose this exception, which
                 // is where/how the exception should be handled.
@@ -334,8 +336,8 @@ public class TrafficReplayer {
                                     successCount.incrementAndGet();
                                     return rval;
                                 } catch (Exception e) {
-                                    log.info("base64 gzipped traffic stream: " +
-                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream()));
+                                    log.atInfo().setCause(e).setMessage("Exception - base64 gzipped traffic stream: " +
+                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream())).log();
                                     exceptionCount.incrementAndGet();
                                     throw e;
                                 } finally {
@@ -427,7 +429,7 @@ public class TrafficReplayer {
         }
 
         try {
-            log.info("Source/Shadow Request/Response tuple: " + requestResponseTriple);
+            log.atInfo().setMessage(()->"Source/Shadow Request/Response tuple: " + requestResponseTriple).log();
             tripleWriter.writeJSON(requestResponseTriple);
         } catch (IOException e) {
             log.error("Caught an IOException while writing triples output.");
@@ -444,11 +446,11 @@ public class TrafficReplayer {
     }
 
     private DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>
-    writeToSocketAndClose(HttpMessageAndTimestamp request, String diagnosticLabel)
+    writeToSocket(HttpMessageAndTimestamp request, UniqueRequestKey requestKey)
     {
         try {
             log.debug("Assembled request/response - starting to write to socket");
-            var packetHandler = packetHandlerFactory.create(diagnosticLabel);
+            var packetHandler = packetHandlerFactory.create(requestKey);
             for (var packetData : request.packetBytes) {
                 log.debug("sending "+packetData.length+" bytes to the packetHandler");
                 var consumeFuture = packetHandler.consumeBytes(packetData);
@@ -459,7 +461,7 @@ public class TrafficReplayer {
             log.debug("finalizeRequest future = "  + lastRequestFuture);
             return lastRequestFuture;
         } catch (Exception e) {
-            log.debug("Caught exception in writeToSocketAndClose, so failing future");
+            log.debug("Caught exception in writeToSocket, so failing future");
             return StringTrackableCompletableFuture.failedFuture(e, ()->"TrafficReplayer.writeToSocketAndClose");
         }
     }

@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 
 import io.netty.buffer.ByteBuf;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.Serializable;
@@ -16,9 +17,12 @@ import java.util.stream.Stream;
 public class AggregatedRawResponse implements Serializable {
 
     protected final int responseSizeInBytes;
+    @Getter
     protected final Duration responseDuration;
     protected final ArrayList<byte[]> requestPackets;
     protected final ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets;
+    @Getter
+    protected final Throwable error;
 
     public static Builder builder(Instant i) {
         return new Builder(i);
@@ -35,6 +39,7 @@ public class AggregatedRawResponse implements Serializable {
         private final ArrayList<byte[]> requestPackets;
         private final ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> receiptTimeAndResponsePackets;
         private final Instant requestSendTime;
+        protected Throwable error;
 
         public Builder(Instant requestSendTime) {
             this.requestPackets = new ArrayList<>();
@@ -45,7 +50,7 @@ public class AggregatedRawResponse implements Serializable {
         public AggregatedRawResponse build() {
             var totalBytes = receiptTimeAndResponsePackets.stream().mapToInt(kvp->kvp.getValue().length).sum();
             return new AggregatedRawResponse(totalBytes, Duration.between(requestSendTime, Instant.now()),
-                    requestPackets, receiptTimeAndResponsePackets);
+                    requestPackets, receiptTimeAndResponsePackets, error);
         }
 
         public AggregatedRawResponse.Builder addRequestPacket(ByteBuf packet) {
@@ -60,6 +65,11 @@ public class AggregatedRawResponse implements Serializable {
             return addResponsePacket(packet, Instant.now());
         }
 
+        public AggregatedRawResponse.Builder addErrorCause(Throwable t) {
+            error = t;
+            return this;
+        }
+
         public AggregatedRawResponse.Builder addResponsePacket(byte[] packet, Instant timestamp) {
             receiptTimeAndResponsePackets.add(new AbstractMap.SimpleEntry<>(timestamp, packet));
             return this;
@@ -68,11 +78,13 @@ public class AggregatedRawResponse implements Serializable {
 
     public AggregatedRawResponse(int responseSizeInBytes, Duration responseDuration,
                                  ArrayList<byte[]> requestPackets,
-                                 ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets) {
+                                 ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets,
+                                 Throwable error) {
         this.responseSizeInBytes = responseSizeInBytes;
         this.requestPackets = requestPackets;
         this.responseDuration = responseDuration;
         this.responsePackets = responsePackets;
+        this.error = error;
     }
 
     int getResponseSizeInBytes() {

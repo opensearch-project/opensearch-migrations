@@ -1,16 +1,25 @@
 package org.opensearch.migrations.replay.datahandlers;
 
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
+import org.opensearch.migrations.replay.UniqueRequestKey;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
+import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
+import org.opensearch.migrations.transform.JsonTransformer;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
@@ -20,17 +29,19 @@ import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+@Slf4j
 class NettyPacketToHttpConsumerTest {
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
 
-
     private final static String EXPECTED_REQUEST_STRING =
             "GET / HTTP/1.1\r\n" +
+                    "Connection: Keep-Alive\r\n" +
                     "Host: localhost\r\n" +
                     "User-Agent: UnitTest\r\n" +
                     "Connection: Keep-Alive\r\n" +
@@ -49,44 +60,57 @@ class NettyPacketToHttpConsumerTest {
                     "0\r\n" +
                     "\r\n";
 
+    private static Map<Boolean, SimpleHttpServer> testServers;
 
-    private static SimpleHttpServer testServer;
-
-    @BeforeAll
-    public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+    private static SimpleHttpServer makeServer(boolean useTls)
+            throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                testServerRef.set(new SimpleHttpServer(true, port.intValue(),
+                testServerRef.set(new SimpleHttpServer(useTls, port.intValue(),
                         NettyPacketToHttpConsumerTest::makeContext));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
-        testServer = testServerRef.get();
+        return testServerRef.get();
+    }
+
+    @BeforeAll
+    public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        testServers = Map.of(
+                false, makeServer(false),
+                true, makeServer(true));
     }
 
     @AfterAll
     public static void tearDownTestServer() throws Exception {
-        testServer.close();
+        testServers.values().stream().forEach(s-> {
+            try {
+                s.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     @Test
     public void testThatTestSetupIsCorrect()
             throws IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException
     {
-        //Thread.sleep(120000);
-        try (var client = new SimpleHttpClientForTesting(true)) {
-            var endpoint = URI.create("https://localhost:" + testServer.port() + "/");
-            var response = makeTestRequestViaClient(client, endpoint);
-            Assertions.assertEquals(SERVER_RESPONSE_BODY, new String(response.payloadBytes, StandardCharsets.UTF_8));
+        for (var useTls : new boolean[]{false, true}) {
+            try (var client = new SimpleHttpClientForTesting(useTls)) {
+                var endpoint = testServers.get(useTls).localhostEndpoint();
+                var response = makeTestRequestViaClient(client, endpoint);
+                Assertions.assertEquals(SERVER_RESPONSE_BODY,
+                        new String(response.payloadBytes, StandardCharsets.UTF_8));
+            }
         }
     }
 
     private SimpleHttpResponse makeTestRequestViaClient(SimpleHttpClientForTesting client, URI endpoint)
             throws IOException {
-        return client.makeGetRequest(endpoint,
-                Map.of("Host", "localhost",
+        return client.makeGetRequest(endpoint, Map.of("Host", "localhost",
         "User-Agent", "UnitTest").entrySet().stream());
     }
 
@@ -99,21 +123,60 @@ class NettyPacketToHttpConsumerTest {
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 
-    @Test
-    public void testHttpResponseIsSuccessfullyCaptured()
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testHttpResponseIsSuccessfullyCaptured(boolean useTls) throws Exception {
+        for (int i = 0; i < 3; ++i) {
+            var testServer = testServers.get(useTls);
+            var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
+                    SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+            var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4),
+                    testServer.localhostEndpoint(), sslContext, "unitTest"+i);
+            nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
+            var aggregatedResponse = nphc.finalizeRequest().get();
+            var responseBytePackets = aggregatedResponse.getCopyOfPackets();
+            var responseAsString = Arrays.stream(responseBytePackets)
+                    .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
+                    .collect(Collectors.joining());
+            Assertions.assertEquals(normalizeMessage(EXPECTED_RESPONSE_STRING),
+                    normalizeMessage(responseAsString));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
             throws SSLException, ExecutionException, InterruptedException
     {
-        var sslContextBuilder = SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE);
-        var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(),
-                testServer.localhostEndpoint(), sslContextBuilder.build(),"unitTest");
-        nphc.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8));
-        var aggregatedResponse = nphc.finalizeRequest().get();
-        var responseBytePackets = aggregatedResponse.getCopyOfPackets();
-        var responseAsString = Arrays.stream(responseBytePackets)
-                .map(bytes->new String(bytes,StandardCharsets.UTF_8))
-                .collect(Collectors.joining());
-        Assertions.assertEquals(normalizeMessage(EXPECTED_RESPONSE_STRING),
-                normalizeMessage(responseAsString));
+        var testServer = testServers.get(useTls);
+        var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
+                SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+        var factory = new PacketToTransformingHttpHandlerFactory(testServer.localhostEndpoint(),
+                new JoltJsonTransformBuilder().build(), sslContext, 1, 1);
+        for (int j=0; j<2; ++j) {
+            for (int i = 0; i < 2; ++i) {
+                String connId = "TEST_" + j;
+                var packetConsumer = factory.createNettyHandler(new UniqueRequestKey(connId, i), 0);
+                log.debug("packetConsumer="+packetConsumer);
+                packetConsumer.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8));
+                var requestFinishFuture = packetConsumer.finalizeRequest();
+                log.info("requestFinishFuture="+requestFinishFuture);
+                var aggregatedResponse = requestFinishFuture.get();
+                log.debug("Got aggregated response=" + aggregatedResponse);
+                Assertions.assertNull(aggregatedResponse.getError());
+                var responseBytePackets = aggregatedResponse.getCopyOfPackets();
+                var responseAsString = Arrays.stream(responseBytePackets)
+                        .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
+                        .collect(Collectors.joining());
+                Assertions.assertEquals(normalizeMessage(EXPECTED_RESPONSE_STRING),
+                        normalizeMessage(responseAsString));
+            }
+        }
+        var stopFuture = factory.stopGroup();
+        log.info("waiting for factory to shutdown: " + stopFuture);
+        stopFuture.get();
+        Assertions.assertEquals(2, factory.getNumConnectionsCreated());
+        Assertions.assertEquals(2, factory.getNumConnectionsClosed());
     }
 
     private static String normalizeMessage(String s) {

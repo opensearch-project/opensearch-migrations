@@ -130,6 +130,6 @@ public class RequestPipelineOrchestrator {
     }
 
     private void addLoggingHandler(ChannelPipeline pipeline, String name) {
-        PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler(name, logLevel)));
+        PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler("t"+name, logLevel)));
     }
 }

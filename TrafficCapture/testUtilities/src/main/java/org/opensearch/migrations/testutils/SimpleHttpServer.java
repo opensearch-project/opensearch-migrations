@@ -40,8 +40,9 @@ public class SimpleHttpServer implements AutoCloseable {
 
     public static final String LOCALHOST = "localhost";
     public static final char[] KEYSTORE_PASSWORD = "".toCharArray();
+    public static final int SOCKET_BACKLOG_SIZE = 10;
     protected final HttpServer httpServer;
-    private final boolean useTls;
+    public final boolean useTls;
 
     public static class HttpFirstLine {
         public final String verb;
@@ -89,7 +90,7 @@ public class SimpleHttpServer implements AutoCloseable {
 
     private static HttpsServer createSecureServer(InetSocketAddress address)
             throws Exception {
-        var httpsServer = HttpsServer.create(address, 0);
+        var httpsServer = HttpsServer.create(address, SOCKET_BACKLOG_SIZE);
         SSLContext sslContext = SSLContext.getInstance("TLS");
 
         KeyStore ks = buildKeyStoreForTesting();
@@ -160,8 +161,7 @@ public class SimpleHttpServer implements AutoCloseable {
 
     public URI localhostEndpoint() {
         try {
-            return new URI((useTls ? "https" : "http"),
-                    null,LOCALHOST,port(),"/",null, null);
+            return new URI((useTls ? "https" : "http"), null, LOCALHOST, port(),"/",null, null);
         } catch (URISyntaxException e) {
             throw new RuntimeException("Error building URI", e);
         }
