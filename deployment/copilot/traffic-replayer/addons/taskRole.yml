@@ -26,6 +26,7 @@ Resources:
             Resource:
               - Fn::ImportValue: !Sub "${App}-${Env}-msk-cluster-arn"
           - Action:
+              - kafka-cluster:CreateTopic
               - kafka-cluster:DescribeTopic
               - kafka-cluster:ReadData
             Effect: Allow
