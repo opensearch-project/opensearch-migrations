@@ -5,6 +5,7 @@ import lombok.NonNull;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 public class StringTrackableCompletableFuture<T>
         extends DiagnosticTrackableCompletableFuture<String, T> {
@@ -27,8 +28,13 @@ public class StringTrackableCompletableFuture<T>
 
     public static <U> StringTrackableCompletableFuture<Void>
     allOf(DiagnosticTrackableCompletableFuture<String,? extends U>[] allRemainingWorkArray, Supplier<String> diagnosticSupplier) {
+        return allOf(Arrays.stream(allRemainingWorkArray), diagnosticSupplier);
+    }
+
+    public static <U> StringTrackableCompletableFuture<Void>
+    allOf(Stream<DiagnosticTrackableCompletableFuture<String,? extends U>> allRemainingWorkStream, Supplier<String> diagnosticSupplier) {
         return new StringTrackableCompletableFuture<>(
-                CompletableFuture.allOf(Arrays.stream(allRemainingWorkArray)
+                CompletableFuture.allOf(allRemainingWorkStream
                         .map(tcf->tcf.future).toArray(CompletableFuture[]::new)),
                 diagnosticSupplier);
 

@@ -147,7 +147,8 @@ class TrafficReplayerTest {
                         fullPair -> {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
-                        }
+                        },
+                        c -> {}
                 );
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -176,6 +177,7 @@ class TrafficReplayerTest {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                         },
+                        connection -> {},
                         remaining -> remainingAccumulations.incrementAndGet()
                 );
         byte[] serializedChunks;

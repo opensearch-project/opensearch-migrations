@@ -27,13 +27,13 @@ public class AggregatedTransformedResponse extends AggregatedRawResponse {
                                          ArrayList<byte[]> requestPackets,
                                          ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets,
                                          HttpRequestTransformationStatus transformationStatus) {
-        super(responseSizeInBytes, responseDuration, requestPackets, responsePackets);
+        super(responseSizeInBytes, responseDuration, requestPackets, responsePackets, null);
         this.transformationStatus = transformationStatus;
         errorCause = null;
     }
 
     public AggregatedTransformedResponse(AggregatedRawResponse o, Throwable exception) {
-        super(o.responseSizeInBytes, o.responseDuration, o.requestPackets, o.responsePackets);
+        super(o.responseSizeInBytes, o.responseDuration, o.requestPackets, o.responsePackets, null);
         transformationStatus = HttpRequestTransformationStatus.ERROR;
         errorCause = exception;
     }

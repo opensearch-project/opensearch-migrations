@@ -40,11 +40,11 @@ public class HttpMessageAndTimestamp {
 
     @Override
     public String toString() {
-        var packetBytesAsStr = Utils.packetsToStringTruncated(packetBytes);
+        var packetBytesAsStr = Utils.httpPacketsToString(packetBytes);
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);
         sb.append(", lastPacketTimestamp=").append(lastPacketTimestamp);
-        sb.append(", packetBytes=[").append(packetBytesAsStr);
+        sb.append(", message=[").append(packetBytesAsStr);
         sb.append("]}");
         return sb.toString();
     }

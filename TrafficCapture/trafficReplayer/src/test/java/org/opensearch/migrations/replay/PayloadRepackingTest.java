@@ -79,7 +79,7 @@ public class PayloadRepackingTest {
                                                DefaultHttpHeaders expectedRequestHeaders,
                                                Function<StringBuilder,String> expectedOutputGenerator) throws Exception {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
-                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>()));
+                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>(),null));
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, testPacketCapture, "TEST");
 
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();

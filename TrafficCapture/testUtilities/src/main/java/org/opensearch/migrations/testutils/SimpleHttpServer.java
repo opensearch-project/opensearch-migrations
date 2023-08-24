@@ -89,7 +89,7 @@ public class SimpleHttpServer implements AutoCloseable {
 
     private static HttpsServer createSecureServer(InetSocketAddress address)
             throws Exception {
-        var httpsServer = HttpsServer.create(address, 0);
+        var httpsServer = HttpsServer.create(address, 10);
         SSLContext sslContext = SSLContext.getInstance("TLS");
 
         KeyStore ks = buildKeyStoreForTesting();

@@ -144,14 +144,16 @@ public class SourceTargetCaptureTuple {
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
-        sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
-        sb.append("\n sourcePair=").append(sourcePair);
-        sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
-        sb.append("\n shadowRequestData=").append(Utils.packetsToStringTruncated(shadowRequestData));
-        sb.append("\n shadowResponseData=").append(Utils.packetsToStringTruncated(shadowResponseData));
-        sb.append("\n transformStatus=").append(transformationStatus);
-        sb.append("\n errorCause=").append(errorCause==null ? "null" : errorCause.toString());
-        sb.append('}');
+        Utils.setPrintStyleFor(Utils.PacketPrintFormat.PARSED_HTTP, () -> {
+            sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
+            sb.append("\n sourcePair=").append(sourcePair);
+            sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
+            sb.append("\n shadowRequestData=").append(Utils.httpPacketsToString(shadowRequestData));
+            sb.append("\n shadowResponseData=").append(Utils.httpPacketsToString(shadowResponseData));
+            sb.append("\n transformStatus=").append(transformationStatus);
+            sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
+            sb.append('}');
+        });
         return sb.toString();
     }
 }

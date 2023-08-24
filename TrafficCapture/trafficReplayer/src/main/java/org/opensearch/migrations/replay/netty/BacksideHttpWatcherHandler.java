@@ -28,10 +28,24 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
         super.channelReadComplete(ctx);
     }
 
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        triggerResponseCallbackAndRemoveCallback();
+        super.handlerRemoved(ctx);
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        triggerResponseCallbackAndRemoveCallback();
+        super.exceptionCaught(ctx, cause);
+    }
+
     private void triggerResponseCallbackAndRemoveCallback() {
         if (this.responseCallback != null) {
-            this.responseCallback.accept(aggregatedRawResponseBuilder.build());
+            // this method may be re-entrant upon calling the callback, so make sure that we don't loop
+            var responseCallback = this.responseCallback;
             this.responseCallback = null;
+            responseCallback.accept(aggregatedRawResponseBuilder.build());
             aggregatedRawResponseBuilder = null;
         }
     }
