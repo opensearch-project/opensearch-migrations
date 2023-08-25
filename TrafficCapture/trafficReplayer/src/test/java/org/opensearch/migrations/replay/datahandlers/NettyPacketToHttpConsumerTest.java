@@ -71,6 +71,11 @@ class NettyPacketToHttpConsumerTest {
             }
         });
         testServer = testServerRef.get();
+//        try {
+//            Thread.sleep(12*60*1000);
+//        } catch (InterruptedException e) {
+//            throw new RuntimeException(e);
+//        }
     }
 
     @AfterAll
@@ -128,16 +133,19 @@ class NettyPacketToHttpConsumerTest {
     public void testThatConnectionsAreKeptAliveAndShared()
             throws SSLException, ExecutionException, InterruptedException
     {
-        var sslContextBuilder = SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE);
+        var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
+                SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var factory = new PacketToTransformingHttpHandlerFactory(testServer.localhostEndpoint(),
-                new JoltJsonTransformBuilder().build(),sslContextBuilder.build(), 1, 1);
+                new JoltJsonTransformBuilder().build(), sslContext, 1, 1);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
                 var packetConsumer = factory.createNettyHandler(new UniqueRequestKey(connId, i), 0);
                 log.debug("packetConsumer="+packetConsumer);
                 packetConsumer.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8));
-                var aggregatedResponse = packetConsumer.finalizeRequest().get();
+                var requestFinishFuture = packetConsumer.finalizeRequest();
+                log.info("requestFinishFuture="+requestFinishFuture);
+                var aggregatedResponse = requestFinishFuture.get();
                 log.debug("Got aggregated response=" + aggregatedResponse);
                 Assertions.assertNull(aggregatedResponse.getError());
                 var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -148,6 +156,9 @@ class NettyPacketToHttpConsumerTest {
                         normalizeMessage(responseAsString));
             }
         }
+        var stopFuture = factory.stopGroup();
+        log.info("waiting for factory to shutdown: " + stopFuture);
+        stopFuture.get();
         Assertions.assertEquals(2, factory.getNumConnectionsCreated());
         Assertions.assertEquals(2, factory.getNumConnectionsClosed());
     }

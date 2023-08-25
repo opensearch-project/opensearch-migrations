@@ -7,7 +7,6 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
 import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
@@ -27,7 +26,6 @@ import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import java.net.URI;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiFunction;
 
 @Log4j2
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
@@ -53,14 +51,15 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         // Start the connection attempt.
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
-                new StringTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "sslHandshakeFuture");
+                new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
+                        () -> "incoming connection is ready for " + clientConnection);
         this.activeChannelFuture = initialFuture;
         this.channel = clientConnection.channel();
 
         log.debug("Incoming clientConnection has pipeline="+clientConnection.channel().pipeline());
         clientConnection.addListener(connectFuture -> {
             if (connectFuture.isSuccess()) {
-                addHttpTransactionHandlersToPipeline(clientConnection);
+                activateChannelForThisConsumer();
             }
         }).addListener(completelySetupFuture -> {
             if (completelySetupFuture.isSuccess()) {
@@ -117,27 +116,32 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return rval;
     }
 
-    private void addHttpTransactionHandlersToPipeline(ChannelFuture channelFuture) {
-        var pipeline = channelFuture.channel().pipeline();
-        pipeline.addLast(new LoggingHandler("PRE_SNIFFERS", LogLevel.TRACE));
+    private void activateChannelForThisConsumer() {
+        var pipeline = channel.pipeline();
+        pipeline.addLast(new LoggingHandler("A", LogLevel.INFO));
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
+        pipeline.addLast(new LoggingHandler("B", LogLevel.INFO));
         pipeline.addLast(new HttpResponseDecoder());
+        pipeline.addLast(new LoggingHandler("C", LogLevel.INFO));
         // TODO - switch this out to use less memory.
         // We only need to know when the response has been fully received, not the contents
         // since we're already logging those in the sniffer earlier in the pipeline.
         pipeline.addLast(new HttpObjectAggregator(1024 * 1024));
-        pipeline.addLast(new LoggingHandler("POST_HTTP_AGGREGATOR", LogLevel.TRACE));
+        pipeline.addLast(new LoggingHandler("POST_HTTP_AGGREGATOR", LogLevel.INFO));
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
         pipeline.addLast(new LoggingHandler("POST_EVERYTHING", LogLevel.TRACE));
         log.debug("Added handlers to the pipeline: " + pipeline);
+
+        channel.config().setAutoRead(true);
     }
 
-    private void resetPipeline() {
+    private void deactivateChannel() {
         var pipeline = channel.pipeline();
         log.debug("Resetting the pipeline currently at: " + pipeline);
         while (!(pipeline.last() instanceof SslHandler) && (pipeline.last() != null)) {
             pipeline.removeLast();
         }
+        channel.config().setAutoRead(false);
         log.debug("Reset the pipeline back to: " + pipeline);
     }
 
@@ -145,6 +149,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(ByteBuf packetData) {
         log.debug("Scheduling write of packetData["+packetData+"]" +
                 " hash=" + System.identityHashCode(packetData));
+        var oldActiveChannelFuture = activeChannelFuture;
         activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelInitException) -> {
             if (channelInitException == null) {
                 log.trace("outboundChannelFuture has finished - retriggering consumeBytes" +
@@ -157,11 +162,13 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 return StringTrackableCompletableFuture.factory.failedFuture(channelInitException, ()->"");
             }
         }, ()->"consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
+        log.info("Created future consumeBytes="+activeChannelFuture);
         return activeChannelFuture;
     }
 
     private DiagnosticTrackableCompletableFuture<String, Void>
     writePacketAndUpdateFuture(ByteBuf packetData) {
+        log.info("Writing packet data=" + packetData);
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
         channel.writeAndFlush(packetData)
@@ -189,13 +196,15 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         channel.close();
                     }
                 });
+        log.info("Created future for writing data="+completableFuture);
         return completableFuture;
     }
 
     @Override
     public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
     finalizeRequest() {
-        return activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
+        log.info("Chaining finalization work off of " + activeChannelFuture);
+        var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
                     var future = new CompletableFuture();
                     var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,
                             ()->"NettyPacketToHttpConsumer.finalizeRequest()");
@@ -208,6 +217,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     }
                     return rval;
                 }, ()->"Waiting for previous consumes to set the callback")
-                .map(f->f.whenComplete((v,t)->resetPipeline()), ()->"clearing pipeline");
+                .map(f->f.whenComplete((v,t)-> deactivateChannel()), ()->"clearing pipeline");
+        log.info("Returning finalization future="+ff);
+        return ff;
     }
 }

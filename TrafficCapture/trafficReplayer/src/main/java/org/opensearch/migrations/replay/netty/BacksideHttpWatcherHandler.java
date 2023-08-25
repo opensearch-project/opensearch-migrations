@@ -36,11 +36,13 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        aggregatedRawResponseBuilder.addErrorCause(cause);
         triggerResponseCallbackAndRemoveCallback();
         super.exceptionCaught(ctx, cause);
     }
 
     private void triggerResponseCallbackAndRemoveCallback() {
+        log.trace("triggerResponseCallbackAndRemoveCallback, callback="+this.responseCallback);
         if (this.responseCallback != null) {
             // this method may be re-entrant upon calling the callback, so make sure that we don't loop
             var responseCallback = this.responseCallback;
@@ -55,8 +57,10 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
             throw new RuntimeException("Callback was already triggered for the aggregated response");
         }
         if (doneReadingRequest) {
+            log.debug("calling callback because we're done reading the request");
             callback.accept(aggregatedRawResponseBuilder.build());
         } else {
+            log.debug("setting the callback to fire later");
             this.responseCallback = callback;
         }
     }

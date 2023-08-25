@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -68,15 +69,37 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
     }
 
     public DiagnosticTrackableCompletableFuture<String,Void> stopGroup() {
-        var channelClosedFuturesArray = (DiagnosticTrackableCompletableFuture<String, Channel>[])
-                connectionId2ChannelCache.asMap().values().stream()
-                        .map(c->closeChannel(c))
-                        .toArray();
-        var allChannelClosedFutures =
-                StringTrackableCompletableFuture.allOf(channelClosedFuturesArray, ()->"all channels closed");
-        connectionId2ChannelCache.invalidateAll();
-        eventLoopGroup.shutdownGracefully();
-        return allChannelClosedFutures;
+        var eventLoopFuture =
+                new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
+                        () -> "all channels closed");
+        this.eventLoopGroup.submit(()-> {
+            try {
+                var channelClosedFuturesArray =
+                        connectionId2ChannelCache.asMap().values().stream()
+                                .map(this::closeChannel)
+                                .collect(Collectors.toList());
+                StringTrackableCompletableFuture.<Channel>allOf(channelClosedFuturesArray.stream(),
+                        () -> "all channels closed")
+                        .handle((v,t)-> {
+                            if (t == null) {
+                                eventLoopFuture.future.complete(v);
+                            } else {
+                                eventLoopFuture.future.completeExceptionally(t);
+                            }
+                            return null;
+                        },
+                        () -> "Waiting for all channels to close: Remaining=" +
+                                (channelClosedFuturesArray.stream().filter(c -> !c.isDone()).count()));
+            } catch (Exception e) {
+                log.atError().setCause(e).setMessage("Caught error while closing cached connections").log();
+                log.error("bad", e);
+                eventLoopFuture.future.completeExceptionally(e);
+            }
+        });
+        return eventLoopFuture.map(f->f.whenComplete((c,t)->{
+            connectionId2ChannelCache.invalidateAll();
+            eventLoopGroup.shutdownGracefully();
+        }), () -> "Final shutdown for " + this.getClass().getSimpleName());
     }
 
     public NettyPacketToHttpConsumer createNettyHandler(UniqueRequestKey requestKey, int timesToRetry) {
@@ -113,12 +136,13 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
 
     private DiagnosticTrackableCompletableFuture<String, Channel>
     closeChannel(ChannelFuture channelsFuture) {
-        var cf = new CompletableFuture<Channel>();
         var channelClosedFuture =
-                new StringTrackableCompletableFuture<>(cf, ()->"Waiting for closeFuture() on channel");
+                new StringTrackableCompletableFuture<>(new CompletableFuture<Channel>(),
+                        ()->"Waiting for closeFuture() on channel");
 
         numConnectionsClosed.incrementAndGet();
-        channelsFuture.channel().closeFuture().addListener(closeFuture -> {
+        var cf = channelsFuture.channel().close();
+        cf.addListener(closeFuture -> {
             if (closeFuture.isSuccess()) {
                 channelClosedFuture.future.complete(channelsFuture.channel());
             } else {

@@ -27,12 +27,12 @@ public class StringTrackableCompletableFuture<T>
     }
 
     public static <U> StringTrackableCompletableFuture<Void>
-    allOf(DiagnosticTrackableCompletableFuture<String,? extends U>[] allRemainingWorkArray, Supplier<String> diagnosticSupplier) {
+    allOf(DiagnosticTrackableCompletableFuture<String,U>[] allRemainingWorkArray, Supplier<String> diagnosticSupplier) {
         return allOf(Arrays.stream(allRemainingWorkArray), diagnosticSupplier);
     }
 
     public static <U> StringTrackableCompletableFuture<Void>
-    allOf(Stream<DiagnosticTrackableCompletableFuture<String,? extends U>> allRemainingWorkStream, Supplier<String> diagnosticSupplier) {
+    allOf(Stream<DiagnosticTrackableCompletableFuture<String,U>> allRemainingWorkStream, Supplier<String> diagnosticSupplier) {
         return new StringTrackableCompletableFuture<>(
                 CompletableFuture.allOf(allRemainingWorkStream
                         .map(tcf->tcf.future).toArray(CompletableFuture[]::new)),
