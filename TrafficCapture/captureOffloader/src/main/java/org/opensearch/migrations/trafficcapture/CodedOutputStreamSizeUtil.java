@@ -23,46 +23,38 @@ public class CodedOutputStreamSizeUtil {
     }
 
     /**
-     * This function calculates the maximum bytes needed to store a message ByteBuffer that needs to be segmented into
-     * different ReadSegmentObservation or WriteSegmentObservation and its associated Traffic Stream overhead into a
-     * CodedOutputStream. The actual required bytes could be marginally smaller.
+     * This function calculates the maximum bytes that would be needed to store a [Read/Write]SegmentObservation, if constructed
+     * from the given ByteBuffer and associated segment field numbers and values passed in. This estimate is essentially
+     * the max size needed in the CodedOutputStream to store the provided ByteBuffer data and its associated TrafficStream
+     * overhead. The actual required bytes could be marginally smaller.
      */
-    public static int maxBytesNeededForSegmentedMessage(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
-        int dataCountFieldNumber, int dataCount,  ByteBuffer buffer, int flushes) {
-        // Timestamp closure bytes
+    public static int maxBytesNeededForASegmentedObservation(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
+        int dataCountFieldNumber, int dataCount,  ByteBuffer buffer, int numberOfTrafficStreamsSoFar) {
+        // Timestamp required bytes
         int tsContentSize = getSizeOfTimestamp(timestamp);
-        int tsClosureSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
+        int tsTagAndContentSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
 
-        // Capture closure bytes
+        // Capture required bytes
         int dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, buffer);
         int dataCountSize = dataCountFieldNumber > 0 ? CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount) : 0;
         int captureContentSize = dataSize + dataCountSize;
-        int captureClosureSize = CodedOutputStream.computeInt32Size(observationFieldNumber, captureContentSize) + captureContentSize;
+        int captureTagAndContentSize = CodedOutputStream.computeInt32Size(observationFieldNumber, captureContentSize) + captureContentSize;
 
-        // Observation tag and closure size needed bytes
-        int observationTagAndClosureSize = CodedOutputStream.computeInt32Size(TrafficStream.SUBSTREAM_FIELD_NUMBER, tsClosureSize + captureClosureSize);
-
-        // Size for additional SegmentEndObservation to signify end of segments
-        int segmentEndBytes = bytesNeededForSegmentEndObservation(timestamp);
-
-        // Size for closing index, use arbitrary field to calculate
-        int indexSize = CodedOutputStream.computeInt32Size(TrafficStream.NUMBER_FIELD_NUMBER, flushes);
-
-        return observationTagAndClosureSize + tsClosureSize + captureClosureSize + segmentEndBytes + indexSize;
+        // Observation and closing index required bytes
+        return bytesNeededForObservationAndClosingIndex(tsTagAndContentSize + captureTagAndContentSize, numberOfTrafficStreamsSoFar);
     }
 
-    public static int bytesNeededForSegmentEndObservation(Instant timestamp) {
-        // Timestamp closure bytes
-        int tsContentSize = getSizeOfTimestamp(timestamp);
-        int tsClosureSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
+    /**
+     * This function determines the number of bytes needed to store a TrafficObservation and a closing index for a
+     * TrafficStream, from the provided input.
+     */
+    public static int bytesNeededForObservationAndClosingIndex(int observationContentSize, int numberOfTrafficStreamsSoFar) {
+        int observationTagSize = CodedOutputStream.computeUInt32Size(TrafficStream.SUBSTREAM_FIELD_NUMBER, observationContentSize);
 
-        // Capture closure bytes
-        int captureClosureSize = CodedOutputStream.computeMessageSize(TrafficObservation.SEGMENTEND_FIELD_NUMBER, EndOfSegmentsIndication.getDefaultInstance());
+        // Size for TrafficStream index added when flushing, use arbitrary field to calculate
+        int indexSize = CodedOutputStream.computeInt32Size(TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER, numberOfTrafficStreamsSoFar);
 
-        // Observation tag and closure size needed bytes
-        int observationTagAndClosureSize = CodedOutputStream.computeInt32Size(TrafficStream.SUBSTREAM_FIELD_NUMBER, tsClosureSize + captureClosureSize);
-
-        return observationTagAndClosureSize + tsClosureSize + captureClosureSize;
+        return observationTagSize + observationContentSize + indexSize;
     }
 
 
