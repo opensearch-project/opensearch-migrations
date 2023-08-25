@@ -157,7 +157,7 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     @Test
-    public void testCloseAfterWriteWillFlushWhenSpaceNeeded() throws IOException, ExecutionException, InterruptedException {
+    public void testCloseObservationAfterWriteWillFlushWhenSpaceNeeded() throws IOException, ExecutionException, InterruptedException {
         final var referenceTimestamp = Instant.ofEpochMilli(1686593191*1000);
         String packetData = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         byte[] packetBytes = packetData.getBytes(StandardCharsets.UTF_8);

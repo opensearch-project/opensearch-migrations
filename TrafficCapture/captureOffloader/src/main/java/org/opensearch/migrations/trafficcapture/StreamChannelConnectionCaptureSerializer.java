@@ -125,8 +125,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         final var captureTagNoLengthSize = CodedOutputStream.computeTagSize(captureTagFieldNumber);
         final var observationContentSize = tsTagSize + tsContentSize + captureTagNoLengthSize + captureTagLengthAndContentSize;
         // Ensure space is available before starting an observation
-        if (getOrCreateCodedOutputStream().spaceLeft() < CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
-            observationContentSize, numFlushesSoFar + 1)) {
+        if (getOrCreateCodedOutputStream().spaceLeft() <
+            CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1))
+        {
             flushCommitAndResetStream(false);
         }
         // e.g. 2 {
