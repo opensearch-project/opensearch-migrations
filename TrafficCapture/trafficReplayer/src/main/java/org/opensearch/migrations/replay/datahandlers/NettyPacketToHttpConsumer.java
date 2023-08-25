@@ -7,6 +7,7 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
@@ -17,6 +18,7 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
@@ -25,10 +27,16 @@ import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-@Log4j2
+@Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
+    /**
+     * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
+     * Set this to Optional.empty() to disable intra-handler logging.
+     */
+    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     /**
@@ -94,7 +102,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     sslEngine.setUseClientMode(true);
                     var sslHandler = new SslHandler(sslEngine);
                     pipeline.addFirst("ssl", sslHandler);
-                    pipeline.addFirst("PRE-SSL", new LoggingHandler(LogLevel.WARN));
+                    addLoggingHandler(pipeline, "A");
                     sslHandler.handshakeFuture().addListener(handshakeFuture -> {
                         if (handshakeFuture.isSuccess()) {
                             rval.setSuccess();
@@ -107,9 +115,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 }
             } else {
                 // Close the connection if the connection attempt has failed.
-                log.warn(diagnosticLabel + " CONNECT future was not successful, so setting the channel future's " +
-                        "result to an exception");
-                log.warn(connectFuture.cause());
+                log.atWarn().setCause(connectFuture.cause())
+                        .setMessage(() -> diagnosticLabel + " CONNECT future was not successful, " +
+                        "so setting the channel future's result to an exception").log();
                 rval.setFailure(connectFuture.cause());
             }
         });
@@ -118,21 +126,25 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
     private void activateChannelForThisConsumer() {
         var pipeline = channel.pipeline();
-        pipeline.addLast(new LoggingHandler("A", LogLevel.INFO));
+        addLoggingHandler(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
-        pipeline.addLast(new LoggingHandler("B", LogLevel.INFO));
+        addLoggingHandler(pipeline, "C");
         pipeline.addLast(new HttpResponseDecoder());
-        pipeline.addLast(new LoggingHandler("C", LogLevel.INFO));
+        addLoggingHandler(pipeline, "D");
         // TODO - switch this out to use less memory.
         // We only need to know when the response has been fully received, not the contents
         // since we're already logging those in the sniffer earlier in the pipeline.
         pipeline.addLast(new HttpObjectAggregator(1024 * 1024));
-        pipeline.addLast(new LoggingHandler("POST_HTTP_AGGREGATOR", LogLevel.INFO));
+        addLoggingHandler(pipeline, "D");
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
-        pipeline.addLast(new LoggingHandler("POST_EVERYTHING", LogLevel.TRACE));
-        log.debug("Added handlers to the pipeline: " + pipeline);
+        addLoggingHandler(pipeline, "E");
+        log.atTrace().setMessage(() -> "Added handlers to the pipeline: " + pipeline).log();
 
         channel.config().setAutoRead(true);
+    }
+
+    private static void addLoggingHandler(ChannelPipeline pipeline, String name) {
+        PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler("n"+name, logLevel)));
     }
 
     private void deactivateChannel() {

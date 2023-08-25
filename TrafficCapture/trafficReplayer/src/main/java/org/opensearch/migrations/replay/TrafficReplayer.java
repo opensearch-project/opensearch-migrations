@@ -336,8 +336,8 @@ public class TrafficReplayer {
                                     successCount.incrementAndGet();
                                     return rval;
                                 } catch (Exception e) {
-                                    log.info("base64 gzipped traffic stream: " +
-                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream()));
+                                    log.atInfo().setCause(e).setMessage("Exception - base64 gzipped traffic stream: " +
+                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream())).log();
                                     exceptionCount.incrementAndGet();
                                     throw e;
                                 } finally {
