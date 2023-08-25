@@ -11,9 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.JsonTransformer;
 
 import java.net.URI;
 import java.util.Arrays;
@@ -26,7 +27,8 @@ import java.util.stream.Collectors;
 public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFactory<AggregatedTransformedResponse> {
     private final NioEventLoopGroup eventLoopGroup;
     private final URI serverUri;
-    private final JsonTransformer jsonTransformer;
+    private final IJsonTransformer jsonTransformer;
+    private final IAuthTransformerFactory authTransformerFactory;
     private final SslContext sslContext;
     private final LoadingCache<String, ChannelFuture> connectionId2ChannelCache;
     private int maxRetriesForNewConnection;
@@ -34,11 +36,16 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
     private final AtomicInteger numConnectionsCreated = new AtomicInteger(0);
     private final AtomicInteger numConnectionsClosed = new AtomicInteger(0);
 
-    public PacketToTransformingHttpHandlerFactory(URI serverUri, JsonTransformer jsonTransformer,
-                                                  SslContext sslContext, int numThreads, int maxRetriesForNewConnection) {
-        this.jsonTransformer = jsonTransformer;
+    public PacketToTransformingHttpHandlerFactory(URI serverUri,
+                                                  IJsonTransformer jsonTransformer,
+                                                  IAuthTransformerFactory authTransformerFactory,
+                                                  SslContext sslContext,
+                                                  int numThreads,
+                                                  int maxRetriesForNewConnection) {
         this.eventLoopGroup = new NioEventLoopGroup(numThreads);
         this.serverUri = serverUri;
+        this.jsonTransformer = jsonTransformer;
+        this.authTransformerFactory = authTransformerFactory;
         this.sslContext = sslContext;
         this.maxRetriesForNewConnection = maxRetriesForNewConnection;
 
@@ -52,6 +59,11 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
         });
     }
 
+    NettyPacketToHttpConsumer createNettyHandler(String diagnosticLabel) {
+        return new NettyPacketToHttpConsumer(eventLoopGroup, serverUri, sslContext, diagnosticLabel);
+    }
+
+
     public int getNumConnectionsCreated() {
         return numConnectionsCreated.get();
     }
@@ -63,7 +75,7 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
     @Override
     public IPacketFinalizingConsumer<AggregatedTransformedResponse> create(UniqueRequestKey requestKey) {
         log.trace("creating HttpJsonTransformingConsumer");
-        return new HttpJsonTransformingConsumer(jsonTransformer,
+        return new HttpJsonTransformingConsumer(jsonTransformer, authTransformerFactory,
                 createNettyHandler(requestKey, maxRetriesForNewConnection),
                 requestKey.toString());
     }

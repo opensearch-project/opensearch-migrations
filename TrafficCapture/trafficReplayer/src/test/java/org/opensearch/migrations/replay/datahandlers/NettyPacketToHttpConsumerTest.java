@@ -18,8 +18,7 @@ import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
-import org.opensearch.migrations.transform.JoltJsonTransformBuilder;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
@@ -152,7 +151,7 @@ class NettyPacketToHttpConsumerTest {
         var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var factory = new PacketToTransformingHttpHandlerFactory(testServer.localhostEndpoint(),
-                new JoltJsonTransformBuilder().build(), sslContext, 1, 1);
+                new JsonJoltTransformBuilder().build(), null, sslContext, 1, 1);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;

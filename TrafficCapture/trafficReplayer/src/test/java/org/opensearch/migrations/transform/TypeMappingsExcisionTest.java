@@ -61,7 +61,7 @@ public class TypeMappingsExcisionTest {
         Assertions.assertEquals(expectedValue, jsonAsStr);
     }
 
-    static JsonTransformer getJsonTransformer() {
-        return new TypeMappingJsonTransformer();
+    static IJsonTransformer getJsonTransformer() {
+        return new JsonTypeMappingTransformer();
     }
 }

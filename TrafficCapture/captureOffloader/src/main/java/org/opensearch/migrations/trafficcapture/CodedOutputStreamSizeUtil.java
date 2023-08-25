@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture;
 
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
+import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -22,10 +23,11 @@ public class CodedOutputStreamSizeUtil {
     }
 
     /**
-     * This function calculates the maximum bytes needed to store a message ByteBuffer and its associated
-     * Traffic Stream overhead into a CodedOutputStream. The actual required bytes could be marginally smaller.
+     * This function calculates the maximum bytes needed to store a message ByteBuffer that needs to be segmented into
+     * different ReadSegmentObservation or WriteSegmentObservation and its associated Traffic Stream overhead into a
+     * CodedOutputStream. The actual required bytes could be marginally smaller.
      */
-    public static int maxBytesNeededForMessage(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
+    public static int maxBytesNeededForSegmentedMessage(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
         int dataCountFieldNumber, int dataCount,  ByteBuffer buffer, int flushes) {
         // Timestamp closure bytes
         int tsContentSize = getSizeOfTimestamp(timestamp);
@@ -40,10 +42,27 @@ public class CodedOutputStreamSizeUtil {
         // Observation tag and closure size needed bytes
         int observationTagAndClosureSize = CodedOutputStream.computeInt32Size(TrafficStream.SUBSTREAM_FIELD_NUMBER, tsClosureSize + captureClosureSize);
 
+        // Size for additional SegmentEndObservation to signify end of segments
+        int segmentEndBytes = bytesNeededForSegmentEndObservation(timestamp);
+
         // Size for closing index, use arbitrary field to calculate
         int indexSize = CodedOutputStream.computeInt32Size(TrafficStream.NUMBER_FIELD_NUMBER, flushes);
 
-        return observationTagAndClosureSize + tsClosureSize + captureClosureSize + indexSize;
+        return observationTagAndClosureSize + tsClosureSize + captureClosureSize + segmentEndBytes + indexSize;
+    }
+
+    public static int bytesNeededForSegmentEndObservation(Instant timestamp) {
+        // Timestamp closure bytes
+        int tsContentSize = getSizeOfTimestamp(timestamp);
+        int tsClosureSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
+
+        // Capture closure bytes
+        int captureClosureSize = CodedOutputStream.computeMessageSize(TrafficObservation.SEGMENTEND_FIELD_NUMBER, EndOfSegmentsIndication.getDefaultInstance());
+
+        // Observation tag and closure size needed bytes
+        int observationTagAndClosureSize = CodedOutputStream.computeInt32Size(TrafficStream.SUBSTREAM_FIELD_NUMBER, tsClosureSize + captureClosureSize);
+
+        return observationTagAndClosureSize + tsClosureSize + captureClosureSize;
     }
 
 

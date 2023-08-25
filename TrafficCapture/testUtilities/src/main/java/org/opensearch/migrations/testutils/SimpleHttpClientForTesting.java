@@ -1,6 +1,10 @@
 package org.opensearch.migrations.testutils;
 
+import java.io.InputStream;
+import java.nio.charset.Charset;
+import lombok.AllArgsConstructor;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.BasicHttpClientConnectionManager;
@@ -9,8 +13,13 @@ import org.apache.hc.client5.http.socket.PlainConnectionSocketFactory;
 import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
 import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
 import org.apache.hc.client5.http.ssl.TrustAllStrategy;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.config.RegistryBuilder;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.http.io.entity.InputStreamEntity;
+import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.ssl.SSLContexts;
+import java.nio.charset.Charset;
 
 import java.io.IOException;
 import java.net.URI;
@@ -59,9 +68,31 @@ public class SimpleHttpClientForTesting implements AutoCloseable {
         httpClient = HttpClients.custom().setConnectionManager(connectionManager).build();
     }
 
+    @AllArgsConstructor
+    public static class PayloadAndContentType{
+        public final InputStream contents;
+        public final String contentType;
+        //public final Charset charset;
+    }
+
     public SimpleHttpResponse makeGetRequest(URI endpoint, Stream<Map.Entry<String,String>> requestHeaders)
             throws IOException {
         var request = new HttpGet(endpoint);
+        requestHeaders.forEach(kvp->request.setHeader(kvp.getKey(), kvp.getValue()));
+        var response = httpClient.execute(request);
+        var responseBodyBytes = response.getEntity().getContent().readAllBytes();
+        return new SimpleHttpResponse(
+                Arrays.stream(response.getHeaders()).collect(Collectors.toMap(h->h.getName(), h->h.getValue())),
+                responseBodyBytes, response.getReasonPhrase(), response.getCode());
+    }
+
+    public SimpleHttpResponse makePutRequest(URI endpoint, Stream<Map.Entry<String,String>> requestHeaders, PayloadAndContentType payloadAndContentType)
+            throws IOException {
+        var request = new HttpPut(endpoint);
+        if (payloadAndContentType != null) {
+            request.setEntity(new InputStreamEntity(payloadAndContentType.contents,
+                    ContentType.create(payloadAndContentType.contentType)));
+        }
         requestHeaders.forEach(kvp->request.setHeader(kvp.getKey(), kvp.getValue()));
         var response = httpClient.execute(request);
         var responseBodyBytes = response.getEntity().getContent().readAllBytes();
@@ -75,3 +106,5 @@ public class SimpleHttpClientForTesting implements AutoCloseable {
         httpClient.close();
     }
 }
+
+

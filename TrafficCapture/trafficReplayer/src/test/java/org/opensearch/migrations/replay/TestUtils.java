@@ -14,16 +14,21 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
@@ -115,5 +120,41 @@ public class TestUtils {
             bb.readBytes(baos, bb.readableBytes());
             return new String(baos.toByteArray(), StandardCharsets.UTF_8);
         }
+    }
+
+    static void runPipelineAndValidate(IJsonTransformer transformer,
+                                       IAuthTransformerFactory authTransformer,
+                                       String extraHeaders,
+                                       List<String> stringParts,
+                                       DefaultHttpHeaders expectedRequestHeaders,
+                                       Function<StringBuilder, String> expectedOutputGenerator) throws Exception {
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
+                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>(), null));
+        var transformingHandler = new HttpJsonTransformingConsumer(transformer, authTransformer, testPacketCapture,
+                "TEST");
+
+        var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
+        var headerString = "GET / HTTP/1.1\n" +
+                "host: localhost\n" +
+                (extraHeaders == null ? "" : extraHeaders) +
+                "content-length: " + contentLength + "\n\n";
+        var referenceStringBuilder = new StringBuilder();
+        var allConsumesFuture = chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,
+                        stringParts, referenceStringBuilder, headerString);
+
+        var innermostFinalizeCallCount = new AtomicInteger();
+        DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> finalizationFuture =
+                allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest(),
+                        ()->"PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture");
+        finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse, t) -> {
+            Assertions.assertNull(t);
+            Assertions.assertNotNull(aggregatedRawResponse);
+            // do nothing but check connectivity between the layers in the bottom most handler
+            innermostFinalizeCallCount.incrementAndGet();
+        }), ()->"PayloadRepackingTest.runPipelineAndValidate.assertCheck");
+        finalizationFuture.get();
+
+        verifyCapturedResponseMatchesExpectedPayload(testPacketCapture.getBytesCaptured(),
+                expectedRequestHeaders, expectedOutputGenerator.apply(referenceStringBuilder));
     }
 }
