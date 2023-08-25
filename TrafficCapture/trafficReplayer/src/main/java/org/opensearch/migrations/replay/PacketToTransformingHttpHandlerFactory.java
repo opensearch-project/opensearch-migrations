@@ -126,7 +126,7 @@ public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFac
     }
 
     public void closeConnection(String connId) {
-        log.debug("closing connection for "+connId );
+        log.atDebug().setMessage(()->"closing connection for " + connId).log();
         var channelsFuture = connectionId2ChannelCache.getIfPresent(connId);
         if (channelsFuture != null) {
             closeChannel(channelsFuture);

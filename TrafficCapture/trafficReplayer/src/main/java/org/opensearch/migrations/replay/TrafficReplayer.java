@@ -299,9 +299,9 @@ public class TrafficReplayer {
             requestFutureMap.put(request, requestPushFuture);
             try {
                 var rval = requestPushFuture.get();
-                log.trace("Summary response value for " + requestKey + " returned=" + rval);
+                log.atTrace().setMessage(()->"Summary response value for " + requestKey + " returned=" + rval).log();
             } catch (ExecutionException e) {
-                log.warn("Got an ExecutionException for " + requestKey + ": ", e);
+                log.atWarn().setCause(e).setMessage(()->"Got an ExecutionException for " + requestKey).log();
                 // eating this exception is the RIGHT thing to do here!  Future invocations
                 // of get() or chained invocations will continue to expose this exception, which
                 // is where/how the exception should be handled.

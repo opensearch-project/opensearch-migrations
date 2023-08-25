@@ -21,8 +21,11 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -52,14 +55,28 @@ public class Utils {
         );
     }
 
-    public static void setPrintStyleFor(PacketPrintFormat packetPrintFormat, Runnable r) {
+    public static <T> T setPrintStyleForCallable(PacketPrintFormat packetPrintFormat, Callable<T> r) throws Exception {
         var oldStyle = printStyle.get();
         printStyle.set(packetPrintFormat);
         try {
-            r.run();
+            return r.call();
         } finally {
             printStyle.set(oldStyle);
         }
+    }
+
+    public static <T> T setPrintStyleFor(PacketPrintFormat packetPrintFormat, Supplier<T> supplier) {
+        try {
+            return setPrintStyleForCallable(packetPrintFormat, (()->supplier.get()));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void setPrintStyleFor(PacketPrintFormat packetPrintFormat, Runnable r) {
+        setPrintStyleFor(packetPrintFormat, ()-> null);
     }
 
     public static String httpPacketsToString(List<byte[]> packetStream) {
@@ -112,7 +129,7 @@ public class Utils {
     }
 
 
-    public static String prettyPrinNettyMessage(StringJoiner sj, HttpMessage msg, ByteBuf content) {
+    private static String prettyPrinNettyMessage(StringJoiner sj, HttpMessage msg, ByteBuf content) {
         msg.headers().forEach(kvp->sj.add(String.format("%s: %s", kvp.getKey(), kvp.getValue())));
         sj.add("");
         sj.add(content.toString(StandardCharsets.UTF_8));

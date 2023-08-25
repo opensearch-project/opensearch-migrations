@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers;
 
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +9,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.UniqueRequestKey;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
@@ -26,6 +29,7 @@ import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -56,48 +60,57 @@ class NettyPacketToHttpConsumerTest {
                     "0\r\n" +
                     "\r\n";
 
+    private static Map<Boolean, SimpleHttpServer> testServers;
 
-    private static SimpleHttpServer testServer;
-
-    @BeforeAll
-    public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+    private static SimpleHttpServer makeServer(boolean useTls)
+            throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                testServerRef.set(new SimpleHttpServer(true, port.intValue(),
+                testServerRef.set(new SimpleHttpServer(useTls, port.intValue(),
                         NettyPacketToHttpConsumerTest::makeContext));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
-        testServer = testServerRef.get();
-//        try {
-//            Thread.sleep(12*60*1000);
-//        } catch (InterruptedException e) {
-//            throw new RuntimeException(e);
-//        }
+        return testServerRef.get();
+    }
+
+    @BeforeAll
+    public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        testServers = Map.of(
+                false, makeServer(false),
+                true, makeServer(true));
     }
 
     @AfterAll
     public static void tearDownTestServer() throws Exception {
-        testServer.close();
+        testServers.values().stream().forEach(s-> {
+            try {
+                s.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     @Test
     public void testThatTestSetupIsCorrect()
             throws IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException
     {
-        try (var client = new SimpleHttpClientForTesting(true)) {
-            var endpoint = URI.create("https://localhost:" + testServer.port() + "/");
-            var response = makeTestRequestViaClient(client, endpoint);
-            Assertions.assertEquals(SERVER_RESPONSE_BODY, new String(response.payloadBytes, StandardCharsets.UTF_8));
+        for (var useTls : new boolean[]{false, true}) {
+            try (var client = new SimpleHttpClientForTesting(useTls)) {
+                var endpoint = testServers.get(useTls).localhostEndpoint();
+                var response = makeTestRequestViaClient(client, endpoint);
+                Assertions.assertEquals(SERVER_RESPONSE_BODY,
+                        new String(response.payloadBytes, StandardCharsets.UTF_8));
+            }
         }
     }
 
     private SimpleHttpResponse makeTestRequestViaClient(SimpleHttpClientForTesting client, URI endpoint)
             throws IOException {
-        return client.makeGetRequest(endpoint,
-                Map.of("Host", "localhost",
+        return client.makeGetRequest(endpoint, Map.of("Host", "localhost",
         "User-Agent", "UnitTest").entrySet().stream());
     }
 
@@ -110,12 +123,13 @@ class NettyPacketToHttpConsumerTest {
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 
-    @Test
-    public void testHttpResponseIsSuccessfullyCaptured()
-            throws SSLException, ExecutionException, InterruptedException {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testHttpResponseIsSuccessfullyCaptured(boolean useTls) throws Exception {
         for (int i = 0; i < 3; ++i) {
-            var sslContextBuilder = SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE);
-            var sslContext = sslContextBuilder.build();
+            var testServer = testServers.get(useTls);
+            var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
+                    SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4),
                     testServer.localhostEndpoint(), sslContext, "unitTest"+i);
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
@@ -129,10 +143,12 @@ class NettyPacketToHttpConsumerTest {
         }
     }
 
-    @Test
-    public void testThatConnectionsAreKeptAliveAndShared()
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
             throws SSLException, ExecutionException, InterruptedException
     {
+        var testServer = testServers.get(useTls);
         var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var factory = new PacketToTransformingHttpHandlerFactory(testServer.localhostEndpoint(),

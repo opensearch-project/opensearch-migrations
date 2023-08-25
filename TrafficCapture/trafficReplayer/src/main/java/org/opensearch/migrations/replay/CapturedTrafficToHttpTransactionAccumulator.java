@@ -61,9 +61,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                        Consumer<RequestResponsePacketPair> fullDataHandler,
                                                        Consumer<String> connectionCloseListener)
     {
-        this(minTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener, accumulation -> log.atWarn()
-                .setMessage(()->"TrafficStreams are still pending for this expiring accumulation: " + accumulation)
-                .log());
+        this(minTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener,
+                accumulation -> log.atWarn()
+                        .setMessage(()->"TrafficStreams are still pending for this expiring accumulation: " +
+                                accumulation).log());
     }
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
@@ -198,8 +199,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             rotateAccumulationIfNecessary(connectionId, accum);
             exceptionConnectionCounter.incrementAndGet();
             accum.resetForNextRequest();
-            log.atWarn().log("Removing accumulated traffic pair for " + connectionId);
-            log.atDebug().log("Accumulated object: " + accum);
+            log.atWarn().setMessage(()->"Removing accumulated traffic pair for " + connectionId).log();
+            log.atDebug().setMessage(()->"Accumulated object: " + accum).log();
         } else {
             log.atWarn().setMessage(()->"unaccounted for observation type " + observation).log();
         }

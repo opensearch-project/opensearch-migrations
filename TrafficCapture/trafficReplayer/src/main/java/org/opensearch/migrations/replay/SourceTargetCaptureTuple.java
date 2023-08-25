@@ -143,8 +143,8 @@ public class SourceTargetCaptureTuple {
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
-        Utils.setPrintStyleFor(Utils.PacketPrintFormat.PARSED_HTTP, () -> {
+        return Utils.setPrintStyleFor(Utils.PacketPrintFormat.PARSED_HTTP, () -> {
+            final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
             sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
@@ -153,7 +153,7 @@ public class SourceTargetCaptureTuple {
             sb.append("\n transformStatus=").append(transformationStatus);
             sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
             sb.append('}');
+            return sb.toString();
         });
-        return sb.toString();
     }
 }
