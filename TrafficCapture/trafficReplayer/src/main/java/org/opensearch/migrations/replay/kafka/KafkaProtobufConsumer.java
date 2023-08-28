@@ -79,36 +79,34 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
 
     @Override
     @SuppressWarnings("unchecked")
-    public Stream<TrafficStream> supplyTrafficFromSource() {
+    public boolean readNextChunk(java.util.function.Consumer<TrafficStream> trafficStreamConsumer) {
         try {
             consumer.subscribe(Collections.singleton(topic));
             AtomicInteger trafficStreamsRead = new AtomicInteger();
-            Stream<Stream<TrafficStream>> generatedStream = Stream.generate((Supplier) () -> {
-                ConsumerRecords<String, byte[]> records;
+            ConsumerRecords<String, byte[]> records;
+            try {
+                records = consumer.poll(CONSUMER_POLL_TIMEOUT);
+            }
+            catch (RuntimeException e) {
+                log.warn("Unable to poll the topic: {} with our Kafka consumer... Ending message consumption now", topic);
+                throw e;
+            }
+            Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
                 try {
-                    records = consumer.poll(CONSUMER_POLL_TIMEOUT);
-                }
-                catch (RuntimeException e) {
-                    log.warn("Unable to poll the topic: {} with our Kafka consumer... Ending message consumption now", topic);
-                    throw e;
-                }
-                Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
-                    try {
-                        TrafficStream ts = TrafficStream.parseFrom(record.value());
-                        // Ensure we increment trafficStreamsRead even at a higher log level
-                        log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
-                        return ts;
-                    } catch (InvalidProtocolBufferException e) {
-                        RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
-                        if (recordError != null) {
-                            throw recordError;
-                        }
-                        return null;
+                    TrafficStream ts = TrafficStream.parseFrom(record.value());
+                    // Ensure we increment trafficStreamsRead even at a higher log level
+                    log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+                    return ts;
+                } catch (InvalidProtocolBufferException e) {
+                    RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
+                    if (recordError != null) {
+                        throw recordError;
                     }
-                }).filter(Objects::nonNull);
-                return trafficStream;
-            }).takeWhile(Objects::nonNull);
-            return generatedStream.flatMap(stream -> stream);
+                    return null;
+                }
+            }).filter(Objects::nonNull);
+            trafficStream.forEach(trafficStreamConsumer);
+            return true;
         } catch (Exception e) {
             log.error("Terminating Kafka traffic stream");
             throw e;

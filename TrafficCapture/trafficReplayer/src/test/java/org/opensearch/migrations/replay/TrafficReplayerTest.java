@@ -108,17 +108,20 @@ class TrafficReplayerTest {
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger(0);
-            Assertions.assertTrue(new InputStreamOfTraffic(bais).supplyTrafficFromSource()
-                    .allMatch(ts-> {
-                        var i = counter.incrementAndGet();
-                        var expectedStream = makeTrafficStream(timestamp.plus(i-1, ChronoUnit.SECONDS), i);
-                        var isEqual = ts.equals(expectedStream);
-                        if (!isEqual) {
-                            log.error("Expected trafficStream: "+expectedStream);
-                            log.error("Observed trafficStream: "+ts);
-                        }
-                        return isEqual;
-                    }));
+            var allMatch = new AtomicBoolean(true);
+            try (var trafficProducer = new InputStreamOfTraffic(bais)) {
+                while (trafficProducer.readNextChunk(ts -> {
+                    var i = counter.incrementAndGet();
+                    var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
+                    var isEqual = ts.equals(expectedStream);
+                    if (!isEqual) {
+                        log.error("Expected trafficStream: " + expectedStream);
+                        log.error("Observed trafficStream: " + ts);
+                    }
+                    allMatch.set(allMatch.get() && isEqual);
+                })) {}
+            }
+            Assertions.assertTrue(allMatch.get());
         }
     }
 
@@ -154,7 +157,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
@@ -199,7 +202,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
@@ -226,7 +229,7 @@ class TrafficReplayerTest {
         }
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();

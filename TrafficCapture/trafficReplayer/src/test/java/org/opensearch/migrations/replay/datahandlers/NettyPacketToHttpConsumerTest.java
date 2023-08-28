@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.PacketToTransmitFactory;
+import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.testutils.PortFinder;
@@ -28,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -153,8 +155,8 @@ class NettyPacketToHttpConsumerTest {
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
                 new JsonJoltTransformBuilder().build(), null);
-        var sendingFactory = new PacketToTransmitFactory(testServer.localhostEndpoint(),
-                sslContext, 1, 1);
+        var sendingFactory = new ReplayEngine(new PacketToTransmitFactory(testServer.localhostEndpoint(),
+                sslContext, 1, 1), Duration.ofSeconds(0));
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
@@ -174,7 +176,7 @@ class NettyPacketToHttpConsumerTest {
                         normalizeMessage(responseAsString));
             }
         }
-        var stopFuture = sendingFactory.stopGroup();
+        var stopFuture = sendingFactory.close();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
         Assertions.assertEquals(2, sendingFactory.getNumConnectionsCreated());
