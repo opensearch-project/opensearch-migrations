@@ -2,11 +2,11 @@ package org.opensearch.migrations.replay;
 
 import lombok.Getter;
 import lombok.Setter;
+import org.opensearch.migrations.replay.datatypes.RawPackets;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.stream.Stream;
 
 public class HttpMessageAndTimestamp {

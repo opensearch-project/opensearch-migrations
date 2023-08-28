@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import lombok.Getter;
 import lombok.Setter;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -10,10 +11,6 @@ import java.util.ArrayList;
 import java.util.Optional;
 
 public class AggregatedTransformedResponse extends AggregatedRawResponse {
-
-    public enum HttpRequestTransformationStatus {
-        SKIPPED, COMPLETED, ERROR
-    }
 
     @Getter
     private final Throwable errorCause;

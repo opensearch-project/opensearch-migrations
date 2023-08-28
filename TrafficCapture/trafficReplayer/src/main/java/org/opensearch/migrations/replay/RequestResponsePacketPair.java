@@ -1,13 +1,10 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.stream.Stream;
 
 @Slf4j
 public class RequestResponsePacketPair {

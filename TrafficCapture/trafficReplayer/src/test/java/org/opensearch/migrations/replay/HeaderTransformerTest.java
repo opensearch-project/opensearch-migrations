@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -28,7 +29,7 @@ public class HeaderTransformerTest {
     public void testTransformer() throws Exception {
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null, null,
-                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
+                null, HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var jsonHandler = JsonJoltTransformer.newBuilder()
                 .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
@@ -40,7 +41,7 @@ public class HeaderTransformerTest {
                         "content-length: " + contentLength + "\n");
     }
 
-    private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer transformingHandler,
+    private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer<AggregatedRawResponse> transformingHandler,
                                                  AggregatedRawResponse dummyAggregatedResponse,
                                                  TestCapturePacketToHttpHandler testPacketCapture,
                                                  Function<Integer,String> makeHeaders)
@@ -80,7 +81,7 @@ public class HeaderTransformerTest {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null, null,
-                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
+                null, HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
@@ -105,7 +106,7 @@ public class HeaderTransformerTest {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null, null,
-                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
+                null, HttpRequestTransformationStatus.COMPLETED);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),

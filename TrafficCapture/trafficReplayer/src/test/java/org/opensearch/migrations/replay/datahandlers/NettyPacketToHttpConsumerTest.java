@@ -1,7 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+import io.netty.buffer.Unpooled;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.slf4j.Slf4j;
@@ -12,8 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
-import org.opensearch.migrations.replay.UniqueRequestKey;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.PacketToTransmitFactory;
+import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -28,11 +29,11 @@ import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 class NettyPacketToHttpConsumerTest {
@@ -150,15 +151,17 @@ class NettyPacketToHttpConsumerTest {
         var testServer = testServers.get(useTls);
         var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-        var factory = new PacketToTransformingHttpHandlerFactory(testServer.localhostEndpoint(),
-                new JsonJoltTransformBuilder().build(), null, sslContext, 1, 1);
+        var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
+                new JsonJoltTransformBuilder().build(), null);
+        var sendingFactory = new PacketToTransmitFactory(testServer.localhostEndpoint(),
+                sslContext, 1, 1);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
-                var packetConsumer = factory.createNettyHandler(new UniqueRequestKey(connId, i), 0);
-                log.debug("packetConsumer="+packetConsumer);
-                packetConsumer.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8));
-                var requestFinishFuture = packetConsumer.finalizeRequest();
+                var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
+                        sendingFactory,
+                        new UniqueRequestKey(connId, i),
+                        Stream.of(Unpooled.wrappedBuffer(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8))));
                 log.info("requestFinishFuture="+requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();
                 log.debug("Got aggregated response=" + aggregatedResponse);
@@ -171,11 +174,11 @@ class NettyPacketToHttpConsumerTest {
                         normalizeMessage(responseAsString));
             }
         }
-        var stopFuture = factory.stopGroup();
+        var stopFuture = sendingFactory.stopGroup();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
-        Assertions.assertEquals(2, factory.getNumConnectionsCreated());
-        Assertions.assertEquals(2, factory.getNumConnectionsClosed());
+        Assertions.assertEquals(2, sendingFactory.getNumConnectionsCreated());
+        Assertions.assertEquals(2, sendingFactory.getNumConnectionsClosed());
     }
 
     private static String normalizeMessage(String s) {

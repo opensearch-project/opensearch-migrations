@@ -5,6 +5,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.HTTP;
 import org.json.JSONObject;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -21,14 +22,14 @@ public class SourceTargetCaptureTuple {
     private RequestResponsePacketPair sourcePair;
     private final List<byte[]> shadowRequestData;
     private final List<byte[]> shadowResponseData;
-    private final AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus;
+    private final HttpRequestTransformationStatus transformationStatus;
     private final Throwable errorCause;
     Duration shadowResponseDuration;
 
     public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
                                     List<byte[]> shadowRequestData,
                                     List<byte[]> shadowResponseData,
-                                    AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus,
+                                    HttpRequestTransformationStatus transformationStatus,
                                     Throwable errorCause,
                                     Duration shadowResponseDuration) {
         this.sourcePair = sourcePair;

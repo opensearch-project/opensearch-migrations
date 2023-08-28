@@ -3,11 +3,18 @@ package org.opensearch.migrations.replay;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -48,7 +55,8 @@ public class TrafficReplayer {
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String AWS_AUTH_HEADER_USER_AND_SECRET_ARG = "--auth-header-user-and-secret";
-    private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
+    private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
+    private final PacketToTransmitFactory outputTransmitFactory;
 
     public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
         var joltJsonTransformerBuilder = JsonJoltTransformer.newBuilder()
@@ -82,7 +90,8 @@ public class TrafficReplayer {
         if (serverUri.getScheme() == null) {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
-        packetHandlerFactory = new PacketToTransformingHttpHandlerFactory(serverUri, jsonTransformer, authTransformer,
+        inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
+        outputTransmitFactory = new PacketToTransmitFactory(serverUri,
                 loadSslContext(serverUri, allowInsecureConnections), numSendingThreads, 1);
     }
 
@@ -309,7 +318,7 @@ public class TrafficReplayer {
                         getRecordedRequestReconstructCompleteHandler(requestFutureMap),
                         getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
                                 tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap),
-                        connId -> packetHandlerFactory.closeConnection(connId));
+                        connId -> outputTransmitFactory.closeConnection(connId));
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {
@@ -354,7 +363,7 @@ public class TrafficReplayer {
     getRecordedRequestReconstructCompleteHandler(ConcurrentHashMap<HttpMessageAndTimestamp,
             DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>> requestFutureMap) {
         return (requestKey, request) -> {
-            var requestPushFuture = writeToSocket(request, requestKey);
+            var requestPushFuture = transformAndSendRequest(request, requestKey);
             requestFutureMap.put(request, requestPushFuture);
             try {
                 var rval = requestPushFuture.get();
@@ -446,7 +455,7 @@ public class TrafficReplayer {
         }
         allWorkFuture.getDeferredFutureThroughHandle((t, v) -> {
                     log.info("stopping packetHandlerFactory's group");
-                    packetHandlerFactory.stopGroup();
+                    outputTransmitFactory.stopGroup();
                     // squash exceptions for individual requests
                     return StringTrackableCompletableFuture.completedFuture(null, () -> "finished all work");
                 }, () -> "TrafficReplayer.PacketHandlerFactory->stopGroup");
@@ -475,7 +484,7 @@ public class TrafficReplayer {
             log.error("Got exception in CompletableFuture callback: ", t);
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
                     new ArrayList<>(), new ArrayList<>(),
-                    AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR, t, Duration.ZERO);
+                    HttpRequestTransformationStatus.ERROR, t, Duration.ZERO);
         } else {
             requestResponseTriple = new SourceTargetCaptureTuple(rrPair,
                     summary.requestPackets,
@@ -498,31 +507,59 @@ public class TrafficReplayer {
 
         if (t != null) { throw new CompletionException(t); }
         if (summary.getErrorCause() != null) { throw new CompletionException(summary.getErrorCause()); }
-        if (summary.getTransformationStatus() == AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR) {
+        if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
             throw new CompletionException(new RuntimeException("Unknown error transforming the request"));
         }
         return summary;
     }
 
     private DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>
-    writeToSocket(HttpMessageAndTimestamp request, UniqueRequestKey requestKey)
+    transformAndSendRequest(HttpMessageAndTimestamp request, UniqueRequestKey requestKey) {
+        return transformAndSendRequest(inputRequestTransformerFactory, outputTransmitFactory, requestKey,
+                request.packetBytes.stream().map(b-> Unpooled.wrappedBuffer(b)));
+    }
+
+    public static DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>
+    transformAndSendRequest(PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
+                            PacketToTransmitFactory outputTransmitFactory,
+                            UniqueRequestKey requestKey,
+                            Stream<ByteBuf> packets)
     {
         try {
             log.debug("Assembled request/response - starting to write to socket");
-            var packetHandler = packetHandlerFactory.create(requestKey);
-            for (var packetData : request.packetBytes) {
-                log.debug("sending "+packetData.length+" bytes to the packetHandler");
-                var consumeFuture = packetHandler.consumeBytes(packetData);
-                log.debug("consumeFuture = " + consumeFuture);
-            }
-            log.debug("done sending bytes, now finalizing the request");
-            var lastRequestFuture = packetHandler.finalizeRequest();
-            log.debug("finalizeRequest future = "  + lastRequestFuture);
-            return lastRequestFuture;
+            var transformationCompleteFuture = sendAllData(inputRequestTransformerFactory.create(requestKey),
+                    packets);
+            log.debug("finalizeRequest future for transformation = " + transformationCompleteFuture);
+            var sendFuture = transformationCompleteFuture.thenCompose(transformedResult -> {
+                        var nettySender = outputTransmitFactory.create(requestKey);
+                        var sendResult = sendAllData(nettySender, transformedResult.transformedOutput.stream());
+                        return sendResult.map(f->f.thenApply(aggregatedRawResponse ->
+                                        new AggregatedTransformedResponse(aggregatedRawResponse,
+                                                transformedResult.transformationStatus)),
+                                        ()->"Combining original transformation status with sent result");
+                    },
+                    () -> "transitioning transformed packets onto the wire")
+                    .map(future->future.exceptionally(t->new AggregatedTransformedResponse(null, t)),
+                            ()->"Checking for exception out of sending data to the target server");
+            return sendFuture;
         } catch (Exception e) {
             log.debug("Caught exception in writeToSocket, so failing future");
             return StringTrackableCompletableFuture.failedFuture(e, ()->"TrafficReplayer.writeToSocketAndClose");
         }
+    }
+
+    private static <R> DiagnosticTrackableCompletableFuture<String, R>
+    sendAllData(IPacketFinalizingConsumer<R> packetHandler, Stream<ByteBuf> packets) {
+        DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<TransformedPackets>> transformationCompleteFuture;
+        var logLabel = packetHandler.getClass().getSimpleName();
+        packets.forEach(packetData-> {
+            log.atDebug().setMessage(()->logLabel + " sending " + packetData.readableBytes() +
+                    " bytes to the packetHandler").log();
+            var consumeFuture = packetHandler.consumeBytes(packetData);
+            log.atDebug().setMessage(()->logLabel + " consumeFuture = " + consumeFuture).log();
+        });
+        log.atDebug().setMessage(()->logLabel + " done sending bytes, now finalizing the request").log();
+        return packetHandler.finalizeRequest();
     }
 
     public void runReplay(Stream<TrafficStream> trafficChunkStream,

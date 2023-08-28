@@ -5,14 +5,15 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.AggregatedTransformedResponse;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -23,12 +24,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * futures) and CompletableFutures (Java's construct that came after).
  */
 @Slf4j
-public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandlerAdapter {
-    final IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver;
+public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHandlerAdapter {
+    final IPacketFinalizingConsumer<R> packetReceiver;
     // final Boolean value indicates if the handler received a LastHttpContent or EndOfInput message
     // TODO - make this threadsafe.  calls may come in on different threads
     DiagnosticTrackableCompletableFuture<String, Boolean> currentFuture;
-    private AtomicReference<DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>>
+    private AtomicReference<DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>>
             packetReceiverCompletionFutureRef;
     String diagnosticLabel;
 
@@ -66,18 +67,17 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
                     assert v1 != null :
                             "expected in progress Boolean to be not null since null should signal that work was never started";
                     var transformationStatus = v1.booleanValue() ?
-                            AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED :
-                            AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR;
+                            HttpRequestTransformationStatus.COMPLETED : HttpRequestTransformationStatus.ERROR;
                     return packetReceiver.finalizeRequest().getDeferredFutureThroughHandle((v2, t2) -> {
                                 if (t1 != null) {
-                                    return StringTrackableCompletableFuture.<AggregatedTransformedResponse>failedFuture(t1,
+                                    return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t1,
                                             ()->"fixed failure from currentFuture.getDeferredFutureThroughHandle()");
                                 } else if (t2 != null) {
-                                    return StringTrackableCompletableFuture.<AggregatedTransformedResponse>failedFuture(t2,
+                                    return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t2,
                                             ()->"fixed failure from packetReceiver.finalizeRequest()");
                                 } else {
                                     return StringTrackableCompletableFuture.completedFuture(Optional.ofNullable(v2)
-                                                    .map(r->new AggregatedTransformedResponse(r,  transformationStatus))
+                                                    .map(r->new TransformedOutputAndResult(r,  transformationStatus, null))
                                                     .orElse(null),
                                             ()->"fixed value from packetReceiver.finalizeRequest()"
                                             );
@@ -97,7 +97,8 @@ public class NettySendByteBufsToPacketHandlerHandler extends ChannelInboundHandl
         super.handlerRemoved(ctx);
     }
 
-    public DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> getPacketReceiverCompletionFuture() {
+    public DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>
+    getPacketReceiverCompletionFuture() {
         assert packetReceiverCompletionFutureRef.get() != null :
                 "expected close() to have removed the handler and for this to be non-null";
         return packetReceiverCompletionFutureRef.get();
