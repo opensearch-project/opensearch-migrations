@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# You can use any of these parameters to create conditions or mappings in your template.
+Parameters:
+  App:
+    Type: String
+    Description: Your application's name.
+  Env:
+    Type: String
+    Description: The environment name your service, job, or workflow is being deployed to.
+  Name:
+    Type: String
+    Description: Your workload's name.
+    
+Resources:
+  MSKConsumerAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allow compute host to consume from MSK
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - kafka-cluster:Connect
+            Effect: Allow
+            Resource:
+              - Fn::ImportValue: !Sub "${App}-${Env}-msk-cluster-arn"
+          - Action:
+              - kafka-cluster:DescribeTopic
+              - kafka-cluster:ReadData
+            Effect: Allow
+            Resource:
+              !Join
+              # Delimiter
+              - ''
+              # Values to join
+              - - { "Fn::Join" : [ ":topic", { "Fn::Split": [":cluster", {"Fn::ImportValue" : !Sub "${App}-${Env}-msk-cluster-arn"}]}] }
+                - "/*"
+          - Action:
+              - kafka-cluster:AlterGroup
+              - kafka-cluster:DescribeGroup
+            Effect: Allow
+            Resource:
+              !Join
+              # Delimiter
+              - ''
+              # Values to join
+              - - { "Fn::Join" : [ ":group", { "Fn::Split": [":cluster", {"Fn::ImportValue" : !Sub "${App}-${Env}-msk-cluster-arn"}]}] }
+                - "/*"
+          - Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Effect: Allow
+            Resource: "*"
+
+Outputs:
+  # 1. You need to output the IAM ManagedPolicy so that Copilot can add it as a managed policy to your ECS task role.
+  MSKConsumerAccessPolicyArn:
+    Description: "The ARN of the ManagedPolicy to attach to the task role."
+    Value: !Ref MSKConsumerAccessPolicy

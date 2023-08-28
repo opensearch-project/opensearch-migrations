@@ -68,7 +68,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    -h|--h)
+    -h|--help)
       usage
       ;;
     -*)
@@ -130,19 +130,18 @@ fi
 # This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
 # The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
-cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdkOutput.json --require-approval never --concurrency 3
+cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
 
-# Collect export commands from CDK output, which are needed by Copilot, wrap the commands in double quotes and make them available to the environment
-found_exports=$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json | sed 's/=/="/' | sed 's/.*/&"/')
-eval "$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json | sed 's/=/="/' | sed 's/.*/&"/')"
-printf "The following exports were added from CDK:\n%s\n" "$found_exports"
+# Collect export commands from CDK output, which are needed by Copilot, wrap the commands in double quotes and store them within the "environment" dir
+export_file_path=../../copilot/environments/$COPILOT_DEPLOYMENT_STAGE/envExports.sh
+grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdk.out/cdkOutput.json | sed 's/=/="/' | sed 's/.*/&"/' > "${export_file_path}"
+source "${export_file_path}"
+chmod +x "${export_file_path}"
+echo "The following exports were stored from CDK in ${export_file_path}"
+cat $export_file_path
 
 # Future enhancement needed here to make our Copilot deployment able to be reran without error even if no changes are deployed
 # === Copilot Deployment ===
-
-replay_command="/bin/sh -c \"/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://${MIGRATION_DOMAIN_ENDPOINT}:443 --insecure --kafka-traffic-brokers ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN} | nc traffic-comparator 9220\""
-echo "Constructed replay command: ${replay_command}"
-export MIGRATION_REPLAYER_COMMAND="${replay_command}"
 
 cd ../../copilot
 
@@ -163,9 +162,10 @@ if [ "$SKIP_COPILOT_INIT" = false ] ; then
   # Init services
   copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator-jupyter
   copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator
-  copilot svc init -a $COPILOT_APP_NAME --name traffic-replayer
   copilot svc init -a $COPILOT_APP_NAME --name capture-proxy-es
   copilot svc init -a $COPILOT_APP_NAME --name migration-console
+else
+  REPLAYER_SKIP_INIT_ARG="--skip-copilot-init"
 fi
 
 
@@ -175,7 +175,7 @@ copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE
 # Deploy services
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE
+./createReplayer.sh --id default --target-uri "https://${MIGRATION_DOMAIN_ENDPOINT}:443" --extra-args "--auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN} | nc traffic-comparator 9220" "${REPLAYER_SKIP_INIT_ARG}"
 copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE
 copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE
 
