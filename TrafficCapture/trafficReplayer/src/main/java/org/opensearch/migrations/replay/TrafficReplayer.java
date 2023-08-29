@@ -90,8 +90,9 @@ public class TrafficReplayer {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
-        var outputTransmitFactory = new PacketToTransmitFactory(serverUri,
-                loadSslContext(serverUri, allowInsecureConnections), numSendingThreads, 1);
+        var clientConnectionPool = new ClientConnectionPool(serverUri,
+                loadSslContext(serverUri, allowInsecureConnections), numSendingThreads);
+        var outputTransmitFactory = new RequestSenderOrchestrator(clientConnectionPool, 1);
         replayEngine = new ReplayEngine(outputTransmitFactory, Duration.ofSeconds(1));
     }
 

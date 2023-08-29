@@ -12,8 +12,6 @@ import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.transform.IAuthTransformerFactory;
-import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
@@ -22,25 +20,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class PacketToTransmitFactory implements PacketConsumerFactory<AggregatedRawResponse> {
+public class ClientConnectionPool {
     private final NioEventLoopGroup eventLoopGroup;
-    private final URI serverUri;
-
-    private final SslContext sslContext;
     private final LoadingCache<String, ChannelFuture> connectionId2ChannelCache;
     private int maxRetriesForNewConnection;
 
     private final AtomicInteger numConnectionsCreated = new AtomicInteger(0);
     private final AtomicInteger numConnectionsClosed = new AtomicInteger(0);
 
-    public PacketToTransmitFactory(URI serverUri,
-                                   SslContext sslContext,
-                                   int numThreads,
-                                   int maxRetriesForNewConnection) {
+    public ClientConnectionPool(URI serverUri,
+                                SslContext sslContext,
+                                int numThreads) {
         this.eventLoopGroup = new NioEventLoopGroup(numThreads);
-        this.serverUri = serverUri;
-        this.sslContext = sslContext;
-        this.maxRetriesForNewConnection = maxRetriesForNewConnection;
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(new CacheLoader<>() {
             @Override
@@ -68,7 +59,7 @@ public class PacketToTransmitFactory implements PacketConsumerFactory<Aggregated
             try {
                 var channelClosedFuturesArray =
                         connectionId2ChannelCache.asMap().values().stream()
-                                .map(this::closeChannel)
+                                .map(this::closeClientConnectionChannel)
                                 .collect(Collectors.toList());
                 StringTrackableCompletableFuture.<Channel>allOf(channelClosedFuturesArray.stream(),
                                 () -> "all channels closed")
@@ -98,17 +89,12 @@ public class PacketToTransmitFactory implements PacketConsumerFactory<Aggregated
         log.atDebug().setMessage(()->"closing connection for " + connId).log();
         var channelsFuture = connectionId2ChannelCache.getIfPresent(connId);
         if (channelsFuture != null) {
-            closeChannel(channelsFuture);
+            closeClientConnectionChannel(channelsFuture);
             connectionId2ChannelCache.invalidate(connId);
         }
     }
 
-    @Override
-    public NettyPacketToHttpConsumer create(UniqueRequestKey requestKey) {
-        return create(requestKey, maxRetriesForNewConnection);
-    }
-
-    private NettyPacketToHttpConsumer create(UniqueRequestKey requestKey, int timesToRetry) {
+    ChannelFuture get(UniqueRequestKey requestKey, int timesToRetry) {
         log.trace("loading NettyHandler");
 
         ChannelFuture channelFuture = null;
@@ -122,17 +108,17 @@ public class PacketToTransmitFactory implements PacketConsumerFactory<Aggregated
         if (channelFuture == null || (channelFuture.isDone() && !channelFuture.channel().isActive())) {
             connectionId2ChannelCache.invalidate(requestKey.connectionId);
             if (timesToRetry > 0) {
-                return create(requestKey, timesToRetry - 1);
+                return get(requestKey, timesToRetry - 1);
             } else {
                 throw new RuntimeException("Channel wasn't active and out of retries.");
             }
         }
 
-        return new NettyPacketToHttpConsumer(channelFuture, requestKey.toString());
+        return channelFuture;
     }
 
     private DiagnosticTrackableCompletableFuture<String, Channel>
-    closeChannel(ChannelFuture channelsFuture) {
+    closeClientConnectionChannel(ChannelFuture channelsFuture) {
         var channelClosedFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<Channel>(),
                         ()->"Waiting for closeFuture() on channel");
@@ -147,5 +133,9 @@ public class PacketToTransmitFactory implements PacketConsumerFactory<Aggregated
             }
         });
         return channelClosedFuture;
+    }
+
+    public void invalidate(String connectionId) {
+        connectionId2ChannelCache.invalidate(connectionId);
     }
 }

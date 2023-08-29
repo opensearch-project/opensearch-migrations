@@ -11,9 +11,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
-import org.opensearch.migrations.replay.PacketToTransmitFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
+import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.testutils.PortFinder;
@@ -155,8 +156,10 @@ class NettyPacketToHttpConsumerTest {
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
                 new JsonJoltTransformBuilder().build(), null);
-        var sendingFactory = new ReplayEngine(new PacketToTransmitFactory(testServer.localhostEndpoint(),
-                sslContext, 1, 1), Duration.ofSeconds(0));
+        var sendingFactory = new ReplayEngine(
+                new RequestSenderOrchestrator(
+                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1),
+                        1), Duration.ofSeconds(0));
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;

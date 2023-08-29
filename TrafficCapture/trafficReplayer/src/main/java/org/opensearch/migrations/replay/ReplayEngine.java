@@ -17,26 +17,26 @@ import java.util.stream.Stream;
 @Slf4j
 public class ReplayEngine {
     public final Duration resendDelay;
-    PacketToTransmitFactory outputTransmitFactory;
+    RequestSenderOrchestrator networkSendOrchestrator;
 
-    public ReplayEngine(PacketToTransmitFactory outputTransmitFactory, Duration resendDelay) {
+    public ReplayEngine(RequestSenderOrchestrator networkSendOrchestrator, Duration resendDelay) {
         this.resendDelay = resendDelay;
-        this.outputTransmitFactory = outputTransmitFactory;
+        this.networkSendOrchestrator = networkSendOrchestrator;
     }
 
     public void closeConnection(String connId) {
-        outputTransmitFactory.closeConnection(connId);
+        networkSendOrchestrator.clientConnectionPool.closeConnection(connId);
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void> close() {
-        return outputTransmitFactory.stopGroup();
+        return networkSendOrchestrator.clientConnectionPool.stopGroup();
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>
     scheduleRequest(UniqueRequestKey requestKey,
                     HttpRequestTransformationStatus transformationStatus,
                     Stream<ByteBuf> packets) {
-        var nettySender = outputTransmitFactory.create(requestKey);
+        var nettySender = networkSendOrchestrator.create(requestKey);
         var sendResult = sendAllData(nettySender, packets);
         return sendResult.map(f->f.thenApply(aggregatedRawResponse ->
                         new AggregatedTransformedResponse(aggregatedRawResponse,
@@ -59,10 +59,10 @@ public class ReplayEngine {
     }
 
     public int getNumConnectionsCreated() {
-        return outputTransmitFactory.getNumConnectionsCreated();
+        return networkSendOrchestrator.clientConnectionPool.getNumConnectionsCreated();
     }
 
     public int getNumConnectionsClosed() {
-        return outputTransmitFactory.getNumConnectionsClosed();
+        return networkSendOrchestrator.clientConnectionPool.getNumConnectionsClosed();
     }
 }
