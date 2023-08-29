@@ -35,9 +35,9 @@ public class HeaderTransformerTest {
                 .build();
         var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, null, testPacketCapture, "TEST");
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
-                contentLength -> "GET / HTTP/1.1\n" +
-                        "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
-                        "content-length: " + contentLength + "\n");
+                contentLength -> "GET / HTTP/1.1\r\n" +
+                        "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
+                        "content-length: " + contentLength + "\r\n");
     }
 
     private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer transformingHandler,
@@ -88,11 +88,11 @@ public class HeaderTransformerTest {
                 httpBasicAuthTransformer, testPacketCapture, "TEST");
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
-                contentLength -> "GET / HTTP/1.1\n" +
-                        "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
-                        "content-type: application/json\n" +
-                        "content-length: " + contentLength + "\n" +
-                        "authorization: Basic YWRtaW46YWRtaW4=\n");
+                contentLength -> "GET / HTTP/1.1\r\n" +
+                        "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
+                        "content-type: application/json\r\n" +
+                        "content-length: " + contentLength + "\r\n" +
+                        "authorization: Basic YWRtaW46YWRtaW4=\r\n");
     }
 
     /**
@@ -119,10 +119,10 @@ public class HeaderTransformerTest {
                 TestUtils.chainedDualWriteHeaderAndPayloadParts(transformingHandler,
                         stringParts,
                         referenceStringBuilder,
-                        contentLength -> "PUT /foo HTTP/1.1\n" +
-                                "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
-                                "content-type: application/json\n" +
-                                "content-length: " + contentLength + "\n"
+                        contentLength -> "PUT /foo HTTP/1.1\r\n" +
+                                "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
+                                "content-type: application/json\r\n" +
+                                "content-length: " + contentLength + "\r\n"
                 );
 
         var finalizationFuture = allConsumesFuture.thenCompose(v->transformingHandler.finalizeRequest(),
