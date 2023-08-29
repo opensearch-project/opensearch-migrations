@@ -1,4 +1,4 @@
-# The manifest for the "${SERVICE_NAME}" service.
+# The manifest for the SERVICE_NAME_PLACEHOLDER service.
 # Read the full specification for the "Backend Service" type at:
 #  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
 

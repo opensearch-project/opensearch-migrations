@@ -10,11 +10,11 @@ cd $script_dir_abs_path
 
 usage() {
   echo ""
-  echo "Deploy Copilot Replayer service"
+  echo "Create and Deploy Copilot Replayer service"
   echo ""
   echo "Options:"
-  echo "  --id*                                 [string, default: null] The unique ID to give this particular Replayer service, will be used in service naming (e.g. traffic-replayer-ID)"
-  echo "  --target-uri*                         [string, default: null] The URI of the target cluster that captured requests will be replayed to (e.g. https://my-target-cluster.com:443)"
+  echo "  --id*                                 [string] The unique ID to give this particular Replayer service, will be used in service naming (e.g. traffic-replayer-ID)"
+  echo "  --target-uri*                         [string] The URI of the target cluster that captured requests will be replayed to (e.g. https://my-target-cluster.com:443)"
   echo "  --kafka-group-id                      [string, default: logging-group-ID] The Kafka consumer group ID that will decide which consumer group the Replayer will join and consume from"
   echo "  --extra-args                          [string, default: --auth-header-user-and-secret MIGRATION_DOMAIN_USER_AND_SECRET_ARN] Extra arguments to provide to the Replayer command"
   echo "  --delete-id                           [string, default: null] Delete the Replayer directory with the given ID (e.g. traffic-replayer-ID) and remove the Copilot service"
