@@ -20,9 +20,13 @@ def shutdown_pipeline(endpoint: EndpointInfo):
     requests.post(shutdown_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
 
 
-def fetch_prometheus_metrics(endpoint: EndpointInfo) -> List[Metric]:
+def fetch_prometheus_metrics(endpoint: EndpointInfo) -> Optional[List[Metric]]:
     metrics_endpoint = endpoint.url + __PROMETHEUS_METRICS_ENDPOINT
-    response = requests.get(metrics_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+    try:
+        response = requests.get(metrics_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+        response.raise_for_status()
+    except requests.exceptions.RequestException:
+        return None
     # Based on response headers defined in Data Prepper's PrometheusMetricsHandler.java class
     metrics = response.content.decode('utf-8')
     # Collect generator return values into list
@@ -55,17 +59,20 @@ def run(args: argparse.Namespace, wait_seconds: int) -> None:
     endpoint = EndpointInfo(args.dp_endpoint, default_auth, False)
     prev_no_partitions_count = 0
     terminal = False
-    target_doc_count = int(args.target_count)
     while not terminal:
+        # If the API call fails, the response is empty
         metrics = fetch_prometheus_metrics(endpoint)
-        success_docs = get_metric_value(metrics, __DOC_SUCCESS_METRIC)
-        rec_in_flight = get_metric_value(metrics, __RECORDS_IN_FLIGHT_METRIC)
-        no_partitions_count = get_metric_value(metrics, __NO_PARTITIONS_METRIC)
-        terminal = check_if_complete(success_docs, rec_in_flight, no_partitions_count,
-                                     prev_no_partitions_count, target_doc_count)
+        if metrics is not None:
+            success_docs = get_metric_value(metrics, __DOC_SUCCESS_METRIC)
+            rec_in_flight = get_metric_value(metrics, __RECORDS_IN_FLIGHT_METRIC)
+            no_partitions_count = get_metric_value(metrics, __NO_PARTITIONS_METRIC)
+            terminal = check_if_complete(success_docs, rec_in_flight, no_partitions_count,
+                                         prev_no_partitions_count, args.target_count)
+            if not terminal:
+                # Save no_partitions_count
+                prev_no_partitions_count = no_partitions_count
+
         if not terminal:
-            # Save no_partitions_count
-            prev_no_partitions_count = no_partitions_count
             time.sleep(wait_seconds)
     # Loop terminated, shut down the Data Prepper pipeline
     shutdown_pipeline(endpoint)
@@ -75,9 +82,9 @@ if __name__ == '__main__':  # pragma no cover
     # Set up parsing for command line arguments
     arg_parser = argparse.ArgumentParser(
         prog="python monitor.py",
-        description="Monitoring process for a running Data Prepper pipeline.\n" +
-                    "The first input is the Data Prepper URL endpoint.\n" +
-                    "The second input is the target doc_count for termination.",
+        description="""Monitoring process for a running Data Prepper pipeline.
+        The first input is the Data Prepper URL endpoint.
+        The second input is the target doc_count for termination.""",
         formatter_class=argparse.RawTextHelpFormatter
     )
     # Required positional arguments
@@ -87,6 +94,7 @@ if __name__ == '__main__':  # pragma no cover
     )
     arg_parser.add_argument(
         "target_count",
+        type=int,
         help="Target doc_count to reach, after which the Data Prepper pipeline will be terminated"
     )
     cli_args = arg_parser.parse_args()

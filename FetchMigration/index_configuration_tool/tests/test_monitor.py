@@ -2,6 +2,8 @@ import argparse
 import unittest
 from unittest.mock import patch, MagicMock, PropertyMock
 
+import requests
+import responses
 from prometheus_client.parser import text_string_to_metric_families
 
 import monitor
@@ -20,7 +22,6 @@ TEST_PROMETHEUS_METRIC_STRING = "# HELP " + TEST_METRIC_NAME + " Unit Test Metri
 
 class TestMonitor(unittest.TestCase):
     @patch('requests.post')
-    # Note that mock objects are passed bottom-up from the patch order above
     def test_shutdown(self, mock_post: MagicMock):
         expected_shutdown_url = TEST_ENDPOINT + "/shutdown"
         test_endpoint = EndpointInfo(TEST_ENDPOINT, TEST_AUTH, TEST_FLAG)
@@ -28,7 +29,6 @@ class TestMonitor(unittest.TestCase):
         mock_post.assert_called_once_with(expected_shutdown_url, auth=TEST_AUTH, verify=TEST_FLAG)
 
     @patch('requests.get')
-    # Note that mock objects are passed bottom-up from the patch order above
     def test_fetch_prometheus_metrics(self, mock_get: MagicMock):
         expected_url = TEST_ENDPOINT + "/metrics/prometheus"
         # Set up GET response
@@ -50,6 +50,15 @@ class TestMonitor(unittest.TestCase):
         self.assertEqual(TEST_METRIC_NAME, test_sample.name)
         self.assertEqual(TEST_METRIC_VALUE, test_sample.value)
         self.assertTrue(len(test_sample.labels) > 0)
+
+    @responses.activate
+    def test_fetch_prometheus_metrics_failure(self):
+        # Set up expected GET call with a mock exception
+        expected_url = TEST_ENDPOINT + "/metrics/prometheus"
+        responses.get(expected_url, body=requests.Timeout())
+        # Test fetch
+        result = monitor.fetch_prometheus_metrics(EndpointInfo(TEST_ENDPOINT))
+        self.assertIsNone(result)
 
     def test_get_metric_value(self):
         # Return value is an int
@@ -74,7 +83,6 @@ class TestMonitor(unittest.TestCase):
         # The values here don't matter since we've mocked the check method
         test_input.dp_endpoint = "test"
         test_input.target_count = 1
-        mock_fetch.return_value = None
         mock_get.return_value = None
         # Check will first fail, then pass
         mock_check.side_effect = [False, True]
@@ -83,6 +91,34 @@ class TestMonitor(unittest.TestCase):
         monitor.run(test_input, wait_time)
         # Test that fetch was called with the expected EndpointInfo
         expected_endpoint_info = EndpointInfo(test_input.dp_endpoint, ('admin', 'admin'), False)
+        self.assertEqual(2, mock_fetch.call_count)
+        mock_fetch.assert_called_with(expected_endpoint_info)
+        # We expect one wait cycle
+        mock_sleep.assert_called_once_with(wait_time)
+        mock_shut.assert_called_once_with(expected_endpoint_info)
+
+    @patch('monitor.shutdown_pipeline')
+    @patch('time.sleep')
+    @patch('monitor.check_if_complete')
+    @patch('monitor.get_metric_value')
+    @patch('monitor.fetch_prometheus_metrics')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_run_with_fetch_failure(self, mock_fetch: MagicMock, mock_get: MagicMock, mock_check: MagicMock,
+                                    mock_sleep: MagicMock, mock_shut: MagicMock):
+        test_input = argparse.Namespace()
+        # The values here don't matter since we've mocked the check method
+        test_input.dp_endpoint = "test"
+        test_input.target_count = 1
+        mock_get.return_value = None
+        mock_check.return_value = True
+        # Fetch call will first fail, then succeed
+        mock_fetch.side_effect = [None, MagicMock()]
+        # Run test method
+        wait_time = 3
+        monitor.run(test_input, wait_time)
+        # Test that fetch was called with the expected EndpointInfo
+        expected_endpoint_info = EndpointInfo(test_input.dp_endpoint, ('admin', 'admin'), False)
+        self.assertEqual(2, mock_fetch.call_count)
         mock_fetch.assert_called_with(expected_endpoint_info)
         # We expect one wait cycle
         mock_sleep.assert_called_once_with(wait_time)
