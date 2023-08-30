@@ -488,7 +488,7 @@ public class TrafficReplayer {
         }
 
         try {
-            log.info("Source/Shadow Request/Response tuple: " + requestResponseTriple);
+            log.info("Source/Target Request/Response tuple: " + requestResponseTriple);
             tripleWriter.writeJSON(requestResponseTriple);
         } catch (IOException e) {
             log.error("Caught an IOException while writing triples output.");
