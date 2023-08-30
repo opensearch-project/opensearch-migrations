@@ -6,6 +6,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
@@ -78,15 +79,18 @@ public class Utils {
         setPrintStyleFor(packetPrintFormat, ()-> null);
     }
 
-    public static String httpPacketBytesToString(List<byte[]> packetStream) {
-        return httpPacketBytesToString(Optional.ofNullable(packetStream).map(p->p.stream()).orElse(null));
+    public enum HttpMessageType { Request, Response }
+
+    public static String httpPacketBytesToString(HttpMessageType msgType, List<byte[]> packetStream) {
+        return httpPacketBytesToString(msgType, Optional.ofNullable(packetStream).map(p->p.stream())
+                .orElse(null));
     }
 
-    public static String httpPacketBytesToString(Stream<byte[]> packetStream) {
-        return httpPacketBufsToString(packetStream.map(bArr->Unpooled.wrappedBuffer(bArr)));
+    public static String httpPacketBytesToString(HttpMessageType msgType, Stream<byte[]> packetStream) {
+        return httpPacketBufsToString(msgType, packetStream.map(bArr->Unpooled.wrappedBuffer(bArr)));
     }
 
-    public static String httpPacketBufsToString(Stream<ByteBuf> packetStream) {
+    public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> packetStream) {
         packetStream = packetStream.map(bb->bb.duplicate()); // assume that callers don't want read-indices to be spent
         switch (printStyle.get()) {
             case TRUNCATED:
@@ -94,22 +98,14 @@ public class Utils {
             case FULL_BYTES:
                 return httpPacketBufsToString(packetStream, Long.MAX_VALUE);
             case PARSED_HTTP:
-                return httpPacketsToPrettyPrintedString(packetStream);
+                return httpPacketsToPrettyPrintedString(msgType, packetStream);
             default:
                 throw new RuntimeException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
-    public static String httpPacketsToPrettyPrintedString(Stream<ByteBuf> packetStream) {
-        EmbeddedChannel channel = new EmbeddedChannel(
-                new HttpServerCodec(),
-                new HttpContentDecompressor(),
-                new HttpObjectAggregator(MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
-        );
-
-        packetStream.forEach(b-> {channel.writeInbound(channel.alloc().buffer().writeBytes(b));});
-
-        var httpMessage = (HttpMessage) channel.readInbound();
+    public static String httpPacketsToPrettyPrintedString(HttpMessageType msgType, Stream<ByteBuf> packetStream) {
+        HttpMessage httpMessage = parseHttpMessage(msgType, packetStream);
         if (httpMessage instanceof FullHttpRequest) {
             return prettyPrintNettyRequest((FullHttpRequest) httpMessage);
         } else if (httpMessage instanceof FullHttpResponse) {
@@ -120,6 +116,18 @@ public class Utils {
             throw new RuntimeException("Embedded channel with an HttpObjectAggregator returned an unexpected object " +
                     "of type " + httpMessage.getClass() + ": " + httpMessage);
         }
+    }
+
+    public static HttpMessage parseHttpMessage(HttpMessageType msgType, Stream<ByteBuf> packetStream) {
+        EmbeddedChannel channel = new EmbeddedChannel(
+                msgType == HttpMessageType.Request ? new HttpServerCodec() : new HttpClientCodec(),
+                new HttpContentDecompressor(),
+                new HttpObjectAggregator(MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
+        );
+
+        packetStream.forEach(b-> {channel.writeInbound(channel.alloc().buffer().writeBytes(b));});
+
+        return channel.readInbound();
     }
 
     public static String prettyPrintNettyRequest(FullHttpRequest msg) {

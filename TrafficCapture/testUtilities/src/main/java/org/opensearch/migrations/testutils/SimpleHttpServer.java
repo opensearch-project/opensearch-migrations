@@ -29,6 +29,7 @@ import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
@@ -43,6 +44,20 @@ public class SimpleHttpServer implements AutoCloseable {
     public static final int SOCKET_BACKLOG_SIZE = 10;
     protected final HttpServer httpServer;
     public final boolean useTls;
+
+    public static SimpleHttpServer makeServer(boolean useTls,
+                                              Function<HttpFirstLine, SimpleHttpResponse> makeContext)
+            throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        var testServerRef = new AtomicReference<SimpleHttpServer>();
+        PortFinder.retryWithNewPortUntilNoThrow(port -> {
+            try {
+                testServerRef.set(new SimpleHttpServer(useTls, port.intValue(), makeContext));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        return testServerRef.get();
+    }
 
     public static class HttpFirstLine {
         public final String verb;

@@ -35,7 +35,6 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -43,7 +42,7 @@ import java.util.stream.Stream;
 class NettyPacketToHttpConsumerTest {
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
 
-    private final static String EXPECTED_REQUEST_STRING =
+    final static String EXPECTED_REQUEST_STRING =
             "GET / HTTP/1.1\r\n" +
                     "Connection: Keep-Alive\r\n" +
                     "Host: localhost\r\n" +
@@ -66,25 +65,11 @@ class NettyPacketToHttpConsumerTest {
 
     private static Map<Boolean, SimpleHttpServer> testServers;
 
-    private static SimpleHttpServer makeServer(boolean useTls)
-            throws PortFinder.ExceededMaxPortAssigmentAttemptException {
-        var testServerRef = new AtomicReference<SimpleHttpServer>();
-        PortFinder.retryWithNewPortUntilNoThrow(port -> {
-            try {
-                testServerRef.set(new SimpleHttpServer(useTls, port.intValue(),
-                        NettyPacketToHttpConsumerTest::makeContext));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
-        return testServerRef.get();
-    }
-
     @BeforeAll
     public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         testServers = Map.of(
-                false, makeServer(false),
-                true, makeServer(true));
+                false, SimpleHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeContext),
+                true, SimpleHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeContext));
     }
 
     @AfterAll

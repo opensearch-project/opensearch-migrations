@@ -243,5 +243,4 @@ class TrafficReplayerTest {
                 .map(ba -> new String(ba, StandardCharsets.UTF_8))
                 .collect(Collectors.joining());
     }
-
 }

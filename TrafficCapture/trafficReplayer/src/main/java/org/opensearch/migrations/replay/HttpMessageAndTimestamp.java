@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 
 import java.io.ByteArrayOutputStream;
@@ -9,6 +10,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.stream.Stream;
 
+@Slf4j
 public class HttpMessageAndTimestamp {
     @Getter
     private Instant firstPacketTimestamp;
@@ -38,7 +40,8 @@ public class HttpMessageAndTimestamp {
 
     @Override
     public String toString() {
-        var packetBytesAsStr = Utils.httpPacketBytesToString(packetBytes);
+        log.error("Fix this - class can represent responses too!");
+        var packetBytesAsStr = Utils.httpPacketBytesToString(Utils.HttpMessageType.Request, packetBytes);
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);
         sb.append(", lastPacketTimestamp=").append(lastPacketTimestamp);
