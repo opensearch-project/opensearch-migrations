@@ -58,7 +58,7 @@ class TestMigrationMonitor(unittest.TestCase):
         expected_url = TEST_ENDPOINT + "/metrics/prometheus"
         responses.get(expected_url, body=requests.Timeout())
         # Test fetch
-        result = monitor.fetch_prometheus_metrics(EndpointInfo(TEST_ENDPOINT))
+        result = migration_monitor.fetch_prometheus_metrics(EndpointInfo(TEST_ENDPOINT))
         self.assertIsNone(result)
 
     def test_get_metric_value(self):
@@ -96,25 +96,23 @@ class TestMigrationMonitor(unittest.TestCase):
         mock_sleep.assert_called_once_with(wait_time)
         mock_shut.assert_called_once_with(expected_endpoint_info)
 
-    @patch('monitor.shutdown_pipeline')
+    @patch('migration_monitor.shutdown_pipeline')
     @patch('time.sleep')
-    @patch('monitor.check_if_complete')
-    @patch('monitor.get_metric_value')
-    @patch('monitor.fetch_prometheus_metrics')
+    @patch('migration_monitor.check_if_complete')
+    @patch('migration_monitor.get_metric_value')
+    @patch('migration_monitor.fetch_prometheus_metrics')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_with_fetch_failure(self, mock_fetch: MagicMock, mock_get: MagicMock, mock_check: MagicMock,
                                     mock_sleep: MagicMock, mock_shut: MagicMock):
-        test_input = argparse.Namespace()
-        # The values here don't matter since we've mocked the check method
-        test_input.dp_endpoint = "test"
-        test_input.target_count = 1
+        # The param values don't matter since we've mocked the check method
+        test_input = MigrationMonitorParams(1, "test")
         mock_get.return_value = None
         mock_check.return_value = True
         # Fetch call will first fail, then succeed
         mock_fetch.side_effect = [None, MagicMock()]
         # Run test method
         wait_time = 3
-        monitor.run(test_input, wait_time)
+        migration_monitor.run(test_input, wait_time)
         # Test that fetch was called with the expected EndpointInfo
         expected_endpoint_info = EndpointInfo(test_input.dp_endpoint, ('admin', 'admin'), False)
         self.assertEqual(2, mock_fetch.call_count)
