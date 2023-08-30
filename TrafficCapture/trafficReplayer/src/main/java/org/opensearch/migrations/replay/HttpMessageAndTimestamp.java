@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.stream.Stream;
 
 public class HttpMessageAndTimestamp {
+    @Getter
     private Instant firstPacketTimestamp;
     @Getter
     @Setter
@@ -37,7 +38,7 @@ public class HttpMessageAndTimestamp {
 
     @Override
     public String toString() {
-        var packetBytesAsStr = Utils.httpPacketsToString(packetBytes);
+        var packetBytesAsStr = Utils.httpPacketBytesToString(packetBytes);
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);
         sb.append(", lastPacketTimestamp=").append(lastPacketTimestamp);

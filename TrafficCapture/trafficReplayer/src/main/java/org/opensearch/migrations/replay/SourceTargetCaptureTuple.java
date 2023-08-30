@@ -6,6 +6,7 @@ import org.apache.logging.log4j.Logger;
 import org.json.HTTP;
 import org.json.JSONObject;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -18,16 +19,16 @@ import java.util.Map;
 import java.util.Scanner;
 
 @Slf4j
-public class SourceTargetCaptureTuple {
+public class SourceTargetCaptureTuple implements AutoCloseable {
     private RequestResponsePacketPair sourcePair;
-    private final List<byte[]> shadowRequestData;
+    private final TransformedPackets shadowRequestData;
     private final List<byte[]> shadowResponseData;
     private final HttpRequestTransformationStatus transformationStatus;
     private final Throwable errorCause;
     Duration shadowResponseDuration;
 
     public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
-                                    List<byte[]> shadowRequestData,
+                                    TransformedPackets shadowRequestData,
                                     List<byte[]> shadowResponseData,
                                     HttpRequestTransformationStatus transformationStatus,
                                     Throwable errorCause,
@@ -38,6 +39,11 @@ public class SourceTargetCaptureTuple {
         this.transformationStatus = transformationStatus;
         this.errorCause = errorCause;
         this.shadowResponseDuration = shadowResponseDuration;
+    }
+
+    @Override
+    public void close() {
+        shadowRequestData.close();
     }
 
     public static class TupleToFileWriter {
@@ -149,8 +155,8 @@ public class SourceTargetCaptureTuple {
             sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
-            sb.append("\n shadowRequestData=").append(Utils.httpPacketsToString(shadowRequestData));
-            sb.append("\n shadowResponseData=").append(Utils.httpPacketsToString(shadowResponseData));
+            sb.append("\n shadowRequestData=").append(Utils.httpPacketBufsToString(shadowRequestData.stream()));
+            sb.append("\n shadowResponseData=").append(Utils.httpPacketBytesToString(shadowResponseData));
             sb.append("\n transformStatus=").append(transformationStatus);
             sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
             sb.append('}');

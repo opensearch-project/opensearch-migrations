@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -32,30 +33,11 @@ public class ReplayEngine {
         return networkSendOrchestrator.clientConnectionPool.stopGroup();
     }
 
-    public DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>
-    scheduleRequest(UniqueRequestKey requestKey,
-                    HttpRequestTransformationStatus transformationStatus,
+    public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
+    scheduleRequest(UniqueRequestKey requestKey, Instant start, Instant end,
                     Stream<ByteBuf> packets) {
-        var nettySender = networkSendOrchestrator.create(requestKey);
-        var sendResult = sendAllData(nettySender, packets);
-        return sendResult.map(f->f.thenApply(aggregatedRawResponse ->
-                        new AggregatedTransformedResponse(aggregatedRawResponse,
-                                transformationStatus)),
-                ()->"Combining original transformation status with sent result");
-    }
-
-    private static <R> DiagnosticTrackableCompletableFuture<String, R>
-    sendAllData(IPacketFinalizingConsumer<R> packetHandler, Stream<ByteBuf> packets) {
-        DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<TransformedPackets>> transformationCompleteFuture;
-        var logLabel = packetHandler.getClass().getSimpleName();
-        packets.forEach(packetData-> {
-            log.atDebug().setMessage(()->logLabel + " sending " + packetData.readableBytes() +
-                    " bytes to the packetHandler").log();
-            var consumeFuture = packetHandler.consumeBytes(packetData);
-            log.atDebug().setMessage(()->logLabel + " consumeFuture = " + consumeFuture).log();
-        });
-        log.atDebug().setMessage(()->logLabel + " done sending bytes, now finalizing the request").log();
-        return packetHandler.finalizeRequest();
+        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, end, packets);
+        return sendResult;
     }
 
     public int getNumConnectionsCreated() {

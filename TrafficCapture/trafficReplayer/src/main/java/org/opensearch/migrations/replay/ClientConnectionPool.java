@@ -21,9 +21,8 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class ClientConnectionPool {
-    private final NioEventLoopGroup eventLoopGroup;
+    public final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<String, ChannelFuture> connectionId2ChannelCache;
-    private int maxRetriesForNewConnection;
 
     private final AtomicInteger numConnectionsCreated = new AtomicInteger(0);
     private final AtomicInteger numConnectionsClosed = new AtomicInteger(0);

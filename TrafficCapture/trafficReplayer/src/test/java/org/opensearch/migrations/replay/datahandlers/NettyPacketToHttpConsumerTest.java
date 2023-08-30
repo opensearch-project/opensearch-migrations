@@ -31,6 +31,7 @@ import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -164,7 +165,7 @@ class NettyPacketToHttpConsumerTest {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
-                        sendingFactory,
+                        sendingFactory, Instant.now(), Instant.now(),
                         new UniqueRequestKey(connId, i),
                         Stream.of(Unpooled.wrappedBuffer(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8))));
                 log.info("requestFinishFuture="+requestFinishFuture);

@@ -18,7 +18,7 @@ class HttpJsonTransformingConsumerTest {
     @Test
     public void testPassThroughSinglePacketPost() throws Exception {
         final var dummyAggregatedResponse =
-                new AggregatedRawResponse(17, null, null, null, null);
+                new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(JsonJoltTransformer.newBuilder().build(),
@@ -37,7 +37,7 @@ class HttpJsonTransformingConsumerTest {
 
     @Test
     public void testPassThroughSinglePacketWithoutBodyTransformationPost() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null,null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(
@@ -63,7 +63,7 @@ class HttpJsonTransformingConsumerTest {
 
     @Test
     public void testPartialBodyThrowsAndIsRedriven() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override

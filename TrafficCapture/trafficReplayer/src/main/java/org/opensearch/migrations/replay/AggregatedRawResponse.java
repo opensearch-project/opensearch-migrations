@@ -19,7 +19,6 @@ public class AggregatedRawResponse implements Serializable {
     protected final int responseSizeInBytes;
     @Getter
     protected final Duration responseDuration;
-    protected final ArrayList<byte[]> requestPackets;
     protected final ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets;
     @Getter
     protected final Throwable error;
@@ -36,13 +35,11 @@ public class AggregatedRawResponse implements Serializable {
     }
 
     public static class Builder {
-        private final ArrayList<byte[]> requestPackets;
         private final ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> receiptTimeAndResponsePackets;
         private final Instant requestSendTime;
         protected Throwable error;
 
         public Builder(Instant requestSendTime) {
-            this.requestPackets = new ArrayList<>();
             receiptTimeAndResponsePackets = new ArrayList<>();
             this.requestSendTime = requestSendTime;
         }
@@ -50,15 +47,7 @@ public class AggregatedRawResponse implements Serializable {
         public AggregatedRawResponse build() {
             var totalBytes = receiptTimeAndResponsePackets.stream().mapToInt(kvp->kvp.getValue().length).sum();
             return new AggregatedRawResponse(totalBytes, Duration.between(requestSendTime, Instant.now()),
-                    requestPackets, receiptTimeAndResponsePackets, error);
-        }
-
-        public AggregatedRawResponse.Builder addRequestPacket(ByteBuf packet) {
-            byte[] output = new byte[packet.readableBytes()];
-            packet.readBytes(output);
-            packet.resetReaderIndex();
-            requestPackets.add(output);
-            return this;
+                    receiptTimeAndResponsePackets, error);
         }
 
         public AggregatedRawResponse.Builder addResponsePacket(byte[] packet) {
@@ -77,11 +66,9 @@ public class AggregatedRawResponse implements Serializable {
     }
 
     public AggregatedRawResponse(int responseSizeInBytes, Duration responseDuration,
-                                 ArrayList<byte[]> requestPackets,
                                  ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets,
                                  Throwable error) {
         this.responseSizeInBytes = responseSizeInBytes;
-        this.requestPackets = requestPackets;
         this.responseDuration = responseDuration;
         this.responsePackets = responsePackets;
         this.error = error;

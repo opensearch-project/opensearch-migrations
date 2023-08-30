@@ -129,7 +129,7 @@ public class TestUtils {
                                        DefaultHttpHeaders expectedRequestHeaders,
                                        Function<StringBuilder, String> expectedOutputGenerator) throws Exception {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
-                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>(), null));
+                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null));
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, authTransformer, testPacketCapture,
                 "TEST");
 
@@ -143,7 +143,7 @@ public class TestUtils {
                         stringParts, referenceStringBuilder, headerString);
 
         var innermostFinalizeCallCount = new AtomicInteger();
-        DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> finalizationFuture =
+        DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse> finalizationFuture =
                 allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest(),
                         ()->"PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture");
         finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse, t) -> {

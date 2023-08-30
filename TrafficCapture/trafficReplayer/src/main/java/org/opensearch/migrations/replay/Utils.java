@@ -2,13 +2,13 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpServerCodec;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -23,7 +23,6 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collector;
@@ -79,16 +78,21 @@ public class Utils {
         setPrintStyleFor(packetPrintFormat, ()-> null);
     }
 
-    public static String httpPacketsToString(List<byte[]> packetStream) {
-        return httpPacketsToString(Optional.ofNullable(packetStream).map(p->p.stream()).orElse(null));
+    public static String httpPacketBytesToString(List<byte[]> packetStream) {
+        return httpPacketBytesToString(Optional.ofNullable(packetStream).map(p->p.stream()).orElse(null));
     }
 
-    public static String httpPacketsToString(Stream<byte[]> packetStream) {
+    public static String httpPacketBytesToString(Stream<byte[]> packetStream) {
+        return httpPacketBufsToString(packetStream.map(bArr->Unpooled.wrappedBuffer(bArr)));
+    }
+
+    public static String httpPacketBufsToString(Stream<ByteBuf> packetStream) {
+        packetStream = packetStream.map(bb->bb.duplicate()); // assume that callers don't want read-indices to be spent
         switch (printStyle.get()) {
             case TRUNCATED:
-                return httpPacketsToString(packetStream, MAX_BYTES_SHOWN_FOR_TO_STRING);
+                return httpPacketBufsToString(packetStream, MAX_BYTES_SHOWN_FOR_TO_STRING);
             case FULL_BYTES:
-                return httpPacketsToString(packetStream, Long.MAX_VALUE);
+                return httpPacketBufsToString(packetStream, Long.MAX_VALUE);
             case PARSED_HTTP:
                 return httpPacketsToPrettyPrintedString(packetStream);
             default:
@@ -96,7 +100,7 @@ public class Utils {
         }
     }
 
-    public static String httpPacketsToPrettyPrintedString(Stream<byte[]> packetStream) {
+    public static String httpPacketsToPrettyPrintedString(Stream<ByteBuf> packetStream) {
         EmbeddedChannel channel = new EmbeddedChannel(
                 new HttpServerCodec(),
                 new HttpContentDecompressor(),
@@ -107,43 +111,46 @@ public class Utils {
 
         var httpMessage = (HttpMessage) channel.readInbound();
         if (httpMessage instanceof FullHttpRequest) {
-            return prettyprintNettyRequest((FullHttpRequest) httpMessage);
+            return prettyPrintNettyRequest((FullHttpRequest) httpMessage);
         } else if (httpMessage instanceof FullHttpResponse) {
-            return prettyprintNettyResponse((FullHttpResponse) httpMessage);
+            return prettyPrintNettyResponse((FullHttpResponse) httpMessage);
+        } else if (httpMessage == null) {
+            return "[NULL]";
         } else {
             throw new RuntimeException("Embedded channel with an HttpObjectAggregator returned an unexpected object " +
                     "of type " + httpMessage.getClass() + ": " + httpMessage);
         }
     }
 
-    public static String prettyprintNettyRequest(FullHttpRequest msg) {
+    public static String prettyPrintNettyRequest(FullHttpRequest msg) {
         var sj = new StringJoiner("\n");
         sj.add(msg.method() + " " + msg.uri() + " " + msg.protocolVersion().text());
-        return prettyprintNettyMessage(sj, msg, msg.content());
+        return prettyPrintNettyMessage(sj, msg, msg.content());
     }
 
-    public static String prettyprintNettyResponse(FullHttpResponse msg) {
+    public static String prettyPrintNettyResponse(FullHttpResponse msg) {
         var sj = new StringJoiner("\n");
         sj.add(msg.protocolVersion().text() + " " + msg.status().code() + " " + msg.status().reasonPhrase());
-        return prettyprintNettyMessage(sj, msg, msg.content());
+        return prettyPrintNettyMessage(sj, msg, msg.content());
     }
 
 
-    private static String prettyprintNettyMessage(StringJoiner sj, HttpMessage msg, ByteBuf content) {
+    private static String prettyPrintNettyMessage(StringJoiner sj, HttpMessage msg, ByteBuf content) {
         msg.headers().forEach(kvp->sj.add(String.format("%s: %s", kvp.getKey(), kvp.getValue())));
         sj.add("");
         sj.add(content.toString(StandardCharsets.UTF_8));
         return sj.toString();
     }
 
-    private static String httpPacketsToString(Stream<byte[]> packetStream, long maxBytesToShow) {
+    private static String httpPacketBufsToString(Stream<ByteBuf> packetStream, long maxBytesToShow) {
         if (packetStream == null) { return "null"; }
         return packetStream.map(bArr-> {
-                    var str = IntStream.range(0, bArr.length).map(idx -> bArr[idx])
+            var length = bArr.readableBytes();
+                    var str = IntStream.range(0, length).map(idx -> bArr.readByte())
                             .limit(maxBytesToShow)
                             .mapToObj(b -> "" + (char) b)
                             .collect(Collectors.joining());
-                    return "[" + (bArr.length > maxBytesToShow ? str + "..." : str) + "]";
+                    return "[" + (length > maxBytesToShow ? str + "..." : str) + "]";
                 })
                 .collect(Collectors.joining(","));
     }
