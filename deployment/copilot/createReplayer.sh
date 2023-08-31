@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Wish list
-# * Allow adding additional security group ids for the Replayer service
+# * Allow adding additional security group ids, https://opensearch.atlassian.net/browse/MIGRATIONS-1305
 
 # Allow executing this script from any dir
 script_abs_path=$(readlink -f "$0")
@@ -12,18 +12,20 @@ usage() {
   echo ""
   echo "Create and Deploy Copilot Replayer service"
   echo ""
+  echo "Usage: "
+  echo "  ./createReplayer.sh <--id STRING> <--target-uri URI> [--kafka-group-id STRING, --extra-args STRING, --delete-id STRING, --copilot-app-name STRING, --skip-copilot-init, --region STRING, --stage STRING]"
+  echo ""
   echo "Options:"
-  echo "  --id*                                 [string] The unique ID to give this particular Replayer service, will be used in service naming (e.g. traffic-replayer-ID)"
-  echo "  --target-uri*                         [string] The URI of the target cluster that captured requests will be replayed to (e.g. https://my-target-cluster.com:443)"
-  echo "  --kafka-group-id                      [string, default: logging-group-ID] The Kafka consumer group ID that will decide which consumer group the Replayer will join and consume from"
-  echo "  --extra-args                          [string, default: --auth-header-user-and-secret MIGRATION_DOMAIN_USER_AND_SECRET_ARN] Extra arguments to provide to the Replayer command"
+  echo "  --id                                  [string] The unique ID to give this particular Replayer service, will be used in service naming (e.g. traffic-replayer-ID)"
+  echo "  --target-uri                          [string] The URI of the target cluster that captured requests will be replayed to (e.g. https://my-target-cluster.com:443)"
+  echo "  --kafka-group-id                      [string, default: logging-group-<ID>] The Kafka consumer group ID the Replayer will use, if not specified an ID will be generated"
+  echo "  --extra-args                          [string, default: null] Extra arguments to provide to the Replayer command (e.g. --extra-args '--sigv4-auth-header-service-region es,us-east-1')"
   echo "  --delete-id                           [string, default: null] Delete the Replayer directory with the given ID (e.g. traffic-replayer-ID) and remove the Copilot service"
   echo "  --copilot-app-name                    [string, default: migration-copilot] Specify the Copilot application name to use for deployment"
   echo "  --skip-copilot-init                   Skip one-time Copilot initialization of Replayer service"
   echo "  -r, --region                          [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stack and resources."
   echo "  -s, --stage                           [string, default: dev] Specify the stage name to associate with the deployed resources"
   echo ""
-  echo "* required"
   exit 1
 }
 
@@ -122,12 +124,6 @@ fi
 SERVICE_NAME="traffic-replayer-${ID}"
 if [[ -z "${KAFKA_GROUP_ID}" ]]; then
   KAFKA_GROUP_ID="logging-group-${ID}"
-fi
-
-# It is expected that the devDeploy.sh will be refactored so that no auth parameters are needed by default and this will
-# result in EXTRA_ARGS="" by default
-if [[ -z "${EXTRA_ARGS}" ]]; then
-  EXTRA_ARGS="--auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN}"
 fi
 
 SERVICE_DIR="./${SERVICE_NAME}"
