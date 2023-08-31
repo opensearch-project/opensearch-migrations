@@ -92,8 +92,7 @@ class TestMigrationMonitor(unittest.TestCase):
         expected_endpoint_info = EndpointInfo(test_input.dp_endpoint, ('admin', 'admin'), False)
         self.assertEqual(2, mock_fetch.call_count)
         mock_fetch.assert_called_with(expected_endpoint_info)
-        # We expect one wait cycle
-        mock_sleep.assert_called_once_with(wait_time)
+        mock_sleep.assert_called_with(wait_time)
         mock_shut.assert_called_once_with(expected_endpoint_info)
 
     @patch('migration_monitor.shutdown_pipeline')

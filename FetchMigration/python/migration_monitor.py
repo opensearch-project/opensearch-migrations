@@ -63,6 +63,7 @@ def run(args: MigrationMonitorParams, wait_seconds: int = 30) -> None:
     # TODO Remove hardcoded EndpointInfo
     default_auth = ('admin', 'admin')
     endpoint = EndpointInfo(args.dp_endpoint, default_auth, False)
+    target_doc_count: int = args.target_count
     prev_no_partitions_count = 0
     terminal = False
     logging.info("Starting migration monitor until target doc count: " + str(target_doc_count))
@@ -80,13 +81,10 @@ def run(args: MigrationMonitorParams, wait_seconds: int = 30) -> None:
                                         " docs ( " + str(completion_percentage) + "% )"
                 logging.info(progress_message)
             terminal = check_if_complete(success_docs, rec_in_flight, no_partitions_count,
-                                         prev_no_partitions_count, args.target_count)
+                                         prev_no_partitions_count, target_doc_count)
             if not terminal:
                 # Save no_partitions_count
                 prev_no_partitions_count = no_partitions_count
-
-        if not terminal:
-            time.sleep(wait_seconds)
     # Loop terminated, shut down the Data Prepper pipeline
     logging.info("Migration monitor at terminal state, shutting down...\n")
     shutdown_pipeline(endpoint)
