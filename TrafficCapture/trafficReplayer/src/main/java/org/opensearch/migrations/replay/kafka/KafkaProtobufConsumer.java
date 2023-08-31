@@ -89,8 +89,10 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     records = consumer.poll(CONSUMER_POLL_TIMEOUT);
                 }
                 catch (RuntimeException e) {
-                    log.warn("Unable to poll the topic: {} with our Kafka consumer... Ending message consumption now", topic);
-                    throw e;
+                    // Generally this block is reserved for exceptions that Kafka deems are unrecoverable
+                    log.warn("Unable to poll the topic: {} with our Kafka consumer. Swallowing and awaiting next " +
+                        "metadata refresh to try again. Exception: {}", topic, e);
+                    records = new ConsumerRecords<>(Collections.emptyMap());
                 }
                 Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
                     try {
