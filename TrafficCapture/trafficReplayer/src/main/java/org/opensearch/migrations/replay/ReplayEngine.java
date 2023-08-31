@@ -34,9 +34,9 @@ public class ReplayEngine {
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueRequestKey requestKey, Instant start, Instant end,
-                    Stream<ByteBuf> packets) {
-        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, end, packets);
+    scheduleRequest(UniqueRequestKey requestKey, Instant start, Instant end, int numPackets, Stream<ByteBuf> packets) {
+        var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
+        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);
         return sendResult;
     }
 

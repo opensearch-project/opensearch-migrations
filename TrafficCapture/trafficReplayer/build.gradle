@@ -9,7 +9,6 @@
  * GitHub history for details.
  */
 
-
 buildscript {
     dependencies {
         classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
@@ -40,10 +39,10 @@ repositories {
 }
 
 dependencies {
-    implementation project(':captureProtobufs')
 
-    implementation 'software.amazon.awssdk:sdk-core:2.20.102'
-    implementation 'software.amazon.awssdk:auth:2.20.102'
+    def resilience4jVersion = "1.7.0";
+
+    implementation project(':captureProtobufs')
 
     // TODO - upgrade this to 2.x so that we don't pollute the jar-space with two versions of AWS SDK
     implementation group: 'com.amazonaws.secretsmanager', name: 'aws-secretsmanager-caching-java', version: '1.0.2'
@@ -53,9 +52,11 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
     implementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
     implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
+    implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"${resilience4jVersion}"
+    implementation group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"${resilience4jVersion}"
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.json', name: 'json', version: '20230227'
-    implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
+    //implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
 
     implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.5.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
@@ -63,6 +64,8 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
     implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.7'
+    implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
+    implementation group: 'software.amazon.awssdk', name: 'auth', version: '2.20.102'
 
     testImplementation project(':testUtilities')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'

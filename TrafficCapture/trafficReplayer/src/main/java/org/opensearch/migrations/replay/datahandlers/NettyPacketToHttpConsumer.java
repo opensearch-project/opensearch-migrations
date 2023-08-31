@@ -9,6 +9,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.DefaultChannelPromise;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
@@ -78,7 +79,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         });
     }
 
-    public static ChannelFuture createClientConnection(NioEventLoopGroup eventLoopGroup, SslContext sslContext,
+    public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup, SslContext sslContext,
                                                        URI serverUri, String diagnosticLabel) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();

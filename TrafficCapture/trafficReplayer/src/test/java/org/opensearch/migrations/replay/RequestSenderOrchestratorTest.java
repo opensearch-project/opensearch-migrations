@@ -2,6 +2,9 @@ package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.http.FullHttpMessage;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.async.methods.SimpleHttpRequest;
 import org.junit.jupiter.api.Assertions;
@@ -12,7 +15,6 @@ import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -33,7 +35,7 @@ class RequestSenderOrchestratorTest {
                     "User-Agent: UnitTest\r\n" +
                     "Connection: Keep-Alive\r\n" +
                     "\r\n";
-    public static final int NUM_REQUESTS_TO_SCHEDULE = 1;
+    public static final int NUM_REQUESTS_TO_SCHEDULE = 2;
 
     private static String SERVER_RESPONSE_BODY = "Boring Response.";
     private static Duration SERVER_RESPONSE_LATENCY = Duration.ofMillis(100);
@@ -57,13 +59,12 @@ class RequestSenderOrchestratorTest {
         var httpServer = SimpleHttpServer.makeServer(false, r->makeResponse());
         var testServerUri = httpServer.localhostEndpoint();
         var clientConnectionPool = new ClientConnectionPool(testServerUri, null, 1);
-        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool, 1);
+        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
         var baseTime = Instant.now();
         var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
         for (int i = 0; i< NUM_REQUESTS_TO_SCHEDULE; ++i) {
             var rKey = new UniqueRequestKey("TEST", i);
-            var endTime = baseTime.plus(Duration.ofMillis(i));
-            var arr = senderOrchestrator.scheduleRequest(rKey, baseTime, endTime, makeRequest(i));
+            var arr = senderOrchestrator.scheduleRequest(rKey, baseTime, Duration.ofMillis(1), makeRequest(i));
             scheduledItems.add(arr);
         }
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
@@ -73,11 +74,11 @@ class RequestSenderOrchestratorTest {
             log.atError().setCause(arr.error).log("error");
             Assertions.assertEquals(null, arr.error);
             Assertions.assertTrue(arr.responseSizeInBytes > 0);
-            var httpMessage = (HttpResponse) Utils.parseHttpMessage(arr.responsePackets.stream()
-                    .map(kvp->Unpooled.wrappedBuffer(kvp.getValue())));
-            Assertions.assertEquals(200, httpMessage.statusCode());
-            var body = httpMessage.body();
-            Assertions.assertNotNull(body);
+            var httpMessage = (FullHttpResponse) Utils.parseHttpMessage(Utils.HttpMessageType.Response,
+                    arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())));
+            Assertions.assertEquals(200, httpMessage.status().code());
+            var body = httpMessage.content();
+            Assertions.assertEquals(SERVER_RESPONSE_BODY, new String(body.duplicate().toString(StandardCharsets.UTF_8)));
         }
     }
 

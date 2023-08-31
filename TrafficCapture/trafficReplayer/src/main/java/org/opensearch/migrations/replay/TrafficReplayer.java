@@ -92,7 +92,7 @@ public class TrafficReplayer {
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
         var clientConnectionPool = new ClientConnectionPool(serverUri,
                 loadSslContext(serverUri, allowInsecureConnections), numSendingThreads);
-        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool, 1);
+        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
         replayEngine = new ReplayEngine(senderOrchestrator, Duration.ofSeconds(1));
     }
 
@@ -532,6 +532,7 @@ public class TrafficReplayer {
             log.debug("finalizeRequest future for transformation = " + transformationCompleteFuture);
             var sendFuture = transformationCompleteFuture.thenCompose(transformedResult ->
                         replayEngine.scheduleRequest(requestKey, start, end,
+                                        transformedResult.transformedOutput.size(),
                                         transformedResult.transformedOutput.stream())
                                 .map(future->future.exceptionally(t->
                                                 new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,

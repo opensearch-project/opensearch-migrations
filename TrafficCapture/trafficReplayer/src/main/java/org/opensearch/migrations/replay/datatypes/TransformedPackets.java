@@ -13,6 +13,8 @@ public class TransformedPackets implements AutoCloseable {
         return data.add(nextRequestPacket.retainedDuplicate());
     }
 
+    public int size() { return data.size(); }
+
     public Stream<ByteBuf> stream() {
         return data.stream().map(bb->bb.duplicate());
     }

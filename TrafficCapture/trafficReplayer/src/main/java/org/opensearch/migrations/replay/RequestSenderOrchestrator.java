@@ -1,50 +1,153 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.EventLoop;
+import io.netty.util.AttributeKey;
+import io.netty.util.concurrent.ScheduledFuture;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datatypes.ChannelAndScheduledRequests;
+import org.opensearch.migrations.replay.datatypes.TimeToResponseFulfillmentFutureMap;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Iterator;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 @Slf4j
 public class RequestSenderOrchestrator {
-    private final int maxRetriesForNewConnection;
+
+    private static final AttributeKey<TimeToResponseFulfillmentFutureMap> SCHEDULED_ITEMS_KEY =
+            AttributeKey.valueOf("ScheduledItemsKey");
+
     public final ClientConnectionPool clientConnectionPool;
 
-    public RequestSenderOrchestrator(ClientConnectionPool clientConnectionPool, int maxRetriesForNewConnection) {
-        this.maxRetriesForNewConnection = maxRetriesForNewConnection;
+    public RequestSenderOrchestrator(ClientConnectionPool clientConnectionPool) {
         this.clientConnectionPool = clientConnectionPool;
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueRequestKey requestKey, Instant start, Instant end, Stream<ByteBuf> packets) {
-        var nettySender = create(requestKey);
-        return sendAllData(nettySender, packets);
-    }
-
-    private static DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    sendAllData(NettyPacketToHttpConsumer packetHandler, Stream<ByteBuf> packets) {
-        DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<TransformedPackets>> transformationCompleteFuture;
-        var logLabel = packetHandler.getClass().getSimpleName();
-        packets.forEach(packetData-> {
-            log.atDebug().setMessage(()->logLabel + " sending " + packetData.readableBytes() +
-                    " bytes to the packetHandler").log();
-            var consumeFuture = packetHandler.consumeBytes(packetData);
-            log.atDebug().setMessage(()->logLabel + " consumeFuture = " + consumeFuture).log();
+    scheduleRequest(UniqueRequestKey requestKey, Instant start, Duration interval, Stream<ByteBuf> packets) {
+        var finalTunneledResponse =
+                new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
+                        ()->"waiting for connection to be ready");
+        var channelFutureAndScheduleFuture = clientConnectionPool.submitEventualChannelGet(requestKey);
+        channelFutureAndScheduleFuture.addListener(submitFuture->{
+                if (!submitFuture.isSuccess()) {
+                    log.atError().setCause(submitFuture.cause())
+                            .log("Major unexpected issue found from a scheduled task");
+                } else {
+                    var channelFutureAndFutureRequests = ((ChannelAndScheduledRequests) submitFuture.get());
+                    channelFutureAndFutureRequests.channelFutureFuture
+                            .map(channelFutureGetAttemptFuture->
+                                            channelFutureGetAttemptFuture.thenAccept(v->{
+                                                assert v == channelFutureAndFutureRequests.channelFutureFuture.future.getNow(null).channel();
+                                                scheduleSendAfterChannelSetup(requestKey, channelFutureAndFutureRequests,
+                                                        finalTunneledResponse, start, interval, packets);
+                                            }),
+                            ()->"waiting for channel future creation to happen");
+                }
         });
-        log.atDebug().setMessage(()->logLabel + " done sending bytes, now finalizing the request").log();
-        return packetHandler.finalizeRequest();
+        return finalTunneledResponse;
     }
 
-    private NettyPacketToHttpConsumer create(UniqueRequestKey requestKey) {
-        return new NettyPacketToHttpConsumer(clientConnectionPool.get(requestKey, maxRetriesForNewConnection),
-                requestKey.toString());
+    private void scheduleSendAfterChannelSetup(UniqueRequestKey requestKey,
+                                               ChannelAndScheduledRequests channelFutureAndFutureRequests,
+                                               StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
+                                               Instant start, Duration interval,
+                                               Stream<ByteBuf> packets) {
+        channelFutureAndFutureRequests.getInnerChannelFuture().addListener(f->{
+            if (!f.isSuccess()) {
+                responseFuture.future.completeExceptionally(
+                        new RuntimeException("channel was returned in a bad state", f.cause()));
+            } else {
+                scheduleSend(requestKey, channelFutureAndFutureRequests, responseFuture, start, interval, packets);
+            }
+        });
     }
 
+    private void scheduleSend(UniqueRequestKey requestKey,
+                              ChannelAndScheduledRequests channelFutureAndFutureRequests,
+                              StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
+                              Instant start, Duration interval, Stream<ByteBuf> packets) {
+        var schedule = channelFutureAndFutureRequests.schedule;
+        var counter = new AtomicInteger();
+        var packetReceiverRef = new AtomicReference<NettyPacketToHttpConsumer>();
+
+        var eventLoop = channelFutureAndFutureRequests.getInnerChannelFuture().channel().eventLoop();
+        Runnable packetSender = () -> sendNextPartAndContinue(() ->
+                        getPacketReceiver(requestKey, channelFutureAndFutureRequests.getInnerChannelFuture(), packetReceiverRef),
+                        eventLoop, packets.iterator(), start, interval, counter, responseFuture);
+        if (schedule.isEmpty()) {
+            eventLoop.schedule(packetSender, getDelayFromNowMs(start), TimeUnit.MILLISECONDS);
+        } else {
+            assert !start.isBefore(schedule.firstKey()) :
+                    "Per-connection TrafficStream ordering should force a time ordering on incoming requests";
+        }
+        responseFuture.map(f->f.whenComplete((v,t)->{
+            var firstItem = schedule.entrySet().stream().findFirst();
+            firstItem.ifPresent(kvp->
+                    eventLoop.schedule(kvp.getValue(), getDelayFromNowMs(kvp.getKey()), TimeUnit.MILLISECONDS));
+        }), ()->"Kicking off the next item");
+        schedule.put(start, packetSender);
+    }
+
+    private Instant now() {
+        return Instant.now();
+    }
+
+    private long getDelayFromNowMs(Instant to) {
+        return Math.max(0, Duration.between(now(), to).toMillis());
+    }
+
+    @SneakyThrows
+    private static NettyPacketToHttpConsumer
+    getPacketReceiver(UniqueRequestKey requestKey, ChannelFuture channelFuture,
+                      AtomicReference<NettyPacketToHttpConsumer> packetReceiver) {
+        if (packetReceiver.get() == null) {
+            packetReceiver.set(new NettyPacketToHttpConsumer(channelFuture, requestKey.toString()));
+        }
+        return packetReceiver.get();
+    }
+
+    private void sendNextPartAndContinue(Supplier<NettyPacketToHttpConsumer> packetHandlerSupplier,
+                                         EventLoop eventLoop, Iterator<ByteBuf> iterator,
+                                         Instant start, Duration interval, AtomicInteger counter,
+                                         StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture) {
+        log.atTrace().setMessage(()->"sendNextPartAndContinue: counter=" + counter.get()).log();
+        var packetReceiver = packetHandlerSupplier.get();
+        assert iterator.hasNext() : "Should not have called this with no items to send";
+
+        packetReceiver.consumeBytes(iterator.next());
+        counter.incrementAndGet();
+        Runnable packetSender = () -> sendNextPartAndContinue(packetHandlerSupplier, eventLoop,
+                iterator, start, interval, counter, responseFuture);
+        var delayMs = Duration.between(Instant.now(), start.plus(interval.multipliedBy(counter.get()))).toMillis();
+        eventLoop.schedule(packetSender, Math.min(0, delayMs), TimeUnit.MILLISECONDS);
+
+        if (!iterator.hasNext()) {
+            packetReceiver.finalizeRequest().handle((v,t)-> {
+                if (t != null) {
+                    responseFuture.future.completeExceptionally(t);
+                } else {
+                    responseFuture.future.complete(v);
+                }
+                return null;
+            }, ()->"waiting for finalize to send Aggregated Response");
+        }
+    }
 }
