@@ -73,10 +73,24 @@ dependencies {
 configurations.all {
     resolutionStrategy.eachDependency { DependencyResolveDetails details ->
         if (details.requested.group == 'org.apache.commons' && details.requested.name == 'commons-text') {
-            details.useVersion '1.10.0'
+            def requestedVersion = details.requested.version
+            def targetVersion = '1.10.0'
+
+            if (requestedVersion > targetVersion) {
+                details.useVersion requestedVersion
+            } else {
+                details.useVersion targetVersion
+            }
         }
         if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
-            details.useVersion '6.7.0'
+            def requestedVersion = details.requested.version
+            def targetVersion = '6.7.0'
+
+            if (requestedVersion > targetVersion) {
+                details.useVersion requestedVersion
+            } else {
+                details.useVersion targetVersion
+            }
         }
     }
 }
