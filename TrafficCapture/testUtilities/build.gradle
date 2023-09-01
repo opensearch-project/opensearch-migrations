@@ -37,7 +37,6 @@ checkstyle {
 
 repositories {
     mavenCentral()
-    maven { url 'https://www.bouncycastle.org/repo/' }
 }
 
 dependencies {
