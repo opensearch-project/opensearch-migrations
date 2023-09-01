@@ -29,7 +29,7 @@ spotbugs {
 }
 
 checkstyle {
-    toolVersion = '10.9.3'
+    toolVersion = '10.12.1'
     configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
     System.setProperty('checkstyle.cache.file', String.format('%s/%s',
             buildDir, 'checkstyle.cachefile'))
@@ -37,6 +37,7 @@ checkstyle {
 
 repositories {
     mavenCentral()
+    maven { url 'https://www.bouncycastle.org/repo/' }
 }
 
 dependencies {
@@ -44,8 +45,8 @@ dependencies {
     implementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
-    implementation group: 'org.bouncycastle', name: 'bcprov-jdk15on', version: '1.68'
-    implementation group: 'org.bouncycastle', name: 'bcpkix-jdk15on', version: '1.68'
+    implementation group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: '1.74'
+    implementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.74'
     implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
