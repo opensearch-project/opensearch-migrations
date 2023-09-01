@@ -40,6 +40,8 @@ repositories {
 }
 
 dependencies {
+    spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
+
     implementation project(':captureProtobufs')
 
     implementation 'software.amazon.awssdk:sdk-core:2.20.102'
