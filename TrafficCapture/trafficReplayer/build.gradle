@@ -70,6 +70,17 @@ dependencies {
     testImplementation 'org.mockito:mockito-junit-jupiter:4.6.1'
 }
 
+configurations.all {
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.group == 'org.apache.commons' && details.requested.name == 'commons-text') {
+            details.useVersion '1.10.0'
+        }
+        if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
+            details.useVersion '6.7.0'
+        }
+    }
+}
+
 application {
     mainClass = 'org.opensearch.migrations.replay.TrafficReplayer'
 }
