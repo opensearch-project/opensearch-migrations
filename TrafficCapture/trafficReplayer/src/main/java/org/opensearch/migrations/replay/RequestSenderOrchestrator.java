@@ -1,18 +1,14 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import io.netty.util.AttributeKey;
-import io.netty.util.concurrent.ScheduledFuture;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ChannelAndScheduledRequests;
 import org.opensearch.migrations.replay.datatypes.TimeToResponseFulfillmentFutureMap;
-import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
@@ -20,8 +16,8 @@ import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -46,18 +42,29 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for connection to be ready");
         var channelFutureAndScheduleFuture = clientConnectionPool.submitEventualChannelGet(requestKey);
-        channelFutureAndScheduleFuture.addListener(submitFuture->{
+        var cf2 = channelFutureAndScheduleFuture.addListener(submitFuture->{
                 if (!submitFuture.isSuccess()) {
                     log.atError().setCause(submitFuture.cause())
-                            .log("Major unexpected issue found from a scheduled task");
+                            .setMessage(()->requestKey.toString() + " unexpected issue found from a scheduled task")
+                            .log();
+                    finalTunneledResponse.future.completeExceptionally(submitFuture.cause());
                 } else {
+                    log.atTrace().setMessage(()->requestKey.toString() + " in submitFuture(success) callback").log();
                     var channelFutureAndFutureRequests = ((ChannelAndScheduledRequests) submitFuture.get());
                     channelFutureAndFutureRequests.channelFutureFuture
-                            .map(channelFutureGetAttemptFuture->
-                                            channelFutureGetAttemptFuture.thenAccept(v->{
-                                                assert v == channelFutureAndFutureRequests.channelFutureFuture.future.getNow(null).channel();
+                            .map(channelFutureGetAttemptFuture->channelFutureGetAttemptFuture
+                                            .thenAccept(v->{
+                                                log.atTrace().setMessage(()->requestKey.toString() +
+                                                        " ChannelFuture was created with "+v).log();
+                                                assert v.channel() == channelFutureAndFutureRequests.channelFutureFuture.future.getNow(null).channel();
                                                 scheduleSendAfterChannelSetup(requestKey, channelFutureAndFutureRequests,
                                                         finalTunneledResponse, start, interval, packets);
+                                            })
+                                            .exceptionally(t->{
+                                                log.atTrace().setCause(t).setMessage(()->requestKey.toString() +
+                                                        " ChannelFuture creation threw an exception").log();
+                                                finalTunneledResponse.future.completeExceptionally(t);
+                                                return null;
                                             }),
                             ()->"waiting for channel future creation to happen");
                 }
@@ -66,16 +73,21 @@ public class RequestSenderOrchestrator {
     }
 
     private void scheduleSendAfterChannelSetup(UniqueRequestKey requestKey,
-                                               ChannelAndScheduledRequests channelFutureAndFutureRequests,
+                                               ChannelAndScheduledRequests channelFutureAndItsFutureRequests,
                                                StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
                                                Instant start, Duration interval,
                                                Stream<ByteBuf> packets) {
-        channelFutureAndFutureRequests.getInnerChannelFuture().addListener(f->{
+        var cf = channelFutureAndItsFutureRequests.getInnerChannelFuture();
+        log.trace("cf="+cf);
+        cf.addListener(f->{
+            log.atTrace().setMessage(()->"channel creation has finished initialized (success="+f.isSuccess()+")").log();
             if (!f.isSuccess()) {
                 responseFuture.future.completeExceptionally(
                         new RuntimeException("channel was returned in a bad state", f.cause()));
             } else {
-                scheduleSend(requestKey, channelFutureAndFutureRequests, responseFuture, start, interval, packets);
+                channelFutureAndItsFutureRequests.scheduleSequencer.add(requestKey.requestIndex, ()->scheduleSend(
+                        requestKey, channelFutureAndItsFutureRequests, responseFuture, start, interval, packets),
+                        x->x.run());
             }
         });
     }
@@ -93,17 +105,34 @@ public class RequestSenderOrchestrator {
                         getPacketReceiver(requestKey, channelFutureAndFutureRequests.getInnerChannelFuture(), packetReceiverRef),
                         eventLoop, packets.iterator(), start, interval, counter, responseFuture);
         if (schedule.isEmpty()) {
-            eventLoop.schedule(packetSender, getDelayFromNowMs(start), TimeUnit.MILLISECONDS);
+            var scheduledFuture = eventLoop.schedule(packetSender, getDelayFromNowMs(start), TimeUnit.MILLISECONDS);
+            scheduledFuture.addListener(f->{
+                if (!f.isSuccess()) {
+                    log.atError().setCause(f.cause()).setMessage(()->"Error scheduling task").log();
+                }
+            });
         } else {
-            assert !start.isBefore(schedule.firstKey()) :
+            assert !start.isBefore(schedule.peekFirstItem().getKey()) :
                     "Per-connection TrafficStream ordering should force a time ordering on incoming requests";
         }
         responseFuture.map(f->f.whenComplete((v,t)->{
-            var firstItem = schedule.entrySet().stream().findFirst();
-            firstItem.ifPresent(kvp->
-                    eventLoop.schedule(kvp.getValue(), getDelayFromNowMs(kvp.getKey()), TimeUnit.MILLISECONDS));
+            var itemStartTimeOfPopped = schedule.removeFirstItem();
+            assert start.equals(itemStartTimeOfPopped):
+                    "Expected to have popped the item to match the start time for the responseFuture that finished";
+            log.atDebug().setMessage(()->requestKey.toString() + " responseFuture completed - checking "
+                    + schedule + " for the next item to schedule").log();
+            Optional.ofNullable(schedule.peekFirstItem()).ifPresent(kvp-> {
+                var sf = eventLoop.schedule(kvp.getValue(), getDelayFromNowMs(kvp.getKey()), TimeUnit.MILLISECONDS);
+                sf.addListener(sfp->{
+                    if (!sfp.isSuccess()) {
+                        log.atWarn().setCause(sfp.cause()).setMessage(()->"Scheduled future was not successful").log();
+                    }
+                });
+            });
         }), ()->"Kicking off the next item");
-        schedule.put(start, packetSender);
+        schedule.appendTask(start, packetSender);
+        log.atTrace().setMessage(()->requestKey + " added a scheduled event at " + start + " packets=" + packets +
+                "... " + schedule).log();
     }
 
     private Instant now() {

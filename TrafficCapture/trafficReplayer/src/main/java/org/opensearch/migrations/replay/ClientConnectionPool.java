@@ -63,6 +63,7 @@ public class ClientConnectionPool {
                     var channelFuture =
                             NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, serverUri, s);
                     channelFuture.addListener(f -> {
+                        log.atTrace().setMessage(()->s + " ChannelFuture result for create=" + f.isSuccess()).log();
                         if (f.isSuccess()) {
                             clientConnectionChannelCreatedFuture.future.complete(channelFuture);
                         } else {
@@ -158,10 +159,10 @@ public class ClientConnectionPool {
                                             channelClosedFuture.future.completeExceptionally(closeFuture.cause());
                                         }
                                     });
-                            var scheduledWorkRemaining = channelAndFutureWork.schedule;
-                            if (!scheduledWorkRemaining.isEmpty()) {
-                                log.atWarn().setMessage("Work items are still remaining.  "
-                                        + scheduledWorkRemaining.size() + " requests that were enqueued won't be run").log();
+                            if (!channelAndFutureWork.hasWorkRemaining()) {
+                                log.atWarn().setMessage(()->"Work items are still remaining.  "
+                                        + channelAndFutureWork.calculateSizeSlowly() + " " +
+                                        "requests that were enqueued won't be run").log();
                             }
                         })
                         .exceptionally(t->{channelClosedFuture.future.completeExceptionally(t);return null;}),

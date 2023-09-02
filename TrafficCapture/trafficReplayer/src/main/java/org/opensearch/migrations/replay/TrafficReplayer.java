@@ -559,7 +559,7 @@ public class TrafficReplayer {
             var consumeFuture = packetHandler.consumeBytes(packetData);
             log.atDebug().setMessage(()->logLabel + " consumeFuture = " + consumeFuture).log();
         });
-        log.atDebug().setMessage(()->logLabel + " done sending bytes, now finalizing the request").log();
+        log.atDebug().setMessage(()->logLabel + "  done sending bytes, now finalizing the request").log();
         return packetHandler.finalizeRequest();
     }
 
