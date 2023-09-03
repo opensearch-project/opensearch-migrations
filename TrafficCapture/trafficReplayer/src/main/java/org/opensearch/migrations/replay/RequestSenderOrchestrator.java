@@ -21,11 +21,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 @Slf4j
 public class RequestSenderOrchestrator {
+
+    // TODO - Reconsider how time shifting is done
+    AtomicReference<Duration> lagTimeRef = new AtomicReference<>();
 
     private static final AttributeKey<TimeToResponseFulfillmentFutureMap> SCHEDULED_ITEMS_KEY =
             AttributeKey.valueOf("ScheduledItemsKey");
@@ -36,11 +41,41 @@ public class RequestSenderOrchestrator {
         this.clientConnectionPool = clientConnectionPool;
     }
 
+    public void scheduleClose(UniqueRequestKey requestKey, Instant timestamp) {
+        var finalTunneledResponse =
+                new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
+                        ()->"waiting for connection to be ready for close");
+        scheduleRunnableToSetFuture(requestKey, timestamp, finalTunneledResponse,
+                channelFutureAndFutureRequests->scheduleAfterChannelSetup(requestKey, channelFutureAndFutureRequests,
+                finalTunneledResponse,
+                (channelFutureAndItsFutureRequests,responseFuture)->
+                        channelFutureAndItsFutureRequests.scheduleSequencer.add(requestKey.requestIndex,
+                                ()-> {
+                                    clientConnectionPool.closeConnection(requestKey.connectionId);
+                                    responseFuture.future.complete(null);
+                                },
+                                x->x.run())));
+    }
+
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
     scheduleRequest(UniqueRequestKey requestKey, Instant start, Duration interval, Stream<ByteBuf> packets) {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
-                        ()->"waiting for connection to be ready");
+                        ()->"waiting for connection to be ready for request");
+        return scheduleRunnableToSetFuture(requestKey, start, finalTunneledResponse,
+                channelFutureAndFutureRequests->scheduleAfterChannelSetup(requestKey, channelFutureAndFutureRequests,
+                        finalTunneledResponse,
+                        (channelFutureAndItsFutureRequests,responseFuture)->
+                                channelFutureAndItsFutureRequests.scheduleSequencer.add(requestKey.requestIndex,
+                                        ()-> scheduleSendOnCffr(requestKey, channelFutureAndItsFutureRequests,
+                                                responseFuture, start, interval, packets),
+                                x->x.run())));
+    }
+
+    private <T> DiagnosticTrackableCompletableFuture<String, T>
+    scheduleRunnableToSetFuture(UniqueRequestKey requestKey, Instant start,
+                                DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
+                                Consumer<ChannelAndScheduledRequests> successFn) {
         var channelFutureAndScheduleFuture = clientConnectionPool.submitEventualChannelGet(requestKey);
         var cf2 = channelFutureAndScheduleFuture.addListener(submitFuture->{
                 if (!submitFuture.isSuccess()) {
@@ -57,8 +92,7 @@ public class RequestSenderOrchestrator {
                                                 log.atTrace().setMessage(()->requestKey.toString() +
                                                         " ChannelFuture was created with "+v).log();
                                                 assert v.channel() == channelFutureAndFutureRequests.channelFutureFuture.future.getNow(null).channel();
-                                                scheduleSendAfterChannelSetup(requestKey, channelFutureAndFutureRequests,
-                                                        finalTunneledResponse, start, interval, packets);
+                                                successFn.accept(channelFutureAndFutureRequests);
                                             })
                                             .exceptionally(t->{
                                                 log.atTrace().setCause(t).setMessage(()->requestKey.toString() +
@@ -72,11 +106,10 @@ public class RequestSenderOrchestrator {
         return finalTunneledResponse;
     }
 
-    private void scheduleSendAfterChannelSetup(UniqueRequestKey requestKey,
-                                               ChannelAndScheduledRequests channelFutureAndItsFutureRequests,
-                                               StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
-                                               Instant start, Duration interval,
-                                               Stream<ByteBuf> packets) {
+    private <T> void scheduleAfterChannelSetup(UniqueRequestKey requestKey,
+                                           ChannelAndScheduledRequests channelFutureAndItsFutureRequests,
+                                           StringTrackableCompletableFuture<T> responseFuture,
+                                           BiConsumer<ChannelAndScheduledRequests,StringTrackableCompletableFuture<T>> task) {
         var cf = channelFutureAndItsFutureRequests.getInnerChannelFuture();
         log.trace("cf="+cf);
         cf.addListener(f->{
@@ -85,17 +118,15 @@ public class RequestSenderOrchestrator {
                 responseFuture.future.completeExceptionally(
                         new RuntimeException("channel was returned in a bad state", f.cause()));
             } else {
-                channelFutureAndItsFutureRequests.scheduleSequencer.add(requestKey.requestIndex, ()->scheduleSend(
-                        requestKey, channelFutureAndItsFutureRequests, responseFuture, start, interval, packets),
-                        x->x.run());
+                task.accept(channelFutureAndItsFutureRequests, responseFuture);
             }
         });
     }
 
-    private void scheduleSend(UniqueRequestKey requestKey,
-                              ChannelAndScheduledRequests channelFutureAndFutureRequests,
-                              StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
-                              Instant start, Duration interval, Stream<ByteBuf> packets) {
+    private void scheduleSendOnCffr(UniqueRequestKey requestKey,
+                                    ChannelAndScheduledRequests channelFutureAndFutureRequests,
+                                    StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
+                                    Instant start, Duration interval, Stream<ByteBuf> packets) {
         var schedule = channelFutureAndFutureRequests.schedule;
         var counter = new AtomicInteger();
         var packetReceiverRef = new AtomicReference<NettyPacketToHttpConsumer>();
@@ -162,13 +193,13 @@ public class RequestSenderOrchestrator {
         assert iterator.hasNext() : "Should not have called this with no items to send";
 
         packetReceiver.consumeBytes(iterator.next());
-        counter.incrementAndGet();
-        Runnable packetSender = () -> sendNextPartAndContinue(packetHandlerSupplier, eventLoop,
-                iterator, start, interval, counter, responseFuture);
-        var delayMs = Duration.between(Instant.now(), start.plus(interval.multipliedBy(counter.get()))).toMillis();
-        eventLoop.schedule(packetSender, Math.min(0, delayMs), TimeUnit.MILLISECONDS);
-
-        if (!iterator.hasNext()) {
+        if (iterator.hasNext()) {
+            counter.incrementAndGet();
+            Runnable packetSender = () -> sendNextPartAndContinue(packetHandlerSupplier, eventLoop,
+                    iterator, start, interval, counter, responseFuture);
+            var delayMs = Duration.between(Instant.now(), start.plus(interval.multipliedBy(counter.get()))).toMillis();
+            eventLoop.schedule(packetSender, Math.min(0, delayMs), TimeUnit.MILLISECONDS);
+        } else {
             packetReceiver.finalizeRequest().handle((v,t)-> {
                 if (t != null) {
                     responseFuture.future.completeExceptionally(t);
@@ -179,4 +210,5 @@ public class RequestSenderOrchestrator {
             }, ()->"waiting for finalize to send Aggregated Response");
         }
     }
+
 }

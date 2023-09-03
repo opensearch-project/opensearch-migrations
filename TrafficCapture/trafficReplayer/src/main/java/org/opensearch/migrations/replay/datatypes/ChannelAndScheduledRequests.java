@@ -7,10 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
 
-import java.time.Instant;
-import java.util.AbstractMap;
-import java.util.Map;
-
 @Slf4j
 public class ChannelAndScheduledRequests {
     /**

@@ -1,16 +1,10 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.handler.ssl.SslContext;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
-import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.stream.Stream;
@@ -25,8 +19,8 @@ public class ReplayEngine {
         this.networkSendOrchestrator = networkSendOrchestrator;
     }
 
-    public void closeConnection(String connId) {
-        networkSendOrchestrator.clientConnectionPool.closeConnection(connId);
+    public void closeConnection(UniqueRequestKey requestKey, Instant timestamp) {
+        networkSendOrchestrator.scheduleClose(requestKey, timestamp);
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void> close() {

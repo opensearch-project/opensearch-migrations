@@ -5,6 +5,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Optional;
 
 @Slf4j
 public class RequestResponsePacketPair {
@@ -46,5 +47,11 @@ public class RequestResponsePacketPair {
         sb.append("\n responseData=").append(responseData);
         sb.append('}');
         return sb.toString();
+    }
+
+    public Optional<Instant> getLastTimestamp() {
+        return Optional.ofNullable(responseData)
+                .or(()->Optional.ofNullable(requestData))
+                .map(d->d.getLastPacketTimestamp());
     }
 }

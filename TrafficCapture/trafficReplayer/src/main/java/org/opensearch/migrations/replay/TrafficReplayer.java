@@ -319,7 +319,7 @@ public class TrafficReplayer {
                         getRecordedRequestReconstructCompleteHandler(requestFutureMap),
                         getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
                                 tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap),
-                        connId -> replayEngine.closeConnection(connId));
+                        (requestKey, ts) -> replayEngine.closeConnection(requestKey, ts));
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {

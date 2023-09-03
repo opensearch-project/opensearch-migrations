@@ -91,6 +91,6 @@ class RequestSenderOrchestratorTest {
 
     private Stream<ByteBuf> makeRequest(int i) {
         return //Stream.of(Unpooled.wrappedBuffer(getRequestString(i).getBytes()));
-                getRequestString(i).chars().mapToObj(c->Unpooled.wrappedBuffer(new byte[]{(byte) c}));
+               getRequestString(i).chars().mapToObj(c->Unpooled.wrappedBuffer(new byte[]{(byte) c}));
     }
 }

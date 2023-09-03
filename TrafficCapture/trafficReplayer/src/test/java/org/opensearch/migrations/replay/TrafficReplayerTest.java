@@ -151,7 +151,7 @@ class TrafficReplayerTest {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                         },
-                        c -> {}
+                        (rk,ts) -> {}
                 );
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -180,7 +180,7 @@ class TrafficReplayerTest {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                         },
-                        connection -> {},
+                        (rk,ts) -> {},
                         remaining -> remainingAccumulations.incrementAndGet()
                 );
         byte[] serializedChunks;
@@ -220,6 +220,7 @@ class TrafficReplayerTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
                         (id,request) -> { gotAnythingElse.set(true); },
                         fullPair -> { gotAnythingElse.set(true); },
+                        (requestKey,ts) -> {},
                         accum -> gotWarning.set(true));
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
