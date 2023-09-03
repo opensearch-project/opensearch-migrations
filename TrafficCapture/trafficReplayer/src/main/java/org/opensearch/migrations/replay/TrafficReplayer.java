@@ -565,7 +565,12 @@ public class TrafficReplayer {
 
     public void runReplay(ITrafficCaptureSource trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
-        while (trafficChunkStream.readNextChunk(ts-> trafficToHttpTransactionAccumulator.accept(ts))) {
+        while (trafficChunkStream.readNextChunk(ts->{
+            //if (ts.getConnectionId().equals("0242acfffe130008-0000000c-00000051-68198b12c8a9927d-622f0ffa"))
+            {
+                trafficToHttpTransactionAccumulator.accept(ts);
+            }
+        })) {
             log.trace("Reading next chunk from TrafficStream supplier");
         }
     }

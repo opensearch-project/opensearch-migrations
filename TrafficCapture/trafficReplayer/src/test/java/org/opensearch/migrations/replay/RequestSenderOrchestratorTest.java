@@ -15,8 +15,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -64,16 +66,24 @@ class RequestSenderOrchestratorTest {
         var clientConnectionPool = new ClientConnectionPool(testServerUri, null, 1);
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
         var baseTime = Instant.now();
+        Instant lastEndTime = baseTime;
         var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
         for (int i = 0; i<NUM_REQUESTS_TO_SCHEDULE; ++i) {
             var rKey = new UniqueRequestKey("TEST", i);
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
-            var startTimeForThisRequest = baseTime.plus(Duration.ofMillis(10*i/NUM_REPEATS));
+            var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
+            var startTimeForThisRequest = baseTime.plus(perPacketShift);
+            var requestPackets = makeRequest(i/NUM_REPEATS);
             var arr = senderOrchestrator.scheduleRequest(rKey, startTimeForThisRequest, Duration.ofMillis(1),
-                    makeRequest(i/NUM_REPEATS));
+                    requestPackets.stream());
             log.info("Scheduled item to run at " + startTimeForThisRequest);
             scheduledItems.add(arr);
+            lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
+        var closeFuture = senderOrchestrator.scheduleClose(
+                new UniqueRequestKey("TEST", NUM_REQUESTS_TO_SCHEDULE),
+                lastEndTime.plus(Duration.ofMillis(100)));
+
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
         for (int i=0; i<scheduledItems.size(); ++i) {
             var cf = scheduledItems.get(i);
@@ -87,10 +97,12 @@ class RequestSenderOrchestratorTest {
             Assertions.assertEquals(SERVER_RESPONSE_BODY_PREFIX + getUriForIthRequest(i/NUM_REPEATS),
                     new String(body.duplicate().toString(StandardCharsets.UTF_8)));
         }
+        closeFuture.get();
     }
 
-    private Stream<ByteBuf> makeRequest(int i) {
-        return //Stream.of(Unpooled.wrappedBuffer(getRequestString(i).getBytes()));
-               getRequestString(i).chars().mapToObj(c->Unpooled.wrappedBuffer(new byte[]{(byte) c}));
+    private List<ByteBuf> makeRequest(int i) {
+        return //List.of(Unpooled.wrappedBuffer(getRequestString(i).getBytes()));
+               getRequestString(i).chars().mapToObj(c->Unpooled.wrappedBuffer(new byte[]{(byte) c}))
+                       .collect(Collectors.toList());
     }
 }
