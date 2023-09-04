@@ -382,9 +382,7 @@ public class TrafficReplayer {
             ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>
                     targetTransactionInProgressMap) {
         return rrPair -> {
-            if (log.isTraceEnabled()) {
-                log.trace("Done receiving captured stream for this " + rrPair.requestData);
-            }
+            log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
             var requestData = rrPair.requestData;
             var resultantCf = responseInProgressMap.remove(requestData)
                     .map(f ->
@@ -471,7 +469,6 @@ public class TrafficReplayer {
                             Throwable t) {
         log.trace("done sending and finalizing data to the packet handler");
 
-
         try (var requestResponseTriple = getSourceTargetCaptureTuple(rrPair, summary, t)) {
             log.atInfo().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTriple).log();
             tripleWriter.writeJSON(requestResponseTriple);
@@ -527,7 +524,7 @@ public class TrafficReplayer {
     {
         try {
             log.debug("Assembled request/response - starting to write to socket");
-            var transformationCompleteFuture = sendAllData(inputRequestTransformerFactory.create(requestKey),
+            var transformationCompleteFuture = transformAllData(inputRequestTransformerFactory.create(requestKey),
                     packets);
             log.debug("finalizeRequest future for transformation = " + transformationCompleteFuture);
             var sendFuture = transformationCompleteFuture.thenCompose(transformedResult ->
@@ -551,7 +548,7 @@ public class TrafficReplayer {
     }
 
     private static <R> DiagnosticTrackableCompletableFuture<String, R>
-    sendAllData(IPacketFinalizingConsumer<R> packetHandler, Stream<ByteBuf> packets) {
+    transformAllData(IPacketFinalizingConsumer<R> packetHandler, Stream<ByteBuf> packets) {
         var logLabel = packetHandler.getClass().getSimpleName();
         packets.forEach(packetData-> {
             log.atDebug().setMessage(()->logLabel + " sending " + packetData.readableBytes() +
@@ -565,13 +562,15 @@ public class TrafficReplayer {
 
     public void runReplay(ITrafficCaptureSource trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
+        int i=0;
         while (trafficChunkStream.readNextChunk(ts->{
-            //if (ts.getConnectionId().equals("0242acfffe130008-0000000c-00000051-68198b12c8a9927d-622f0ffa"))
+            //if (ts.getConnectionId().equals("0242acfffe130008-0000000c-0000000b-5e4ccc45d4a91a95-6a74bd3c"))
             {
                 trafficToHttpTransactionAccumulator.accept(ts);
             }
         })) {
             log.trace("Reading next chunk from TrafficStream supplier");
+            //if (i++ > 5) {break;}
         }
     }
 }

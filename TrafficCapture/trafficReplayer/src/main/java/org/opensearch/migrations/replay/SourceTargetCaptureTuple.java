@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -77,7 +78,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             return message;
         }
 
-        private JSONObject jsonFromHttpData(List<byte[]> data) {
+        private JSONObject jsonFromHttpData(@NonNull List<byte[]> data) {
             try {
                 return jsonFromHttpDataUnsafe(data);
             } catch (Exception e) {
@@ -87,21 +88,25 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             }
         }
 
-        private JSONObject jsonFromHttpData(List<byte[]> data, Duration latency) throws IOException {
-            JSONObject message = jsonFromHttpData(data);
+        private JSONObject jsonFromHttpData(@NonNull List<byte[]> data, Duration latency) {
+            JSONObject message =  jsonFromHttpData(data);
             message.put("response_time_ms", latency.toMillis());
             return message;
         }
 
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
+            // TODO: Use Netty to parse the packets as HTTP rather than json.org (we can also remove it as a dependency)
             JSONObject meta = new JSONObject();
             meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
             //log.warn("TODO: These durations are not measuring the same values!");
-            meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
-                Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(), triple.sourcePair.responseData.getLastPacketTimestamp())));
-            meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData,
-                    triple.shadowResponseDuration));
-
+            if (triple.sourcePair.responseData != null) {
+                meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
+                        Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(),
+                                triple.sourcePair.responseData.getLastPacketTimestamp())));
+            }
+            if (triple.shadowResponseData != null) {
+                meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData, triple.shadowResponseDuration));
+            }
             return meta;
         }
 
@@ -150,7 +155,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
 
     @Override
     public String toString() {
-        return Utils.setPrintStyleFor(Utils.PacketPrintFormat.PARSED_HTTP, () -> {
+        return Utils.setPrintStyleFor(Utils.PacketPrintFormat.TRUNCATED, () -> {
             final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
             sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
             sb.append("\n sourcePair=").append(sourcePair);

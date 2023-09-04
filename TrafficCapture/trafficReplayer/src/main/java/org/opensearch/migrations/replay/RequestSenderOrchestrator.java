@@ -48,7 +48,7 @@ public class RequestSenderOrchestrator {
         var timestamp = getTransformedTime(orginalTimestamp);
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
-                        ()->"waiting for connection to be ready for close");
+                        ()->"waiting for final signal to confirm close has finished");
         runRunnableToSetFuture(requestKey, finalTunneledResponse,
                 channelFutureAndFutureRequests->scheduleOnCffr(requestKey, channelFutureAndFutureRequests,
                         finalTunneledResponse, timestamp, ()->{
@@ -64,7 +64,7 @@ public class RequestSenderOrchestrator {
         var start = getTransformedTime(originalStart);
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
-                        ()->"waiting for connection to be ready for request");
+                        ()->"waiting for final aggregated response");
         return runRunnableToSetFuture(requestKey, finalTunneledResponse,
                 channelFutureAndFutureRequests-> scheduleSendOnCffr(requestKey, channelFutureAndFutureRequests,
                         finalTunneledResponse, start, interval, packets));
@@ -122,6 +122,7 @@ public class RequestSenderOrchestrator {
             log.atDebug().setMessage(()->requestKey.toString() + " responseFuture completed - checking "
                     + schedule + " for the next item to schedule").log();
             Optional.ofNullable(schedule.peekFirstItem()).ifPresent(kvp-> {
+
                 var sf = eventLoop.schedule(kvp.getValue(), getDelayFromNowMs(kvp.getKey()), TimeUnit.MILLISECONDS);
                 sf.addListener(sfp->{
                     if (!sfp.isSuccess()) {

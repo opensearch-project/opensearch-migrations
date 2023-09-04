@@ -40,7 +40,7 @@ public class HttpMessageAndTimestamp {
 
     @Override
     public String toString() {
-        log.error("Fix this - class can represent responses too!");
+        //log.error("Fix this - class can represent responses too!");
         var packetBytesAsStr = Utils.httpPacketBytesToString(Utils.HttpMessageType.Request, packetBytes);
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);

@@ -33,7 +33,7 @@ import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
 
 public class Utils {
-    public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 4096;
+    public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 128;
     public static final int MAX_PAYLOAD_SIZE_TO_PRINT = 1024 * 1024; // 1MB
     public enum PacketPrintFormat {
         TRUNCATED, FULL_BYTES, PARSED_HTTP
@@ -120,7 +120,8 @@ public class Utils {
 
     public static HttpMessage parseHttpMessage(HttpMessageType msgType, Stream<ByteBuf> packetStream) {
         EmbeddedChannel channel = new EmbeddedChannel(
-                msgType == HttpMessageType.Request ? new HttpServerCodec() : new HttpClientCodec(),
+                new HttpServerCodec(),
+                new HttpClientCodec(),
                 new HttpContentDecompressor(),
                 new HttpObjectAggregator(MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
         );
