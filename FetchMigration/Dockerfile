@@ -1,5 +1,5 @@
 FROM opensearch-data-prepper:2.4.0-SNAPSHOT
-COPY index_configuration_tool/requirements.txt .
+COPY python/requirements.txt .
 
 # Install dependencies to local user directory
 RUN apk update
@@ -9,7 +9,7 @@ RUN pip install --user -r requirements.txt
 ENV ICT_CODE_PATH /code
 WORKDIR $ICT_CODE_PATH
 # Copy only source code
-COPY ./index_configuration_tool/*.py .
+COPY python/*.py .
 
 # update PATH
 ENV PATH=/root/.local:$PATH
