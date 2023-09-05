@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -90,10 +91,11 @@ class RequestSenderOrchestratorTest {
             var arr = cf.get();
             Assertions.assertEquals(null, arr.error);
             Assertions.assertTrue(arr.responseSizeInBytes > 0);
-            var httpMessage = (FullHttpResponse) Utils.parseHttpMessage(Utils.HttpMessageType.Response,
+            var httpMessage = Utils.parseHttpMessage(Utils.HttpMessageType.Response,
                     arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())));
-            Assertions.assertEquals(200, httpMessage.status().code());
-            var body = httpMessage.content();
+            var response =  (FullHttpResponse) httpMessage;
+            Assertions.assertEquals(200, response.status().code());
+            var body = response.content();
             Assertions.assertEquals(SERVER_RESPONSE_BODY_PREFIX + getUriForIthRequest(i/NUM_REPEATS),
                     new String(body.duplicate().toString(StandardCharsets.UTF_8)));
         }

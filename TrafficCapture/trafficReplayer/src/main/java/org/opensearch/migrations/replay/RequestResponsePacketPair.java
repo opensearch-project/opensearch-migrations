@@ -23,7 +23,7 @@ public class RequestResponsePacketPair {
             log.trace(this + " Adding request data: " + new String(data, StandardCharsets.UTF_8));
         }
         if (requestData == null) {
-            requestData = new HttpMessageAndTimestamp(packetTimeStamp);
+            requestData = new HttpMessageAndTimestamp.Request(packetTimeStamp);
         }
         requestData.add(data);
         requestData.setLastPacketTimestamp(packetTimeStamp);
@@ -34,7 +34,7 @@ public class RequestResponsePacketPair {
             log.trace(this + " Adding response data: " + new String(data, StandardCharsets.UTF_8));
         }
         if (responseData == null) {
-            responseData = new HttpMessageAndTimestamp(packetTimeStamp);
+            responseData = new HttpMessageAndTimestamp.Response(packetTimeStamp);
         }
         responseData.add(data);
         responseData.setLastPacketTimestamp(packetTimeStamp);

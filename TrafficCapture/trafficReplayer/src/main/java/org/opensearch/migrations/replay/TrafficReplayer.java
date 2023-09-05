@@ -423,10 +423,12 @@ public class TrafficReplayer {
         var allRemainingWorkArray =
                 (DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>[])
                 requestToFinalWorkFuturesMap.values().toArray(DiagnosticTrackableCompletableFuture[]::new);
-        log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length + " items: " +
+        log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
+        log.atTrace().setMessage(()->" items: " +
                 Arrays.stream(allRemainingWorkArray)
                         .map(dcf->dcf.formatAsString(TrafficReplayer::formatWorkItem))
-                        .collect(Collectors.joining("\n")));
+                        .collect(Collectors.joining("\n")))
+                .log();
 
         // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
         // and were removed from the live map (hopefully)

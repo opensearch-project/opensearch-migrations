@@ -170,7 +170,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             assert accum.state == Accumulation.State.NOTHING_SENT;
             log.atTrace().setMessage(()->"Adding request segment for accum[" + connectionId + "]=" + accum).log();
             if (accum.rrPair.requestData == null) {
-                accum.rrPair.requestData = new HttpMessageAndTimestamp(timestamp);
+                accum.rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
             }
             accum.rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
             log.atTrace().setMessage(()->"Added request segment for accum[" + connectionId + "]=" + accum).log();
@@ -178,7 +178,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             assert accum != null && accum.state == Accumulation.State.REQUEST_SENT;
             log.atTrace().setMessage(()->"Adding response segment for accum[" + connectionId + "]=" + accum).log();
             if (accum.rrPair.responseData == null) {
-                accum.rrPair.responseData = new HttpMessageAndTimestamp(timestamp);
+                accum.rrPair.responseData = new HttpMessageAndTimestamp.Response(timestamp);
             }
             accum.rrPair.responseData.addSegment(observation.getWrite().getData().toByteArray());
             log.atTrace().setMessage(()->"Added response segment for accum[" + connectionId + "]=" + accum).log();

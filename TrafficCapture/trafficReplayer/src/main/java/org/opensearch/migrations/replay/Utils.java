@@ -120,8 +120,7 @@ public class Utils {
 
     public static HttpMessage parseHttpMessage(HttpMessageType msgType, Stream<ByteBuf> packetStream) {
         EmbeddedChannel channel = new EmbeddedChannel(
-                new HttpServerCodec(),
-                new HttpClientCodec(),
+                msgType == HttpMessageType.Request ? new HttpServerCodec() : new HttpClientCodec(),
                 new HttpContentDecompressor(),
                 new HttpObjectAggregator(MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
         );
@@ -151,7 +150,7 @@ public class Utils {
         return sj.toString();
     }
 
-    private static String httpPacketBufsToString(Stream<ByteBuf> packetStream, long maxBytesToShow) {
+    public static String httpPacketBufsToString(Stream<ByteBuf> packetStream, long maxBytesToShow) {
         if (packetStream == null) { return "null"; }
         return packetStream.map(bArr-> {
             var length = bArr.readableBytes();
