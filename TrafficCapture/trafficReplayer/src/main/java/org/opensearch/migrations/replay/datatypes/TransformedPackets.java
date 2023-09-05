@@ -19,6 +19,14 @@ public class TransformedPackets implements AutoCloseable {
         return data.stream().map(bb->bb.duplicate());
     }
 
+    public Stream<byte[]> asByteArrayStream() {
+        return stream().map(bb -> {
+            byte[] bArr = new byte[bb.readableBytes()];
+            bb.readBytes(bArr);
+            return bArr;
+        });
+    }
+
     @Override
     public void close() {
         data.stream().forEach(bb->bb.release());

@@ -78,7 +78,7 @@ public class TestUtils {
                                           StringBuilder referenceStringAccumulator,
                                           Function<Integer, String> headersGenerator) {
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
-        String headers = headersGenerator.apply(contentLength) + "\n";
+        String headers = headersGenerator.apply(contentLength) + "\r\n";
         referenceStringAccumulator.append(headers);
         return chainedWriteHeadersAndDualWritePayloadParts(packetConsumer, stringParts, referenceStringAccumulator, headers);
     }
@@ -134,10 +134,10 @@ public class TestUtils {
                 "TEST");
 
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
-        var headerString = "GET / HTTP/1.1\n" +
-                "host: localhost\n" +
+        var headerString = "GET / HTTP/1.1\r\n" +
+                "host: localhost\r\n" +
                 (extraHeaders == null ? "" : extraHeaders) +
-                "content-length: " + contentLength + "\n\n";
+                "content-length: " + contentLength + "\r\n\r\n";
         var referenceStringBuilder = new StringBuilder();
         var allConsumesFuture = chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,
                         stringParts, referenceStringBuilder, headerString);

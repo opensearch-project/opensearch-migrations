@@ -18,33 +18,34 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
     private RequestResponsePacketPair sourcePair;
-    private final TransformedPackets shadowRequestData;
-    private final List<byte[]> shadowResponseData;
+    private final TransformedPackets targetRequestData;
+    private final List<byte[]> targetResponseData;
     private final HttpRequestTransformationStatus transformationStatus;
     private final Throwable errorCause;
-    Duration shadowResponseDuration;
+    Duration targetResponseDuration;
 
     public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
-                                    TransformedPackets shadowRequestData,
-                                    List<byte[]> shadowResponseData,
+                                    TransformedPackets targetRequestData,
+                                    List<byte[]> targetResponseData,
                                     HttpRequestTransformationStatus transformationStatus,
                                     Throwable errorCause,
-                                    Duration shadowResponseDuration) {
+                                    Duration targetResponseDuration) {
         this.sourcePair = sourcePair;
-        this.shadowRequestData = shadowRequestData;
-        this.shadowResponseData = shadowResponseData;
+        this.targetRequestData = targetRequestData;
+        this.targetResponseData = targetResponseData;
         this.transformationStatus = transformationStatus;
         this.errorCause = errorCause;
-        this.shadowResponseDuration = shadowResponseDuration;
+        this.targetResponseDuration = targetResponseDuration;
     }
 
     @Override
     public void close() {
-        shadowRequestData.close();
+        targetRequestData.close();
     }
 
     public static class TupleToFileWriter {
@@ -56,7 +57,6 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         }
 
         private JSONObject jsonFromHttpDataUnsafe(List<byte[]> data) throws IOException {
-
             SequenceInputStream collatedStream = ReplayUtils.byteArraysToInputStream(data);
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
@@ -89,7 +89,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         }
 
         private JSONObject jsonFromHttpData(@NonNull List<byte[]> data, Duration latency) {
-            JSONObject message =  jsonFromHttpData(data);
+            JSONObject message = jsonFromHttpData(data);
             message.put("response_time_ms", latency.toMillis());
             return message;
         }
@@ -97,26 +97,30 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
             // TODO: Use Netty to parse the packets as HTTP rather than json.org (we can also remove it as a dependency)
             JSONObject meta = new JSONObject();
-            meta.put("request", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
+            meta.put("sourceRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
+            meta.put("targetRequest", jsonFromHttpData(triple.targetRequestData.asByteArrayStream()
+                    .collect(Collectors.toList())));
             //log.warn("TODO: These durations are not measuring the same values!");
             if (triple.sourcePair.responseData != null) {
-                meta.put("primaryResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
+                meta.put("sourceResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
                         Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(),
                                 triple.sourcePair.responseData.getLastPacketTimestamp())));
             }
-            if (triple.shadowResponseData != null) {
-                meta.put("shadowResponse", jsonFromHttpData(triple.shadowResponseData, triple.shadowResponseDuration));
+            if (triple.targetResponseData != null) {
+                meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData, triple.targetResponseDuration));
             }
+            meta.put("connectionId", triple.sourcePair.connectionId);
             return meta;
         }
 
         /**
-         * Writes a "triple" object to an output stream as a JSON object.
-         * The JSON triple is output on one line, and has three objects: "request", "primaryResponse",
-         * and "shadowResponse". An example of the format is below.
+         * Writes a tuple object to an output stream as a JSON object.
+         * The JSON tuple is output on one line, and has several objects: "sourceRequest", "sourceResponse",
+         * "targetRequest", and "targetResponse". The "connectionId" is also included to aid in debugging.
+         * An example of the format is below.
          * <p>
          * {
-         *   "request": {
+         *   "sourceRequest": {
          *     "Request-URI": XYZ,
          *     "Method": XYZ,
          *     "HTTP-Version": XYZ
@@ -124,7 +128,15 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
          *     "header-1": XYZ,
          *     "header-2": XYZ
          *   },
-         *   "primaryResponse": {
+         *   "targetRequest": {
+         *     "Request-URI": XYZ,
+         *     "Method": XYZ,
+         *     "HTTP-Version": XYZ
+         *     "body": XYZ,
+         *     "header-1": XYZ,
+         *     "header-2": XYZ
+         *   },
+         *   "sourceResponse": {
          *     "HTTP-Version": ABC,
          *     "Status-Code": ABC,
          *     "Reason-Phrase": ABC,
@@ -132,14 +144,15 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
          *     "body": ABC,
          *     "header-1": ABC
          *   },
-         *   "shadowResponse": {
+         *   "targetResponse": {
          *     "HTTP-Version": ABC,
          *     "Status-Code": ABC,
          *     "Reason-Phrase": ABC,
          *     "response_time_ms": 123,
          *     "body": ABC,
          *     "header-2": ABC
-         *   }
+         *   },
+         *   "connectionId": "0242acfffe1d0008-0000000c-00000003-0745a19f7c3c5fc9-121001ff.0"
          * }
          *
          * @param  triple  the RequestResponseResponseTriple object to be converted into json and written to the stream.
@@ -159,9 +172,9 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
             sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
             sb.append("\n sourcePair=").append(sourcePair);
-            sb.append("\n shadowResponseDuration=").append(shadowResponseDuration);
-            sb.append("\n shadowRequestData=").append(shadowRequestData);
-            sb.append("\n shadowResponseData=").append(shadowResponseData);
+            sb.append("\n targetResponseDuration=").append(targetResponseDuration);
+            sb.append("\n targetRequestData=").append(targetRequestData);
+            sb.append("\n targetResponseData=").append(targetResponseData);
             sb.append("\n transformStatus=").append(transformationStatus);
             sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
             sb.append('}');
