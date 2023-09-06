@@ -3,12 +3,12 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 
@@ -18,9 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Slf4j
 class RequestSenderOrchestratorTest {
@@ -45,7 +43,7 @@ class RequestSenderOrchestratorTest {
     private static String SERVER_RESPONSE_BODY_PREFIX = "Boring Response to ";
     private static Duration SERVER_RESPONSE_LATENCY = Duration.ofMillis(100);
 
-    private static SimpleHttpResponse makeResponse(SimpleHttpServer.HttpFirstLine r) {
+    private static SimpleHttpResponse makeResponse(HttpFirstLine r) {
         try {
             Thread.sleep(SERVER_RESPONSE_LATENCY.toMillis());
         } catch (InterruptedException e) {
@@ -55,7 +53,7 @@ class RequestSenderOrchestratorTest {
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
                 "Content-Transfer-Encoding", "chunked");
-        String body = SERVER_RESPONSE_BODY_PREFIX + r.path;
+        String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
         var payloadBytes = body.getBytes(StandardCharsets.UTF_8);
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }

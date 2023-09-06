@@ -17,6 +17,7 @@ import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -35,11 +36,13 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
 class NettyPacketToHttpConsumerTest {
+
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
 
     final static String EXPECTED_REQUEST_STRING =
@@ -103,7 +106,7 @@ class NettyPacketToHttpConsumerTest {
         "User-Agent", "UnitTest").entrySet().stream());
     }
 
-    private static SimpleHttpResponse makeContext(SimpleHttpServer.HttpFirstLine request) {
+    private static SimpleHttpResponse makeContext(HttpFirstLine request) {
         var headers = Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
