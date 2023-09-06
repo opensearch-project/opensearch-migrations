@@ -1,4 +1,3 @@
-import argparse
 import copy
 import pickle
 import random
@@ -6,7 +5,8 @@ import unittest
 from typing import Optional
 from unittest.mock import patch, MagicMock, ANY
 
-import main
+import pre_migration
+from pre_migration_params import PreMigrationParams
 from tests import test_constants
 
 # Constants
@@ -37,32 +37,32 @@ def create_plugin_config(host_list: list[str],
 # Utility method to creat a test config section
 def create_config_section(plugin_config: dict) -> dict:
     valid_plugin = dict()
-    valid_plugin[random.choice(main.SUPPORTED_ENDPOINTS)] = plugin_config
+    valid_plugin[random.choice(pre_migration.SUPPORTED_ENDPOINTS)] = plugin_config
     config_section = copy.deepcopy(BASE_CONFIG_SECTION)
     config_section[TEST_KEY].append(valid_plugin)
     return config_section
 
 
-class TestMain(unittest.TestCase):
+class TestPreMigration(unittest.TestCase):
     # Run before each test
     def setUp(self) -> None:
         with open(test_constants.PIPELINE_CONFIG_PICKLE_FILE_PATH, "rb") as f:
             self.loaded_pipeline_config = pickle.load(f)
 
     def test_is_insecure_default_value(self):
-        self.assertFalse(main.is_insecure({}))
+        self.assertFalse(pre_migration.is_insecure({}))
 
     def test_is_insecure_top_level_key(self):
         test_input = {"key": 123, INSECURE_KEY: True}
-        self.assertTrue(main.is_insecure(test_input))
+        self.assertTrue(pre_migration.is_insecure(test_input))
 
     def test_is_insecure_nested_key(self):
         test_input = {"key1": 123, CONNECTION_KEY: {"key2": "val", INSECURE_KEY: True}}
-        self.assertTrue(main.is_insecure(test_input))
+        self.assertTrue(pre_migration.is_insecure(test_input))
 
     def test_is_insecure_missing_nested(self):
         test_input = {"key1": 123, CONNECTION_KEY: {"key2": "val"}}
-        self.assertFalse(main.is_insecure(test_input))
+        self.assertFalse(pre_migration.is_insecure(test_input))
 
     def test_get_auth_returns_none(self):
         # The following inputs should not return an auth tuple:
@@ -71,11 +71,11 @@ class TestMain(unittest.TestCase):
         # - password without user
         input_list = [{}, {"username": "test"}, {"password": "test"}]
         for test_input in input_list:
-            self.assertIsNone(main.get_auth(test_input))
+            self.assertIsNone(pre_migration.get_auth(test_input))
 
     def test_get_auth_for_valid_input(self):
         # Test valid input
-        result = main.get_auth({"username": "user", "password": "pass"})
+        result = pre_migration.get_auth({"username": "user", "password": "pass"})
         self.assertEqual(tuple, type(result))
         self.assertEqual("user", result[0])
         self.assertEqual("pass", result[1])
@@ -87,31 +87,31 @@ class TestMain(unittest.TestCase):
         test_password = "password"
         # Simple base case
         test_config = create_plugin_config([host_input])
-        result = main.get_endpoint_info(test_config)
+        result = pre_migration.get_endpoint_info(test_config)
         self.assertEqual(expected_endpoint, result.url)
         self.assertIsNone(result.auth)
         self.assertTrue(result.verify_ssl)
         # Invalid auth config
         test_config = create_plugin_config([host_input], test_user)
-        result = main.get_endpoint_info(test_config)
+        result = pre_migration.get_endpoint_info(test_config)
         self.assertEqual(expected_endpoint, result.url)
         self.assertIsNone(result.auth)
         # Valid auth config
         test_config = create_plugin_config([host_input], user=test_user, password=test_password)
-        result = main.get_endpoint_info(test_config)
+        result = pre_migration.get_endpoint_info(test_config)
         self.assertEqual(expected_endpoint, result.url)
         self.assertEqual(test_user, result.auth[0])
         self.assertEqual(test_password, result.auth[1])
         # Array of hosts uses the first entry
         test_config = create_plugin_config([host_input, "other_host"], test_user, test_password)
-        result = main.get_endpoint_info(test_config)
+        result = pre_migration.get_endpoint_info(test_config)
         self.assertEqual(expected_endpoint, result.url)
         self.assertEqual(test_user, result.auth[0])
         self.assertEqual(test_password, result.auth[1])
 
     def test_get_index_differences_empty(self):
         # Base case should return an empty list
-        result_tuple = main.get_index_differences(dict(), dict())
+        result_tuple = pre_migration.get_index_differences(dict(), dict())
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # All diffs should be empty
@@ -120,7 +120,7 @@ class TestMain(unittest.TestCase):
         self.assertEqual(set(), result_tuple[2])
 
     def test_get_index_differences_empty_target(self):
-        result_tuple = main.get_index_differences(test_constants.BASE_INDICES_DATA, dict())
+        result_tuple = pre_migration.get_index_differences(test_constants.BASE_INDICES_DATA, dict())
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # No conflicts or identical indices
@@ -136,7 +136,7 @@ class TestMain(unittest.TestCase):
         test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
         del test_data[test_constants.INDEX2_NAME]
         del test_data[test_constants.INDEX3_NAME]
-        result_tuple = main.get_index_differences(test_data, test_data)
+        result_tuple = pre_migration.get_index_differences(test_data, test_data)
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # No indices to move, or conflicts
@@ -151,7 +151,7 @@ class TestMain(unittest.TestCase):
         # Set up conflict in settings
         index_settings = test_data[test_constants.INDEX2_NAME][test_constants.SETTINGS_KEY]
         index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
-        result_tuple = main.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
+        result_tuple = pre_migration.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # No indices to move
@@ -168,7 +168,7 @@ class TestMain(unittest.TestCase):
         test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
         # Set up conflict in mappings
         test_data[test_constants.INDEX3_NAME][test_constants.MAPPINGS_KEY] = {}
-        result_tuple = main.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
+        result_tuple = pre_migration.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
         # Invariant
         self.assertEqual(3, len(result_tuple))
         # No indices to move
@@ -183,34 +183,34 @@ class TestMain(unittest.TestCase):
 
     def test_validate_plugin_config_unsupported_endpoints(self):
         # No supported endpoints
-        self.assertRaises(ValueError, main.validate_plugin_config, BASE_CONFIG_SECTION, TEST_KEY)
+        self.assertRaises(ValueError, pre_migration.validate_plugin_config, BASE_CONFIG_SECTION, TEST_KEY)
 
     def test_validate_plugin_config_missing_host(self):
         test_data = create_config_section({})
-        self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
+        self.assertRaises(ValueError, pre_migration.validate_plugin_config, test_data, TEST_KEY)
 
     def test_validate_plugin_config_missing_auth(self):
         test_data = create_config_section(create_plugin_config(["host"]))
-        self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
+        self.assertRaises(ValueError, pre_migration.validate_plugin_config, test_data, TEST_KEY)
 
     def test_validate_plugin_config_missing_password(self):
         test_data = create_config_section(create_plugin_config(["host"], user="test", disable_auth=False))
-        self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
+        self.assertRaises(ValueError, pre_migration.validate_plugin_config, test_data, TEST_KEY)
 
     def test_validate_plugin_config_missing_user(self):
         test_data = create_config_section(create_plugin_config(["host"], password="test"))
-        self.assertRaises(ValueError, main.validate_plugin_config, test_data, TEST_KEY)
+        self.assertRaises(ValueError, pre_migration.validate_plugin_config, test_data, TEST_KEY)
 
     def test_validate_plugin_config_auth_disabled(self):
         test_data = create_config_section(create_plugin_config(["host"], user="test", disable_auth=True))
         # Should complete without errors
-        main.validate_plugin_config(test_data, TEST_KEY)
+        pre_migration.validate_plugin_config(test_data, TEST_KEY)
 
     def test_validate_plugin_config_happy_case(self):
         plugin_config = create_plugin_config(["host"], "user", "password")
         test_data = create_config_section(plugin_config)
         # Should complete without errors
-        main.validate_plugin_config(test_data, TEST_KEY)
+        pre_migration.validate_plugin_config(test_data, TEST_KEY)
 
     def test_validate_pipeline_config_missing_required_keys(self):
         # Test cases:
@@ -219,16 +219,16 @@ class TestMain(unittest.TestCase):
         # - missing input
         bad_configs = [{}, {"source": {}}, {"sink": {}}]
         for config in bad_configs:
-            self.assertRaises(ValueError, main.validate_pipeline_config, config)
+            self.assertRaises(ValueError, pre_migration.validate_pipeline_config, config)
 
     def test_validate_pipeline_config_happy_case(self):
         # Get top level value
         test_config = next(iter(self.loaded_pipeline_config.values()))
-        main.validate_pipeline_config(test_config)
+        pre_migration.validate_pipeline_config(test_config)
 
     @patch('index_operations.doc_count')
-    @patch('main.write_output')
-    @patch('main.print_report')
+    @patch('pre_migration.write_output')
+    @patch('pre_migration.print_report')
     @patch('index_operations.create_indices')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
@@ -251,27 +251,20 @@ class TestMain(unittest.TestCase):
         index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
         # Fetch indices is called first for source, then for target
         mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
-        # Set up test input
-        test_input = argparse.Namespace()
-        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        # Default value for missing output file
-        test_input.output_file = ""
-        test_input.report = True
-        test_input.dryrun = False
-        main.run(test_input)
+        test_input = PreMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, report=True)
+        pre_migration.run(test_input)
         mock_create_indices.assert_called_once_with(expected_create_payload, ANY)
         mock_doc_count.assert_called()
         mock_print_report.assert_called_once_with(expected_diff, 1)
         mock_write_output.assert_not_called()
 
     @patch('index_operations.doc_count')
-    @patch('main.dump_count_and_indices')
-    @patch('main.print_report')
-    @patch('main.write_output')
+    @patch('pre_migration.print_report')
+    @patch('pre_migration.write_output')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
-                        mock_print_report: MagicMock, mock_dump: MagicMock, mock_doc_count: MagicMock):
+                        mock_print_report: MagicMock, mock_doc_count: MagicMock):
         index_to_create = test_constants.INDEX1_NAME
         mock_doc_count.return_value = 1
         expected_output_path = "dummy"
@@ -280,18 +273,14 @@ class TestMain(unittest.TestCase):
         del target_indices_data[index_to_create]
         # Fetch indices is called first for source, then for target
         mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, target_indices_data]
-        # Set up test input
-        test_input = argparse.Namespace()
-        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        test_input.output_file = expected_output_path
-        test_input.dryrun = True
-        test_input.report = False
-        main.run(test_input)
+        test_input = PreMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, expected_output_path, dryrun=True)
+        test_result = pre_migration.run(test_input)
+        self.assertEqual(mock_doc_count.return_value, test_result.target_doc_count)
+        self.assertEqual({index_to_create}, test_result.created_indices)
         mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
         mock_doc_count.assert_called()
-        # Report should not be printed, but dump should be invoked
+        # Report should not be printed
         mock_print_report.assert_not_called()
-        mock_dump.assert_called_once_with(mock_doc_count.return_value, {index_to_create})
 
     @patch('yaml.dump')
     def test_write_output(self, mock_dump: MagicMock):
@@ -316,18 +305,13 @@ class TestMain(unittest.TestCase):
         del test_input['test-pipeline-input']['source']['opensearch']['indices']['include']
         # Call method under test
         with patch('builtins.open') as mock_open:
-            main.write_output(test_input, {index_to_create}, expected_output_path)
+            pre_migration.write_output(test_input, {index_to_create}, expected_output_path)
             mock_open.assert_called_once_with(expected_output_path, 'w')
             mock_dump.assert_called_once_with(expected_output_data, ANY)
 
     def test_missing_output_file_non_report(self):
-        # Set up test input
-        test_input = argparse.Namespace()
-        test_input.config_file_path = test_constants.PIPELINE_CONFIG_RAW_FILE_PATH
-        # Default value for missing output file
-        test_input.output_file = ""
-        test_input.report = False
-        self.assertRaises(ValueError, main.run, test_input)
+        test_input = PreMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH)
+        self.assertRaises(ValueError, pre_migration.run, test_input)
 
 
 if __name__ == '__main__':

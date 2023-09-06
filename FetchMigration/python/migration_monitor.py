@@ -7,6 +7,7 @@ from prometheus_client import Metric
 from prometheus_client.parser import text_string_to_metric_families
 
 from endpoint_info import EndpointInfo
+from migration_monitor_params import MigrationMonitorParams
 
 __PROMETHEUS_METRICS_ENDPOINT = "/metrics/prometheus"
 __SHUTDOWN_ENDPOINT = "/shutdown"
@@ -53,7 +54,7 @@ def check_if_complete(doc_count: Optional[int], in_flight: Optional[int], no_par
     return False
 
 
-def run(args: argparse.Namespace, wait_seconds: int) -> None:
+def run(args: MigrationMonitorParams, wait_seconds: int = 30) -> None:
     # TODO Remove hardcoded EndpointInfo
     default_auth = ('admin', 'admin')
     endpoint = EndpointInfo(args.dp_endpoint, default_auth, False)
@@ -97,7 +98,7 @@ if __name__ == '__main__':  # pragma no cover
         type=int,
         help="Target doc_count to reach, after which the Data Prepper pipeline will be terminated"
     )
-    cli_args = arg_parser.parse_args()
+    namespace = arg_parser.parse_args()
     print("\n##### Starting monitor tool... #####\n")
-    run(cli_args, 30)
+    run(MigrationMonitorParams(namespace.target_count, namespace.dp_endpoint))
     print("\n##### Ending monitor tool... #####\n")
