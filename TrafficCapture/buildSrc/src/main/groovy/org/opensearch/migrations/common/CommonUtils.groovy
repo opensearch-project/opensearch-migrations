@@ -75,7 +75,7 @@ class CommonConfigurations {
     static void applyCommonConfigurations(Project project) {
         project.configurations.all {
             resolutionStrategy.dependencySubstitution {
-                substitute module('org.apache.xmlgraphics:batik-codec') using module('org.apache.xmlgraphics:batik-all:1.15')
+                substitute module('org.apache.xmlgraphics:batik-codec') using module('org.apache.xmlgraphics:batik-all:1.17')
             }
         }
     }

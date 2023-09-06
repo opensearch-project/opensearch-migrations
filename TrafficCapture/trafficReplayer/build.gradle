@@ -19,7 +19,7 @@ buildscript {
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id "com.github.spotbugs" version "4.7.3"
-//    id 'checkstyle'
+    id 'checkstyle'
     id 'org.owasp.dependencycheck' version '8.2.1'
     id "io.freefair.lombok" version "8.0.1"
 }
@@ -28,18 +28,20 @@ spotbugs {
     includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
 }
 
-//checkstyle {
-//    toolVersion = '10.9.3'
-//    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
-//    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
-//            buildDir, 'checkstyle.cachefile'))
-//}
+checkstyle {
+    toolVersion = '10.12.3'
+    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
+    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
+            buildDir, 'checkstyle.cachefile'))
+}
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
+    spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
+
     implementation project(':captureProtobufs')
 
     implementation 'software.amazon.awssdk:sdk-core:2.20.102'
@@ -55,17 +57,47 @@ dependencies {
     implementation group: 'org.json', name: 'json', version: '20230227'
     implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
 
-    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.5.0'
+    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.5.1'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
-    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.7'
+    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.9'
 
     testImplementation project(':testUtilities')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testImplementation 'org.mockito:mockito-core:4.6.1'
     testImplementation 'org.mockito:mockito-junit-jupiter:4.6.1'
+}
+
+def isRequestedVersionOlder(String requested, String target) {
+    def requestedParts = requested.split('\\.')*.toInteger()
+    def targetParts = target.split('\\.')*.toInteger()
+
+    for (int i = 0; i < 3; i++) {
+        if (requestedParts[i] < targetParts[i]) {
+            return false
+        } else if (requestedParts[i] > targetParts[i]) {
+            return true
+        }
+    }
+}
+
+configurations.all {
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.group == 'org.apache.commons' && details.requested.name == 'commons-text') {
+            def targetVersion = '1.10.0'
+            if (isRequestedVersionOlder(details.requested.version, targetVersion) != true) {
+                details.useVersion targetVersion
+            }
+        }
+        if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
+            def targetVersion = '6.7.0'
+            if (isRequestedVersionOlder(details.requested.version, targetVersion) != true) {
+                details.useVersion targetVersion
+            }
+        }
+    }
 }
 
 application {
