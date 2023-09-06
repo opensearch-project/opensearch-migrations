@@ -147,7 +147,7 @@ class NettyPacketToHttpConsumerTest {
                 new JsonJoltTransformBuilder().build(), null);
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
-                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)), Duration.ofSeconds(0));
+                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)));
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;

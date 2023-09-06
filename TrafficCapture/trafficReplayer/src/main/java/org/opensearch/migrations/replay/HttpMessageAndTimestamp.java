@@ -62,7 +62,6 @@ public class HttpMessageAndTimestamp {
     }
 
     public String format(Optional<Utils.HttpMessageType> messageTypeOp) {
-        log.error("Fix this - class can represent responses too!");
         var packetBytesAsStr = messageTypeOp.map(mt->Utils.httpPacketBytesToString(mt, packetBytes))
                 .orElseGet(()->Utils.httpPacketBufsToString(packetBytes.stream().map(b-> Unpooled.wrappedBuffer(b)),
                         Utils.MAX_PAYLOAD_SIZE_TO_PRINT));

@@ -101,6 +101,7 @@ class RequestSenderOrchestratorTest {
     }
 
     private List<ByteBuf> makeRequest(int i) {
+        // uncomment/swap for a simpler test case to run
         return //List.of(Unpooled.wrappedBuffer(getRequestString(i).getBytes()));
                getRequestString(i).chars().mapToObj(c->Unpooled.wrappedBuffer(new byte[]{(byte) c}))
                        .collect(Collectors.toList());

@@ -12,11 +12,13 @@ public class TransformedPacketReceiver implements IPacketFinalizingConsumer<Tran
     @Override
     public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         packets.add(nextRequestPacket);
-        return DiagnosticTrackableCompletableFuture.factory.completedFuture(null, ()->"c");
+        return DiagnosticTrackableCompletableFuture.factory.completedFuture(null,
+                ()->"TransformedPacketReceiver.consume...");
     }
 
     @Override
     public DiagnosticTrackableCompletableFuture<String, TransformedPackets> finalizeRequest() {
-        return DiagnosticTrackableCompletableFuture.factory.completedFuture(packets, ()->"f");
+        return DiagnosticTrackableCompletableFuture.factory.completedFuture(packets,
+                ()->"TransformedPacketReceiver.finalize...");
     }
 }

@@ -93,7 +93,7 @@ public class TrafficReplayer {
         var clientConnectionPool = new ClientConnectionPool(serverUri,
                 loadSslContext(serverUri, allowInsecureConnections), numSendingThreads);
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
-        replayEngine = new ReplayEngine(senderOrchestrator, Duration.ofSeconds(1));
+        replayEngine = new ReplayEngine(senderOrchestrator);
     }
 
     private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {

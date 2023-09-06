@@ -11,11 +11,10 @@ import java.util.stream.Stream;
 
 @Slf4j
 public class ReplayEngine {
-    public final Duration resendDelay;
     RequestSenderOrchestrator networkSendOrchestrator;
 
-    public ReplayEngine(RequestSenderOrchestrator networkSendOrchestrator, Duration resendDelay) {
-        this.resendDelay = resendDelay;
+
+    public ReplayEngine(RequestSenderOrchestrator networkSendOrchestrator) {
         this.networkSendOrchestrator = networkSendOrchestrator;
     }
 

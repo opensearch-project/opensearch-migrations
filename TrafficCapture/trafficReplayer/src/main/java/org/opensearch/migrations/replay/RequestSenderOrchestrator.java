@@ -47,7 +47,7 @@ public class RequestSenderOrchestrator {
     Instant getTransformedTime(Instant ts) {
         firstTimestampRef.compareAndSet(null, new TimeAdjustData(ts));
         var rval = firstTimestampRef.get().systemTimeForFirstReplay
-                .plus(Duration.between(firstTimestampRef.get().firstTimestamp, ts).multipliedBy(2));
+                .plus(Duration.between(firstTimestampRef.get().firstTimestamp, ts));
         log.debug("Transformed time=" + ts + " -> " + rval);
         return rval;
     }
@@ -59,7 +59,7 @@ public class RequestSenderOrchestrator {
                         ()->"waiting for final signal to confirm close has finished");
         asynchronouslyInvokeRunnableToSetupFuture(requestKey, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> {
-                    log.atInfo().setMessage(()->requestKey + " setting packet send at " + timestamp).log();
+                    log.atInfo().setMessage(()->requestKey + " scheduling close at " + timestamp).log();
                     scheduleOnCffr(requestKey, channelFutureAndRequestSchedule,
                             finalTunneledResponse, timestamp, () -> {
                                 log.trace("Closing client connection " + requestKey);

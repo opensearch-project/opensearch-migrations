@@ -15,6 +15,7 @@ import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,6 +31,7 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 public class Utils {
@@ -180,6 +182,14 @@ public class Utils {
             return Base64.getEncoder().encodeToString(binaryContents);
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+    
+    public TrafficStream trafficStreamFromCompressedString(String encodedAndZippedStr) throws Exception {
+        try (var bais = new ByteArrayInputStream(Base64.getDecoder().decode(encodedAndZippedStr))) {
+            try (var gzis = new GZIPInputStream(bais)) {
+                return TrafficStream.parseDelimitedFrom(gzis);
+            }
         }
     }
 }
