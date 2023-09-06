@@ -1,9 +1,9 @@
-# The manifest for the "traffic-replayer" service.
+# The manifest for the SERVICE_NAME_PLACEHOLDER service.
 # Read the full specification for the "Backend Service" type at:
 #  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
 
 # Your service name will be used in naming your resources like log groups, ECS services, etc.
-name: traffic-replayer
+name: SERVICE_NAME_PLACEHOLDER
 type: Backend Service
 
 # Allow service-to-service communication with ECS Service Connect

@@ -29,24 +29,12 @@ Otherwise, please follow the manual instructions [here](https://aws.github.io/co
 ### Deploy with an automated script
 
 The following script command can be executed to deploy both the CDK infrastructure and Copilot services for a development environment
-```
+```shell
 ./devDeploy.sh
 ```
-Options:
-```
-./devDeploy.sh -h
-
-Deploy migration solution infrastructure composed of resources deployed by CDK and Copilot
-
-Options:
-  --skip-bootstrap                      Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
-  --skip-copilot-init                   Skip one-time Copilot initialization of app, environments, and services
-  --copilot-app-name                    [string, default: migration-copilot] Specify the Copilot application name to use for deployment
-  --destroy-env                         Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
-  --destroy-all-copilot                 Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
-  -r, --region                          [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
-  -s, --stage                           [string, default: dev] Specify the stage name to associate with the deployed resources
-
+Options can be found with:
+```shell
+./devDeploy.sh --help
 ```
 
 Requirements:
@@ -56,6 +44,21 @@ Requirements:
 #### How is an Authorization header set for requests from the Replayer to the target cluster?
 
 See Replayer explanation [here](../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
+
+### How to run multiple Replayer scenarios
+
+The migration solution has support for running multiple Replayer services simultaneously, such that captured traffic from the Capture Proxy (which has been stored on Kafka) can be replayed on multiple different cluster configurations at the same time. These additional independent and distinct Replayer services can either be spun up together initially to replay traffic as it comes in, or added later, in which case they will begin processing captured traffic from the beginning of what is stored in Kafka.
+
+A **prerequisite** to use this functionality is that the migration solution has been deployed with the `devDeploy.sh` script, so that necessary environment values from CDK resources like the VPC, MSK, and target Domain can be retrieved for additional Replayer services
+
+To spin up another Replayer service, a command similar to below can be ran where `id` is a unique label to apply to this Replayer service and `target-uri` is the accessible endpoint of the target cluster to replay traffic to.
+```shell
+./createReplayer.sh --id new-domain-test --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443
+```
+More options can be found with:
+```shell
+./createReplayer.sh --help
+```
 
 ### Deploy commands one at a time
 
