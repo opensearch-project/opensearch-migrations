@@ -313,7 +313,7 @@ public class TrafficReplayer {
         AtomicInteger exceptionCount = new AtomicInteger();
 
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
-        var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, new TimeShifter());
+        var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, new TimeShifter(), 2.0);
 
         var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap =

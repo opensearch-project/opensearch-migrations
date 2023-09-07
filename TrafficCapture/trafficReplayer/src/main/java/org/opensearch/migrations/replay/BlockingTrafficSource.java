@@ -37,7 +37,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
      * Limit the number of readers to one at a time and only if we haven't yet maxed out our time buffer
      */
     private final Semaphore readGate;
-    @Getter
+
     private final Duration bufferTimeWindow;
 
     public BlockingTrafficSource(ITrafficCaptureSource underlying, Duration bufferTimeWindow) {
@@ -63,12 +63,16 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
         }
     }
 
-    public Instant unblockedReadBoundary() {
-        return lastReadTimestamp().equals(Instant.EPOCH) ? null : stopReadingAtRef.get();
-    }
-
     public Instant lastReadTimestamp() {
         return lastTimestampSecondsRef.get();
+    }
+
+    public Duration getBufferTimeWindow() {
+        return bufferTimeWindow;
+    }
+
+    public Instant unblockedReadBoundary() {
+        return lastReadTimestamp().equals(Instant.EPOCH) ? null : stopReadingAtRef.get();
     }
 
     /**

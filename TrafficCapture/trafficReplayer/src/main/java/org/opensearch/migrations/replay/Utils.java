@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -40,9 +41,13 @@ public class Utils {
     public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 128;
     public static final int MAX_PAYLOAD_SIZE_TO_PRINT = 1024 * 1024; // 1MB
 
-    static Instant setIfLater(AtomicReference<Instant> stopReadingAtRef, Instant pointInTime) {
-        return stopReadingAtRef.updateAndGet(existingInstant -> existingInstant.isBefore(pointInTime) ?
+    static Instant setIfLater(AtomicReference<Instant> referenceValue, Instant pointInTime) {
+        return referenceValue.updateAndGet(existingInstant -> existingInstant.isBefore(pointInTime) ?
                 pointInTime : existingInstant);
+    }
+
+    static long setIfLater(AtomicLong referenceValue, long pointInTimeMillis) {
+        return referenceValue.updateAndGet(existing -> Math.max(existing, pointInTimeMillis));
     }
 
     public enum PacketPrintFormat {

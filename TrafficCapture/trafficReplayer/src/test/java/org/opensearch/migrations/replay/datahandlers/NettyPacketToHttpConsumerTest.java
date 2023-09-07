@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
@@ -148,7 +149,7 @@ class NettyPacketToHttpConsumerTest {
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
                         new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
-                pointInTime -> {}, new TimeShifter());
+                new TestTimeController(), new TimeShifter(), 2.0);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
@@ -179,4 +180,13 @@ class NettyPacketToHttpConsumerTest {
         return s.replaceAll("Date: .*", "Date: SOMETHING");
     }
 
+    private class TestTimeController implements BufferedTimeController {
+        @Override
+        public void stopReadsPast(Instant pointInTime) {}
+
+        @Override
+        public Duration getBufferTimeWindow() {
+            return Duration.ofSeconds(1);
+        }
+    }
 }

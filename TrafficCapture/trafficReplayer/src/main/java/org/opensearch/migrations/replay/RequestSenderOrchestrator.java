@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.FastThreadLocal;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ChannelAndScheduledRequests;
