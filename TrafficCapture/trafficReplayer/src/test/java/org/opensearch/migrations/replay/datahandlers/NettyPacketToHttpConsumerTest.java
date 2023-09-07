@@ -11,10 +11,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.replay.BufferedTimeController;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
+import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.testutils.HttpFirstLine;
@@ -31,12 +33,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -147,7 +147,8 @@ class NettyPacketToHttpConsumerTest {
                 new JsonJoltTransformBuilder().build(), null);
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
-                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)));
+                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
+                pointInTime -> {}, new TimeShifter());
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;

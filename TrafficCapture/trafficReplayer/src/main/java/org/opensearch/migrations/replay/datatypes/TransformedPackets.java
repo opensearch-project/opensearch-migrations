@@ -30,5 +30,10 @@ public class TransformedPackets implements AutoCloseable {
     @Override
     public void close() {
         data.stream().forEach(bb->bb.release());
+        // Once we're closed, I'd rather see an NPE rather than refCnt errors from netty, which
+        // could cause us to look in many places before finding out that it was just localize
+        // to how callers were handling this object
+        data.clear();
+        data = null;
     }
 }

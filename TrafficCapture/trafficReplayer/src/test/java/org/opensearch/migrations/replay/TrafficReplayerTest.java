@@ -17,6 +17,7 @@ import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
@@ -103,23 +104,29 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testDelimitedDeserializer() throws IOException {
+    public void testDelimitedDeserializer() throws Exception {
         final Instant timestamp = Instant.now();
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger(0);
             var allMatch = new AtomicBoolean(true);
             try (var trafficProducer = new InputStreamOfTraffic(bais)) {
-                while (trafficProducer.readNextChunk(ts -> {
-                    var i = counter.incrementAndGet();
-                    var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
-                    var isEqual = ts.equals(expectedStream);
-                    if (!isEqual) {
-                        log.error("Expected trafficStream: " + expectedStream);
-                        log.error("Observed trafficStream: " + ts);
-                    }
-                    allMatch.set(allMatch.get() && isEqual);
-                })) {}
+                while (true) {
+                    trafficProducer.readNextTrafficStreamChunk().get().stream().forEach(ts->{
+                        var i = counter.incrementAndGet();
+                        var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
+                        var isEqual = ts.equals(expectedStream);
+                        if (!isEqual) {
+                            log.error("Expected trafficStream: " + expectedStream);
+                            log.error("Observed trafficStream: " + ts);
+                        }
+                        allMatch.set(allMatch.get() && isEqual);
+                    });
+                }
+            } catch (ExecutionException e) {
+                if (!(e.getCause() instanceof EOFException)) {
+                    throw e;
+                }
             }
             Assertions.assertTrue(allMatch.get());
         }

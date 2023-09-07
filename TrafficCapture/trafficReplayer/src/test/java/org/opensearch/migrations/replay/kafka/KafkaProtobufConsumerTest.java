@@ -58,7 +58,7 @@ class KafkaProtobufConsumerTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextChunk(stream -> {
+                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(stream->{
                     tsCount.incrementAndGet();
                     log.trace("Stream has substream count: " + stream.getSubStreamCount());
                     Assertions.assertInstanceOf(TrafficStream.class, stream);
@@ -107,7 +107,7 @@ class KafkaProtobufConsumerTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextChunk(stream -> {
+                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(stream->{
                     tsCount.incrementAndGet();
                     log.trace("Stream has substream count: " + stream.getSubStreamCount());
                     Assertions.assertInstanceOf(TrafficStream.class, stream);

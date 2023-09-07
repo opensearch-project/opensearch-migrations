@@ -15,10 +15,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -26,27 +28,29 @@ import java.util.stream.StreamSupport;
 public class KafkaProtobufConsumer implements ITrafficCaptureSource {
 
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
-    private final Consumer<String, byte[]> consumer;
+    private final Consumer<String, byte[]> kafkaConsumer;
     private final String topic;
     private final KafkaBehavioralPolicy behavioralPolicy;
 
 
-    public KafkaProtobufConsumer(Consumer<String, byte[]> consumer, String topic) {
-        assert topic != null;
-        this.consumer = consumer;
-        this.topic = topic;
-        this.behavioralPolicy = new KafkaBehavioralPolicy();
+    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic) {
+        this(kafkaConsumer, topic, new KafkaBehavioralPolicy());
     }
 
-    public KafkaProtobufConsumer(Consumer<String, byte[]> consumer, String topic, KafkaBehavioralPolicy behavioralPolicy) {
+    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic, KafkaBehavioralPolicy behavioralPolicy) {
         assert topic != null;
-        this.consumer = consumer;
+        this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
         this.behavioralPolicy = behavioralPolicy;
+        kafkaConsumer.subscribe(Collections.singleton(topic));
     }
 
-    public static KafkaProtobufConsumer buildKafkaConsumer(@NonNull String brokers, @NonNull String topic, @NonNull String groupId,
-        boolean enableMSKAuth, String propertyFilePath, KafkaBehavioralPolicy behavioralPolicy) throws IOException {
+    public static KafkaProtobufConsumer buildKafkaConsumer(@NonNull String brokers,
+                                                           @NonNull String topic,
+                                                           @NonNull String groupId,
+                                                           boolean enableMSKAuth,
+                                                           String propertyFilePath,
+                                                           KafkaBehavioralPolicy behavioralPolicy) throws IOException {
         var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
         return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic, behavioralPolicy);
     }
@@ -79,16 +83,19 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
 
     @Override
     @SuppressWarnings("unchecked")
-    public boolean readNextChunk(java.util.function.Consumer<TrafficStream> trafficStreamConsumer) {
+    public CompletableFuture<List<TrafficStream>> readNextTrafficStreamChunk() {
+        return CompletableFuture.supplyAsync(() -> readNextTrafficStreamSynchronously());
+    }
+
+    public List<TrafficStream> readNextTrafficStreamSynchronously() {
         try {
-            consumer.subscribe(Collections.singleton(topic));
             AtomicInteger trafficStreamsRead = new AtomicInteger();
             ConsumerRecords<String, byte[]> records;
             try {
-                records = consumer.poll(CONSUMER_POLL_TIMEOUT);
-            }
-            catch (RuntimeException e) {
-                log.warn("Unable to poll the topic: {} with our Kafka consumer... Ending message consumption now", topic);
+                records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
+            } catch (RuntimeException e) {
+                log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer... " +
+                        "Ending message consumption now").addArgument(topic).log();
                 throw e;
             }
             Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
@@ -105,8 +112,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     return null;
                 }
             }).filter(Objects::nonNull);
-            trafficStream.forEach(trafficStreamConsumer);
-            return true;
+            return trafficStream.collect(Collectors.toList());
         } catch (Exception e) {
             log.error("Terminating Kafka traffic stream");
             throw e;
@@ -115,7 +121,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
 
     @Override
     public void close() throws IOException {
-        consumer.close();
+        kafkaConsumer.close();
         log.info("Kafka consumer closed successfully.");
     }
 

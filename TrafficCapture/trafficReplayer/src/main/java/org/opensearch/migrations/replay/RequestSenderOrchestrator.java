@@ -25,43 +25,20 @@ import java.util.stream.Stream;
 @Slf4j
 public class RequestSenderOrchestrator {
 
-    private static class TimeAdjustData {
-        public final Instant firstTimestamp;
-        public final Instant systemTimeForFirstReplay;
-
-        public TimeAdjustData(Instant firstTimestamp) {
-            this.firstTimestamp = firstTimestamp;
-            this.systemTimeForFirstReplay = Instant.now();
-        }
-    }
-
-    // TODO - Reconsider how time shifting is done
-    AtomicReference<TimeAdjustData> firstTimestampRef = new AtomicReference<>();
-
     public final ClientConnectionPool clientConnectionPool;
 
     public RequestSenderOrchestrator(ClientConnectionPool clientConnectionPool) {
         this.clientConnectionPool = clientConnectionPool;
     }
 
-    Instant getTransformedTime(Instant ts) {
-        firstTimestampRef.compareAndSet(null, new TimeAdjustData(ts));
-        var rval = firstTimestampRef.get().systemTimeForFirstReplay
-                .plus(Duration.between(firstTimestampRef.get().firstTimestamp, ts));
-        log.debug("Transformed time=" + ts + " -> " + rval);
-        return rval;
-    }
-    
-    public StringTrackableCompletableFuture<Void> scheduleClose(UniqueRequestKey requestKey, Instant orginalTimestamp) {
-        var timestamp = getTransformedTime(orginalTimestamp);
+    public StringTrackableCompletableFuture<Void> scheduleClose(UniqueRequestKey requestKey, Instant timestamp) {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm close has finished");
         asynchronouslyInvokeRunnableToSetupFuture(requestKey, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> {
-                    log.atInfo().setMessage(()->requestKey + " scheduling close at " + timestamp).log();
                     scheduleOnCffr(requestKey, channelFutureAndRequestSchedule,
-                            finalTunneledResponse, timestamp, () -> {
+                            finalTunneledResponse, timestamp, "close", () -> {
                                 log.trace("Closing client connection " + requestKey);
                                 clientConnectionPool.closeConnection(requestKey.connectionId);
                                 finalTunneledResponse.future.complete(null);
@@ -71,8 +48,7 @@ public class RequestSenderOrchestrator {
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueRequestKey requestKey, Instant originalStart, Duration interval, Stream<ByteBuf> packets) {
-        var start = getTransformedTime(originalStart);
+    scheduleRequest(UniqueRequestKey requestKey, Instant start, Duration interval, Stream<ByteBuf> packets) {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for final aggregated response");
@@ -124,7 +100,9 @@ public class RequestSenderOrchestrator {
     private <T> void scheduleOnCffr(UniqueRequestKey requestKey,
                                     ChannelAndScheduledRequests channelFutureAndRequestSchedule,
                                     StringTrackableCompletableFuture<T> signalCleanupCompleteToFuture,
-                                    Instant atTime, Runnable task) {
+                                    Instant atTime, String activityNameForLogging, Runnable task) {
+        log.atInfo().setMessage(()->requestKey + " scheduling " + activityNameForLogging + " at " + atTime).log();
+
         var schedule = channelFutureAndRequestSchedule.schedule;
         var eventLoop = channelFutureAndRequestSchedule.getInnerChannelFuture().channel().eventLoop();
 
@@ -166,14 +144,13 @@ public class RequestSenderOrchestrator {
                                     ChannelAndScheduledRequests channelFutureAndRequestSchedule,
                                     StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
                                     Instant start, Duration interval, Stream<ByteBuf> packets) {
-        log.atInfo().setMessage(()->requestKey + " scheduling packet send at " + start).log();
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
         AtomicReference packetReceiverRef = new AtomicReference();
         Runnable packetSender = () -> sendNextPartAndContinue(() ->
                         getPacketReceiver(requestKey, channelFutureAndRequestSchedule.getInnerChannelFuture(),
                                 packetReceiverRef),
                 eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
-        scheduleOnCffr(requestKey, channelFutureAndRequestSchedule, responseFuture, start, packetSender);
+        scheduleOnCffr(requestKey, channelFutureAndRequestSchedule, responseFuture, start, "send", packetSender);
     }
 
     private <T> void runAfterChannelSetup(ChannelAndScheduledRequests channelFutureAndItsFutureRequests,
