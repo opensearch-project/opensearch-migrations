@@ -11,6 +11,9 @@ import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -22,6 +25,8 @@ import java.util.List;
 public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
 
     private final IChannelConnectionCaptureSerializer trafficOffloader;
+    private static final Logger metricsLogger = LoggerFactory.getLogger("MetricsLogger");
+
 
     public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
@@ -64,6 +69,8 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         trafficOffloader.addWriteEvent(Instant.now(), (ByteBuf) msg);
+        MDC.put("channelId",ctx.channel().id().asLongText());
+        metricsLogger.info("Component of response received");
         super.write(ctx, msg, promise);
     }
 

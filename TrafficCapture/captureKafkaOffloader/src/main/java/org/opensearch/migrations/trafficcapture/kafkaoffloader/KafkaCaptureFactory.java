@@ -8,6 +8,9 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -15,8 +18,11 @@ import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 
+
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory {
+
+    private static final Logger metricsLogger = LoggerFactory.getLogger("MetricsLogger");
 
     private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes and
@@ -55,6 +61,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                 return cos;
             },
             (captureSerializerResult) -> {
+                // Structured context for MetricsLogger
+                MDC.put("channelId",connectionId);
+                MDC.put("topic", topicNameForTraffic);
                 try {
                     CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
                     ByteBuffer byteBuffer = codedStreamToByteStreamMap.get(codedOutputStream);
@@ -65,6 +74,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     // Used to essentially wrap Future returned by Producer to CompletableFuture
                     CompletableFuture cf = new CompletableFuture<>();
                     log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
+                    MDC.put("diagnosticId", recordId);
+                    metricsLogger.info("Sending message to Kafka");
+                    MDC.remove("diagnosticId");
                     // Async request to Kafka cluster
                     producer.send(record, handleProducerRecordSent(cf, recordId));
                     // Note that ordering is not guaranteed to be preserved here
@@ -72,6 +84,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
                     return singleAggregateCfRef[0];
                 } catch (Exception e) {
+                    metricsLogger.warn("[connectionId: {0}, topic: {1}] Sending message to Kafka", connectionId, topicNameForTraffic);
+                    metricsLogger.warn("Error: ", e);
                     throw new RuntimeException(e);
                 }
             });
