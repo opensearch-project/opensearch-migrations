@@ -1,13 +1,11 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.stream.Stream;
+import java.util.Optional;
 
 @Slf4j
 public class RequestResponsePacketPair {
@@ -25,7 +23,7 @@ public class RequestResponsePacketPair {
             log.trace(this + " Adding request data: " + new String(data, StandardCharsets.UTF_8));
         }
         if (requestData == null) {
-            requestData = new HttpMessageAndTimestamp(packetTimeStamp);
+            requestData = new HttpMessageAndTimestamp.Request(packetTimeStamp);
         }
         requestData.add(data);
         requestData.setLastPacketTimestamp(packetTimeStamp);
@@ -36,7 +34,7 @@ public class RequestResponsePacketPair {
             log.trace(this + " Adding response data: " + new String(data, StandardCharsets.UTF_8));
         }
         if (responseData == null) {
-            responseData = new HttpMessageAndTimestamp(packetTimeStamp);
+            responseData = new HttpMessageAndTimestamp.Response(packetTimeStamp);
         }
         responseData.add(data);
         responseData.setLastPacketTimestamp(packetTimeStamp);
@@ -49,5 +47,11 @@ public class RequestResponsePacketPair {
         sb.append("\n responseData=").append(responseData);
         sb.append('}');
         return sb.toString();
+    }
+
+    public Optional<Instant> getLastTimestamp() {
+        return Optional.ofNullable(responseData)
+                .or(()->Optional.ofNullable(requestData))
+                .map(d->d.getLastPacketTimestamp());
     }
 }

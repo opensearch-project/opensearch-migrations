@@ -162,6 +162,8 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
                 });
     }
 
+    public boolean isDone() { return future.isDone(); }
+
     @Override
     public String toString() {
         return formatAsString(x->null);
@@ -178,7 +180,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
             @NonNull AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture, Supplier<D>> kvp,
             @NonNull Function<DiagnosticTrackableCompletableFuture,String> resultFormatter) {
         var diagnosticInfo = kvp.getValue().get();
-        var isDone = kvp.getKey().future.isDone();
+        var isDone = kvp.getKey().isDone();
         return "[" + System.identityHashCode(kvp.getKey()) + "] " + diagnosticInfo +
                 (isDone ? formatWithDefault(resultFormatter, kvp.getKey()) :
                         getPendingString(kvp, resultFormatter));

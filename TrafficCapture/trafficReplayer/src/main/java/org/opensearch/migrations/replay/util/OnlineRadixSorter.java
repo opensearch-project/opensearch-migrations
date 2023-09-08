@@ -71,4 +71,8 @@ public class OnlineRadixSorter<T> {
         sb.append('}');
         return sb.toString();
     }
+
+    public long numPending() {
+        return items.size() - currentOffset;
+    }
 }

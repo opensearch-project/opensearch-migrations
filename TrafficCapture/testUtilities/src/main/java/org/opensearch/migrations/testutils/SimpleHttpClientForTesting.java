@@ -58,9 +58,10 @@ public class SimpleHttpClientForTesting implements AutoCloseable {
         this(new BasicHttpClientConnectionManager());
     }
 
-    public SimpleHttpClientForTesting(boolean setupInsecureTls)
+    public SimpleHttpClientForTesting(boolean useTlsAndInsecurelyInsteadOfClearText)
             throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
-        this(setupInsecureTls ? getInsecureTlsConnectionManager() : new BasicHttpClientConnectionManager());
+        this(useTlsAndInsecurelyInsteadOfClearText ?
+                getInsecureTlsConnectionManager() : new BasicHttpClientConnectionManager());
     }
 
     private SimpleHttpClientForTesting(BasicHttpClientConnectionManager connectionManager) {

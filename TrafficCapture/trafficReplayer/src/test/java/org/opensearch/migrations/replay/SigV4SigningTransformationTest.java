@@ -19,16 +19,13 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class SigV4SigningTransformationTest {
-    private static String decodeString(String s) {
-        var decodedByteBuf = Base64.decode(Unpooled.wrappedBuffer(s.getBytes(StandardCharsets.UTF_8)));
-        return decodedByteBuf.toString(StandardCharsets.UTF_8);
-    }
 
     private static class MockCredentialsProvider implements AwsCredentialsProvider {
         @Override
         public AwsCredentials resolveCredentials() {
-            return AwsBasicCredentials.create(decodeString("QUtJQUlPU0ZPRE5ON0VYQU1QTEUK"),
-                    decodeString("d0phbHJYVXRuRkVNSS9LN01ERU5HL2JQeFJmaUNZRVhBTVBMRUtFWQo="));
+            // Notice that these are example keys
+            return AwsBasicCredentials.create("AKIAIOSFODNN7EXAMPLE",
+                    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
         }
     }
 

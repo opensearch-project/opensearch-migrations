@@ -17,7 +17,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
-public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer {
+public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer<AggregatedRawResponse> {
     private final Duration consumeDuration;
     private final AtomicInteger numFinalizations;
     @Getter

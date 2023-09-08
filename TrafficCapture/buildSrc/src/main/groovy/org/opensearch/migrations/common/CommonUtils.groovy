@@ -69,13 +69,27 @@ class CommonUtils {
             //defaultCommand('/runJavaWithClasspath.sh', '...')
         }
     }
+
+    static def wasRequestedVersionReleasedBeforeTargetVersion(String requested, String target) {
+        def requestedParts = requested.split('\\.')*.toInteger()
+        def targetParts = target.split('\\.')*.toInteger()
+
+        for (int i = 0; i < 3; i++) {
+            if (requestedParts[i] < targetParts[i]) {
+                return true
+            } else if (requestedParts[i] > targetParts[i]) {
+                return false
+            }
+        }
+        return false // In this case, versions are equal
+    }
 }
 
 class CommonConfigurations {
     static void applyCommonConfigurations(Project project) {
         project.configurations.all {
             resolutionStrategy.dependencySubstitution {
-                substitute module('org.apache.xmlgraphics:batik-codec') using module('org.apache.xmlgraphics:batik-all:1.15')
+                substitute module('org.apache.xmlgraphics:batik-codec') using module('org.apache.xmlgraphics:batik-all:1.17')
             }
         }
     }
