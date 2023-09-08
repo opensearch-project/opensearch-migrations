@@ -419,7 +419,7 @@ public class TrafficReplayer {
                                 }
                             }), () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
             if (!resultantCf.future.isDone()) {
-                log.error("Adding " + rrPair.connectionId + " to targetTransactionInProgressMap");
+                log.info("Adding " + rrPair.connectionId + " to targetTransactionInProgressMap");
                 targetTransactionInProgressMap.put(rrPair.requestData, resultantCf);
                 if (resultantCf.future.isDone()) {
                     targetTransactionInProgressMap.remove(rrPair.requestData);
@@ -551,11 +551,13 @@ public class TrafficReplayer {
                         replayEngine.scheduleRequest(requestKey, start, end,
                                         transformedResult.transformedOutput.size(),
                                         transformedResult.transformedOutput.stream())
+                                .map(future->future.thenApply(t->
+                                                new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,
+                                                        t, transformedResult.transformationStatus, t.error)),
+                                        ()->"")
                                 .map(future->future.exceptionally(t->
                                                 new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,
                                                         transformedResult.transformationStatus, t)),
-                                        ()->"")
-                                .map(future->future.thenApply(t-> new TransformedTargetRequestAndResponse(transformedResult.transformedOutput, t, transformedResult.transformationStatus)),
                                         ()->""),
                     () -> "transitioning transformed packets onto the wire")
                     .map(future->future.exceptionally(t->new TransformedTargetRequestAndResponse(null, null, t)),
