@@ -21,11 +21,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * It keeps track of a couple Instants for the last timestamp from a TrafficStreamObservation
  * and for a high-watermark (stopReadingAt) that has been supplied externally.  If the last
  * timestamp was PAST the high-watermark, calls to read the next chunk (readNextTrafficStreamChunk)
- * will return a CompletableFuture that is blocking on a semaphore that won't be released until
- * somebody advances the high-watermark by calling advanceReadHorizonTo, which takes in a
+ * will return a CompletableFuture that is blocking and won't be released until
+ * somebody advances the high-watermark by calling stopReadsPast, which takes in a
  * point-in-time (in System time) and adds some buffer to it.
  *
- * This class is designed to only be threadsafe for any number of callers to call advanceReadHorizon
+ * This class is designed to only be threadsafe for any number of callers to call stopReadsPast
  * and independently for one caller to call readNextTrafficStreamChunk() and to wait for the result
  * to complete before another caller calls it again.
  */
@@ -59,16 +59,18 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
         var prospectiveBarrier = pointInTime.plus(bufferTimeWindow);
         var newValue = Utils.setIfLater(stopReadingAtRef, prospectiveBarrier);
         if (newValue.equals(prospectiveBarrier)) {
-            log.atLevel(readGate.hasQueuedThreads()? Level.INFO: Level.TRACE)
-                    .setMessage(() -> "Releasing the semaphore and set the new stopReadingAtRef=" + newValue).log();
+            log.atLevel(readGate.hasQueuedThreads() ? Level.INFO: Level.TRACE)
+                    .setMessage(() -> "Releasing the block on readNextTrafficStreamChunk and set" +
+                            " the new stopReadingAtRef=" + newValue).log();
+            // No reason to signal more than one reader.  We don't support concurrent reads with the current contract
             readGate.drainPermits();
             readGate.release();
         } else {
             log.atTrace()
-                    .setMessage(()->"stopReadsPast: "+pointInTime + " -> (" + prospectiveBarrier +
-                                    ") didn't move the cursor because the value was " +
-                                    "already at " + newValue
-                            ).log();
+                    .setMessage(() -> "stopReadsPast: " + pointInTime + " -> (" + prospectiveBarrier +
+                            ") didn't move the cursor because the value was " +
+                            "already at " + newValue
+                    ).log();
         }
     }
 
@@ -95,19 +97,37 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
     readNextTrafficStreamChunk() {
         var trafficStreamListFuture =
                 CompletableFuture.supplyAsync(() -> {
-                    if (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
-                        try {
-                            log.info("waiting to acquire semaphore to read the next chunk");
-                            readGate.acquire();
-                        } catch (InterruptedException e) {
-                            log.atWarn().setCause(e).log("Interrupted while waiting for a signal to read more data");
-                        }
-                    }
-                    return null;
-                }).thenCompose(v->underlyingSource.readNextTrafficStreamChunk());
+                                    try {
+                                        Thread.sleep((long) (Math.random() * 10));
+                                    } catch (InterruptedException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                    while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
+                                        try {
+                                            log.info("blocking until signaled to read the next chunk");
+                                            readGate.acquire();
+                                            try {
+                                                Thread.sleep((long) (Math.random() * 10));
+                                            } catch (InterruptedException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        } catch (InterruptedException e) {
+                                            log.atWarn().setCause(e)
+                                                    .log("Interrupted while waiting to read more data");
+                                        }
+                                    }
+                                    return null;
+                                },
+                                task -> new Thread(task).start())
+                        .thenCompose(v->underlyingSource.readNextTrafficStreamChunk());
         return trafficStreamListFuture.whenComplete((v,t)->{
             if (t != null) {
                 return;
+            }
+            try {
+                Thread.sleep((long)(Math.random()*10));
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
             }
             var maxLocallyObserved = v.stream().flatMap(ts->ts.getSubStreamList().stream())
                     .map(tso->tso.getTs())
@@ -121,6 +141,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
                 Utils.setIfLater(stopReadingAtRef, maxLocallyObserved.plus(bufferTimeWindow));
             }
             Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObserved);
+            log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
+                    +lastTimestampSecondsRef.get()).log();
         });
     }
 

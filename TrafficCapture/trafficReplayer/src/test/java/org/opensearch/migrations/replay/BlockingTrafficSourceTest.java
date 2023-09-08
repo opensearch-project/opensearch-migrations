@@ -45,9 +45,9 @@ class BlockingTrafficSourceTest {
             Assertions.assertFalse(blockedFuture.isDone());
             Assertions.assertEquals(i+BUFFER_MILLIS+2, testSource.counter.get());
             blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i+1)));
-            log.info("post window update blockingSource=" + blockingSource);
+            log.info("after stopReadsPast blockingSource=" + blockingSource);
             var protoBufTime =
-                    blockedFuture.get(10, TimeUnit.MILLISECONDS).get(0).getSubStreamList().get(0).getTs();
+                    blockedFuture.get(100, TimeUnit.MILLISECONDS).get(0).getSubStreamList().get(0).getTs();
             lastTime = Instant.ofEpochSecond(protoBufTime.getSeconds(), protoBufTime.getNanos());
         }
         Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate-1)), lastTime);
@@ -68,6 +68,7 @@ class BlockingTrafficSourceTest {
 
         @Override
         public CompletableFuture<List<TrafficStream>> readNextTrafficStreamChunk() {
+            log.atTrace().setMessage(()->"Test.readNextTrafficStreamChunk.counter="+counter).log();
             var i = counter.getAndIncrement();
             if (i >= nStreamsToCreate) {
                 return CompletableFuture.failedFuture(new EOFException());
