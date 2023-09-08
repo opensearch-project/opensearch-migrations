@@ -1,5 +1,9 @@
+## Deploying to AWS
+
 ### Copilot Deployment
 Copilot is a tool for deploying containerized applications on AWS ECS. Official documentation can be found [here](https://aws.github.io/copilot-cli/docs/overview/).
+
+**Notice**: These tools are free to use, but the user is responsible for the cost of underlying infrastructure required to operate the solution. We welcome feedback and contributions to optimize costs.
 
 ### Initial Setup
 
@@ -49,11 +53,20 @@ See Replayer explanation [here](../../TrafficCapture/trafficReplayer/README.md#a
 
 The migration solution has support for running multiple Replayer services simultaneously, such that captured traffic from the Capture Proxy (which has been stored on Kafka) can be replayed on multiple different cluster configurations at the same time. These additional independent and distinct Replayer services can either be spun up together initially to replay traffic as it comes in, or added later, in which case they will begin processing captured traffic from the beginning of what is stored in Kafka.
 
-A **prerequisite** to use this functionality is that the migration solution has been deployed with the `devDeploy.sh` script, so that necessary environment values from CDK resources like the VPC, MSK, and target Domain can be retrieved for additional Replayer services
+A **prerequisite** to use this functionality is that the migration solution has been deployed with the `devDeploy.sh` script, so that necessary environment values from CDK resources like the VPC, MSK, and EFS volume can be retrieved for additional Replayer services
 
-To spin up another Replayer service, a command similar to below can be ran where `id` is a unique label to apply to this Replayer service and `target-uri` is the accessible endpoint of the target cluster to replay traffic to.
+To test this scenario, you can create an additional OpenSearch Domain target cluster within the existing VPC by executing the following series of commands:
 ```shell
-./createReplayer.sh --id new-domain-test --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443
+# Assuming you are in the copilot directory and the default "dev" environment was used for ./devDeploy.sh
+source ./environments/dev/envExports.sh
+cd ../cdk/opensearch-service-migration
+# Pick a name to be used for identifying this new domain stack that is different from the one used for ./devDeploy.sh
+export CDK_DEPLOYMENT_STAGE=dev2
+cdk deploy "*" --c domainName="test-domain-2-7" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c vpcId="$MIGRATION_VPC_ID" --c vpcSecurityGroupIds="[\"$MIGRATION_DOMAIN_SG_ID\"]" --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=false --c enableDemoAdmin=true --require-approval never --concurrency 3
+```
+To launch an additional Replayer service that directs traffic to this new Domain, run a command like the one below. In this command, `id` is a unique label for the Replayer service, and `target-uri` is the endpoint of the target cluster where traffic will be replayed. You can obtain this endpoint either from the CDK command output mentioned earlier or from the AWS Console:
+```shell
+./createReplayer.sh --id test-os-2-7 --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443
 ```
 More options can be found with:
 ```shell
@@ -186,5 +199,12 @@ Official documentation on Addons can be found [here](https://aws.github.io/copil
 
 ### Useful Commands
 
-`copilot app show`: Provides details on the current app \
-`copilot svc show`: Provides details on a particular service
+`copilot app show` - Provides details on the current app \
+`copilot svc show` - Provides details on a particular service
+
+### Removing deloyed resources from AWS
+
+To remove the resources installed from the steps above, follow these instructions:
+1.  `./devDeploy.sh --destroy-env` - Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
+2.  `./devDeploy.sh --destroy-all-copilot` - Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions
+3. After execution of the above steps, a CDK bootstrap stack remains. To remove this stack, begin by deleting the S3 objects and the associated bucket. After that, you can delete the stack using the AWS Console or CLI.
