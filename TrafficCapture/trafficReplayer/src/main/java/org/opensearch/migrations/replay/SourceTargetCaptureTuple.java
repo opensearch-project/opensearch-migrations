@@ -106,7 +106,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
                         Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(),
                                 triple.sourcePair.responseData.getLastPacketTimestamp())));
             }
-            if (triple.targetResponseData != null) {
+            if (triple.targetResponseData != null && !triple.targetResponseData.isEmpty()) {
                 meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData, triple.targetResponseDuration));
             }
             meta.put("connectionId", triple.sourcePair.connectionId);
