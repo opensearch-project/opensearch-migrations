@@ -8,6 +8,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -15,8 +16,11 @@ import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 
+
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory {
+
+    private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHandler");
 
     private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes and
@@ -55,6 +59,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                 return cos;
             },
             (captureSerializerResult) -> {
+                // Structured context for MetricsLogger
                 try {
                     CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
                     ByteBuffer byteBuffer = codedStreamToByteStreamMap.get(codedOutputStream);
@@ -67,11 +72,21 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
                     // Async request to Kafka cluster
                     producer.send(record, handleProducerRecordSent(cf, recordId));
+                    metricsLogger.atSuccess()
+                            .addKeyValue("channelId", connectionId)
+                            .addKeyValue("topic-name", topicNameForTraffic)
+                            .addKeyValue("size", record.value().length)
+                            .addKeyValue("diagnosticId", recordId)
+                            .setMessage("Sent message to Kafka").log();
                     // Note that ordering is not guaranteed to be preserved here
                     // A more desirable way to cut off our tree of cf aggregation should be investigated
                     singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
                     return singleAggregateCfRef[0];
                 } catch (Exception e) {
+                    metricsLogger.atError(e)
+                            .addKeyValue("channelId", connectionId)
+                            .addKeyValue("topic-name", topicNameForTraffic)
+                            .setMessage("Sending message to Kafka failed.").log();
                     throw new RuntimeException(e);
                 }
             });

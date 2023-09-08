@@ -5,10 +5,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.logging.LogLevel;
 import lombok.extern.slf4j.Slf4j;
-
-import java.net.URI;
 
 @Slf4j
 public class FrontsideHandler extends ChannelInboundHandlerAdapter {

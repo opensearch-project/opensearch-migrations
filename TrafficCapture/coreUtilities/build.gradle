@@ -1,0 +1,52 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ *
+ * Modifications Copyright OpenSearch Contributors. See
+ * GitHub history for details.
+ */
+
+
+buildscript {
+    dependencies {
+        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
+    }
+}
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id "com.github.spotbugs" version "4.7.3"
+    id 'checkstyle'
+    id 'org.owasp.dependencycheck' version '8.2.1'
+    id "io.freefair.lombok" version "8.0.1"
+}
+
+spotbugs {
+    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
+}
+
+checkstyle {
+    toolVersion = '10.9.3'
+    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
+    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
+            buildDir, 'checkstyle.cachefile'))
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

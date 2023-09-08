@@ -15,13 +15,14 @@ import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 
-import java.io.IOException;
 import java.time.Instant;
-import java.util.List;
 
 @Slf4j
 public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
+    private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
+
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
          * Override this so that the HttpHeaders object can be a cheaper one.  PassThruHeaders
@@ -127,6 +128,11 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
         super.channelRead(ctx, msg);
+        metricsLogger.atSuccess()
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .addKeyValue("httpMethod", httpRequest.method().toString())
+                .addKeyValue("httpEndpoint", httpRequest.uri())
+                .setMessage("Full request received").log();
     }
 
     @Override
@@ -134,6 +140,9 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         var timestamp = Instant.now();
         var bb = (ByteBuf) msg;
         trafficOffloader.addReadEvent(timestamp, bb);
+        metricsLogger.atSuccess()
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .setMessage("Component of request received").log();
 
         var httpProcessedState = parseHttpMessageParts(bb);
         if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
