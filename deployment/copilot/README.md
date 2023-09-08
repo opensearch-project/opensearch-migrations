@@ -75,7 +75,7 @@ The provided CDK will output export commands once deployed that can be ran on a 
 ```
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
-export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
@@ -196,10 +196,6 @@ Official documentation on Addons can be found [here](https://aws.github.io/copil
 ### Removing deloyed resources from AWS
 
 To remove the resources installed from the steps above, follow these instructions:
-1. Access the AWS Console and delete all S3 objects and content within the "StagingBucket".
-2. Execute the following commands:
-    ```
-    ./devDeploy.sh --destroy-env
-    ./devDeploy.sh --destroy-all-copilot`
-    ```
-**Warning**: If Copilot resources were deployed across multiple regions, some resources may need to be removed manually. This can be achieved by deleting the CloudFormation stacks in each respective region. Ensure to look for resources tagged with the key migration_deployment and a value corresponding to the migration version.
+1.  `./devDeploy.sh --destroy-env` - Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
+2.  `./devDeploy.sh --destroy-all-copilot` - Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions
+3. After execution of the above steps, a CDK bootstrap stack remains. To remove this stack, begin by deleting the S3 objects and the associated bucket. After that, you can delete the stack using the AWS Console or CLI.
