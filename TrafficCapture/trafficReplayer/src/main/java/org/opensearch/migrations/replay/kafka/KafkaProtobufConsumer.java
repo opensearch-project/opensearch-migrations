@@ -31,6 +31,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
     private final Consumer<String, byte[]> kafkaConsumer;
     private final String topic;
     private final KafkaBehavioralPolicy behavioralPolicy;
+    private final AtomicInteger trafficStreamsRead;
 
 
     public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic) {
@@ -43,6 +44,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
         this.topic = topic;
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic));
+        trafficStreamsRead = new AtomicInteger();
     }
 
     public static KafkaProtobufConsumer buildKafkaConsumer(@NonNull String brokers,
@@ -89,7 +91,6 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
 
     public List<TrafficStream> readNextTrafficStreamSynchronously() {
         try {
-            AtomicInteger trafficStreamsRead = new AtomicInteger();
             ConsumerRecords<String, byte[]> records;
             try {
                 records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);

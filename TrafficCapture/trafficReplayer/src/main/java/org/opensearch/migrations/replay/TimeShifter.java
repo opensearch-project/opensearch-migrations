@@ -10,7 +10,6 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public
 class TimeShifter {
-    private final double rateMultiplier;
 
     private static class TimeAdjustData {
         public final Instant sourceTimeStart;
@@ -22,6 +21,11 @@ class TimeShifter {
         }
     }
 
+    private final double rateMultiplier;
+
+    // TODO - Reconsider how time shifting is done
+    private final AtomicReference<TimeAdjustData> firstTimestampRef = new AtomicReference<>();
+
     public TimeShifter() {
         this(1.0);
     }
@@ -29,9 +33,6 @@ class TimeShifter {
     public TimeShifter(double rateMultiplier) {
         this.rateMultiplier = rateMultiplier;
     }
-
-    // TODO - Reconsider how time shifting is done
-    private final AtomicReference<TimeAdjustData> firstTimestampRef = new AtomicReference<>();
 
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
         firstTimestampRef.compareAndSet(null, new TimeAdjustData(sourceTime));
