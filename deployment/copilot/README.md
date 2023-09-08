@@ -1,5 +1,9 @@
+## Deploying to AWS
+
 ### Copilot Deployment
 Copilot is a tool for deploying containerized applications on AWS ECS. Official documentation can be found [here](https://aws.github.io/copilot-cli/docs/overview/).
+
+**Notice**: These tools are free to use, but the user is responsible for the cost of underlying infrastructure required to operate the solution. We welcome feedback and contributions to optimize costs.
 
 ### Initial Setup
 
@@ -195,5 +199,12 @@ Official documentation on Addons can be found [here](https://aws.github.io/copil
 
 ### Useful Commands
 
-`copilot app show`: Provides details on the current app \
-`copilot svc show`: Provides details on a particular service
+`copilot app show` - Provides details on the current app \
+`copilot svc show` - Provides details on a particular service
+
+### Removing deloyed resources from AWS
+
+To remove the resources installed from the steps above, follow these instructions:
+1.  `./devDeploy.sh --destroy-env` - Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
+2.  `./devDeploy.sh --destroy-all-copilot` - Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions
+3. After execution of the above steps, a CDK bootstrap stack remains. To remove this stack, begin by deleting the S3 objects and the associated bucket. After that, you can delete the stack using the AWS Console or CLI.
