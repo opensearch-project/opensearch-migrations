@@ -10,6 +10,12 @@ set -e
 script_abs_path=$(readlink -f "$0")
 script_dir_abs_path=$(dirname "$script_abs_path")
 cd $script_dir_abs_path
+if [ -f ../../VERSION ]; then
+    software_version=$(cat ../../VERSION)
+else
+    software_version=unknown
+fi
+TAGS=migration_deployment=$software_version
 
 SECONDS=0
 
@@ -68,7 +74,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    -h|--help)
+         -h|--help)
       usage
       ;;
     -*)
@@ -124,13 +130,13 @@ if [ "$SKIP_BOOTSTRAP" = false ] ; then
   ./gradlew :dockerSolution:buildDockerImages
   cd ../deployment/cdk/opensearch-service-migration
   npm install
-  cdk bootstrap
+  cdk bootstrap --tags $TAGS
 fi
 
 # This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
 # The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
-cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
+cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
 
 # Collect export commands from CDK output, which are needed by Copilot, wrap the commands in double quotes and store them within the "environment" dir
 export_file_path=../../copilot/environments/$COPILOT_DEPLOYMENT_STAGE/envExports.sh
@@ -164,7 +170,7 @@ if [ "$SKIP_COPILOT_INIT" = false ] ; then
   copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator
   copilot svc init -a $COPILOT_APP_NAME --name capture-proxy-es
   copilot svc init -a $COPILOT_APP_NAME --name migration-console
-else
+  else
   REPLAYER_SKIP_INIT_ARG="--skip-copilot-init"
 fi
 
@@ -173,12 +179,11 @@ fi
 copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE
 
 # Deploy services
-copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE
-copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE
-
-./createReplayer.sh --id default --target-uri "https://${MIGRATION_DOMAIN_ENDPOINT}:443" --extra-args "--auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN} | nc traffic-comparator 9220" "${REPLAYER_SKIP_INIT_ARG}"
+copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
+copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
+copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
+copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
+./createReplayer.sh --id default --target-uri "https://${MIGRATION_DOMAIN_ENDPOINT}:443" --extra-args "--tags=${TAGS} --auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN} | nc traffic-comparator 9220" "${REPLAYER_SKIP_INIT_ARG}"
 
 
 # Output deployment time

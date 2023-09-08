@@ -23,6 +23,7 @@ usage() {
   echo "  --delete-id                           [string, default: null] Delete the Replayer directory with the given ID (e.g. traffic-replayer-ID) and remove the Copilot service"
   echo "  --copilot-app-name                    [string, default: migration-copilot] Specify the Copilot application name to use for deployment"
   echo "  --skip-copilot-init                   Skip one-time Copilot initialization of Replayer service"
+  echo "  -t,tags                               Pass AWS tags as key-value pairs. E.g., migrations=0.1,replayer=1"
   echo "  -r, --region                          [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stack and resources."
   echo "  -s, --stage                           [string, default: dev] Specify the stage name to associate with the deployed resources"
   echo ""
@@ -37,6 +38,7 @@ ID_TO_DELETE=""
 COPILOT_APP_NAME=migration-copilot
 SKIP_COPILOT_INIT=false
 REGION=us-east-1
+TAGS=migration_deployment=unknown
 STAGE=dev
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -73,6 +75,11 @@ while [[ $# -gt 0 ]]; do
     --skip-copilot-init)
       SKIP_COPILOT_INIT=true
       shift # past argument
+      ;;
+    -t|--tags)
+      TAGS="$2"
+      shift # past argument
+      shift # past value
       ;;
     -r|--region)
       REGION="$2"
@@ -141,4 +148,4 @@ REPLAY_COMMAND="/bin/sh -c \"/runJavaWithClasspath.sh org.opensearch.migrations.
 echo "Constructed replay command: ${REPLAY_COMMAND}"
 export MIGRATION_REPLAYER_COMMAND="${REPLAY_COMMAND}"
 
-copilot svc deploy -a "${COPILOT_APP_NAME}" --name "${SERVICE_NAME}" --env "${STAGE}"
+copilot svc deploy -a "${COPILOT_APP_NAME}" --name "${SERVICE_NAME}" --env "${STAGE}" --resource-tags ${TAGS}
