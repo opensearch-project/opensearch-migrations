@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.ArrayDeque;
 import java.util.Map;
+import java.util.StringJoiner;
 import java.util.TreeMap;
 
 public class TimeToResponseFulfillmentFutureMap {
@@ -48,6 +49,19 @@ public class TimeToResponseFulfillmentFutureMap {
 
     @Override
     public String toString() {
-        return "[" + this.calculateSizeSlowly() + "]: " + timeToRunnableMap;
+        return "[" + this.calculateSizeSlowly() + "]: {" + formatBookends() + "}";
+    }
+
+    private String formatBookends() {
+        if (timeToRunnableMap.size() == 0) {
+            return "";
+        } else if (timeToRunnableMap.size() == 1) {
+            return timeToRunnableMap.firstKey().toString();
+        } else {
+            return new StringJoiner("...")
+                    .add(timeToRunnableMap.firstKey().toString())
+                    .add(timeToRunnableMap.lastKey().toString())
+                    .toString();
+        }
     }
 }

@@ -179,6 +179,13 @@ public class TrafficReplayer {
                 description = "assume that connections were terminated after this many " +
                         "seconds of inactivity observed in the captured stream")
         int observedPacketConnectionTimeout = 30;
+        @Parameter(required = false,
+                names = {"--speedup-factor"},
+                arity = 1,
+                description = "Accelerate the replayed communications by this factor.  " +
+                        "This means that between each interaction will be replayed at this rate faster " +
+                        "than the original observations, provided that the replayer and target are able to keep up.")
+        double speedupFactor = 1.0;
 
         @Parameter(required = false,
             names = {"--kafka-traffic-brokers"},
@@ -244,7 +251,7 @@ public class TrafficReplayer {
                     var tr = new TrafficReplayer(uri, buildAuthTransformerFactory(params),
                             params.allowInsecureConnections);
                     tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                            blockingTrafficStream, bufferedOutputStream);
+                            blockingTrafficStream, bufferedOutputStream, new TimeShifter(params.speedupFactor));
                     log.info("reached the end of the ingestion output stream");
                 }
             }
@@ -307,13 +314,14 @@ public class TrafficReplayer {
 
     private void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
                                         BlockingTrafficSource trafficChunkStream,
-                                        BufferedOutputStream bufferedOutputStream)
+                                        BufferedOutputStream bufferedOutputStream,
+                                        TimeShifter timeShifter)
             throws InterruptedException, ExecutionException {
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger exceptionCount = new AtomicInteger();
 
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
-        var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, new TimeShifter(), 2.0);
+        var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, timeShifter, 2.0);
 
         var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap =
