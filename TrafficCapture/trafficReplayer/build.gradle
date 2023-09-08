@@ -23,6 +23,8 @@ plugins {
     id "io.freefair.lombok" version "8.0.1"
 }
 
+import org.opensearch.migrations.common.CommonUtils
+
 //spotbugs {
 //    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
 //}
@@ -71,30 +73,19 @@ dependencies {
     testImplementation 'org.mockito:mockito-junit-jupiter:4.6.1'
 }
 
-def isRequestedVersionOlder(String requested, String target) {
-    def requestedParts = requested.split('\\.')*.toInteger()
-    def targetParts = target.split('\\.')*.toInteger()
 
-    for (int i = 0; i < 3; i++) {
-        if (requestedParts[i] < targetParts[i]) {
-            return false
-        } else if (requestedParts[i] > targetParts[i]) {
-            return true
-        }
-    }
-}
 
 configurations.all {
     resolutionStrategy.eachDependency { DependencyResolveDetails details ->
         if (details.requested.group == 'org.apache.commons' && details.requested.name == 'commons-text') {
             def targetVersion = '1.10.0'
-            if (isRequestedVersionOlder(details.requested.version, targetVersion) != true) {
+            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
                 details.useVersion targetVersion
             }
         }
         if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
             def targetVersion = '6.7.0'
-            if (isRequestedVersionOlder(details.requested.version, targetVersion) != true) {
+            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
                 details.useVersion targetVersion
             }
         }

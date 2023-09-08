@@ -22,6 +22,7 @@ export interface migrationStackProps extends StackPropsExt {
     // Future support needed to allow importing an existing MSK cluster
     readonly mskARN?: string,
     readonly mskEnablePublicEndpoints?: boolean
+    readonly mskBrokerNodeCount?: number
 }
 
 
@@ -57,7 +58,7 @@ export class MigrationAssistanceStack extends Stack {
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
             clusterName: 'migration-msk-cluster',
             kafkaVersion: '2.8.1',
-            numberOfBrokerNodes: 2,
+            numberOfBrokerNodes: props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2,
             brokerNodeGroupInfo: {
                 instanceType: 'kafka.m5.large',
                 clientSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}).subnetIds,
