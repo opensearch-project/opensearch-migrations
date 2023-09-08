@@ -11,12 +11,14 @@ import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 @Slf4j
 public class ReplayEngine {
     public static final int BACKPRESSURE_UPDATE_FREQUENCY = 8;
     public static final TimeUnit TIME_UNIT_MILLIS = TimeUnit.MILLISECONDS;
+    public static final Duration EXPECTED_TRANSFORMATION_DURATION = Duration.ofSeconds(1);
     private final RequestSenderOrchestrator networkSendOrchestrator;
     private final BufferedTimeController contentTimeController;
     private final AtomicLong lastCompletedSourceTimeEpochMs;
@@ -96,14 +98,6 @@ public class ReplayEngine {
         return totalCountOfScheduledTasksOutstanding.get() > 1;
     }
 
-    public void closeConnection(UniqueRequestKey requestKey, Instant timestamp) {
-        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        log.atDebug().setMessage(()->"scheduleClose: incremented tasksOutstanding to "+newCount).log();
-        var future = networkSendOrchestrator
-                .scheduleClose(requestKey, timeShifter.transformSourceTimeToRealTime(timestamp));
-        hookWorkFinishingUpdates(future, timestamp);
-    }
-
     private <T> DiagnosticTrackableCompletableFuture<String, T>
     hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp) {
         return future.map(f->f
@@ -116,6 +110,17 @@ public class ReplayEngine {
                 ()->"Updating fields for callers to poll progress and updating backpressure");
     }
 
+    public <T> DiagnosticTrackableCompletableFuture<String, T>
+    scheduleTransformationWork(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
+                               Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        log.atDebug().setMessage(()->"scheduleWork: incremented tasksOutstanding to "+newCount).log();
+        var start = timeShifter.transformSourceTimeToRealTime(originalStart);
+        var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
+        var result = networkSendOrchestrator.scheduleWork(requestKey, end.minus(EXPECTED_TRANSFORMATION_DURATION) ,task);
+        return hookWorkFinishingUpdates(result, originalStart);
+    }
+
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
     scheduleRequest(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
@@ -126,6 +131,14 @@ public class ReplayEngine {
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);
         return hookWorkFinishingUpdates(sendResult, originalStart);
+    }
+
+    public void closeConnection(UniqueRequestKey requestKey, Instant timestamp) {
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        log.atDebug().setMessage(()->"scheduleClose: incremented tasksOutstanding to "+newCount).log();
+        var future = networkSendOrchestrator
+                .scheduleClose(requestKey, timeShifter.transformSourceTimeToRealTime(timestamp));
+        hookWorkFinishingUpdates(future, timestamp);
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void> close() {

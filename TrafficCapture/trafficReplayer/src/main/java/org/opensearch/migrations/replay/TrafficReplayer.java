@@ -541,9 +541,12 @@ public class TrafficReplayer {
     {
         try {
             log.debug("Assembled request/response - starting to write to socket");
-            var transformationCompleteFuture = transformAllData(inputRequestTransformerFactory.create(requestKey),
-                    packets);
+            var transformationCompleteFuture = replayEngine.scheduleTransformationWork(requestKey, start, end, ()->
+                    transformAllData(inputRequestTransformerFactory.create(requestKey), packets));
             log.debug("finalizeRequest future for transformation = " + transformationCompleteFuture);
+            // It might be safer to chain this work directly inside the scheduleWork call above so that the
+            // read buffer horizons aren't set after the transformation work finishes, but after the packets
+            // are fully handled
             var sendFuture = transformationCompleteFuture.thenCompose(transformedResult ->
                         replayEngine.scheduleRequest(requestKey, start, end,
                                         transformedResult.transformedOutput.size(),
@@ -552,7 +555,7 @@ public class TrafficReplayer {
                                                 new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,
                                                         transformedResult.transformationStatus, t)),
                                         ()->"")
-                                .map(future->future.thenApply(t->new TransformedTargetRequestAndResponse(transformedResult.transformedOutput, t, transformedResult.transformationStatus)),
+                                .map(future->future.thenApply(t-> new TransformedTargetRequestAndResponse(transformedResult.transformedOutput, t, transformedResult.transformationStatus)),
                                         ()->""),
                     () -> "transitioning transformed packets onto the wire")
                     .map(future->future.exceptionally(t->new TransformedTargetRequestAndResponse(null, null, t)),

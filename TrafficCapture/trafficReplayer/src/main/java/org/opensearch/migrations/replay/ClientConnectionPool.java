@@ -13,7 +13,7 @@ import io.netty.util.concurrent.Future;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
-import org.opensearch.migrations.replay.datatypes.ChannelAndScheduledRequests;
+import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
@@ -29,7 +29,7 @@ public class ClientConnectionPool {
     private final URI serverUri;
     private final SslContext sslContext;
     public final NioEventLoopGroup eventLoopGroup;
-    private final LoadingCache<String, ChannelAndScheduledRequests> connectionId2ChannelCache;
+    private final LoadingCache<String, ConnectionReplaySession> connectionId2ChannelCache;
 
     private final AtomicInteger numConnectionsCreated = new AtomicInteger(0);
     private final AtomicInteger numConnectionsClosed = new AtomicInteger(0);
@@ -41,15 +41,15 @@ public class ClientConnectionPool {
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(new CacheLoader<>() {
             @Override
-            public ChannelAndScheduledRequests load(final String s) {
+            public ConnectionReplaySession load(final String s) {
                 numConnectionsCreated.incrementAndGet();
-                log.trace("creating connection future");
+                log.trace("creating connection session");
                 // arguably the most only thing that matters here is associating this item with an
                 // EventLoop (thread).  As the channel needs to be recycled, we'll come back to the
                 // event loop that was tied to the original channel to bind all future channels to
                 // the same event loop.  That means that we don't have to worry about concurrent
                 // accesses/changes to the OTHER value that we're storing within the cache.
-                return new ChannelAndScheduledRequests(eventLoopGroup.next());
+                return new ConnectionReplaySession(eventLoopGroup.next());
             }
         });
     }
@@ -126,12 +126,12 @@ public class ClientConnectionPool {
         }
     }
 
-    public Future<ChannelAndScheduledRequests>
+    public Future<ConnectionReplaySession>
     submitEventualChannelGet(UniqueRequestKey requestKey, boolean ignoreIfNotPresent) {
-        ChannelAndScheduledRequests channelFutureAndSchedule =
-                getChannelAndScheduledRequestsSafe(requestKey, ignoreIfNotPresent);
+        ConnectionReplaySession channelFutureAndSchedule =
+                getCachedSession(requestKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
-            var rval = new DefaultPromise<ChannelAndScheduledRequests>(eventLoopGroup.next());
+            var rval = new DefaultPromise<ConnectionReplaySession>(eventLoopGroup.next());
             rval.setSuccess(null);
             return rval;
         }
@@ -145,14 +145,13 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    private ChannelAndScheduledRequests getChannelAndScheduledRequestsSafe(UniqueRequestKey requestKey,
-                                                                           boolean dontCreate) {
+    public ConnectionReplaySession getCachedSession(UniqueRequestKey requestKey, boolean dontCreate) {
         return dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.connectionId) :
                 connectionId2ChannelCache.get(requestKey.connectionId);
     }
 
     private DiagnosticTrackableCompletableFuture<String, Channel>
-    closeClientConnectionChannel(ChannelAndScheduledRequests channelAndFutureWork) {
+    closeClientConnectionChannel(ConnectionReplaySession channelAndFutureWork) {
         var channelClosedFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<Channel>(),
                         ()->"Waiting for closeFuture() on channel");

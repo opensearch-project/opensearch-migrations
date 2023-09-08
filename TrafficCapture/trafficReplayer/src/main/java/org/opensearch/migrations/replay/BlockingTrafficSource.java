@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay;
 
 import com.google.protobuf.Timestamp;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.slf4j.event.Level;
