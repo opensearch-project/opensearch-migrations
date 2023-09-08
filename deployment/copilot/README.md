@@ -51,16 +51,16 @@ The migration solution has support for running multiple Replayer services simult
 
 A **prerequisite** to use this functionality is that the migration solution has been deployed with the `devDeploy.sh` script, so that necessary environment values from CDK resources like the VPC, MSK, and EFS volume can be retrieved for additional Replayer services
 
-To try this scenario out, an additional Opensearch Domain target cluster can be created in the existing VPC by running a series of commands like below
+To test this scenario, you can create an additional OpenSearch Domain target cluster within the existing VPC by executing the following series of commands:
 ```shell
 # Assuming you are in the copilot directory and the default "dev" environment was used for ./devDeploy.sh
 source ./environments/dev/envExports.sh
 cd ../cdk/opensearch-service-migration
-# Pick a name to be used for identifying this new domain stack
+# Pick a name to be used for identifying this new domain stack that is different from the one used for ./devDeploy.sh
 export CDK_DEPLOYMENT_STAGE=dev2
 cdk deploy "*" --c domainName="test-domain-2-7" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c vpcId="$MIGRATION_VPC_ID" --c vpcSecurityGroupIds="[\"$MIGRATION_DOMAIN_SG_ID\"]" --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=false --c enableDemoAdmin=true --require-approval never --concurrency 3
 ```
-To spin up another Replayer service to send traffic to this new Domain, a command similar to below can be ran where `id` is a unique label to apply to this Replayer service and `target-uri` is the accessible endpoint of the target cluster to replay traffic to. This endpoint can be retrieved from the CDK command output from the above command or from the AWS Console
+To launch an additional Replayer service that directs traffic to this new Domain, run a command like the one below. In this command, `id` is a unique label for the Replayer service, and `target-uri` is the endpoint of the target cluster where traffic will be replayed. You can obtain this endpoint either from the CDK command output mentioned earlier or from the AWS Console:
 ```shell
 ./createReplayer.sh --id test-os-2-7 --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443
 ```
