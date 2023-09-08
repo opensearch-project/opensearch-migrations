@@ -1,6 +1,7 @@
 {
-  "engineVersion": "OS_2.5",
+  "engineVersion": "OS_2.7",
   "domainName": "os-service-domain",
+  "tlsSecurityPolicy": "TLS_1_2",
   "enforceHTTPS": true,
   "nodeToNodeEncryptionEnabled": true,
   "encryptionAtRestEnabled": true

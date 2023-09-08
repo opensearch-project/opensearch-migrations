@@ -107,7 +107,7 @@ done
 
 # Remove service from Copilot and delete created service directory
 if [[ -n "${ID_TO_DELETE}" ]]; then
-  copilot svc delete -a $COPILOT_APP_NAME --name traffic-replayer-$ID_TO_DELETE --env $STAGE --yes
+  copilot svc delete -a $COPILOT_APP_NAME --name traffic-replayer-$ID_TO_DELETE --yes
   rm -r traffic-replayer-$ID_TO_DELETE
   exit 1
 fi

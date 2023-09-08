@@ -110,7 +110,7 @@ if [ "$DESTROY_ENV" = true ] ; then
 
   export AWS_DEFAULT_REGION=$REGION
   cd ../cdk/opensearch-service-migration
-  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true
+  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true
   exit 1
 fi
 

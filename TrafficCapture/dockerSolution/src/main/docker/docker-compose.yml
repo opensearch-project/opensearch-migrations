@@ -71,6 +71,8 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
+    environment:
+      - TUPLE_DIR_PATH=/shared-replayer-output/traffic-replayer-default
     depends_on:
       kafka:
         condition: service_started
