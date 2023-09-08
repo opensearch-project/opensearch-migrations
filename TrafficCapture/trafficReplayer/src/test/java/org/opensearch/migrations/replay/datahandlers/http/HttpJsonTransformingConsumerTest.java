@@ -3,8 +3,8 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.AggregatedTransformedResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -17,10 +17,12 @@ import java.util.Map;
 class HttpJsonTransformingConsumerTest {
     @Test
     public void testPassThroughSinglePacketPost() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null,null);
+        final var dummyAggregatedResponse =
+                new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformingHandler = new HttpJsonTransformingConsumer(JsonJoltTransformer.newBuilder().build(),
-                null, testPacketCapture, "TEST");
+        var transformingHandler =
+                new HttpJsonTransformingConsumer<AggregatedRawResponse>(JsonJoltTransformer.newBuilder().build(),
+                        null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -28,22 +30,21 @@ class HttpJsonTransformingConsumerTest {
         }
         transformingHandler.consumeBytes(testBytes);
         var returnedResponse = transformingHandler.finalizeRequest().get();
-        Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8),
-                testPacketCapture.getCapturedAsString());
+        Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(AggregatedTransformedResponse.HttpRequestTransformationStatus.SKIPPED,
-                returnedResponse.getTransformationStatus());
+        Assertions.assertEquals(HttpRequestTransformationStatus.SKIPPED, returnedResponse.transformationStatus);
     }
 
     @Test
     public void testPassThroughSinglePacketWithoutBodyTransformationPost() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null,null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformingHandler = new HttpJsonTransformingConsumer(
-                JsonJoltTransformer.newBuilder()
-                        .addHostSwitchOperation("test.domain")
-                        .build(),
-                null, testPacketCapture, "TEST");
+        var transformingHandler =
+                new HttpJsonTransformingConsumer<AggregatedRawResponse>(
+                        JsonJoltTransformer.newBuilder()
+                                .addHostSwitchOperation("test.domain")
+                                .build(),
+                        null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -57,8 +58,7 @@ class HttpJsonTransformingConsumerTest {
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8),
                 testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(AggregatedTransformedResponse.HttpRequestTransformationStatus.SKIPPED,
-                returnedResponse.getTransformationStatus());
+        Assertions.assertEquals(HttpRequestTransformationStatus.SKIPPED, returnedResponse.transformationStatus);
     }
 
     @Test
@@ -81,7 +81,8 @@ class HttpJsonTransformingConsumerTest {
             }
         });
         var transformingHandler =
-                new HttpJsonTransformingConsumer(complexTransformer, null, testPacketCapture, "TEST");
+                new HttpJsonTransformingConsumer<AggregatedRawResponse>(complexTransformer, null,
+                        testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -94,9 +95,8 @@ class HttpJsonTransformingConsumerTest {
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8),
                 testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(AggregatedTransformedResponse.HttpRequestTransformationStatus.ERROR,
-                returnedResponse.getTransformationStatus());
+        Assertions.assertEquals(HttpRequestTransformationStatus.ERROR, returnedResponse.transformationStatus);
         Assertions.assertInstanceOf(NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException.class,
-                returnedResponse.getErrorCause());
+                returnedResponse.error);
     }
 }

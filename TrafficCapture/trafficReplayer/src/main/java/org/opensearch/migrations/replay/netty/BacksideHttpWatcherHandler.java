@@ -4,11 +4,12 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
 
-@Log4j2
+@Slf4j
 public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<FullHttpResponse> {
 
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
@@ -28,10 +29,26 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
         super.channelReadComplete(ctx);
     }
 
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        triggerResponseCallbackAndRemoveCallback();
+        super.handlerRemoved(ctx);
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        aggregatedRawResponseBuilder.addErrorCause(cause);
+        triggerResponseCallbackAndRemoveCallback();
+        super.exceptionCaught(ctx, cause);
+    }
+
     private void triggerResponseCallbackAndRemoveCallback() {
+        log.atTrace().setMessage(()->"triggerResponseCallbackAndRemoveCallback, callback="+this.responseCallback).log();
         if (this.responseCallback != null) {
-            this.responseCallback.accept(aggregatedRawResponseBuilder.build());
+            // this method may be re-entrant upon calling the callback, so make sure that we don't loop
+            var responseCallback = this.responseCallback;
             this.responseCallback = null;
+            responseCallback.accept(aggregatedRawResponseBuilder.build());
             aggregatedRawResponseBuilder = null;
         }
     }
@@ -41,8 +58,10 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
             throw new RuntimeException("Callback was already triggered for the aggregated response");
         }
         if (doneReadingRequest) {
+            log.trace("calling callback because we're done reading the request");
             callback.accept(aggregatedRawResponseBuilder.build());
         } else {
+            log.trace("setting the callback to fire later");
             this.responseCallback = callback;
         }
     }

@@ -1,44 +1,41 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.handler.ssl.SslContext;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
-import java.net.URI;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 
-public class PacketToTransformingHttpHandlerFactory implements PacketConsumerFactory<AggregatedTransformedResponse> {
-    private final NioEventLoopGroup eventLoopGroup;
-    private final URI serverUri;
+@Slf4j
+public class PacketToTransformingHttpHandlerFactory implements
+        PacketConsumerFactory<TransformedOutputAndResult<TransformedPackets>> {
     private final IJsonTransformer jsonTransformer;
     private final IAuthTransformerFactory authTransformerFactory;
-    private final SslContext sslContext;
 
-    public PacketToTransformingHttpHandlerFactory(URI serverUri,
-                                                  IJsonTransformer jsonTransformer,
-                                                  IAuthTransformerFactory authTransformerFactory,
-                                                  SslContext sslContext) {
-        this.serverUri = serverUri;
+    public PacketToTransformingHttpHandlerFactory(IJsonTransformer jsonTransformer,
+                                                  IAuthTransformerFactory authTransformerFactory) {
         this.jsonTransformer = jsonTransformer;
         this.authTransformerFactory = authTransformerFactory;
-        this.sslContext = sslContext;
-        this.eventLoopGroup = new NioEventLoopGroup();
     }
 
-    NettyPacketToHttpConsumer createNettyHandler(String diagnosticLabel) {
-        return new NettyPacketToHttpConsumer(eventLoopGroup, serverUri, sslContext, diagnosticLabel);
-    }
 
     @Override
-    public IPacketFinalizingConsumer<AggregatedTransformedResponse> create(String diagnosticLabel) {
-        return new HttpJsonTransformingConsumer(jsonTransformer, authTransformerFactory, createNettyHandler(diagnosticLabel),
-                diagnosticLabel);
-    }
-
-    public void stopGroup() {
-        eventLoopGroup.shutdownGracefully();
+    public IPacketFinalizingConsumer<TransformedOutputAndResult<TransformedPackets>>
+    create(UniqueRequestKey requestKey) {
+        log.trace("creating HttpJsonTransformingConsumer");
+        return new HttpJsonTransformingConsumer(jsonTransformer, authTransformerFactory,
+                new TransformedPacketReceiver(), requestKey.toString());
     }
 }

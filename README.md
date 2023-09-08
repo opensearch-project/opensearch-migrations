@@ -1,57 +1,57 @@
-## OpenSearch Migrations
+## OpenSearch upgrades, migrations, and comparison tooling
 
-```
-Data flows to OpenSearch
-On wings of the morning breeze
-Effortless migration
-```
-
-This repo contains code, tools and documentation to assist in migrations to and upgrades of OpenSearch clusters.
+OpenSearch upgrade, migration, and comparison tooling facilitates OpenSearch migrations and upgrades. With these tools, you can set up a proof-of-concept environment locally using Docker containers or deploy to AWS using a one-click deployment script. Once set up and deployed, users can redirect their production traffic from a source cluster to a provisioned target cluster, enabling a comparison of results between the two clusters. All traffic directed to the source cluster is stored for future replay. Meanwhile, traffic to the target cluster is replayed at an identical rate to ensure a direct "apple-to-apple" comparison. This toolset empowers users to fine-tune cluster configurations and manage workloads more effectively.
 
 ## Table of Contents
 
-- [OpenSearch Migrations](#opensearch-migrations)
-    - [Table of Contents](#table-of-contents)
-    - [Developer Setup](#setup-for-commits)
-    - [Traffic Capture](#traffic-capture)
-    - [Local Docker Solution](#local-docker-solution)
-    - [End-to-End Testing](#end-to-end-testing)
-    - [Cloud Deployment](#deploying-to-aws-with-copilot)
-    - [Security](#security)
-    - [License](#license)
+- [ Supported cluster versions and platforms](#supported-cluster-versions-and-platforms)
+- [Build and deploy](#build-and-deploy)
+    - [Local deployment](#local-deployment)
+    - [AWS deployment](#aws-deployment)
+- [Developer contributions](#developer-contributions)
+    - [Pre-commit hooks](#pre-commit-hooks)
+    - [Traffic Capture Proxy and Replayer](#traffic-capture-proxy-and-replayer)
+    - [Running Tests](#running-tests)
+- [Security](#security)
+- [License](#license)
 
-## Setup for commits
+## Supported cluster versions and platforms
 
-Developers must run the "install_githooks.sh" script in order to add any pre-commit hooks.
-At the moment, one pre-commit hook will be installed which runs a linting commandon the `*.py` files.
+There are numerous combinations of source clusters, target clusters, and platforms. While the tools provided in this repository might work with various combinations, they might not support breaking changes between different source and target versions. Below is a growing support table that will be updated over time.
 
-## Traffic Capture
+|Supported Sources|Supported Targets|Source Platform|Target Platform|
+|:---------------:|:---------------:|:-------------:|:-------------:|
+|ElasticSearch 7-7.10.2|OpenSearch 1.x and 2.x|AWS Self-Managed|AWS OpenSearch and OpenSearch Serverless|
 
-The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP
-traffic, which can then be offloaded and replayed to other HTTP(S) server(s).
+## Build and deploy
 
-More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md) 
+### Local deployment
 
-### Local Docker Solution
+A containerized end-to-end solution can be deployed locally using the 
+[Docker Solution](TrafficCapture/dockerSolution/README.md).
 
-A containarized end-to-end solution can be deployed locally using Docker.
+### AWS deployment
 
-More documentation on this solution can be found here:
-[Docker Solution](TrafficCapture/dockerSolution/README.md)
+Refer to [AWS Deployment](deployment/copilot/README.md) to deploy this solution to AWS.
 
-### End-to-End Testing
+## Developer contributions
+
+### Pre-commit hooks
+
+Developers must run the "install_githooks.sh" script in order to add any pre-commit hooks.  Developers should run these hooks before opening a pull request to ensure checks pass and prevent potential rejection of the pull request."
+
+### Traffic Capture Proxy and Replayer
+
+The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP traffic, which can then be offloaded and replayed to other HTTP(S) server(s).
+
+More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md).
+
+### Running Tests
 
 Developers can run a test script which will verify the end-to-end Local Docker Solution.
 
 More documentation on this test script can be found here:
 [End-to-End Testing](test/README.md)
-
-## Deploying to AWS with Copilot
-
-The containerized services that this repo provides can be deployed to AWS with the use of [Copilot](https://aws.github.io/copilot-cli/)
-
-Documentation for getting started and deploying these services can be found here:
-[AWS Deployment](deployment/copilot/README.md)
 
 ## Security
 
