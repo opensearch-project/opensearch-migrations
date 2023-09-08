@@ -36,7 +36,7 @@ public class RequestSenderOrchestrator {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm close has finished");
-        asynchronouslyInvokeRunnableToSetupFuture(requestKey, finalTunneledResponse,
+        asynchronouslyInvokeRunnableToSetupFuture(requestKey, true, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> {
                     scheduleOnCffr(requestKey, channelFutureAndRequestSchedule,
                             finalTunneledResponse, timestamp, "close", () -> {
@@ -53,16 +53,18 @@ public class RequestSenderOrchestrator {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for final aggregated response");
-        return asynchronouslyInvokeRunnableToSetupFuture(requestKey, finalTunneledResponse,
+        return asynchronouslyInvokeRunnableToSetupFuture(requestKey, false, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> scheduleSendOnCffr(requestKey, channelFutureAndRequestSchedule,
                         finalTunneledResponse, start, interval, packets));
     }
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
     asynchronouslyInvokeRunnableToSetupFuture(UniqueRequestKey requestKey,
+                                              boolean ignoreIfChannelNotPresent,
                                               DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
                                               Consumer<ChannelAndScheduledRequests> successFn) {
-        var channelFutureAndScheduleFuture = clientConnectionPool.submitEventualChannelGet(requestKey);
+        var channelFutureAndScheduleFuture =
+                clientConnectionPool.submitEventualChannelGet(requestKey, ignoreIfChannelNotPresent);
         var cf2 = channelFutureAndScheduleFuture.addListener(submitFuture->{
             if (!submitFuture.isSuccess()) {
                 log.atError().setCause(submitFuture.cause())
@@ -72,6 +74,10 @@ public class RequestSenderOrchestrator {
             } else {
                 log.atTrace().setMessage(()->requestKey.toString() + " in submitFuture(success) callback").log();
                 var channelFutureAndRequestSchedule = ((ChannelAndScheduledRequests) submitFuture.get());
+                if (channelFutureAndRequestSchedule == null) {
+                    finalTunneledResponse.future.complete(null);
+                    return;
+                }
                 channelFutureAndRequestSchedule.channelFutureFuture
                         .map(channelFutureGetAttemptFuture->channelFutureGetAttemptFuture
                                         .thenAccept(v->{
@@ -200,7 +206,8 @@ public class RequestSenderOrchestrator {
             counter.incrementAndGet();
             Runnable packetSender = () -> sendNextPartAndContinue(packetHandlerSupplier, eventLoop,
                     iterator, start, interval, counter, responseFuture);
-            var delayMs = Duration.between(Instant.now(), start.plus(interval.multipliedBy(counter.get()))).toMillis();
+            var delayMs = Duration.between(now(),
+                    start.plus(interval.multipliedBy(counter.get()))).toMillis();
             eventLoop.schedule(packetSender, Math.min(0, delayMs), TimeUnit.MILLISECONDS);
         } else {
             packetReceiver.finalizeRequest().handle((v,t)-> {

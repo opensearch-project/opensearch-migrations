@@ -29,7 +29,7 @@ class TimeShifter {
         // realtime = systemTimeStart + (sourceTime-sourceTimeStart)
         var rval = tad.systemTimeStart
                 .plus(Duration.between(firstTimestampRef.get().sourceTimeStart, sourceTime));
-        log.debug("Transformed real time=" + sourceTime + " -> " + rval);
+        log.trace("Transformed real time=" + sourceTime + " -> " + rval);
         return rval;
     }
 
@@ -40,7 +40,7 @@ class TimeShifter {
                     // sourceTime = sourceTimeStart + (realTime-systemTimeStart)
                     var rval = tad.sourceTimeStart
                             .plus(Duration.between(tad.systemTimeStart, realTime));
-                    log.debug("Transformed source time=" + realTime + " -> " + rval);
+                    log.trace("Transformed source time=" + realTime + " -> " + rval);
                     return rval;
                 });
     }

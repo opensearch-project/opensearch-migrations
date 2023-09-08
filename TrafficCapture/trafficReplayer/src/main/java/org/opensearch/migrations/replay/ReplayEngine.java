@@ -97,7 +97,8 @@ public class ReplayEngine {
     }
 
     public void closeConnection(UniqueRequestKey requestKey, Instant timestamp) {
-        totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        log.atDebug().setMessage(()->"scheduleClose: incremented tasksOutstanding to "+newCount).log();
         var future = networkSendOrchestrator
                 .scheduleClose(requestKey, timeShifter.transformSourceTimeToRealTime(timestamp));
         hookWorkFinishingUpdates(future, timestamp);
@@ -106,16 +107,20 @@ public class ReplayEngine {
     private <T> DiagnosticTrackableCompletableFuture<String, T>
     hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp) {
         return future.map(f->f
-                .whenComplete((v,t)->Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
-                .whenComplete((v,t)->totalCountOfScheduledTasksOutstanding.decrementAndGet())
-                .whenComplete((v,t)->contentTimeController.stopReadsPast(timestamp)),
+                        .whenComplete((v,t)->Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
+                        .whenComplete((v,t)->totalCountOfScheduledTasksOutstanding.decrementAndGet())
+                        .whenComplete((v,t)->contentTimeController.stopReadsPast(timestamp))
+                        .whenComplete((v,t)->log.atDebug().
+                                setMessage(()->"work finished and used timestamp="+timestamp+" for updates " +
+                                        "(tasksOutstanding=" + totalCountOfScheduledTasksOutstanding.get() +")").log()),
                 ()->"Updating fields for callers to poll progress and updating backpressure");
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
     scheduleRequest(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
-        totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        log.atDebug().setMessage(()->"scheduleRequest: incremented tasksOutstanding to "+newCount).log();
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;

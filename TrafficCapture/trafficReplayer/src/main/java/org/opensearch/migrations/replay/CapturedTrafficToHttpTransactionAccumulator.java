@@ -201,7 +201,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             exceptionConnectionCounter.incrementAndGet();
             accum.resetForNextRequest();
             log.atWarn().setMessage(()->"Removing accumulated traffic pair for " + connectionId).log();
-            log.atDebug().setMessage(()->"Accumulated object: " + accum).log();
+            log.atTrace().setMessage(()->"Accumulated object: " + accum).log();
         } else {
             log.atWarn().setMessage(()->"unaccounted for observation type " + observation).log();
         }

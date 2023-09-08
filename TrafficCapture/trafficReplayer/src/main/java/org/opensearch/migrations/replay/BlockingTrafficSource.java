@@ -4,6 +4,7 @@ import com.google.protobuf.Timestamp;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.slf4j.event.Level;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -58,8 +59,16 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
         var prospectiveBarrier = pointInTime.plus(bufferTimeWindow);
         var newValue = Utils.setIfLater(stopReadingAtRef, prospectiveBarrier);
         if (newValue.equals(prospectiveBarrier)) {
+            log.atLevel(readGate.hasQueuedThreads()? Level.INFO: Level.TRACE)
+                    .setMessage(() -> "Releasing the semaphore and set the new stopReadingAtRef=" + newValue).log();
             readGate.drainPermits();
             readGate.release();
+        } else {
+            log.atTrace()
+                    .setMessage(()->"stopReadsPast: "+pointInTime + " -> (" + prospectiveBarrier +
+                                    ") didn't move the cursor because the value was " +
+                                    "already at " + newValue
+                            ).log();
         }
     }
 
@@ -88,6 +97,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
                 CompletableFuture.supplyAsync(() -> {
                     if (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
                         try {
+                            log.info("waiting to acquire semaphore to read the next chunk");
                             readGate.acquire();
                         } catch (InterruptedException e) {
                             log.atWarn().setCause(e).log("Interrupted while waiting for a signal to read more data");

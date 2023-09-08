@@ -8,6 +8,7 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContext;
+import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.Future;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -126,8 +127,14 @@ public class ClientConnectionPool {
     }
 
     public Future<ChannelAndScheduledRequests>
-    submitEventualChannelGet(UniqueRequestKey requestKey) {
-        ChannelAndScheduledRequests channelFutureAndSchedule = getChannelAndScheduledRequestsSafe(requestKey);
+    submitEventualChannelGet(UniqueRequestKey requestKey, boolean ignoreIfNotPresent) {
+        ChannelAndScheduledRequests channelFutureAndSchedule =
+                getChannelAndScheduledRequestsSafe(requestKey, ignoreIfNotPresent);
+        if (channelFutureAndSchedule == null) {
+            var rval = new DefaultPromise<ChannelAndScheduledRequests>(eventLoopGroup.next());
+            rval.setSuccess(null);
+            return rval;
+        }
         return channelFutureAndSchedule.eventLoop.submit(() -> {
             if (channelFutureAndSchedule.channelFutureFuture == null) {
                 channelFutureAndSchedule.channelFutureFuture =
@@ -138,8 +145,10 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    private ChannelAndScheduledRequests getChannelAndScheduledRequestsSafe(UniqueRequestKey requestKey) {
-        return connectionId2ChannelCache.get(requestKey.connectionId);
+    private ChannelAndScheduledRequests getChannelAndScheduledRequestsSafe(UniqueRequestKey requestKey,
+                                                                           boolean dontCreate) {
+        return dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.connectionId) :
+                connectionId2ChannelCache.get(requestKey.connectionId);
     }
 
     private DiagnosticTrackableCompletableFuture<String, Channel>
