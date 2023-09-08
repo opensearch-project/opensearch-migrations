@@ -1,3 +1,5 @@
+## Deploying to AWS
+
 ### Copilot Deployment
 Copilot is a tool for deploying containerized applications on AWS ECS. Official documentation can be found [here](https://aws.github.io/copilot-cli/docs/overview/).
 
@@ -71,7 +73,7 @@ The provided CDK will output export commands once deployed that can be ran on a 
 ```
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
-export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
@@ -186,5 +188,16 @@ Official documentation on Addons can be found [here](https://aws.github.io/copil
 
 ### Useful Commands
 
-`copilot app show`: Provides details on the current app \
-`copilot svc show`: Provides details on a particular service
+`copilot app show` - Provides details on the current app \
+`copilot svc show` - Provides details on a particular service
+
+### Removing deloyed resources from AWS
+
+To remove the resources installed from the steps above, follow these instructions:
+1. Access the AWS Console and delete all S3 objects and content within the "StagingBucket".
+2. Execute the following commands:
+    ```
+    ./devDeploy.sh --destroy-env
+    ./devDeploy.sh --destroy-all-copilot`
+    ```
+**Warning**: If Copilot resources were deployed across multiple regions, some resources may need to be removed manually. This can be achieved by deleting the CloudFormation stacks in each respective region. Ensure to look for resources tagged with the key migration_deployment and a value corresponding to the migration version.
