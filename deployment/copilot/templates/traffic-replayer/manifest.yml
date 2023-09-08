@@ -35,7 +35,7 @@ exec: true     # Enable getting a shell to your container (https://docs.aws.amaz
 
 # Pass environment variables as key value pairs.
 variables:
-  TUPLE_DIR_NAME: SERVICE_NAME_PLACEHOLDER
+  TUPLE_DIR_PATH: /shared-replayer-output/SERVICE_NAME_PLACEHOLDER
 
 environments:
   dev:

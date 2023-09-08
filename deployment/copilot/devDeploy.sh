@@ -104,7 +104,7 @@ if [ "$DESTROY_ENV" = true ] ; then
 
   export AWS_DEFAULT_REGION=$REGION
   cd ../cdk/opensearch-service-migration
-  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true
+  cdk destroy "*" --c domainName="aos-domain" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true
   exit 1
 fi
 
@@ -130,7 +130,7 @@ fi
 # This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
 # The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
-cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_1.3" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
+cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
 
 # Collect export commands from CDK output, which are needed by Copilot, wrap the commands in double quotes and store them within the "environment" dir
 export_file_path=../../copilot/environments/$COPILOT_DEPLOYMENT_STAGE/envExports.sh
