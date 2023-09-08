@@ -1,4 +1,4 @@
-import {Stack, StackProps} from "aws-cdk-lib";
+import {CfnOutput, Stack, StackProps} from "aws-cdk-lib";
 import {
     IpAddresses,
     ISecurityGroup,
@@ -71,24 +71,25 @@ export class NetworkStack extends Stack {
         }
 
         // Retrieve existing SGs to apply to VPC Domain endpoints
+        const securityGroups: ISecurityGroup[] = []
         if (props.vpcSecurityGroupIds) {
-            const securityGroups: ISecurityGroup[] = []
             for (let i = 0; i < props.vpcSecurityGroupIds.length; i++) {
                 securityGroups.push(SecurityGroup.fromLookupById(this, "domainSecurityGroup-" + i, props.vpcSecurityGroupIds[i]))
             }
-            this.domainSecurityGroups = securityGroups
         }
-        // Create a default SG to allow open access to Domain within VPC. This should be further restricted for users
-        // who want limited access to their domain within the VPC
-        else {
-            const defaultSecurityGroup = new SecurityGroup(this, 'domainSecurityGroup', {
-                vpc: this.vpc,
-                allowAllOutbound: true,
-            });
-            defaultSecurityGroup.addIngressRule(Peer.ipv4('0.0.0.0/0'), Port.allTcp());
-            defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
-            this.domainSecurityGroups = [defaultSecurityGroup]
-        }
+        // Create a default SG which only allows members of this SG to access the Domain endpoints
+        const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
+            vpc: this.vpc,
+            allowAllOutbound: false,
+        });
+        defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
+        securityGroups.push(defaultSecurityGroup)
+        this.domainSecurityGroups = securityGroups
+
+        new CfnOutput(this, 'CopilotDomainSGExports', {
+            value: `export MIGRATION_DOMAIN_SG_ID=${defaultSecurityGroup.securityGroupId}`,
+            description: 'Domain Security Group created by CDK that is needed for Copilot container deployments',
+        });
 
     }
 }

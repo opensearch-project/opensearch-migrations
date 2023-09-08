@@ -7,7 +7,6 @@ import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ResourceLeakDetector;
@@ -183,10 +182,10 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
         try (var osw = new OutputStreamWriter(os, StandardCharsets.UTF_8)) {
             osw.append(httpJson.method());
             osw.append(" ");
-            osw.append(httpJson.uri());
+            osw.append(httpJson.path());
             osw.append(" ");
             osw.append(httpJson.protocol());
-            osw.append("\n");
+            osw.append("\r\n");
 
             for (var kvpList : httpJson.headers().asStrictMap().entrySet()) {
                 var key = kvpList.getKey();
@@ -194,10 +193,10 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
                     osw.append(key);
                     osw.append(": ");
                     osw.append(valueEntry);
-                    osw.append("\n");
+                    osw.append("\r\n");
                 }
             }
-            osw.append("\n");
+            osw.append("\r\n");
             osw.flush();
         }
     }

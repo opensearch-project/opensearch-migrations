@@ -1,0 +1,44 @@
+# The manifest for the SERVICE_NAME_PLACEHOLDER service.
+# Read the full specification for the "Backend Service" type at:
+#  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
+
+# Your service name will be used in naming your resources like log groups, ECS services, etc.
+name: SERVICE_NAME_PLACEHOLDER
+type: Backend Service
+
+# Allow service-to-service communication with ECS Service Connect
+network:
+  connect: true
+  vpc:
+    security_groups: [ "${MIGRATION_CAPTURE_MSK_SG_ID}", "${MIGRATION_DOMAIN_SG_ID}", "${MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID}" ]
+
+# Configuration for your containers and service.
+image:
+  # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/backend-service/#image-build
+  build:
+    dockerfile: ../TrafficCapture/dockerSolution/build/docker/trafficReplayer/Dockerfile
+
+command: "${MIGRATION_REPLAYER_COMMAND}"
+
+storage:
+  volumes:
+    sharedReplayerOutputVolume: # This is a variable key and can be set to an arbitrary string.
+      path: '/shared-replayer-output'
+      read_only: false
+      efs:
+        id: ${MIGRATION_REPLAYER_OUTPUT_EFS_ID}
+
+cpu: 1024       # Number of CPU units for the task.
+memory: 4096    # Amount of memory in MiB used by the task.
+count: 1       # Number of tasks that should be running in your service.
+exec: true     # Enable getting a shell to your container (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html).
+
+# Pass environment variables as key value pairs.
+variables:
+  TUPLE_DIR_PATH: /shared-replayer-output/SERVICE_NAME_PLACEHOLDER
+
+environments:
+  dev:
+    count: 1               # Number of tasks to run for the "dev" environment.
+    deployment:            # The deployment strategy for the "dev" environment.
+      rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.

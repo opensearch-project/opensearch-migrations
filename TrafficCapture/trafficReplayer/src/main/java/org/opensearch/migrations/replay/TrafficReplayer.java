@@ -11,11 +11,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.transform.CompositeJsonTransformer;
-import org.opensearch.migrations.transform.JoltJsonTransformer;
-import org.opensearch.migrations.transform.JsonTransformer;
-import org.opensearch.migrations.transform.TypeMappingJsonTransformer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.JsonCompositeTransformer;
+import org.opensearch.migrations.transform.JsonJoltTransformer;
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.JsonTypeMappingTransformer;
+import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
+import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
@@ -26,6 +30,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -36,30 +41,36 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+
 @Slf4j
 public class TrafficReplayer {
 
+    public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
+    public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
+    public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
+    public static final String AWS_AUTH_HEADER_USER_AND_SECRET_ARG = "--auth-header-user-and-secret";
     private final PacketToTransformingHttpHandlerFactory packetHandlerFactory;
 
-    public static JsonTransformer buildDefaultJsonTransformer(String newHostName,
-                                                              String authorizationHeader) {
-        var joltJsonTransformerBuilder = JoltJsonTransformer.newBuilder()
+    public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
+        var joltJsonTransformerBuilder = JsonJoltTransformer.newBuilder()
                 .addHostSwitchOperation(newHostName);
-        if (authorizationHeader != null) {
-            joltJsonTransformerBuilder = joltJsonTransformerBuilder.addAuthorizationOperation(authorizationHeader);
-        }
         var joltJsonTransformer = joltJsonTransformerBuilder.build();
-        return new CompositeJsonTransformer(joltJsonTransformer, new TypeMappingJsonTransformer());
+        return new JsonCompositeTransformer(joltJsonTransformer, new JsonTypeMappingTransformer());
     }
 
-    public TrafficReplayer(URI serverUri, String authorizationHeader, boolean allowInsecureConnections)
+    public TrafficReplayer(URI serverUri,
+                           IAuthTransformerFactory authTransformerFactory,
+                           boolean allowInsecureConnections)
             throws SSLException {
         this(serverUri, allowInsecureConnections,
-                buildDefaultJsonTransformer(serverUri.getHost(), authorizationHeader));
+                buildDefaultJsonTransformer(serverUri.getHost()),
+                authTransformerFactory);
     }
     
-    public TrafficReplayer(URI serverUri, boolean allowInsecureConnections,
-                           JsonTransformer jsonTransformer)
+    public TrafficReplayer(URI serverUri,
+                           boolean allowInsecureConnections,
+                           IJsonTransformer jsonTransformer,
+                           IAuthTransformerFactory authTransformer)
             throws SSLException
     {
         if (serverUri.getPort() < 0) {
@@ -71,7 +82,7 @@ public class TrafficReplayer {
         if (serverUri.getScheme() == null) {
             throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
         }
-        packetHandlerFactory = new PacketToTransformingHttpHandlerFactory(serverUri, jsonTransformer,
+        packetHandlerFactory = new PacketToTransformingHttpHandlerFactory(serverUri, jsonTransformer, authTransformer,
                 loadSslContext(serverUri, allowInsecureConnections));
     }
 
@@ -108,27 +119,57 @@ public class TrafficReplayer {
                 arity = 0,
                 description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
+
+
         @Parameter(required = false,
-                names = {"--auth-header-value"},
+                names = {REMOVE_AUTH_HEADER_VALUE_ARG},
+                arity = 0,
+                description = "Remove the authorization header if present and do not replace it with anything.  " +
+                        "(cannot be used with other auth arguments)")
+        boolean removeAuthHeader;
+        @Parameter(required = false,
+                names = {AUTH_HEADER_VALUE_ARG},
                 arity = 1,
-                description = "Value to use for the \"authorization\" header of each request")
+                description = "Static value to use for the \"authorization\" header of each request " +
+                        "(cannot be used with other auth arguments)")
         String authHeaderValue;
         @Parameter(required = false,
-                names = {"-o", "--output"},
-                arity=1,
-                description = "output file to hold the request/response traces for the source and target cluster")
-        String outputFilename;
+                names = {AWS_AUTH_HEADER_USER_AND_SECRET_ARG},
+                arity = 2,
+                description = "<USERNAME> <SECRET_ARN> pair to specify " +
+                        "\"authorization\" header value for each request.  " +
+                        "The USERNAME specifies the plaintext user and the SECRET_ARN specifies the ARN or " +
+                        "Secret name from AWS Secrets Manager to retrieve the password from for the password section" +
+                        "(cannot be used with other auth arguments)")
+        List<String> awsAuthHeaderUserAndSecret;
+        @Parameter(required = false,
+                names = {SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG},
+                arity = 1,
+                description = "Use AWS SigV4 to sign each request with the specified service name and region.  " +
+                        "(e.g. es,us-east-1)  " +
+                        "DefaultCredentialsProvider is used to resolve credentials.  " +
+                        "(cannot be used with other auth arguments)")
+        String useSigV4ServiceAndRegion;
+
+
         @Parameter(required = false,
                 names = {"-i", "--input"},
                 arity=1,
                 description = "input file to read the request/response traces for the source cluster")
         String inputFilename;
         @Parameter(required = false,
+                names = {"-o", "--output"},
+                arity=1,
+                description = "output file to hold the request/response traces for the source and target cluster")
+        String outputFilename;
+
+        @Parameter(required = false,
                 names = {"-t", "--packet-timeout-seconds"},
                 arity = 1,
                 description = "assume that connections were terminated after this many " +
                         "seconds of inactivity observed in the captured stream")
         int observedPacketConnectionTimeout = 30;
+
         @Parameter(required = false,
             names = {"--kafka-traffic-brokers"},
             arity=1,
@@ -185,7 +226,7 @@ public class TrafficReplayer {
             return;
         }
 
-        var tr = new TrafficReplayer(uri, params.authHeaderValue, params.allowInsecureConnections);
+        var tr = new TrafficReplayer(uri, buildAuthTransformerFactory(params), params.allowInsecureConnections);
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
@@ -195,6 +236,60 @@ public class TrafficReplayer {
                     log.info("reached the end of the ingestion output stream");
                 }
             }
+        }
+    }
+
+    /**
+     * Java doesn't have a notion of constexpr like C++ does, so this cannot be used within the
+     * parameters' annotation descriptions, but it's still useful to break the documentation
+     * aspect out from the core logic below.
+     */
+    private static String formatAuthArgFlagsAsString() {
+        return List.of(REMOVE_AUTH_HEADER_VALUE_ARG,
+                        AUTH_HEADER_VALUE_ARG,
+                        AWS_AUTH_HEADER_USER_AND_SECRET_ARG,
+                        SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG).stream()
+                .collect(Collectors.joining(", "));
+    }
+
+    private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
+        if (params.removeAuthHeader &&
+                params.authHeaderValue != null &&
+                params.useSigV4ServiceAndRegion != null &&
+                params.awsAuthHeaderUserAndSecret != null) {
+            throw new RuntimeException("Cannot specify more than one auth option: " +
+                    formatAuthArgFlagsAsString());
+        }
+
+        var authHeaderValue = params.authHeaderValue;
+        if (params.awsAuthHeaderUserAndSecret != null) {
+            if (params.awsAuthHeaderUserAndSecret.size() != 2) {
+                throw new ParameterException(AWS_AUTH_HEADER_USER_AND_SECRET_ARG +
+                        " must specify two arguments, <USERNAME> <SECRET_ARN>");
+            }
+            try (AWSAuthService awsAuthService = new AWSAuthService()) {
+                authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(params.awsAuthHeaderUserAndSecret.get(0),
+                        params.awsAuthHeaderUserAndSecret.get(1));
+            }
+        }
+
+        if (authHeaderValue != null) {
+            return new StaticAuthTransformerFactory(authHeaderValue);
+        } else if (params.useSigV4ServiceAndRegion != null) {
+            var serviceAndRegion = params.useSigV4ServiceAndRegion.split(",");
+            if (serviceAndRegion.length != 2) {
+                throw new RuntimeException("Format for " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG + " must be " +
+                        "'SERVICE_NAME,REGION', such as 'es,us-east-1'");
+            }
+            String serviceName = serviceAndRegion[0];
+            String region = serviceAndRegion[1];
+            DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
+
+            return httpMessage -> new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
+        } else if (params.removeAuthHeader) {
+            return RemovingAuthTransformerFactory.instance;
+        } else {
+            return null; // default is to do nothing to auth headers
         }
     }
 
@@ -213,7 +308,8 @@ public class TrafficReplayer {
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         getRecordedRequestReconstructCompleteHandler(requestFutureMap),
                         getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
-                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap));
+                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap)
+        );
         try {
             runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {
@@ -392,7 +488,7 @@ public class TrafficReplayer {
         }
 
         try {
-            log.info("Source/Shadow Request/Response tuple: " + requestResponseTriple);
+            log.info("Source/Target Request/Response tuple: " + requestResponseTriple);
             tripleWriter.writeJSON(requestResponseTriple);
         } catch (IOException e) {
             log.error("Caught an IOException while writing triples output.");
@@ -409,8 +505,7 @@ public class TrafficReplayer {
     }
 
     private DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse>
-    writeToSocketAndClose(HttpMessageAndTimestamp request, String diagnosticLabel)
-    {
+    writeToSocketAndClose(HttpMessageAndTimestamp request, String diagnosticLabel) {
         try {
             log.debug("Assembled request/response - starting to write to socket");
             var packetHandler = packetHandlerFactory.create(diagnosticLabel);
@@ -431,7 +526,7 @@ public class TrafficReplayer {
 
     public void runReplay(Stream<TrafficStream> trafficChunkStream,
                           CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
-        trafficChunkStream
-                .forEach(ts-> trafficToHttpTransactionAccumulator.accept(ts));
+        trafficChunkStream.forEach(ts-> trafficToHttpTransactionAccumulator.accept(ts));
     }
+
 }

@@ -5,7 +5,7 @@ import {CfnOutput, RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
 import {IKey, Key} from "aws-cdk-lib/aws-kms";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
-import {Secret} from "aws-cdk-lib/aws-secretsmanager";
+import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
 
 
@@ -55,8 +55,9 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
 
-    let adminUserSecret: SecretValue|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
-        Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN).secretValue : undefined
+    let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
+        Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
+
 
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
@@ -67,7 +68,11 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     // Enable demo mode setting
     if (props.enableDemoAdmin) {
       adminUserName = "admin"
-      adminUserSecret = SecretValue.unsafePlainText("Admin123!")
+      adminUserSecret = new Secret(this, "demoUserSecret", {
+        secretName: `demo-user-secret-${props.stage}-${props.env?.region}`,
+        // This is unsafe and strictly for ease of use in a demo mode setup
+        secretStringValue: SecretValue.unsafePlainText("Admin123!")
+      })
     }
     const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
         {enabled: true, availabilityZoneCount: props.availabilityZoneCount} : undefined
@@ -88,7 +93,7 @@ export class OpensearchServiceDomainCdkStack extends Stack {
       fineGrainedAccessControl: {
         masterUserArn: props.fineGrainedManagerUserARN,
         masterUserName: adminUserName,
-        masterUserPassword: adminUserSecret
+        masterUserPassword: adminUserSecret ? adminUserSecret.secretValue : undefined
       },
       nodeToNodeEncryption: props.nodeToNodeEncryptionEnabled,
       encryptionAtRest: {
@@ -116,8 +121,17 @@ export class OpensearchServiceDomainCdkStack extends Stack {
 
     this.domainEndpoint = domain.domainEndpoint
 
+    const exports = [
+      `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`
+    ]
+    if (domain.masterUserPassword && !adminUserSecret) {
+      console.log("A master user was configured without an existing Secrets Manager secret, will not export MIGRATION_DOMAIN_USER_AND_SECRET_ARN for Copilot")
+    }
+    else if (domain.masterUserPassword && adminUserSecret) {
+      exports.push(`export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=${adminUserName} ${adminUserSecret.secretArn}`)
+    }
     new CfnOutput(this, 'CopilotDomainExports', {
-      value: `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`,
+      value: exports.join(";"),
       description: 'Exported Domain resource values created by CDK that are needed by Copilot container deployments',
     });
   }

@@ -1,4 +1,4 @@
-from operations import create_index, check_index, create_document,\
+from operations import create_index, check_index, create_document, \
     delete_document, delete_index, get_document
 from http import HTTPStatus
 from typing import Tuple, Callable

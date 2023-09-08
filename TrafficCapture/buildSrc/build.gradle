@@ -17,3 +17,11 @@ repositories {
 dependencies {
     implementation 'com.bmuschko:gradle-docker-plugin:9.3.1'
 }
+
+tasks.withType(Tar){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.withType(Zip){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

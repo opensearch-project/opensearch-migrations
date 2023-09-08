@@ -1,0 +1,47 @@
+# The manifest for the "capture-proxy-es" service. This service will spin up a Capture Proxy instance
+# and an Elasticsearch with Search Guard instance on a single container. You will also find in this repo these two
+# items split into their own services to give more flexibility in setup. A current limitation of this joined approach
+# is that we are unable to expose two ports (one for the capture proxy and one for elasticsearch) to other services
+# as Copilot seems to have a limitation to only allow exposing the default path "/" to a single port, in our case
+# we will expose the Capture Proxy port. If elasticsearch needs to be accessed directly it would need to be done
+# from this container.
+#
+#
+# Read the full specification for the "Backend Service" type at:
+#  https://aws.github.io/copilot-cli/docs/manifest/backend-service/
+
+# Your service name will be used in naming your resources like log groups, ECS services, etc.
+name: capture-proxy-es
+type: Backend Service
+
+# Allow service-to-service communication with ECS Service Connect
+network:
+  connect: true
+  vpc:
+    security_groups: [ "${MIGRATION_CAPTURE_MSK_SG_ID}" ]
+
+
+# Configuration for your containers and service.
+image:
+  # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/#image-build
+  build: ../TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer/Dockerfile
+  # Port exposed through your container to route traffic to it.
+  port: 9200
+
+command: /bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main  --kafkaConnection ${MIGRATION_KAFKA_BROKER_ENDPOINTS} --enableMSKAuth --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1'
+
+cpu: 1024       # Number of CPU units for the task.
+memory: 4096    # Amount of memory in MiB used by the task.
+count: 1       # Number of tasks that should be running in your service.
+exec: true     # Enable getting a shell to your container (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html).
+
+# Pass environment variables as key value pairs.
+variables:
+  # Set Elasticsearch port to 19200 to allow capture proxy at port 9200
+  http.port: 19200
+
+environments:
+  dev:
+    count: 1               # Number of tasks to run for the "dev" environment.
+    deployment:            # The deployment strategy for the "dev" environment.
+      rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.

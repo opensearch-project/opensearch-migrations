@@ -15,15 +15,12 @@ public class HttpMessageAndTimestamp {
     @Setter
     private Instant lastPacketTimestamp;
 
-    /**
-     * TODO - handle out-of-order inserts by making this a radix map
-     */
-    public final ArrayList<byte[]> packetBytes;
+    public final RawPackets packetBytes;
     ByteArrayOutputStream currentSegmentBytes;
 
     public HttpMessageAndTimestamp(Instant firstPacketTimestamp) {
         this.firstPacketTimestamp = firstPacketTimestamp;
-        this.packetBytes = new ArrayList<>();
+        this.packetBytes = new RawPackets();
     }
 
     public boolean hasInProgressSegment() {

@@ -29,19 +29,36 @@ Otherwise, please follow the manual instructions [here](https://aws.github.io/co
 ### Deploy with an automated script
 
 The following script command can be executed to deploy both the CDK infrastructure and Copilot services for a development environment
-```
+```shell
 ./devDeploy.sh
 ```
-Options:
-```
---skip-bootstrap                Skips installing packages with npm for CDK, bootstrapping CDK, and building the docker images used by Copilot
---skip-copilot-init             Skips Copilot initialization of app, environments, and services
---destroy                       Cleans up all deployed resources from this script (CDK and Copilot)
+Options can be found with:
+```shell
+./devDeploy.sh --help
 ```
 
 Requirements:
 * AWS credentials have been configured
 * CDK and Copilot CLIs have been installed
+
+#### How is an Authorization header set for requests from the Replayer to the target cluster?
+
+See Replayer explanation [here](../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
+
+### How to run multiple Replayer scenarios
+
+The migration solution has support for running multiple Replayer services simultaneously, such that captured traffic from the Capture Proxy (which has been stored on Kafka) can be replayed on multiple different cluster configurations at the same time. These additional independent and distinct Replayer services can either be spun up together initially to replay traffic as it comes in, or added later, in which case they will begin processing captured traffic from the beginning of what is stored in Kafka.
+
+A **prerequisite** to use this functionality is that the migration solution has been deployed with the `devDeploy.sh` script, so that necessary environment values from CDK resources like the VPC, MSK, and target Domain can be retrieved for additional Replayer services
+
+To spin up another Replayer service, a command similar to below can be ran where `id` is a unique label to apply to this Replayer service and `target-uri` is the accessible endpoint of the target cluster to replay traffic to.
+```shell
+./createReplayer.sh --id new-domain-test --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443
+```
+More options can be found with:
+```shell
+./createReplayer.sh --help
+```
 
 ### Deploy commands one at a time
 
@@ -50,16 +67,24 @@ The following sections list out commands line-by-line for deploying this solutio
 #### Importing values from CDK
 The typical use case for this Copilot app is to initially use the `opensearch-service-migration` CDK to deploy the surrounding infrastructure (VPC, OpenSearch Domain, Managed Kafka (MSK)) that Copilot requires, and then deploy the desired Copilot services. Documentation for setting up and deploying these resources can be found in the CDK [README](../cdk/opensearch-service-migration/README.md).
 
-The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses:
+The provided CDK will output export commands once deployed that can be ran on a given deployment machine to meet the required environment variables this Copilot app uses i.e.:
 ```
-export MIGRATION_VPC_ID=vpc-123;
+export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
+export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
 export MIGRATION_COMPARATOR_EFS_SG_ID=sg-123;
+export MIGRATION_REPLAYER_OUTPUT_EFS_ID=fs-124
+export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=sg-124
 export MIGRATION_PUBLIC_SUBNETS=subnet-123,subnet-124;
 export MIGRATION_PRIVATE_SUBNETS=subnet-125,subnet-126;
 export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafka.us-east-1.amazonaws.com:9198,b-2-public.loggingmskcluster.123.46.kafka.us-east-1.amazonaws.com:9198
+```
+Additionally, if not using the deploy script, the following export is needed for the Replayer service:
+```
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --auth-header-user-and-secret $MIGRATION_DOMAIN_USER_AND_SECRET_ARN | nc traffic-comparator 9220"
 ```
 
 #### Setting up existing Copilot infrastructure
@@ -72,6 +97,8 @@ If using temporary environment credentials when initializing an environment:
 * Copilot will prompt you to enter each variable (AWS Access Key ID, AWS Secret Access Key, AWS Session Token). If these variables are already available in your environment, these three prompts can be `enter`'d through and ignored. 
 * When prompted ` Would you like to use the default configuration for a new environment?` select `Yes, use default.` as this will ultimately get ignored for what has been configured in the existing `manifest.yml`
 * The last prompt will ask for the desired deployment region and should be filled out as Copilot will store this internally.
+
+This Copilot app supports deploying the Capture Proxy and Elasticsearch as a single service `capture-proxy-es` (as shown below) or as separate services `capture-proxy` and `elasticsearch`
 
 **Note**: This app also contains `kafka-broker` and `kafka-zookeeper` services which are currently experimental and usage of MSK is preferred. These services do not need to be deployed, and as so are not listed below.
 ```
@@ -86,10 +113,8 @@ copilot env init --name dev
 copilot svc init --name traffic-replayer
 copilot svc init --name traffic-comparator
 copilot svc init --name traffic-comparator-jupyter
-
-copilot svc init --name elasticsearch
-copilot svc init --name capture-proxy
-copilot svc init --name opensearch-benchmark
+copilot svc init --name capture-proxy-es
+copilot svc init --name migration-console
 
 ```
 
@@ -106,28 +131,35 @@ copilot env deploy --name dev
 copilot svc deploy --name traffic-comparator-jupyter --env dev
 copilot svc deploy --name traffic-comparator --env dev
 copilot svc deploy --name traffic-replayer --env dev
-
-copilot svc deploy --name elasticsearch --env dev
-copilot svc deploy --name capture-proxy --env dev
-copilot svc deploy --name opensearch-benchmark --env dev
+copilot svc deploy --name capture-proxy-es --env dev
+copilot svc deploy --name migration-console --env dev
 ```
 
 ### Running Benchmarks on the Deployed Solution
 
-Once the solution is deployed, the easiest way to test the solution is to exec into the benchmark container and run a benchmark test through, as the following steps illustrate
+Once the solution is deployed, the easiest way to test the solution is to exec into the migration-console container and run a benchmark test through, as the following steps illustrate
 
 ```
 // Exec into container
-copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
+copilot svc exec -a migration-copilot -e dev -n migration-console -c "bash"
 
-// Run benchmark workload (i.e. geonames, nyc_taxis, http_logs)
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy:443 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
+// Run opensearch-benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+
+// Option 1: Automated script
+./runTestBenchmarks.sh
+
+// Option 2: Manually execute command
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy-es:9200 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
 ```
 
-After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same benchmark container to confirm
+After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same migration-console container to confirm
 ```
+// Option 1: Automated script
+./catIndices.sh
+
+// Option 2: Manually execute cluster requests
 // Check source cluster
-curl https://capture-proxy:443/_cat/indices?v --insecure -u admin:admin
+curl https://capture-proxy-es:9200/_cat/indices?v --insecure -u admin:admin
 
 // Check target cluster
 curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:Admin123!
@@ -142,7 +174,8 @@ copilot svc exec -a migration-copilot -e dev -n traffic-comparator -c "bash"
 copilot svc exec -a migration-copilot -e dev -n traffic-replayer -c "bash"
 copilot svc exec -a migration-copilot -e dev -n elasticsearch -c "bash"
 copilot svc exec -a migration-copilot -e dev -n capture-proxy -c "bash"
-copilot svc exec -a migration-copilot -e dev -n opensearch-benchmark -c "bash"
+copilot svc exec -a migration-copilot -e dev -n capture-proxy-es -c "bash"
+copilot svc exec -a migration-copilot -e dev -n migration-console -c "bash"
 ```
 
 ### Addons

@@ -22,6 +22,7 @@ export interface migrationStackProps extends StackPropsExt {
     // Future support needed to allow importing an existing MSK cluster
     readonly mskARN?: string,
     readonly mskEnablePublicEndpoints?: boolean
+    readonly mskBrokerNodeCount?: number
 }
 
 
@@ -57,7 +58,7 @@ export class MigrationAssistanceStack extends Stack {
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
             clusterName: 'migration-msk-cluster',
             kafkaVersion: '2.8.1',
-            numberOfBrokerNodes: 2,
+            numberOfBrokerNodes: props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2,
             brokerNodeGroupInfo: {
                 instanceType: 'kafka.m5.large',
                 clientSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}).subnetIds,
@@ -104,7 +105,7 @@ export class MigrationAssistanceStack extends Stack {
 
         const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
             vpc: props.vpc,
-            allowAllOutbound: true,
+            allowAllOutbound: false,
         });
         comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
 
@@ -114,22 +115,16 @@ export class MigrationAssistanceStack extends Stack {
             securityGroup: comparatorSQLiteSG
         });
 
-        // Creates a security group with open access via ssh
-        const oinoSecurityGroup = new SecurityGroup(this, 'orchestratorSecurityGroup', {
+        const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
             vpc: props.vpc,
-            allowAllOutbound: true,
+            allowAllOutbound: false,
         });
-        oinoSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.tcp(22));
+        replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
 
-        // Create EC2 instance for analysis of cluster in VPC
-        const oino = new Instance(this, "orchestratorEC2Instance", {
+        // Create an EFS file system for Traffic Replayer output
+        const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
             vpc: props.vpc,
-            vpcSubnets: { subnetType: SubnetType.PUBLIC },
-            instanceType: InstanceType.of(InstanceClass.T2, InstanceSize.MICRO),
-            machineImage: MachineImage.latestAmazonLinux2(),
-            securityGroup: oinoSecurityGroup,
-            // Manually created for now, to be automated in future
-            //keyName: "es-node-key"
+            securityGroup: replayerOutputSG
         });
 
         let publicSubnetString = props.vpc.publicSubnets.map(_ => _.subnetId).join(",")
@@ -138,13 +133,21 @@ export class MigrationAssistanceStack extends Stack {
             `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
             `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
             `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
-            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`]
+            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`,
+            `export MIGRATION_REPLAYER_OUTPUT_EFS_ID=${replayerOutputEFS.fileSystemId}`,
+            `export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=${replayerOutputSG.securityGroupId}`]
         if (publicSubnetString) exports.push(`export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`)
         if (privateSubnetString) exports.push(`export MIGRATION_PRIVATE_SUBNETS=${privateSubnetString}`)
 
         new CfnOutput(this, 'CopilotMigrationExports', {
             value: exports.join(";"),
             description: 'Exported migration resource values created by CDK that are needed by Copilot container deployments',
+        });
+        // Create export of MSK cluster ARN for Copilot stacks to use
+        new CfnOutput(this, 'migrationMSKClusterARN', {
+            value: mskCluster.attrArn,
+            exportName: `${props.copilotAppName}-${props.copilotEnvName}-msk-cluster-arn`,
+            description: 'Migration MSK Cluster ARN'
         });
 
     }

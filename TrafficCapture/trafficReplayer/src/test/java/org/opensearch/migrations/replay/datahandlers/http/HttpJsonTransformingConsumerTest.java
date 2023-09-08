@@ -5,13 +5,12 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.AggregatedTransformedResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
-import org.opensearch.migrations.transform.CompositeJsonTransformer;
-import org.opensearch.migrations.transform.JoltJsonTransformer;
-import org.opensearch.migrations.transform.JsonTransformer;
+import org.opensearch.migrations.transform.JsonCompositeTransformer;
+import org.opensearch.migrations.transform.JsonJoltTransformer;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
 
@@ -20,8 +19,8 @@ class HttpJsonTransformingConsumerTest {
     public void testPassThroughSinglePacketPost() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null,null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformingHandler = new HttpJsonTransformingConsumer(JoltJsonTransformer.newBuilder().build(),
-                testPacketCapture, "TEST");
+        var transformingHandler = new HttpJsonTransformingConsumer(JsonJoltTransformer.newBuilder().build(),
+                null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -41,10 +40,10 @@ class HttpJsonTransformingConsumerTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null,null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
-                JoltJsonTransformer.newBuilder()
+                JsonJoltTransformer.newBuilder()
                         .addHostSwitchOperation("test.domain")
                         .build(),
-                testPacketCapture, "TEST");
+                null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -66,7 +65,7 @@ class HttpJsonTransformingConsumerTest {
     public void testPartialBodyThrowsAndIsRedriven() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var complexTransformer = new CompositeJsonTransformer(new JsonTransformer() {
+        var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
             public Object transformJson(Object incomingJson) {
                 // just walk everything - that's enough to touch the payload and throw
@@ -81,7 +80,8 @@ class HttpJsonTransformingConsumerTest {
                 }
             }
         });
-        var transformingHandler = new HttpJsonTransformingConsumer(complexTransformer,  testPacketCapture, "TEST");
+        var transformingHandler =
+                new HttpJsonTransformingConsumer(complexTransformer, null, testPacketCapture, "TEST");
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {

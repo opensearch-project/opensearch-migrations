@@ -1,7 +1,6 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -23,14 +22,15 @@ public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpR
         if (shouldBlockPredicate.test(httpRequest)) {
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 if (t != null) {
+                    // This is a spot where we would benefit from having a behavioral policy that different users
+                    // could set as needed. Some users may be fine with just logging a failed offloading of a request
+                    // where other users may want to stop entirely. JIRA here: https://opensearch.atlassian.net/browse/MIGRATIONS-1276
                     log.warn("Got error: " + t.getMessage());
-                    ctx.close();
-                } else {
-                    try {
-                        super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
+                }
+                try {
+                    super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
             });
         } else {

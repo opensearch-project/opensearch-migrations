@@ -29,7 +29,7 @@ import java.util.stream.StreamSupport;
  * 1. Capturing a particular set of Kafka traffic records to a file which can then be repeatedly passed as an input param
  * to the Replayer for testing.
  * 2. Printing records for a topic with a different group id then is used normally to compare
- * 3. Clearing records for a  topic with the same group id
+ * 3. Clearing records for a topic with the same group id
  */
 public class KafkaPrinter {
     private static final Logger log = LoggerFactory.getLogger(KafkaPrinter.class);

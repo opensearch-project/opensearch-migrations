@@ -1,3 +1,5 @@
+import org.opensearch.migrations.common.CommonUtils
+
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -29,7 +31,7 @@ spotbugs {
 }
 
 checkstyle {
-    toolVersion = '10.9.3'
+    toolVersion = '10.12.3'
     configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
     System.setProperty('checkstyle.cache.file', String.format('%s/%s',
             buildDir, 'checkstyle.cachefile'))
@@ -40,18 +42,31 @@ repositories {
 }
 
 dependencies {
+    spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
+
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
     implementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
     implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
-    implementation group: 'org.bouncycastle', name: 'bcprov-jdk15on', version: '1.68'
-    implementation group: 'org.bouncycastle', name: 'bcpkix-jdk15on', version: '1.68'
+    implementation group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: '1.74'
+    implementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.74'
     implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+}
+
+configurations.all {
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
+            def targetVersion = '6.7.0'
+            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
+                details.useVersion targetVersion
+            }
+        }
+    }
 }
 
 tasks.named('test') {
