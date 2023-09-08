@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-         -h|--help)
+    -h|--help)
       usage
       ;;
     -*)
@@ -130,13 +130,13 @@ if [ "$SKIP_BOOTSTRAP" = false ] ; then
   ./gradlew :dockerSolution:buildDockerImages
   cd ../deployment/cdk/opensearch-service-migration
   npm install
-  cdk bootstrap --tags $TAGS
+  cdk bootstrap
 fi
 
 # This command deploys the required infrastructure for the migration solution with CDK that Copilot requires.
 # The options provided to `cdk deploy` here will cause a VPC, Opensearch Domain, and MSK(Kafka) resources to get created in AWS (among other resources)
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
-cdk deploy "*" --c domainName="aos-domain" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
+cdk deploy "*" --tags $TAGS --c domainName="aos-domain" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
 
 # Collect export commands from CDK output, which are needed by Copilot, wrap the commands in double quotes and store them within the "environment" dir
 export_file_path=../../copilot/environments/$COPILOT_DEPLOYMENT_STAGE/envExports.sh
