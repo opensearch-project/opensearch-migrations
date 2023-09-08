@@ -29,7 +29,7 @@ spotbugs {
 }
 
 checkstyle {
-    toolVersion = '10.9.3'
+    toolVersion = '10.12.1'
     configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
     System.setProperty('checkstyle.cache.file', String.format('%s/%s',
             buildDir, 'checkstyle.cachefile'))
