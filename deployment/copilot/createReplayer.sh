@@ -23,7 +23,7 @@ usage() {
   echo "  --delete-id                           [string, default: null] Delete the Replayer directory with the given ID (e.g. traffic-replayer-ID) and remove the Copilot service"
   echo "  --copilot-app-name                    [string, default: migration-copilot] Specify the Copilot application name to use for deployment"
   echo "  --skip-copilot-init                   Skip one-time Copilot initialization of Replayer service"
-  echo "  -t,tags                               Pass AWS tags as key-value pairs. E.g., migrations=0.1,replayer=1"
+  echo "  -t, --tags                            Pass AWS tags as key-value pairs. E.g., migrations=0.1,replayer=1"
   echo "  -r, --region                          [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stack and resources."
   echo "  -s, --stage                           [string, default: dev] Specify the stage name to associate with the deployed resources"
   echo ""
