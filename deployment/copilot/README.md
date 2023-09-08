@@ -3,6 +3,8 @@
 ### Copilot Deployment
 Copilot is a tool for deploying containerized applications on AWS ECS. Official documentation can be found [here](https://aws.github.io/copilot-cli/docs/overview/).
 
+**Notice**: These tools are free to use, but the user is responsible for the cost of underlying infrastructure required to operate the solution. We welcome feedback and contributions to optimize costs.
+
 ### Initial Setup
 
 #### Install Prerequisites
