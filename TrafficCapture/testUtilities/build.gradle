@@ -1,3 +1,5 @@
+import org.opensearch.migrations.common.CommonUtils
+
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -54,6 +56,17 @@ dependencies {
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+}
+
+configurations.all {
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
+            def targetVersion = '6.7.0'
+            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
+                details.useVersion targetVersion
+            }
+        }
+    }
 }
 
 tasks.named('test') {
