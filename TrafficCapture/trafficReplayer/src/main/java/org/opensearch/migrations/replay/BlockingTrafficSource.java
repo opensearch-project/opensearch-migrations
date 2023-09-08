@@ -97,20 +97,10 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
     readNextTrafficStreamChunk() {
         var trafficStreamListFuture =
                 CompletableFuture.supplyAsync(() -> {
-                                    try {
-                                        Thread.sleep((long) (Math.random() * 10));
-                                    } catch (InterruptedException e) {
-                                        throw new RuntimeException(e);
-                                    }
                                     while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
                                         try {
                                             log.info("blocking until signaled to read the next chunk");
                                             readGate.acquire();
-                                            try {
-                                                Thread.sleep((long) (Math.random() * 10));
-                                            } catch (InterruptedException e) {
-                                                throw new RuntimeException(e);
-                                            }
                                         } catch (InterruptedException e) {
                                             log.atWarn().setCause(e)
                                                     .log("Interrupted while waiting to read more data");
@@ -123,11 +113,6 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
         return trafficStreamListFuture.whenComplete((v,t)->{
             if (t != null) {
                 return;
-            }
-            try {
-                Thread.sleep((long)(Math.random()*10));
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
             }
             var maxLocallyObserved = v.stream().flatMap(ts->ts.getSubStreamList().stream())
                     .map(tso->tso.getTs())
