@@ -11,6 +11,7 @@ repositories {
 dependencies {
     api 'io.netty:netty-buffer:4.1.89.Final'
     implementation project(':captureOffloader')
+    implementation project(':coreUtilities')
     implementation 'org.projectlombok:lombok:1.18.26'
     implementation 'com.google.protobuf:protobuf-java:3.22.2'
     implementation 'org.apache.kafka:kafka-clients:3.5.1'

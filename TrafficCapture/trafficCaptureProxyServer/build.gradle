@@ -24,6 +24,7 @@ dependencies {
     implementation project(':captureOffloader')
     implementation project(':nettyWireLogging')
     implementation project(':captureKafkaOffloader')
+    implementation project(':coreUtilities')
 
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.94.Final'
     implementation 'org.opensearch:opensearch-common:2.6.0'
