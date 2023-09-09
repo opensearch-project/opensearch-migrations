@@ -5,6 +5,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.log4j.Log4j2;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
@@ -15,9 +16,9 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
     private boolean doneReadingRequest; // later, when connections are reused, switch this to a counter?
     Consumer<AggregatedRawResponse> responseCallback;
+    private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHttpWatcherHandler");
 
     public BacksideHttpWatcherHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder) {
-
         this.aggregatedRawResponseBuilder = aggregatedRawResponseBuilder;
         doneReadingRequest = false;
     }
@@ -26,6 +27,10 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse msg) throws Exception {
         doneReadingRequest = true;
         triggerResponseCallbackAndRemoveCallback();
+        metricsLogger.atSuccess()
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .addKeyValue("httpStatus", msg.status().toString())
+                .setMessage("Full response received").log();
         super.channelReadComplete(ctx);
     }
 
@@ -38,6 +43,9 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         aggregatedRawResponseBuilder.addErrorCause(cause);
+        metricsLogger.atError(cause)
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .setMessage("Failed to receive full response").log();
         triggerResponseCallbackAndRemoveCallback();
         super.exceptionCaught(ctx, cause);
     }

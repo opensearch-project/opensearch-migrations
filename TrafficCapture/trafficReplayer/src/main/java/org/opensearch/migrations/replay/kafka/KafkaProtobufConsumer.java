@@ -7,6 +7,7 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.ITrafficCaptureSource;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -32,6 +33,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
     private final String topic;
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final AtomicInteger trafficStreamsRead;
+    private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
 
 
     public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic) {
@@ -104,9 +106,17 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     TrafficStream ts = TrafficStream.parseFrom(record.value());
                     // Ensure we increment trafficStreamsRead even at a higher log level
                     log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+                    metricsLogger.atSuccess()
+                            .addKeyValue("connectionId", ts.getConnectionId())
+                            .addKeyValue("topic-name", this.topic)
+                            .addKeyValue("size", ts.getSerializedSize())
+                            .setMessage("Parsed traffic stream from Kafka").log();
                     return ts;
                 } catch (InvalidProtocolBufferException e) {
                     RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
+                    metricsLogger.atError(recordError)
+                            .addKeyValue("topic-name", this.topic)
+                            .setMessage("Failed to parse traffic stream from Kafka.").log();
                     if (recordError != null) {
                         throw recordError;
                     }

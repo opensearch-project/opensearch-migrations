@@ -45,6 +45,7 @@ dependencies {
     def resilience4jVersion = "1.7.0";
 
     implementation project(':captureProtobufs')
+    implementation project(':coreUtilities')
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'

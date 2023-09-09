@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.Utils;
@@ -44,6 +45,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
     private final RequestPipelineOrchestrator pipelineOrchestrator;
     private final EmbeddedChannel channel;
+    private static final MetricsLogger metricsLogger = new MetricsLogger("HttpJsonTransformingConsumer");
+    private String diagnosticLabel;
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
      * are used to chop results up on the way back out.
@@ -67,6 +70,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         pipelineOrchestrator = new RequestPipelineOrchestrator(chunkSizes, transformedPacketReceiver,
                 authTransformerFactory, diagnosticLabel);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
+        this.diagnosticLabel = diagnosticLabel;
     }
 
     private NettySendByteBufsToPacketHandlerHandler<R> getOffloadingHandler() {
@@ -128,9 +132,17 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                         if (t instanceof NoContentException) {
                             return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                         } else {
+                            metricsLogger.atError(t)
+                                    .addKeyValue("diagnosticLabel", diagnosticLabel)
+                                    .addKeyValue("channelId", channel.id().asLongText())
+                                    .setMessage("Request failed to be transformed").log();
                             throw new CompletionException(t);
                         }
                     } else {
+                        metricsLogger.atSuccess()
+                                .addKeyValue("diagnosticLabel", diagnosticLabel)
+                                .addKeyValue("channelId", channel.id().asLongText())
+                                .setMessage("Request was transformed").log();
                         return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                     }
                 }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
@@ -158,6 +170,10 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         DiagnosticTrackableCompletableFuture<String,R> finalizedFuture =
                 consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
+        metricsLogger.atSuccess()
+                .addKeyValue("diagnosticLabel", diagnosticLabel)
+                .addKeyValue("channelId", channel.id().asLongText())
+                .setMessage("Request was redriven without transformation").log();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?
                                 new TransformedOutputAndResult(r, HttpRequestTransformationStatus.SKIPPED, null) :
                                 new TransformedOutputAndResult(r, HttpRequestTransformationStatus.ERROR, reason)),

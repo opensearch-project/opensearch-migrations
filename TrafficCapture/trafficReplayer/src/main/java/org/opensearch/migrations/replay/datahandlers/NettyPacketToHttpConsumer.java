@@ -18,8 +18,8 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
-import lombok.extern.log4j.Log4j2;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
@@ -38,6 +38,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * Set this to Optional.empty() to disable intra-handler logging.
      */
     private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+    private final static MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     /**
@@ -198,6 +199,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     writePacketAndUpdateFuture(ByteBuf packetData) {
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
+        final int readableBytes = packetData.readableBytes();
         channel.writeAndFlush(packetData)
                 .addListener((ChannelFutureListener) future -> {
                     Throwable cause = null;
@@ -220,12 +222,21 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     } else {
                         log.atInfo().setMessage(()->"Signaling previously returned CompletableFuture packet write had an exception : "
                                 + packetData + " hash=" + System.identityHashCode(packetData)).log();
+                        metricsLogger.atError(cause)
+                                .addKeyValue("channelId", channel.id().asLongText())
+                                .addKeyValue("diagnosticLabel", diagnosticLabel)
+                                .setMessage("Failed to write request packet").log();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
                     }
                 });
         log.atTrace().setMessage(()->"Writing packet data=" + packetData +
                 ".  Created future for writing data="+completableFuture).log();
+        metricsLogger.atSuccess()
+                .addKeyValue("channelId", channel.id().asLongText())
+                .addKeyValue("diagnosticLabel", diagnosticLabel)
+                .addKeyValue("size", readableBytes)
+                .setMessage("Request packet written").log();
         return completableFuture;
     }
 

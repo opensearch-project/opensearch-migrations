@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -56,6 +57,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final AtomicInteger exceptionConnectionCounter = new AtomicInteger();
     private final AtomicInteger connectionsExpiredCounter = new AtomicInteger();
     private final AtomicInteger requestsTerminatedUponAccumulatorCloseCounter = new AtomicInteger();
+
+    private final static MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
                                                        BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
@@ -239,6 +242,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private boolean handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.NOTHING_SENT : "state == " + accumulation.state;
         var requestPacketBytes = accumulation.rrPair.requestData;
+        metricsLogger.atSuccess()
+                .addKeyValue("diagnosticLabel", accumulation.getRequestId())
+                .setMessage("Full captured request was accumulated").log();
         if (requestPacketBytes != null) {
             requestHandler.accept(accumulation.getRequestId(), requestPacketBytes);
             accumulation.state = Accumulation.State.REQUEST_SENT;
@@ -253,6 +259,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     private void handleEndOfResponse(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.REQUEST_SENT;
+        metricsLogger.atSuccess()
+                .addKeyValue("diagnosticLabel", accumulation.getRequestId())
+                .setMessage("Full captured response was accumulated").log();
         fullDataHandler.accept(accumulation.rrPair);
         accumulation.resetForNextRequest();
     }
