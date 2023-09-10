@@ -132,8 +132,8 @@ public class ReplayEngine {
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
         metricsLogger.atSuccess()
-                .addKeyValue("requestKey", requestKey.toString())
-                .addKeyValue("delayFromOriginalToScheduledStart", Duration.between(originalStart, start).toString())
+                .addKeyValue("requestId", requestKey.toString())
+                .addKeyValue("delayFromOriginalToScheduledStartInMs", Duration.between(originalStart, start).toMillis())
                 .addKeyValue("scheduledStartTime", start.toString())
                 .setMessage("Request scheduled to be sent").log();
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);

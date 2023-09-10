@@ -33,7 +33,7 @@ public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
         ctx.fireChannelRead(msg);
         metricsLogger.atSuccess()
                 .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .addKeyValue("size", output.length)
+                .addKeyValue("sizeInBytes", output.length)
                 .setMessage("Component of response received").log();
     }
 

@@ -75,7 +75,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     metricsLogger.atSuccess()
                             .addKeyValue("channelId", connectionId)
                             .addKeyValue("topic-name", topicNameForTraffic)
-                            .addKeyValue("size", record.value().length)
+                            .addKeyValue("sizeInBytes", record.value().length)
                             .addKeyValue("diagnosticId", recordId)
                             .setMessage("Sent message to Kafka").log();
                     // Note that ordering is not guaranteed to be preserved here

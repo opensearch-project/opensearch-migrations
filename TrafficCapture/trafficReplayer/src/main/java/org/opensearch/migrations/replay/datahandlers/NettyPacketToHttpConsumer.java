@@ -224,7 +224,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                                 + packetData + " hash=" + System.identityHashCode(packetData)).log();
                         metricsLogger.atError(cause)
                                 .addKeyValue("channelId", channel.id().asLongText())
-                                .addKeyValue("diagnosticLabel", diagnosticLabel)
+                                .addKeyValue("requestId", diagnosticLabel)
                                 .setMessage("Failed to write request packet").log();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
@@ -234,9 +234,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 ".  Created future for writing data="+completableFuture).log();
         metricsLogger.atSuccess()
                 .addKeyValue("channelId", channel.id().asLongText())
-                .addKeyValue("diagnosticLabel", diagnosticLabel)
-                .addKeyValue("size", readableBytes)
-                .setMessage("Request packet written").log();
+                .addKeyValue("requestId", diagnosticLabel)
+                .addKeyValue("sizeInBytes", readableBytes)
+                .setMessage("Request packet written to target").log();
         return completableFuture;
     }
 

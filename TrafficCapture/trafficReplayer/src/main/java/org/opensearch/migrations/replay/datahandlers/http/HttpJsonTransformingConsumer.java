@@ -133,14 +133,14 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                             return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                         } else {
                             metricsLogger.atError(t)
-                                    .addKeyValue("diagnosticLabel", diagnosticLabel)
+                                    .addKeyValue("requestId", diagnosticLabel)
                                     .addKeyValue("channelId", channel.id().asLongText())
                                     .setMessage("Request failed to be transformed").log();
                             throw new CompletionException(t);
                         }
                     } else {
                         metricsLogger.atSuccess()
-                                .addKeyValue("diagnosticLabel", diagnosticLabel)
+                                .addKeyValue("requestId", diagnosticLabel)
                                 .addKeyValue("channelId", channel.id().asLongText())
                                 .setMessage("Request was transformed").log();
                         return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
@@ -171,7 +171,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
         metricsLogger.atSuccess()
-                .addKeyValue("diagnosticLabel", diagnosticLabel)
+                .addKeyValue("requestId", diagnosticLabel)
                 .addKeyValue("channelId", channel.id().asLongText())
                 .setMessage("Request was redriven without transformation").log();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?

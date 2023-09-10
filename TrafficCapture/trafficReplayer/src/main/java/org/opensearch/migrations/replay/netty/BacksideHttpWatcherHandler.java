@@ -27,6 +27,7 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse msg) throws Exception {
         doneReadingRequest = true;
         triggerResponseCallbackAndRemoveCallback();
+//      TODO: Add requestId to this metrics log entry
         metricsLogger.atSuccess()
                 .addKeyValue("channelId", ctx.channel().id().asLongText())
                 .addKeyValue("httpStatus", msg.status().toString())
@@ -43,6 +44,7 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         aggregatedRawResponseBuilder.addErrorCause(cause);
+//      TODO: Add requestId to this metrics log entry
         metricsLogger.atError(cause)
                 .addKeyValue("channelId", ctx.channel().id().asLongText())
                 .setMessage("Failed to receive full response").log();

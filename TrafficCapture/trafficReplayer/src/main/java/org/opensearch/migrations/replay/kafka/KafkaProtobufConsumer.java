@@ -109,7 +109,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     metricsLogger.atSuccess()
                             .addKeyValue("connectionId", ts.getConnectionId())
                             .addKeyValue("topic-name", this.topic)
-                            .addKeyValue("size", ts.getSerializedSize())
+                            .addKeyValue("sizeInBytes", ts.getSerializedSize())
                             .setMessage("Parsed traffic stream from Kafka").log();
                     return ts;
                 } catch (InvalidProtocolBufferException e) {
