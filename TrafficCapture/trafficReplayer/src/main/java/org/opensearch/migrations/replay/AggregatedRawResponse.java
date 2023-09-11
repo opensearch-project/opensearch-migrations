@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -81,7 +82,7 @@ public class AggregatedRawResponse implements Serializable {
         return this.responseDuration;
     }
     Stream<AbstractMap.SimpleEntry<Instant, byte[]>> getReceiptTimeAndResponsePackets() {
-        return this.responsePackets.stream();
+        return Optional.ofNullable(this.responsePackets).map(rp->rp.stream()).orElse(Stream.empty());
     }
 
     @Override

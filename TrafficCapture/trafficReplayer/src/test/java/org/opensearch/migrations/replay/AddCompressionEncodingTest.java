@@ -32,7 +32,7 @@ public class AddCompressionEncodingTest {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 17, null,
-                null, HttpRequestTransformationStatus.COMPLETED);
+                null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var compressingTransformer = new HttpJsonTransformingConsumer(
                 JsonJoltTransformer.newBuilder()

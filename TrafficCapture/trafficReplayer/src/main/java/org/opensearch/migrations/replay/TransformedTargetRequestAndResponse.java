@@ -21,8 +21,9 @@ public class TransformedTargetRequestAndResponse extends AggregatedRawResponse {
     public TransformedTargetRequestAndResponse(TransformedPackets requestPackets, int responseSizeInBytes,
                                                Duration responseDuration,
                                                ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets,
-                                               HttpRequestTransformationStatus transformationStatus) {
-        super(responseSizeInBytes, responseDuration, responsePackets, null);
+                                               HttpRequestTransformationStatus transformationStatus,
+                                               Throwable exception) {
+        super(responseSizeInBytes, responseDuration, responsePackets, exception);
         this.requestPackets = requestPackets;
         this.transformationStatus = transformationStatus;
     }
@@ -36,8 +37,10 @@ public class TransformedTargetRequestAndResponse extends AggregatedRawResponse {
     }
 
     public TransformedTargetRequestAndResponse(TransformedPackets requestPackets,
-                                               AggregatedRawResponse o, HttpRequestTransformationStatus status) {
-        this(requestPackets, o.responseSizeInBytes, o.responseDuration, o.responsePackets, status);
+                                               AggregatedRawResponse o,
+                                               HttpRequestTransformationStatus status,
+                                               Throwable exception) {
+        this(requestPackets, o.responseSizeInBytes, o.responseDuration, o.responsePackets, status, exception);
     }
 
     @Override
