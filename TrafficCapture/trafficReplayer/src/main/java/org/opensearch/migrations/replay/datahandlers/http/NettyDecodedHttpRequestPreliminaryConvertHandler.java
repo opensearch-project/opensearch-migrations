@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -24,16 +25,19 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
+    private UniqueRequestKey requestKeyForMetricsLogging;
     final static MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator requestPipelineOrchestrator,
-                                                            String diagnosticLabel) {
+                                                            String diagnosticLabel,
+                                                            UniqueRequestKey requestKeyForMetricsLogging) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;
         this.diagnosticLabel = "[" + diagnosticLabel + "] ";
+        this.requestKeyForMetricsLogging = requestKeyForMetricsLogging;
     }
 
     @Override
@@ -49,8 +53,8 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
                     .append(request.protocolVersion().text())
                     .toString());
             metricsLogger.atSuccess()
-                    .addKeyValue("requestId", diagnosticLabel) // TODO: this should be a requestKey, not diagnosticLabel
-                    .addKeyValue("connectionId", 0) // TODO
+                    .addKeyValue("requestId", requestKeyForMetricsLogging)
+                    .addKeyValue("connectionId", requestKeyForMetricsLogging.connectionId)
                     .addKeyValue("httpMethod", request.method())
                     .addKeyValue("httpEndpoint", request.uri())
                     .setMessage("Captured request parsed to HTTP").log();

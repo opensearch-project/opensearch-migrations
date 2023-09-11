@@ -21,6 +21,7 @@ import io.netty.handler.ssl.SslHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -50,14 +51,17 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
     final String diagnosticLabel;
+    private UniqueRequestKey uniqueRequestKeyForMetricsLogging;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
-                                     String diagnosticLabel) {
-        this(createClientConnection(eventLoopGroup, sslContext, serverUri, diagnosticLabel), diagnosticLabel);
+                                     String diagnosticLabel, UniqueRequestKey uniqueRequestKeyForMetricsLogging) {
+        this(createClientConnection(eventLoopGroup, sslContext, serverUri, diagnosticLabel),
+                diagnosticLabel, uniqueRequestKeyForMetricsLogging);
     }
 
-    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, String diagnosticLabel) {
+    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, String diagnosticLabel, UniqueRequestKey uniqueRequestKeyForMetricsLogging) {
         this.diagnosticLabel = "[" + diagnosticLabel + "] ";
+        this.uniqueRequestKeyForMetricsLogging = uniqueRequestKeyForMetricsLogging;
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
@@ -224,8 +228,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                                 + packetData + " hash=" + System.identityHashCode(packetData)).log();
                         metricsLogger.atError(cause)
                                 .addKeyValue("channelId", channel.id().asLongText())
-                                .addKeyValue("requestId", diagnosticLabel) // TODO: this should be a requestKey, not diagnosticLabel
-                                .addKeyValue("connectionId", 0) // TODO
+                                .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
+                                .addKeyValue("connectionId", uniqueRequestKeyForMetricsLogging.connectionId)
                                 .setMessage("Failed to write component of request").log();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
@@ -235,8 +239,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 ".  Created future for writing data="+completableFuture).log();
         metricsLogger.atSuccess()
                 .addKeyValue("channelId", channel.id().asLongText())
-                .addKeyValue("requestId", diagnosticLabel) // TODO: this should be a requestKey, not diagnosticLabel
-                .addKeyValue("connectionId", 0) // TODO
+                .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
+                .addKeyValue("connectionId", uniqueRequestKeyForMetricsLogging.connectionId)
                 .addKeyValue("sizeInBytes", readableBytes)
                 .setMessage("Component of request written to target").log();
         return completableFuture;
