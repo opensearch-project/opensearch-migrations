@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
@@ -18,7 +19,8 @@ public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpR
     }
 
     @Override
-    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
+    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest)
+            throws Exception {
         if (shouldBlockPredicate.test(httpRequest)) {
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 if (t != null) {
@@ -26,11 +28,13 @@ public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpR
                     // could set as needed. Some users may be fine with just logging a failed offloading of a request
                     // where other users may want to stop entirely. JIRA here: https://opensearch.atlassian.net/browse/MIGRATIONS-1276
                     log.warn("Got error: " + t.getMessage());
-                }
-                try {
-                    super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    ReferenceCountUtil.release(msg);
+                } else {
+                    try {
+                        super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             });
         } else {

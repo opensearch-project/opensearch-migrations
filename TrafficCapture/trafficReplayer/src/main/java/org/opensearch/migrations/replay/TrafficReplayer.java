@@ -8,6 +8,8 @@ import io.netty.buffer.Unpooled;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.util.ResourceLeakDetector;
+import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
@@ -228,6 +230,7 @@ public class TrafficReplayer {
             return null;
         }
     }
+
 
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
         var params = parseArgs(args);
