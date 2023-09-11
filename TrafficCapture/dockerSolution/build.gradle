@@ -77,7 +77,7 @@ trafficComparatorServices.forEach {projectName, dockerImageName ->
         dependsOn "copyArtifact_${projectName}"
         destFile = project.file("${dockerBuildDir}/Dockerfile")
         from 'python:3.10.10'
-        runCommand("apt-get update && apt-get install -y netcat lsof jq")
+        runCommand("apt-get update && apt-get install -y netcat lsof")
         copyFile("setup.py", "/setup.py")
         copyFile(".", "/containerTC/")
         runCommand("pip3 install --editable \".[data]\"")
