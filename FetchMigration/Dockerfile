@@ -1,4 +1,6 @@
-FROM opensearch-data-prepper:2.4.0-SNAPSHOT
+# TODO Move away from snapshot version after OS source is released
+# https://github.com/opensearch-project/data-prepper/issues/1985
+FROM opensearch-data-prepper:2.5.0-SNAPSHOT
 COPY python/requirements.txt .
 
 # Install dependencies to local user directory

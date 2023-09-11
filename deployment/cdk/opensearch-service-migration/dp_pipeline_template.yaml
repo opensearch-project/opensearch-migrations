@@ -11,8 +11,8 @@ historical-data-migration:
   - opensearch:
       bulk_size: 10
       hosts:
-      - <TARGET_CLUSTER_HOST>
+      - https://<TARGET_CLUSTER_HOST>
       index: ${getMetadata("opensearch-index")}
-      document_id_field: getMetadata("opensearch-document_id")
-      username: admin
-      password: Admin123!
+      document_id: ${getMetadata("opensearch-document_id")}
+      username: user
+      password: pass
