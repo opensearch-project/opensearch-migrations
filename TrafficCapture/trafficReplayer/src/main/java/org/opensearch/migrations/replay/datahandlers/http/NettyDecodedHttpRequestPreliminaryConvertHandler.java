@@ -49,7 +49,8 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
                     .append(request.protocolVersion().text())
                     .toString());
             metricsLogger.atSuccess()
-                    .addKeyValue("requestId", diagnosticLabel)
+                    .addKeyValue("requestId", diagnosticLabel) // TODO: this should be a requestKey, not diagnosticLabel
+                    .addKeyValue("connectionId", 0) // TODO
                     .addKeyValue("httpMethod", request.method())
                     .addKeyValue("httpEndpoint", request.uri())
                     .setMessage("Captured request parsed to HTTP").log();

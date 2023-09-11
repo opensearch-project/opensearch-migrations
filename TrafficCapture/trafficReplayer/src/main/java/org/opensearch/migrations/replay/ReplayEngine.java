@@ -133,6 +133,7 @@ public class ReplayEngine {
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", requestKey.toString())
+                .addKeyValue("connectionId", requestKey.connectionId)
                 .addKeyValue("delayFromOriginalToScheduledStartInMs", Duration.between(originalStart, start).toMillis())
                 .addKeyValue("scheduledStartTime", start.toString())
                 .setMessage("Request scheduled to be sent").log();

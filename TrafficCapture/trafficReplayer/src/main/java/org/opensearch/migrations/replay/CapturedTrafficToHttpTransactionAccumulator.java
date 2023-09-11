@@ -244,6 +244,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var requestPacketBytes = accumulation.rrPair.requestData;
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", accumulation.getRequestId())
+                .addKeyValue("connectionId", accumulation.getRequestId().connectionId)
                 .setMessage("Full captured source request was accumulated").log();
         if (requestPacketBytes != null) {
             requestHandler.accept(accumulation.getRequestId(), requestPacketBytes);
@@ -261,6 +262,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         assert accumulation.state == Accumulation.State.REQUEST_SENT;
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", accumulation.getRequestId())
+                .addKeyValue("connectionId", accumulation.getRequestId().connectionId)
                 .setMessage("Full captured source response was accumulated").log();
         fullDataHandler.accept(accumulation.rrPair);
         accumulation.resetForNextRequest();

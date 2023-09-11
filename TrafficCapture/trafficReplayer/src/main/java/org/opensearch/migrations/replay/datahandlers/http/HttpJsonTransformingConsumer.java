@@ -133,14 +133,16 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                             return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                         } else {
                             metricsLogger.atError(t)
-                                    .addKeyValue("requestId", diagnosticLabel)
+                                    .addKeyValue("requestId", diagnosticLabel) // TODO: this should be a requestKey, not diagnosticLabel
+                                    .addKeyValue("connectionId", 0) // TODO
                                     .addKeyValue("channelId", channel.id().asLongText())
                                     .setMessage("Request failed to be transformed").log();
                             throw new CompletionException(t);
                         }
                     } else {
                         metricsLogger.atSuccess()
-                                .addKeyValue("requestId", diagnosticLabel)
+                                .addKeyValue("requestId", diagnosticLabel) // TODO: this should be a requestKey, not diagnosticLabel
+                                .addKeyValue("connectionId", 0) // TODO
                                 .addKeyValue("channelId", channel.id().asLongText())
                                 .setMessage("Request was transformed").log();
                         return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
@@ -170,8 +172,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         DiagnosticTrackableCompletableFuture<String,R> finalizedFuture =
                 consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
-        metricsLogger.atSuccess()
-                .addKeyValue("requestId", diagnosticLabel)
+        metricsLogger.atError(reason)
+                .addKeyValue("requestId", diagnosticLabel) // TODO: this should be a requestKey, not diagnosticLabel
+                .addKeyValue("connectionId", 0) // TODO
                 .addKeyValue("channelId", channel.id().asLongText())
                 .setMessage("Request was redriven without transformation").log();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?

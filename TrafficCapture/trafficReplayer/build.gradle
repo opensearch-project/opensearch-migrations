@@ -23,8 +23,6 @@ plugins {
     id "io.freefair.lombok" version "8.0.1"
 }
 
-import org.opensearch.migrations.common.CommonUtils
-
 //spotbugs {
 //    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
 //}

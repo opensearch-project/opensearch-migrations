@@ -50,4 +50,8 @@ class MetricsLogger {
     public LoggingEventBuilder atError() {
         return logger.makeLoggingEventBuilder(Level.ERROR);
     }
+
+    public LoggingEventBuilder atTrace() {
+        return logger.makeLoggingEventBuilder(Level.TRACE);
+    }
 }
