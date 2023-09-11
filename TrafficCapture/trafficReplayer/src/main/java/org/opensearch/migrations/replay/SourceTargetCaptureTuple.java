@@ -1,10 +1,13 @@
 package org.opensearch.migrations.replay;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.HTTP;
 import org.json.JSONObject;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -15,20 +18,21 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.stream.Collectors;
 
 @Slf4j
-public class SourceTargetCaptureTuple {
+public class SourceTargetCaptureTuple implements AutoCloseable {
     private RequestResponsePacketPair sourcePair;
-    private final List<byte[]> targetRequestData;
+    private final TransformedPackets targetRequestData;
     private final List<byte[]> targetResponseData;
-    private final AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus;
+    private final HttpRequestTransformationStatus transformationStatus;
     private final Throwable errorCause;
     Duration targetResponseDuration;
 
     public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
-                                    List<byte[]> targetRequestData,
+                                    TransformedPackets targetRequestData,
                                     List<byte[]> targetResponseData,
-                                    AggregatedTransformedResponse.HttpRequestTransformationStatus transformationStatus,
+                                    HttpRequestTransformationStatus transformationStatus,
                                     Throwable errorCause,
                                     Duration targetResponseDuration) {
         this.sourcePair = sourcePair;
@@ -37,6 +41,11 @@ public class SourceTargetCaptureTuple {
         this.transformationStatus = transformationStatus;
         this.errorCause = errorCause;
         this.targetResponseDuration = targetResponseDuration;
+    }
+
+    @Override
+    public void close() {
+        targetRequestData.close();
     }
 
     public static class TupleToFileWriter {
@@ -69,7 +78,7 @@ public class SourceTargetCaptureTuple {
             return message;
         }
 
-        private JSONObject jsonFromHttpData(List<byte[]> data) {
+        private JSONObject jsonFromHttpData(@NonNull List<byte[]> data) {
             try {
                 return jsonFromHttpDataUnsafe(data);
             } catch (Exception e) {
@@ -79,23 +88,28 @@ public class SourceTargetCaptureTuple {
             }
         }
 
-        private JSONObject jsonFromHttpData(List<byte[]> data, Duration latency) throws IOException {
+        private JSONObject jsonFromHttpData(@NonNull List<byte[]> data, Duration latency) {
             JSONObject message = jsonFromHttpData(data);
             message.put("response_time_ms", latency.toMillis());
             return message;
         }
 
         private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
+            // TODO: Use Netty to parse the packets as HTTP rather than json.org (we can also remove it as a dependency)
             JSONObject meta = new JSONObject();
             meta.put("sourceRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
-            meta.put("targetRequest", jsonFromHttpData(triple.targetRequestData));
+            meta.put("targetRequest", jsonFromHttpData(triple.targetRequestData.asByteArrayStream()
+                    .collect(Collectors.toList())));
             //log.warn("TODO: These durations are not measuring the same values!");
-            meta.put("sourceResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
-                Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(), triple.sourcePair.responseData.getLastPacketTimestamp())));
-            meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData,
-                    triple.targetResponseDuration));
+            if (triple.sourcePair.responseData != null) {
+                meta.put("sourceResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
+                        Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(),
+                                triple.sourcePair.responseData.getLastPacketTimestamp())));
+            }
+            if (triple.targetResponseData != null && !triple.targetResponseData.isEmpty()) {
+                meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData, triple.targetResponseDuration));
+            }
             meta.put("connectionId", triple.sourcePair.connectionId);
-
             return meta;
         }
 
@@ -154,15 +168,19 @@ public class SourceTargetCaptureTuple {
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
-        sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
-        sb.append("\n sourcePair=").append(sourcePair);
-        sb.append("\n targetResponseDuration=").append(targetResponseDuration);
-        sb.append("\n targetRequestData=").append(Utils.packetsToStringTruncated(targetRequestData));
-        sb.append("\n targetResponseData=").append(Utils.packetsToStringTruncated(targetResponseData));
-        sb.append("\n transformStatus=").append(transformationStatus);
-        sb.append("\n errorCause=").append(errorCause==null ? "null" : errorCause.toString());
-        sb.append('}');
-        return sb.toString();
+        return Utils.setPrintStyleFor(Utils.PacketPrintFormat.TRUNCATED, () -> {
+            final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
+            sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
+            sb.append("\n sourcePair=").append(sourcePair);
+            sb.append("\n targetResponseDuration=").append(targetResponseDuration);
+            sb.append("\n targetRequestData=")
+                    .append(Utils.httpPacketBufsToString(Utils.HttpMessageType.Request, targetRequestData.stream()));
+            sb.append("\n targetResponseData=")
+                    .append(Utils.httpPacketBytesToString(Utils.HttpMessageType.Response, targetResponseData));
+            sb.append("\n transformStatus=").append(transformationStatus);
+            sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
+            sb.append('}');
+            return sb.toString();
+        });
     }
 }

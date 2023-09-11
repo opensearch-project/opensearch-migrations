@@ -4,24 +4,21 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
-import io.netty.handler.codec.http.DefaultHttpResponse;
-import io.netty.handler.codec.http.HttpMessage;
-import io.netty.handler.codec.http.HttpResponseDecoder;
-import io.netty.handler.codec.http.HttpResponseStatus;
-import io.netty.handler.codec.http.HttpVersion;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
 import java.io.IOException;
 import java.net.SocketAddress;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
 public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
 
     private final IChannelConnectionCaptureSerializer trafficOffloader;
+    private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpResponseHandler");
+
 
     public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
@@ -64,6 +61,9 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         trafficOffloader.addWriteEvent(Instant.now(), (ByteBuf) msg);
+        metricsLogger.atSuccess()
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .setMessage("Component of response received").log();
         super.write(ctx, msg, promise);
     }
 

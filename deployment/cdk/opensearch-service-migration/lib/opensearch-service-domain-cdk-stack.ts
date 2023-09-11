@@ -69,7 +69,7 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     if (props.enableDemoAdmin) {
       adminUserName = "admin"
       adminUserSecret = new Secret(this, "demoUserSecret", {
-        secretName: "demo-user-secret",
+        secretName: `demo-user-secret-${props.stage}-${props.env?.region}`,
         // This is unsafe and strictly for ease of use in a demo mode setup
         secretStringValue: SecretValue.unsafePlainText("Admin123!")
       })

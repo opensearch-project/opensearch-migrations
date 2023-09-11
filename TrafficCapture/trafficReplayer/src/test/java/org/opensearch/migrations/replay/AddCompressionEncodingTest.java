@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -29,8 +30,8 @@ public class AddCompressionEncodingTest {
     public void addingCompressionRequestHeaderCompressesPayload() throws ExecutionException, InterruptedException, IOException {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null, null,
-                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 17, null,
+                null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var compressingTransformer = new HttpJsonTransformingConsumer(
                 JsonJoltTransformer.newBuilder()

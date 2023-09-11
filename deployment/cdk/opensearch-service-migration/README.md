@@ -106,6 +106,7 @@ Additional context on some of these options, can also be found in the Domain con
 | domainRemovalPolicy                             | false    | string       | "RETAIN"                                                                                                                                                                                                                       | Policy to apply when the domain is removed from the CloudFormation stack                                                                                                                                                                                     |
 | mskARN (Not currently available)                | false    | string       | `"arn:aws:kafka:us-east-2:123456789123:cluster/msk-cluster-test/81fbae45-5d25-44bb-aff0-108e71cc079b-7"`                                                                                                                       | Supply an existing MSK cluster ARN to use. **NOTE** As MSK is using an L1 construct this is not currently available for use                                                                                                                                  |
 | mskEnablePublicEndpoints                        | false    | boolean      | true                                                                                                                                                                                                                           | Specify if public endpoints should be enabled on the MSK cluster                                                                                                                                                                                             |
+| mskBrokerNodeCount                              | false    | number       | 2                                                                                                                                                                                                                              | The number of broker nodes to be used by the MSK cluster                                                                                                                                                                                                     |
 
 A template `cdk.context.json` to be used to fill in these values is below:
 ```
@@ -143,7 +144,8 @@ A template `cdk.context.json` to be used to fill in these values is below:
   "openAccessPolicyEnabled": "",
   "domainRemovalPolicy": "",
   "mskARN": "",
-  "mskEnablePublicEndpoints": ""
+  "mskEnablePublicEndpoints": "",
+  "mskBrokerNodeCount": ""
 }
 
 ```

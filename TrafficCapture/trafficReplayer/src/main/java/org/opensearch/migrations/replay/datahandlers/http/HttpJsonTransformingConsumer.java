@@ -4,8 +4,8 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.AggregatedTransformedResponse;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -39,7 +39,7 @@ import java.util.concurrent.CompletionException;
  * error was due to transformation, how would we be able to tell?
  */
 @Slf4j
-public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<AggregatedTransformedResponse> {
+public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsumer<TransformedOutputAndResult<R>> {
     public static final int HTTP_MESSAGE_NUM_SEGMENTS = 2;
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
     private final RequestPipelineOrchestrator pipelineOrchestrator;
@@ -57,7 +57,8 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
     private final List<ByteBuf> chunks;
 
     public HttpJsonTransformingConsumer(IJsonTransformer transformer,
-                                        IAuthTransformerFactory authTransformerFactory, IPacketFinalizingConsumer transformedPacketReceiver,
+                                        IAuthTransformerFactory authTransformerFactory,
+                                        IPacketFinalizingConsumer<R> transformedPacketReceiver,
                                         String diagnosticLabel) {
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
@@ -68,7 +69,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
     }
 
-    private NettySendByteBufsToPacketHandlerHandler getOffloadingHandler() {
+    private NettySendByteBufsToPacketHandlerHandler<R> getOffloadingHandler() {
         return Optional.ofNullable(channel).map(c ->
                         (NettySendByteBufsToPacketHandlerHandler) c.pipeline()
                                 .get(RequestPipelineOrchestrator.OFFLOADING_HANDLER_NAME))
@@ -97,7 +98,7 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                         ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
     }
 
-    public DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse> finalizeRequest() {
+    public DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
         var offloadingHandler = getOffloadingHandler();
         try {
             channel.checkException();
@@ -120,7 +121,8 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, null);
         }
         return offloadingHandler.getPacketReceiverCompletionFuture()
-                .getDeferredFutureThroughHandle((v, t) -> {
+                .getDeferredFutureThroughHandle(
+        (v, t) -> {
                     if (t != null) {
                         t = unwindPossibleCompletionException(t);
                         if (t instanceof NoContentException) {
@@ -141,8 +143,8 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
         return t;
     }
 
-    private DiagnosticTrackableCompletableFuture<String, AggregatedTransformedResponse>
-    redriveWithoutTransformation(IPacketFinalizingConsumer<AggregatedRawResponse> packetConsumer, Throwable reason) {
+    private DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>
+    redriveWithoutTransformation(IPacketFinalizingConsumer<R> packetConsumer, Throwable reason) {
         DiagnosticTrackableCompletableFuture<String,Void> consumptionChainedFuture =
                 chunks.stream().collect(
                         Utils.foldLeft(DiagnosticTrackableCompletableFuture.factory.
@@ -153,12 +155,12 @@ public class HttpJsonTransformingConsumer implements IPacketFinalizingConsumer<A
                                     return rval;
                                 },
                                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation collect()")));
-        return consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
-                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()")
-                .map(f->f.thenApply(r->reason == null ?
-                                new AggregatedTransformedResponse(r,
-                                        AggregatedTransformedResponse.HttpRequestTransformationStatus.SKIPPED) :
-                                new AggregatedTransformedResponse(r, reason)),
+        DiagnosticTrackableCompletableFuture<String,R> finalizedFuture =
+                consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
+                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
+        return finalizedFuture.map(f->f.thenApply(r->reason == null ?
+                                new TransformedOutputAndResult(r, HttpRequestTransformationStatus.SKIPPED, null) :
+                                new TransformedOutputAndResult(r, HttpRequestTransformationStatus.ERROR, reason)),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }
 }

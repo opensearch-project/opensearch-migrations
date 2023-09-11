@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.datatypes;
 
 import java.util.ArrayList;
 

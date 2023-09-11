@@ -14,6 +14,7 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -153,6 +154,33 @@ class StreamChannelConnectionCaptureSerializerTest {
             reconstructedData += stringChunk;
         }
         Assertions.assertEquals(packetData, reconstructedData);
+    }
+
+    @Test
+    public void testCloseObservationAfterWriteWillFlushWhenSpaceNeeded() throws IOException, ExecutionException, InterruptedException {
+        final var referenceTimestamp = Instant.ofEpochMilli(1686593191*1000);
+        String packetData = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        byte[] packetBytes = packetData.getBytes(StandardCharsets.UTF_8);
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        // Arbitrarily picking small buffer that can only hold one write observation and no other observations
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 85);
+
+        var bb = Unpooled.wrappedBuffer(packetBytes);
+        serializer.addWriteEvent(referenceTimestamp, bb);
+        serializer.addCloseEvent(referenceTimestamp);
+        CompletableFuture future = serializer.flushCommitAndResetStream(true);
+        future.get();
+        bb.release();
+
+        Assertions.assertEquals(2, outputBuffersCreated.size());
+        List<TrafficObservation> observations = new ArrayList<>();
+        for (ByteBuffer buffer : outputBuffersCreated) {
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.addAll(trafficStream.getSubStreamList());
+        }
+        Assertions.assertEquals(2, observations.size());
+        Assertions.assertTrue(observations.get(0).hasWrite());
+        Assertions.assertTrue(observations.get(1).hasClose());
     }
 
     @Test

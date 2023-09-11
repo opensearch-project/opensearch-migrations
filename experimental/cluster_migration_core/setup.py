@@ -11,8 +11,7 @@ setuptools.setup(
         "coloredlogs",
         "docker",
         "pexpect",
-        "py",
-        "pytest",
+        "pytest>=7.4.2",
         "requests",
         "robotframework"
     ],

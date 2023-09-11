@@ -131,3 +131,4 @@ Input file: /shared_replayer_output/tuples.log; Output file: local-tuples.log
 The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.
 
 Learn more about its functionality and setup here: [Capture Kafka Offloader](captureKafkaOffloader/README.md)
+
