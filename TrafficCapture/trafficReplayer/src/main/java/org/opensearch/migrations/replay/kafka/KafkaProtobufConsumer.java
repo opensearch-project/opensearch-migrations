@@ -108,14 +108,14 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
                     metricsLogger.atSuccess()
                             .addKeyValue("connectionId", ts.getConnectionId())
-                            .addKeyValue("topic-name", this.topic)
+                            .addKeyValue("topicName", this.topic)
                             .addKeyValue("sizeInBytes", ts.getSerializedSize())
                             .setMessage("Parsed traffic stream from Kafka").log();
                     return ts;
                 } catch (InvalidProtocolBufferException e) {
                     RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
                     metricsLogger.atError(recordError)
-                            .addKeyValue("topic-name", this.topic)
+                            .addKeyValue("topicName", this.topic)
                             .setMessage("Failed to parse traffic stream from Kafka.").log();
                     if (recordError != null) {
                         throw recordError;
