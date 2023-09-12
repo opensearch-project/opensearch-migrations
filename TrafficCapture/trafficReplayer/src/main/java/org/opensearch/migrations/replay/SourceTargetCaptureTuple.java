@@ -173,8 +173,10 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n targetResponseDuration=").append(targetResponseDuration);
-            sb.append("\n targetRequestData=").append(targetRequestData);
-            sb.append("\n targetResponseData=").append(targetResponseData);
+            sb.append("\n targetRequestData=")
+                    .append(Utils.httpPacketBufsToString(Utils.HttpMessageType.Request, targetRequestData.stream()));
+            sb.append("\n targetResponseData=")
+                    .append(Utils.httpPacketBytesToString(Utils.HttpMessageType.Response, targetResponseData));
             sb.append("\n transformStatus=").append(transformationStatus);
             sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
             sb.append('}');

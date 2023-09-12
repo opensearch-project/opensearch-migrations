@@ -117,11 +117,14 @@ class ExpiringSubstitutableItemPoolTest {
         Assertions.assertTrue(pool.getStats().getNItemsExpired() >= 4);
 
         for (int i=1; i<=NUM_POOLED_ITEMS*2; ++i) {
-            log.info("Pool=" + pool);
-            Assertions.assertEquals(NUM_POOLED_ITEMS+i, getNextItem(pool));
+            var nextItemGrabbed = getNextItem(pool);
+            log.debug("Pool=" + pool + " nextItem="+nextItemGrabbed);
+            Assertions.assertEquals(NUM_POOLED_ITEMS+i, nextItemGrabbed);
         }
 
-        Assertions.assertTrue(pool.getStats().getNItemsCreated() >= 15);
+        var numItemsCreated = pool.getStats().getNItemsCreated();
+        log.debug("numItemsCreated="+numItemsCreated);
+        Assertions.assertTrue(numItemsCreated >= 15);
         Assertions.assertEquals(11, pool.getStats().getNHotGets()+pool.getStats().getNColdGets());
         Assertions.assertTrue(pool.getStats().getNItemsExpired() >= 4);
 
@@ -139,7 +142,7 @@ class ExpiringSubstitutableItemPoolTest {
     private static Integer getIntegerItem(AtomicInteger builtItemCursor,
                                           AtomicReference<Instant> lastCreation,
                                           CountDownLatch countdownLatchToUse) {
-        log.info("Building item (" +builtItemCursor.hashCode() + ") " + (builtItemCursor.get()+1));
+        log.debug("Building item (" +builtItemCursor.hashCode() + ") " + (builtItemCursor.get()+1));
         countdownLatchToUse.countDown();
         lastCreation.set(Instant.now());
         return Integer.valueOf(builtItemCursor.incrementAndGet());

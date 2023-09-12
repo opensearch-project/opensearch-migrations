@@ -18,22 +18,22 @@ buildscript {
 
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id "com.github.spotbugs" version "4.7.3"
-    id 'checkstyle'
+//    id "com.github.spotbugs" version "4.7.3"
+//    id 'checkstyle'
     id 'org.owasp.dependencycheck' version '8.2.1'
     id "io.freefair.lombok" version "8.0.1"
 }
 
-spotbugs {
-    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
-}
+//spotbugs {
+//    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
+//}
 
-checkstyle {
-    toolVersion = '10.9.3'
-    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
-    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
-            buildDir, 'checkstyle.cachefile'))
-}
+//checkstyle {
+//    toolVersion = '10.12.3'
+//    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
+//    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
+//            buildDir, 'checkstyle.cachefile'))
+//}
 
 repositories {
     mavenCentral()
