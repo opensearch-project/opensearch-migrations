@@ -9,6 +9,7 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -41,18 +42,21 @@ public class RequestPipelineOrchestrator<R> {
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer<R> packetReceiver;
     final String diagnosticLabel;
+    private UniqueRequestKey requestKeyForMetricsLogging;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
                                        IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
-                                       String diagnosticLabel) {
+                                       String diagnosticLabel,
+                                       UniqueRequestKey requestKeyForMetricsLogging) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
                 IAuthTransformerFactory.NullAuthTransformerFactory.instance;
         this.diagnosticLabel = diagnosticLabel;
+        this.requestKeyForMetricsLogging = requestKeyForMetricsLogging;
     }
 
     static void removeThisAndPreviousHandlers(ChannelPipeline pipeline, ChannelHandler targetHandler) {
@@ -94,7 +98,8 @@ public class RequestPipelineOrchestrator<R> {
         // Note3: ByteBufs will be sent through when there were pending bytes left to be parsed by the
         //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
         //        NettyDecodedHttpRequestHandler is removed.
-        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler(transformer, chunkSizes, this, diagnosticLabel));
+        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler(transformer, chunkSizes, this,
+                diagnosticLabel, requestKeyForMetricsLogging));
         addLoggingHandler(pipeline, "B");
     }
 

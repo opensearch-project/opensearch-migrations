@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -128,7 +129,7 @@ public class TestUtils {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
                 new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null));
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, authTransformer, testPacketCapture,
-                "TEST");
+                "TEST", new UniqueRequestKey("testConnectionId", 0));
 
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         var headerString = "GET / HTTP/1.1\r\n" +

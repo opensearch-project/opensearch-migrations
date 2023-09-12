@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -22,7 +23,7 @@ class HttpJsonTransformingConsumerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(JsonJoltTransformer.newBuilder().build(),
-                        null, testPacketCapture, "TEST");
+                        null, testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -44,7 +45,7 @@ class HttpJsonTransformingConsumerTest {
                         JsonJoltTransformer.newBuilder()
                                 .addHostSwitchOperation("test.domain")
                                 .build(),
-                        null, testPacketCapture, "TEST");
+                        null, testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -82,7 +83,7 @@ class HttpJsonTransformingConsumerTest {
         });
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(complexTransformer, null,
-                        testPacketCapture, "TEST");
+                        testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
