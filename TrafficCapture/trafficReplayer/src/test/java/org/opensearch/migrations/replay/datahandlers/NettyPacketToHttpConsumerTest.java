@@ -124,7 +124,8 @@ class NettyPacketToHttpConsumerTest {
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4),
-                    testServer.localhostEndpoint(), sslContext, "unitTest"+i);
+                    testServer.localhostEndpoint(), sslContext, "unitTest"+i,
+                    new UniqueRequestKey("testConnectionId", 0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
