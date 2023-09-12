@@ -38,7 +38,7 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
 
         @Override
         public void write(byte[] buff, int offset, int len) {
-            var byteBuf = ByteBufAllocator.DEFAULT.buffer(len-offset);
+            var byteBuf = ctx.alloc().buffer(len-offset);
             leakDetector.track(byteBuf);
             byteBuf.writeBytes(buff, offset, len);
             ctx.fireChannelRead(new DefaultHttpContent(byteBuf));

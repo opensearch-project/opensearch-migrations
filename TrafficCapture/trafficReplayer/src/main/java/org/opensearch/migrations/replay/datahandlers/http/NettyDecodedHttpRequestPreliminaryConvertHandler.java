@@ -72,7 +72,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
                 log.debug("The transforms for this message require payload manipulation, " +
                         "all content handlers are being loaded.");
                 // make a fresh message and its headers
-                requestPipelineOrchestrator.addJsonParsingHandlers(pipeline, transformer,
+                requestPipelineOrchestrator.addJsonParsingHandlers(ctx, transformer,
                         getAuthTransformerAsStreamingTransformer(authTransformer));
                 ctx.fireChannelRead(handleAuthHeaders(parseHeadersIntoMessage(request), authTransformer));
             }
@@ -110,7 +110,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
         if (streamingAuthTransformer != null) {
             log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
                     "reformatted, adding Content Handlers to this pipeline.");
-            requestPipelineOrchestrator.addContentRepackingHandlers(pipeline, streamingAuthTransformer);
+            requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         } else if (headerFieldsAreIdentical(request, httpJsonMessage)) {
             log.info(diagnosticLabel + "Transformation isn't necessary.  " +
@@ -129,7 +129,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
         } else {
             log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
                     "reformatted, adding Content Handlers to this pipeline.");
-            requestPipelineOrchestrator.addContentRepackingHandlers(pipeline, streamingAuthTransformer);
+            requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         }
     }

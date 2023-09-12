@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.netty.buffer.ByteBufAllocator;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,7 @@ import java.nio.charset.StandardCharsets;
 class JsonEmitterTest {
     @Test
     public void testEmitterWorksRoundTrip() throws IOException {
-        JsonEmitter jse = new JsonEmitter();
+        JsonEmitter jse = new JsonEmitter(ByteBufAllocator.DEFAULT);
         var mapper = new ObjectMapper();
 
         //var originalTree = mapper.readTree(new File("bigfile.json"));

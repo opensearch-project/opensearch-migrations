@@ -97,7 +97,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
             int currentChunkProspectiveSize =
                     payloadBufferIndex >= headerChunkSizes.size() ? 0 :  headerChunkSizes.get(payloadBufferIndex);
             if (inProgressByteBuf == null && currentChunkProspectiveSize > 0) {
-                inProgressByteBuf = ByteBufAllocator.DEFAULT.buffer(currentChunkProspectiveSize);
+                inProgressByteBuf = ctx.alloc().buffer(currentChunkProspectiveSize);
             }
             if (inProgressByteBuf != null) {
                 var bytesLeftToWriteInCurrentChunk = currentChunkProspectiveSize - inProgressByteBuf.writerIndex();
@@ -154,9 +154,9 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
     {
         AtomicInteger chunkIdx = new AtomicInteger(headerChunkSizes.size());
         var bufs = headerChunkSizes.stream()
-                .map(i -> ByteBufAllocator.DEFAULT.buffer(chunkIdx.decrementAndGet()==0?maxLastBufferSize:i).retain())
+                .map(i -> ctx.alloc().buffer(chunkIdx.decrementAndGet()==0?maxLastBufferSize:i).retain())
                 .toArray(ByteBuf[]::new);
-        var cbb = ByteBufAllocator.DEFAULT.compositeBuffer(bufs.length);
+        var cbb = ctx.alloc().compositeBuffer(bufs.length);
         ResourceLeakDetector<CompositeByteBuf> rld =
                 (ResourceLeakDetector<CompositeByteBuf>) ResourceLeakDetectorFactory.instance().newResourceLeakDetector(cbb.getClass());
         rld.track(cbb);

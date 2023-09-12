@@ -14,8 +14,8 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
     public static final int NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING = 1024;
     final JsonEmitter jsonEmitter;
 
-    public NettyJsonBodySerializeHandler() {
-        this.jsonEmitter = new JsonEmitter();
+    public NettyJsonBodySerializeHandler(ChannelHandlerContext ctx) {
+        this.jsonEmitter = new JsonEmitter(ctx.alloc());
     }
 
     @Override

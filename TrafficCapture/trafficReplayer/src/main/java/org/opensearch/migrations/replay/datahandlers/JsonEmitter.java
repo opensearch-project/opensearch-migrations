@@ -9,8 +9,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.CompositeByteBuf;
-import io.netty.util.ResourceLeakDetector;
-import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -64,29 +62,28 @@ public class JsonEmitter {
     }
 
     static class ImmediateByteBufOutputStream extends OutputStream {
+        private final ByteBufAllocator byteBufAllocator;
         @Getter
         CompositeByteBuf compositeByteBuf;
-        ResourceLeakDetector<ByteBuf> leakDetector = ResourceLeakDetectorFactory.instance()
-                .newResourceLeakDetector(ByteBuf.class);
 
-        public ImmediateByteBufOutputStream() {
-            compositeByteBuf = ByteBufAllocator.DEFAULT.compositeBuffer();
+        public ImmediateByteBufOutputStream(ByteBufAllocator byteBufAllocator) {
+            this.byteBufAllocator = byteBufAllocator;
+            compositeByteBuf = byteBufAllocator.compositeBuffer();
         }
 
         @Override
         public void write(int b) throws IOException {
-            var byteBuf = ByteBufAllocator.DEFAULT.buffer(1);
+            var byteBuf = byteBufAllocator.buffer(1);
             write(byteBuf.writeByte(b));
         }
 
         @Override
         public void write(byte[] buff, int offset, int len) throws IOException {
-            var byteBuf = ByteBufAllocator.DEFAULT.buffer(len - offset);
+            var byteBuf = byteBufAllocator.buffer(len - offset);
             write(byteBuf.writeBytes(buff, offset, len));
         }
 
         private void write(ByteBuf byteBuf) {
-            leakDetector.track(byteBuf);
             compositeByteBuf.addComponents(true, byteBuf);
         }
 
@@ -103,7 +100,7 @@ public class JsonEmitter {
          */
         public ByteBuf recycleByteBufRetained() {
             var rval = compositeByteBuf;
-            compositeByteBuf = ByteBufAllocator.DEFAULT.compositeBuffer(rval.maxNumComponents());
+            compositeByteBuf = byteBufAllocator.compositeBuffer(rval.maxNumComponents());
             return rval;
         }
     }
@@ -114,8 +111,8 @@ public class JsonEmitter {
     private Stack<LevelContext> cursorStack;
 
     @SneakyThrows
-    public JsonEmitter() {
-        outputStream = new ImmediateByteBufOutputStream();
+    public JsonEmitter(ByteBufAllocator byteBufAllocator) {
+        outputStream = new ImmediateByteBufOutputStream(byteBufAllocator);
         jsonGenerator = new JsonFactory().createGenerator(outputStream, JsonEncoding.UTF8);
         objectMapper = new ObjectMapper();
         cursorStack = new Stack<>();
