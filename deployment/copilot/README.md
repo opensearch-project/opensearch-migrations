@@ -194,7 +194,7 @@ Official documentation on Addons can be found [here](https://aws.github.io/copil
 `copilot app show` - Provides details on the current app \
 `copilot svc show` - Provides details on a particular service
 
-### Removing deloyed resources from AWS
+### Removing deployed resources from AWS
 
 To remove the resources installed from the steps above, follow these instructions:
 1.  `./devDeploy.sh --destroy-env` - Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
