@@ -33,7 +33,7 @@ public class TransformedTargetRequestAndResponse extends AggregatedRawResponse {
                                                Throwable exception) {
         super(0, Duration.ZERO, null, exception);
         this.requestPackets = requestPackets;
-        transformationStatus = transformationStatus;
+        this.transformationStatus = transformationStatus;
     }
 
     public TransformedTargetRequestAndResponse(TransformedPackets requestPackets,
