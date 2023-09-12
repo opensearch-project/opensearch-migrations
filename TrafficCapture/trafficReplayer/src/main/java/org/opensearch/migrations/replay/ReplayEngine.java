@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
@@ -25,6 +26,7 @@ public class ReplayEngine {
     private final AtomicLong lastIdleUpdatedTimestampEpochMs;
     private final TimeShifter timeShifter;
     private final double maxSpeedupFactor;
+    private static final MetricsLogger metricsLogger = new MetricsLogger("ReplayEngine");
     /**
      * If this proves to be a contention bottleneck, we can move to a scheme with ThreadLocals
      * and on a scheduled basis, submit work to each thread to find out if they're idle or not.
@@ -129,6 +131,12 @@ public class ReplayEngine {
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
+        metricsLogger.atSuccess()
+                .addKeyValue("requestId", requestKey.toString())
+                .addKeyValue("connectionId", requestKey.connectionId)
+                .addKeyValue("delayFromOriginalToScheduledStartInMs", Duration.between(originalStart, start).toMillis())
+                .addKeyValue("scheduledStartTime", start.toString())
+                .setMessage("Request scheduled to be sent").log();
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);
         return hookWorkFinishingUpdates(sendResult, originalStart);
     }

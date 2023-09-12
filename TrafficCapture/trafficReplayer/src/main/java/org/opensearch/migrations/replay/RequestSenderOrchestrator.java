@@ -206,7 +206,7 @@ public class RequestSenderOrchestrator {
     getPacketReceiver(UniqueRequestKey requestKey, ChannelFuture channelFuture,
                       AtomicReference<NettyPacketToHttpConsumer> packetReceiver) {
         if (packetReceiver.get() == null) {
-            packetReceiver.set(new NettyPacketToHttpConsumer(channelFuture, requestKey.toString()));
+            packetReceiver.set(new NettyPacketToHttpConsumer(channelFuture, requestKey.toString(), requestKey));
         }
         return packetReceiver.get();
     }

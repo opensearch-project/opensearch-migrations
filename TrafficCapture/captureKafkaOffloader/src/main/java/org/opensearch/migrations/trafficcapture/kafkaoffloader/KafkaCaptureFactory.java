@@ -74,8 +74,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     producer.send(record, handleProducerRecordSent(cf, recordId));
                     metricsLogger.atSuccess()
                             .addKeyValue("channelId", connectionId)
-                            .addKeyValue("topic-name", topicNameForTraffic)
-                            .addKeyValue("size", record.value().length)
+                            .addKeyValue("topicName", topicNameForTraffic)
+                            .addKeyValue("sizeInBytes", record.value().length)
                             .addKeyValue("diagnosticId", recordId)
                             .setMessage("Sent message to Kafka").log();
                     // Note that ordering is not guaranteed to be preserved here
@@ -85,7 +85,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                 } catch (Exception e) {
                     metricsLogger.atError(e)
                             .addKeyValue("channelId", connectionId)
-                            .addKeyValue("topic-name", topicNameForTraffic)
+                            .addKeyValue("topicName", topicNameForTraffic)
                             .setMessage("Sending message to Kafka failed.").log();
                     throw new RuntimeException(e);
                 }
