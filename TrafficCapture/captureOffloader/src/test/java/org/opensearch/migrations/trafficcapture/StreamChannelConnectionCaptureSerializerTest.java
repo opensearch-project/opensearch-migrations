@@ -190,7 +190,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
         // Arbitrarily picking small buffer size that can only hold one empty message
         var serializer = createSerializerWithTestHandler(outputBuffersCreated,
-                TEST_NODE_ID_STRING.length() + 60);
+                TEST_NODE_ID_STRING.length() + 40);
         var bb = Unpooled.buffer(0);
         serializer.addWriteEvent(referenceTimestamp, bb);
         serializer.addWriteEvent(referenceTimestamp, bb);
