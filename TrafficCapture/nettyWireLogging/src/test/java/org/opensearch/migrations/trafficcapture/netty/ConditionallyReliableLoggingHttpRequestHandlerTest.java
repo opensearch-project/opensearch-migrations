@@ -2,20 +2,13 @@ package org.opensearch.migrations.trafficcapture.netty;
 
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.util.ResourceLeakDetector;
-import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
 import org.opensearch.migrations.testutils.TestUtilities;
-import org.opensearch.migrations.testutils.TestWithNettyLeakDetection;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -111,7 +104,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    @TestWithNettyLeakDetection(repetitions = 16)
+    @WrapWithNettyLeakDetection(repetitions = 16)
     public void testThatAPostInTinyPacketsBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
         testThatAPostInTinyPacketsBlocksFutureActivity(usePool);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);
@@ -119,7 +112,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    @TestWithNettyLeakDetection(repetitions = 32)
+    @WrapWithNettyLeakDetection(repetitions = 32)
     public void testThatAPostInASinglePacketBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
         testThatAPostInASinglePacketBlocksFutureActivity(usePool);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);

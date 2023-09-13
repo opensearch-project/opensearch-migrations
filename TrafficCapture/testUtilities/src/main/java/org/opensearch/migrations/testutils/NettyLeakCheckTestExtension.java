@@ -6,7 +6,6 @@ import org.junit.jupiter.api.extension.InvocationInterceptor;
 import org.junit.jupiter.api.extension.ReflectiveInvocationContext;
 
 import java.lang.reflect.Method;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
 public class NettyLeakCheckTestExtension implements InvocationInterceptor {
@@ -15,7 +14,7 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
     private void wrapWithLeakChecks(ExtensionContext extensionContext, Callable repeatCall, Callable finalCall)
             throws Throwable {
         int repetitions = extensionContext.getTestMethod()
-                .map(ec->ec.getAnnotation(TestWithNettyLeakDetection.class).repetitions())
+                .map(ec->ec.getAnnotation(WrapWithNettyLeakDetection.class).repetitions())
                 .orElseThrow(() -> new IllegalStateException("No test method present"));
         CountingNettyResourceLeakDetector.activate();
 

@@ -10,7 +10,7 @@ import java.lang.annotation.Target;
 @Target({ ElementType.TYPE, ElementType.METHOD })
 @Retention(RetentionPolicy.RUNTIME)
 @ExtendWith(NettyLeakCheckTestExtension.class)
-public @interface TestWithNettyLeakDetection {
+public @interface WrapWithNettyLeakDetection {
     /**
      * Some leaks might need to put a bit more stress on the GC for objects to get cleared out
      * and trigger potential checks within any resource finalizers to determine if there have

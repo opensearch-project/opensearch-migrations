@@ -28,6 +28,7 @@ class NettyJsonToByteBufHandlerTest {
     public static final int ORIGINAL_NUMBER_OF_CHUNKS = 4;
     public static final int ADDITIONAL_CHUNKS = 2;
 
+    // TODO - replace this with just an operation on the EmbeddedChannel.inboundMessage
     static class ValidationHandler extends ChannelInboundHandlerAdapter {
         final List<Integer> chunkSizesReceivedList;
         int totalBytesRead;

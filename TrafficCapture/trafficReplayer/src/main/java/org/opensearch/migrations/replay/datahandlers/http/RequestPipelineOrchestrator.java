@@ -123,7 +123,7 @@ public class RequestPipelineOrchestrator<R> {
             pipeline.addLast(new NettyJsonBodyConvertHandler(transformer));
             // IN:  Netty HttpRequest(2) + HttpJsonMessage(3) with headers AND payload
             // OUT: Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
-            pipeline.addLast(new NettyJsonBodySerializeHandler(ctx));
+            pipeline.addLast(new NettyJsonBodySerializeHandler());
             addLoggingHandler(pipeline, "F");
         }
         if (authTransfomer != null) {

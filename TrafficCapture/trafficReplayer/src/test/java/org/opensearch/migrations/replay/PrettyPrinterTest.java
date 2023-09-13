@@ -7,7 +7,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
 import org.opensearch.migrations.testutils.TestUtilities;
-import org.opensearch.migrations.testutils.TestWithNettyLeakDetection;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@TestWithNettyLeakDetection
+@WrapWithNettyLeakDetection
 public class PrettyPrinterTest {
 
     @BeforeAll
@@ -64,7 +64,7 @@ public class PrettyPrinterTest {
 
     @ParameterizedTest
     @MethodSource("makeCombos")
-    @TestWithNettyLeakDetection(repetitions = 4)
+    @WrapWithNettyLeakDetection(repetitions = 4)
     public void httpPacketBufsToString(PrettyPrinter.PacketPrintFormat format, BufferType bufferType) {
         byte[] fullTrafficBytes = SAMPLE_REQUEST_STRING.getBytes(StandardCharsets.UTF_8);
         var byteArrays = new ArrayList<byte[]>();

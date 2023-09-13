@@ -18,7 +18,7 @@ public class JsonAccumulatorTest {
     public static final String LARGE_PACKED = "largeAndPacked";
     GenerateRandomNestedJsonObject randomJsonGenerator = new GenerateRandomNestedJsonObject();
 
-    private static Object readJson(byte[] testFileBytes, int chunkBound) throws IOException {
+    static Object readJson(byte[] testFileBytes, int chunkBound) throws IOException {
         var jsonParser = new JsonAccumulator();
         Random r = new Random(2);
         var entireByteBuffer = ByteBuffer.wrap(testFileBytes);

@@ -28,7 +28,7 @@ import java.util.function.Supplier;
  * the memory load rather than expanding the working set for a large textual stream.
  */
 @Slf4j
-public class JsonEmitter {
+public class JsonEmitter implements AutoCloseable {
 
     public final static int NUM_SEGMENT_THRESHOLD = 256;
 
@@ -61,12 +61,12 @@ public class JsonEmitter {
         }
     }
 
-    static class ImmediateByteBufOutputStream extends OutputStream {
+    static class ChunkingByteBufOutputStream extends OutputStream {
         private final ByteBufAllocator byteBufAllocator;
         @Getter
         CompositeByteBuf compositeByteBuf;
 
-        public ImmediateByteBufOutputStream(ByteBufAllocator byteBufAllocator) {
+        public ChunkingByteBufOutputStream(ByteBufAllocator byteBufAllocator) {
             this.byteBufAllocator = byteBufAllocator;
             compositeByteBuf = byteBufAllocator.compositeBuffer();
         }
@@ -88,9 +88,13 @@ public class JsonEmitter {
         }
 
         @Override
-        public void close() throws IOException {
+        public void close() {
             compositeByteBuf.release();
-            super.close();
+            try {
+                super.close();
+            } catch (IOException e) {
+                throw new RuntimeException("Expected OutputStream::close() to be empty as per docs in Java 11");
+            }
         }
 
         /**
@@ -106,16 +110,21 @@ public class JsonEmitter {
     }
 
     private JsonGenerator jsonGenerator;
-    private ImmediateByteBufOutputStream outputStream;
+    private ChunkingByteBufOutputStream outputStream;
     private ObjectMapper objectMapper;
     private Stack<LevelContext> cursorStack;
 
     @SneakyThrows
     public JsonEmitter(ByteBufAllocator byteBufAllocator) {
-        outputStream = new ImmediateByteBufOutputStream(byteBufAllocator);
+        outputStream = new ChunkingByteBufOutputStream(byteBufAllocator);
         jsonGenerator = new JsonFactory().createGenerator(outputStream, JsonEncoding.UTF8);
         objectMapper = new ObjectMapper();
         cursorStack = new Stack<>();
+    }
+
+    @Override
+    public void close() {
+        outputStream.close();
     }
 
     /**
