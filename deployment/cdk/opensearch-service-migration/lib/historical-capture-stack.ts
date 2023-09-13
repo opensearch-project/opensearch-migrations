@@ -1,11 +1,10 @@
-import {Stack, StackProps, CfnOutput} from "aws-cdk-lib";
+import {Stack, StackProps, SecretValue, CfnOutput} from "aws-cdk-lib";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
-import {Effect, ManagedPolicy, PolicyDocument, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
-import {Cluster, ContainerImage, FargateService, FargateTaskDefinition, LogDrivers} from "aws-cdk-lib/aws-ecs";
-import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
+import {Cluster, ContainerImage, FargateService, FargateTaskDefinition, LogDrivers, Secret as ECSSecret} from "aws-cdk-lib/aws-ecs";
+import {Secret as SMSecret} from "aws-cdk-lib/aws-secretsmanager";
 import {join} from "path";
-import { readFileSync } from "fs"
+import {readFileSync} from "fs"
 
 export interface historicalCaptureStackProps extends StackProps {
     readonly vpc: IVpc,
@@ -30,25 +29,30 @@ export class HistoricalCaptureStack extends Stack {
             cpu: 512
         });
 
+        // Create Historical Capture Container
+        const historicalCaptureContainer = historicalCaptureFargateTask.addContainer("historicalCaptureContainer", {
+            image: ContainerImage.fromAsset(join(__dirname, "../../../..", "FetchMigration")),
+            // Add in region and stage
+            containerName: "fetch-migration",
+            logging: LogDrivers.awsLogs({ streamPrefix: 'fetch-migration-lg', logRetention: 30 })
+        });
+
+        // Create DP pipeline config from template file
         let dpPipelineData: string = readFileSync(props.dpPipelineTemplatePath, 'utf8');
         dpPipelineData = dpPipelineData.replace("<SOURCE_CLUSTER_HOST>", props.sourceEndpoint);
         dpPipelineData = dpPipelineData.replace("<TARGET_CLUSTER_HOST>", props.targetEndpoint);
         // Base64 encode
         let encodedPipeline = Buffer.from(dpPipelineData).toString("base64");
-        
-        // Docker image asset
-        const historicalCaptureImage = new DockerImageAsset(this, "fetchMigrationImage", {
-            directory: join(__dirname, "../../..", "docker/fetch-migration")
-        });
 
-        // Create Historical Capture Container
-        const historicalCaptureContainer = historicalCaptureFargateTask.addContainer("historicalCaptureContainer", {
-            image: ContainerImage.fromDockerImageAsset(historicalCaptureImage),
-            // Add in region and stage
-            containerName: "fetch-migration",
-            environment: {"INLINE_PIPELINE": '' + encodedPipeline},
-            logging: LogDrivers.awsLogs({ streamPrefix: 'fetch-migration-lg', logRetention: 30 })
+        // Create secret using Secrets Manager
+        const dpPipelineConfigSecret = new SMSecret(this, "dpPipelineConfigSecret", {
+            secretName: `${historicalCaptureFargateTask.family}-${historicalCaptureContainer.containerName}-pipelineConfig`,
+            secretStringValue: SecretValue.unsafePlainText(encodedPipeline)
         });
+        // Add secret to container
+        historicalCaptureContainer.addSecret("INLINE_PIPELINE", 
+            ECSSecret.fromSecretsManager(dpPipelineConfigSecret)
+        );
 
         // The Migration Domain SG disallows all outgoing, but this prevents the ECS run task
         // command from pulling the Docker image from ECR. Thus, create an SG to allow this.
