@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufHolder;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -89,13 +91,18 @@ class RequestSenderOrchestratorTest {
             var arr = cf.get();
             Assertions.assertEquals(null, arr.error);
             Assertions.assertTrue(arr.responseSizeInBytes > 0);
-            var httpMessage = PrettyPrinter.parseHttpMessageFromBufsWithoutReleasing(PrettyPrinter.HttpMessageType.Response,
+            var httpMessage = PrettyPrinter.parseHttpMessageFromBufs(PrettyPrinter.HttpMessageType.Response,
                     arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())));
-            var response =  (FullHttpResponse) httpMessage;
-            Assertions.assertEquals(200, response.status().code());
-            var body = response.content();
-            Assertions.assertEquals(SERVER_RESPONSE_BODY_PREFIX + getUriForIthRequest(i/NUM_REPEATS),
-                    new String(body.duplicate().toString(StandardCharsets.UTF_8)));
+            try {
+                var response = (FullHttpResponse) httpMessage;
+                Assertions.assertEquals(200, response.status().code());
+                var body = response.content();
+                Assertions.assertEquals(SERVER_RESPONSE_BODY_PREFIX + getUriForIthRequest(i / NUM_REPEATS),
+                        new String(body.duplicate().toString(StandardCharsets.UTF_8)));
+            } finally {
+                Optional.ofNullable((httpMessage instanceof ByteBufHolder)?(ByteBufHolder)httpMessage:null)
+                        .ifPresent(bbh-> bbh.content().release());
+            }
         }
         closeFuture.get();
     }

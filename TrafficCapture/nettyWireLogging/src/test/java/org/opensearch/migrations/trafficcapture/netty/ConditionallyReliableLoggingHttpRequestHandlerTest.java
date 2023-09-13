@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
+import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -35,8 +36,7 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
     @BeforeAll
     public static void setup() {
-        ResourceLeakDetectorFactory.setResourceLeakDetectorFactory(new CountingNettyResourceLeakDetector.MyResourceLeakDetectorFactory());
-        CountingNettyResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
+        CountingNettyResourceLeakDetector.activate();
     }
 
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter)
@@ -90,23 +90,11 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         return bArr;
     }
 
-    private ByteBuf getByteBuf(byte[] src, boolean usePool) {
-        var unpooled = Unpooled.wrappedBuffer(src);
-        if (usePool) {
-            var pooled = ByteBufAllocator.DEFAULT.buffer(src.length);
-            pooled.writeBytes(unpooled);
-            unpooled.release();
-            return pooled;
-        } else {
-            return unpooled;
-        }
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testThatAPostInASinglePacketBlocksFutureActivity(boolean usePool) throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
-        var bb = getByteBuf(fullTrafficBytes, usePool);
+        var bb = TestUtilities.getByteBuf(fullTrafficBytes, usePool);
         writeMessageAndVerify(fullTrafficBytes, w -> {
             w.writeInbound(bb);
         });
@@ -119,7 +107,7 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
         writeMessageAndVerify(fullTrafficBytes, w -> {
             for (int i=0; i<fullTrafficBytes.length; ++i) {
-                var singleByte = getByteBuf(Arrays.copyOfRange(fullTrafficBytes, i, i+1), usePool);
+                var singleByte = TestUtilities.getByteBuf(Arrays.copyOfRange(fullTrafficBytes, i, i+1), usePool);
                 w.writeInbound(singleByte);
             }
         });
