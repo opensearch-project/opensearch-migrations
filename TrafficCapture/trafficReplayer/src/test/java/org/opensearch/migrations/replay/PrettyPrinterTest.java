@@ -1,17 +1,14 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.ByteBuf;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
 import org.opensearch.migrations.testutils.TestUtilities;
+import org.opensearch.migrations.testutils.TestWithNettyLeakDetection;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -19,9 +16,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.opensearch.migrations.testutils.TestUtilities.getByteBuf;
-
-class PrettyPrinterTest {
+@TestWithNettyLeakDetection
+public class PrettyPrinterTest {
 
     @BeforeAll
     public static void setup() {
@@ -65,21 +61,11 @@ class PrettyPrinterTest {
         return Arrays.stream(BufferType.values())
                 .flatMap(b-> Arrays.stream(PrettyPrinter.PacketPrintFormat.values()).map(e->Arguments.of(e,b)));
     }
-    @ParameterizedTest
-    @MethodSource("makeCombos")
-    void httpPacketBufsToString_withLeakTest(PrettyPrinter.PacketPrintFormat format, BufferType bufferType) {
-        int COUNT = 16;
-        for (int i=0; i<COUNT; ++i) {
-            httpPacketBufsToString(format, bufferType);
-            System.gc();
-            System.runFinalization();
-            Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
-        }
-    }
 
     @ParameterizedTest
     @MethodSource("makeCombos")
-    void httpPacketBufsToString(PrettyPrinter.PacketPrintFormat format, BufferType bufferType) {
+    @TestWithNettyLeakDetection(repetitions = 4)
+    public void httpPacketBufsToString(PrettyPrinter.PacketPrintFormat format, BufferType bufferType) {
         byte[] fullTrafficBytes = SAMPLE_REQUEST_STRING.getBytes(StandardCharsets.UTF_8);
         var byteArrays = new ArrayList<byte[]>();
         for (int i=0,step=1; i<fullTrafficBytes.length; i+=step) {
