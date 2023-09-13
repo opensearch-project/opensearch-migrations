@@ -50,6 +50,12 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
         return strictHeadersMap.put(key, strList);
     }
 
+    @Override
+    public List<String> remove(Object key) {
+        return strictHeadersMap.remove(key);
+    }
+
+
     /**
      * This is just casting the underlying object's entrySet.  An old git commit will show this unrolled,
      * but this should be significantly more efficient.
