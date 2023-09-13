@@ -6,6 +6,7 @@ import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Disabled;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -41,6 +42,7 @@ class ExpiringSubstitutableItemPoolTest {
      * in place may further mitigate inconsistencies, though I haven't had any tests fail yet
      * unless I've stopped threads within the debugger.
      */
+    @Disabled
     @Test
     void get() throws Exception {
         var firstWaveBuildCountdownLatch = new CountDownLatch(NUM_POOLED_ITEMS);

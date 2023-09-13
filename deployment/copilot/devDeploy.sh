@@ -99,8 +99,6 @@ if [ "$DESTROY_ENV" = true ] ; then
   set +e
   # Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
   export AWS_DEFAULT_REGION=""
-  copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --yes
-  copilot svc delete -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE --yes
   copilot svc delete -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --yes
@@ -166,8 +164,8 @@ if [ "$SKIP_COPILOT_INIT" = false ] ; then
   #copilot env init -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE --default-config --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $REGION
 
   # Init services
-  copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator-jupyter
-  copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator
+  # copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator-jupyter # EXPERIMENTAL
+  # copilot svc init -a $COPILOT_APP_NAME --name traffic-comparator # EXPERIMENTAL
   copilot svc init -a $COPILOT_APP_NAME --name capture-proxy-es
   copilot svc init -a $COPILOT_APP_NAME --name migration-console
   else
@@ -179,11 +177,11 @@ fi
 copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE
 
 # Deploy services
-copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
-copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
+# copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS # EXPERIMENTAL
+# copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS # EXPERIMENTAL
 copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
 copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
-./createReplayer.sh --id default --target-uri "https://${MIGRATION_DOMAIN_ENDPOINT}:443" --tags ${TAGS} --extra-args "--auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN} | nc traffic-comparator 9220" "${REPLAYER_SKIP_INIT_ARG}"
+./createReplayer.sh --id default --target-uri "https://${MIGRATION_DOMAIN_ENDPOINT}:443" --tags ${TAGS} --extra-args "--auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN}" "${REPLAYER_SKIP_INIT_ARG}"
 
 
 # Output deployment time

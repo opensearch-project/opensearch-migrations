@@ -103,18 +103,6 @@ export class MigrationAssistanceStack extends Stack {
         });
         this.mskARN = mskCluster.attrArn
 
-        const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
-            vpc: props.vpc,
-            allowAllOutbound: false,
-        });
-        comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
-
-        // Create an EFS file system for the traffic-comparator
-        const comparatorSQLiteEFS = new FileSystem(this, 'comparatorSQLiteEFS', {
-            vpc: props.vpc,
-            securityGroup: comparatorSQLiteSG
-        });
-
         const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
             vpc: props.vpc,
             allowAllOutbound: false,
@@ -132,8 +120,6 @@ export class MigrationAssistanceStack extends Stack {
         const exports = [
             `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
             `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
-            `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
-            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`,
             `export MIGRATION_REPLAYER_OUTPUT_EFS_ID=${replayerOutputEFS.fileSystemId}`,
             `export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=${replayerOutputSG.securityGroupId}`]
         if (publicSubnetString) exports.push(`export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`)
