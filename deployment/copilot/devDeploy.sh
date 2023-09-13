@@ -181,7 +181,7 @@ copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE
 # copilot svc deploy -a $COPILOT_APP_NAME --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS # EXPERIMENTAL
 copilot svc deploy -a $COPILOT_APP_NAME --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
 copilot svc deploy -a $COPILOT_APP_NAME --name migration-console --env $COPILOT_DEPLOYMENT_STAGE --resource-tags $TAGS
-./createReplayer.sh --id default --target-uri "https://${MIGRATION_DOMAIN_ENDPOINT}:443" --extra-args "--tags=${TAGS} --auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN}" "${REPLAYER_SKIP_INIT_ARG}"
+./createReplayer.sh --id default --target-uri "https://${MIGRATION_DOMAIN_ENDPOINT}:443" --tags ${TAGS} --extra-args "--auth-header-user-and-secret ${MIGRATION_DOMAIN_USER_AND_SECRET_ARN}" "${REPLAYER_SKIP_INIT_ARG}"
 
 
 # Output deployment time
