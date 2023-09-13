@@ -111,7 +111,6 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
             w.writeInbound(bb);
         });
         log.info("buf.refCnt="+bb.refCnt());
-        //Assertions.assertEquals(0, bigBuff.refCnt());
     }
 
     @ParameterizedTest
