@@ -5,12 +5,14 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
+@WrapWithNettyLeakDetection
 public class JsonAccumulatorTest {
     public static final String TINY = "tiny";
     public static final String MEDIUM = "medium";

@@ -20,4 +20,10 @@ public @interface WrapWithNettyLeakDetection {
      * @return
      */
     int repetitions() default 16;
+
+    /**
+     * Set this to true to disable running any netty leak checks.  This will cause the test to be
+     * run by itself, once, without any extra overhead.
+     */
+    boolean disableLeakChecks() default false;
 }

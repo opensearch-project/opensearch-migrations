@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 
@@ -21,6 +22,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 @Slf4j
+@WrapWithNettyLeakDetection(repetitions = 1)
 public class PayloadRepackingTest {
 
     public static Stream<List<Object>> expandList(Stream<List<Object>> stream, List possibilities) {

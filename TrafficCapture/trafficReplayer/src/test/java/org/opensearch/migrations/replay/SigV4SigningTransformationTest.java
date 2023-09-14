@@ -5,6 +5,7 @@ import io.netty.handler.codec.base64.Base64;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.util.ResourceLeakDetector;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
@@ -18,6 +19,8 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+
+@WrapWithNettyLeakDetection
 public class SigV4SigningTransformationTest {
 
     private static class MockCredentialsProvider implements AwsCredentialsProvider {
@@ -30,6 +33,7 @@ public class SigV4SigningTransformationTest {
     }
 
     @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void testSignatureProperlyApplied() throws Exception {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 

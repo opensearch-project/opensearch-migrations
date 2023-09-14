@@ -75,7 +75,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
                     }
                     break;
                 case FIXED:
-                    bufferedContents.addComponents(true, dataByteBuf.retain());
+                    bufferedContents.addComponents(true, dataByteBuf);
                     if (lastContent) {
                         finalizeFixedContentStream(ctx);
                     }

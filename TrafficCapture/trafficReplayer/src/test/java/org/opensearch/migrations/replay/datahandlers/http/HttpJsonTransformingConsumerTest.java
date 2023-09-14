@@ -6,6 +6,7 @@ import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -15,6 +16,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 
+@WrapWithNettyLeakDetection
 class HttpJsonTransformingConsumerTest {
     @Test
     public void testPassThroughSinglePacketPost() throws Exception {

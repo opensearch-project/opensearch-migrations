@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -23,6 +24,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Slf4j
+@WrapWithNettyLeakDetection(repetitions = 1)
 class RequestSenderOrchestratorTest {
 
     static String getUriForIthRequest(int i) {

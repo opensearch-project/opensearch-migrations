@@ -21,9 +21,9 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 public class NettyJsonBodySerializeHandlerTest {
     @Test
-    @WrapWithNettyLeakDetection
     public void testJsonSerializerHandler() throws Exception {
         var randomJsonGenerator = new GenerateRandomNestedJsonObject();
         var randomJson = randomJsonGenerator.makeRandomJsonObject(new Random(2), 2, 1);

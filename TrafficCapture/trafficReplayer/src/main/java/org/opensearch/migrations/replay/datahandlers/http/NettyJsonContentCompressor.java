@@ -8,8 +8,6 @@ import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
-import io.netty.util.ResourceLeakDetector;
-import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedOutputStream;
@@ -24,8 +22,6 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
 
     static class ImmediateForwardingOutputStream extends OutputStream {
         ChannelHandlerContext ctx;
-        ResourceLeakDetector<ByteBuf> leakDetector = ResourceLeakDetectorFactory.instance()
-                .newResourceLeakDetector(ByteBuf.class);
 
         public ImmediateForwardingOutputStream(ChannelHandlerContext ctx) {
             this.ctx = ctx;
@@ -39,7 +35,6 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
         @Override
         public void write(byte[] buff, int offset, int len) {
             var byteBuf = ctx.alloc().buffer(len-offset);
-            leakDetector.track(byteBuf);
             byteBuf.writeBytes(buff, offset, len);
             ctx.fireChannelRead(new DefaultHttpContent(byteBuf));
         }

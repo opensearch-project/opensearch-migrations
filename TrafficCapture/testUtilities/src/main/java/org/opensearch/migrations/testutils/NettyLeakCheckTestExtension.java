@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.InvocationInterceptor;
 import org.junit.jupiter.api.extension.ReflectiveInvocationContext;
 
 import java.lang.reflect.Method;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 
 public class NettyLeakCheckTestExtension implements InvocationInterceptor {
@@ -13,19 +14,30 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
 
     private void wrapWithLeakChecks(ExtensionContext extensionContext, Callable repeatCall, Callable finalCall)
             throws Throwable {
-        int repetitions = extensionContext.getTestMethod()
-                .map(ec->ec.getAnnotation(WrapWithNettyLeakDetection.class).repetitions())
-                .orElseThrow(() -> new IllegalStateException("No test method present"));
         CountingNettyResourceLeakDetector.activate();
 
-        // Repeat calling your test logic directly
-        for (int i = 0; i < repetitions; i++) {
-            ((i==repetitions-1)?finalCall:repeatCall).call();
-            System.gc();
-            System.runFinalization();
-        }
+        if (getAnnotation(extensionContext).map(a -> a.disableLeakChecks()).orElse(false)) {
+            finalCall.call();
+            return;
+        } else {
+            int repetitions = getAnnotation(extensionContext).map(a -> a.repetitions())
+                    .orElseThrow(()->new IllegalStateException("No test method present"));
 
-        Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
+            for (int i = 0; i < repetitions; i++) {
+                ((i == repetitions - 1) ? finalCall : repeatCall).call();
+                System.gc();
+                System.runFinalization();
+            }
+
+            Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
+        }
+    }
+
+    private static Optional<WrapWithNettyLeakDetection> getAnnotation(ExtensionContext extensionContext) {
+        return extensionContext.getTestMethod()
+                .flatMap(m -> Optional.ofNullable(m.getAnnotation(WrapWithNettyLeakDetection.class)))
+                .or(() -> extensionContext.getTestClass()
+                        .flatMap(m -> Optional.ofNullable(m.getAnnotation(WrapWithNettyLeakDetection.class))));
     }
 
     @Override
@@ -36,7 +48,28 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
         var selfInstance =
                 invocationContext.getTarget().orElseThrow(() -> new RuntimeException("Target instance not found"));
         wrapWithLeakChecks(extensionContext,
-                ()->invocationContext.getExecutable().invoke(selfInstance),
+                ()-> {
+                    Method m = invocationContext.getExecutable();
+                    m.setAccessible(true);
+                    return m.invoke(selfInstance);
+                },
+                ()-> wrapProceed(invocation));
+    }
+
+    @Override
+    public void interceptTestTemplateMethod(Invocation<Void> invocation,
+                                            ReflectiveInvocationContext<Method> invocationContext,
+                                            ExtensionContext extensionContext) throws Throwable {
+        var selfInstance =
+                invocationContext.getTarget().orElseThrow(() -> new RuntimeException("Target instance not found"));
+        wrapWithLeakChecks(extensionContext,
+                ()->{
+                    {
+                        Method m = invocationContext.getExecutable();
+                        m.setAccessible(true);
+                        return m.invoke(selfInstance, invocationContext.getArguments().toArray());
+                    }
+                        },
                 ()-> wrapProceed(invocation));
     }
 
@@ -48,16 +81,5 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
         } catch (Throwable t) {
             throw new RuntimeException(t);
         }
-    }
-
-    @Override
-    public void interceptTestTemplateMethod(Invocation<Void> invocation,
-                                            ReflectiveInvocationContext<Method> invocationContext,
-                                            ExtensionContext extensionContext) throws Throwable {
-        var selfInstance =
-                invocationContext.getTarget().orElseThrow(() -> new RuntimeException("Target instance not found"));
-        wrapWithLeakChecks(extensionContext, ()->invocationContext.getExecutable().invoke(selfInstance,
-                        invocationContext.getArguments().toArray()),
-                ()-> wrapProceed(invocation));
     }
 }

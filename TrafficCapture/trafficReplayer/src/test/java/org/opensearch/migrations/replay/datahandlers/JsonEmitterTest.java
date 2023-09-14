@@ -13,9 +13,10 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 public class JsonEmitterTest {
     @Test
-    @WrapWithNettyLeakDetection(repetitions = 2)
+    @WrapWithNettyLeakDetection(repetitions = 16)
     public void testEmitterWorksRoundTrip() throws IOException {
         try (JsonEmitter jse = new JsonEmitter(ByteBufAllocator.DEFAULT)) {
             var mapper = new ObjectMapper();
