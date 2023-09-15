@@ -51,7 +51,7 @@ class HttpJsonTransformingConsumerTest {
                         null, testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
-                "/requests/raw/get_withAuthHeader.txt")) {
+                "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
             testBytes = sampleStream.readAllBytes();
             testBytes = new String(testBytes, StandardCharsets.UTF_8)
                     .replace("foo.example", "test.domain")
