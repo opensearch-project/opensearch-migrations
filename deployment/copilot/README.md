@@ -208,3 +208,13 @@ To remove the resources installed from the steps above, follow these instruction
 1.  `./devDeploy.sh --destroy-env` - Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
 2.  `./devDeploy.sh --destroy-all-copilot` - Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions
 3. After execution of the above steps, a CDK bootstrap stack remains. To remove this stack, begin by deleting the S3 objects and the associated bucket. After that, you can delete the stack using the AWS Console or CLI.
+
+## Metric Filters
+The services emit a number of logs, some of which are designed to be easily parsed for Cloudwatch metric filters. Setting up the appropriate metric filters will create Cloudwatch Metrics for each event, which can be incorporated into graphs and dashboard, as well as alarms.
+The `setMetricFilters.sh` script will set up 17 metrics that span the path of a request from being captured, written to Kafka, pulled by the replayer and played against the target cluster. While this script may be fully sufficient in a simple use case with a single replayer, it will likely not suffice in a more complex environment and you should consider it a model rather than a full solution.
+To use it, install the AWS CLI (installation instructions: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and configure it (`aws configure`) with the account credentials and region for your deployment, and then:
+```
+./setMetricFilters.sh
+```
+
+The metrics will not exist until they are triggered by a matching log line. Once data is flowing through the system and log lines are matching, you can find the metrics under the metricNamespaces `capture-proxy` and `traffic-replayer`.
