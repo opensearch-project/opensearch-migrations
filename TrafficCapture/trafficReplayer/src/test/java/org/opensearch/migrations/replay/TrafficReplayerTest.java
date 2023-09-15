@@ -134,7 +134,7 @@ class TrafficReplayerTest {
         }
     }
 
-    private byte[] synthesizeTrafficStreamsIntoByteArray(Instant timestamp, int numStreams) throws IOException {
+    static byte[] synthesizeTrafficStreamsIntoByteArray(Instant timestamp, int numStreams) throws IOException {
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
             for (int i=0; i<numStreams; ++i) {

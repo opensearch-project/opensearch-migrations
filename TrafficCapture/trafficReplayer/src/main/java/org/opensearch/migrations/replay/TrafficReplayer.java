@@ -8,8 +8,6 @@ import io.netty.buffer.Unpooled;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import io.netty.util.ResourceLeakDetector;
-import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
@@ -72,16 +70,16 @@ public class TrafficReplayer {
                            IAuthTransformerFactory authTransformerFactory,
                            boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, allowInsecureConnections, 1,
-                buildDefaultJsonTransformer(serverUri.getHost()),
-                authTransformerFactory);
+        this(serverUri, authTransformerFactory, allowInsecureConnections, 1,
+                buildDefaultJsonTransformer(serverUri.getHost())
+        );
     }
     
     public TrafficReplayer(URI serverUri,
+                           IAuthTransformerFactory authTransformer,
                            boolean allowInsecureConnections,
                            int numSendingThreads,
-                           IJsonTransformer jsonTransformer,
-                           IAuthTransformerFactory authTransformer)
+                           IJsonTransformer jsonTransformer)
             throws SSLException
     {
         if (serverUri.getPort() < 0) {
@@ -315,7 +313,7 @@ public class TrafficReplayer {
         }
     }
 
-    private void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
+    void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
                                         BlockingTrafficSource trafficChunkStream,
                                         BufferedOutputStream bufferedOutputStream,
                                         TimeShifter timeShifter)
@@ -553,15 +551,15 @@ public class TrafficReplayer {
             var sendFuture = transformationCompleteFuture.thenCompose(transformedResult ->
                         replayEngine.scheduleRequest(requestKey, start, end,
                                         transformedResult.transformedOutput.size(),
-                                        transformedResult.transformedOutput.stream())
+                                        transformedResult.transformedOutput.streamRetained())
                                 .map(future->future.thenApply(t->
                                                 new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,
                                                         t, transformedResult.transformationStatus, t.error)),
-                                        ()->"")
+                                        ()->"(if applicable) packaging transformed result into a completed TransformedTargetRequestAndResponse object")
                                 .map(future->future.exceptionally(t->
                                                 new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,
                                                         transformedResult.transformationStatus, t)),
-                                        ()->""),
+                                        ()->"(if applicable) packaging transformed result into a failed TransformedTargetRequestAndResponse object"),
                     () -> "transitioning transformed packets onto the wire")
                     .map(future->future.exceptionally(t->new TransformedTargetRequestAndResponse(null, null, t)),
                             ()->"Checking for exception out of sending data to the target server");
@@ -595,12 +593,13 @@ public class TrafficReplayer {
             }
         } catch (ExecutionException ee) {
             if (ee.getCause() instanceof EOFException) {
-                log.atWarn().setCause(ee.getCause()).setMessage("Got an EOF on the stream.  Done replaying.").log();
+                log.atWarn().setCause(ee.getCause()).setMessage("Got an EOF on the stream.  " +
+                        "Done reading traffic streams.").log();
             } else {
                 throw new RuntimeException(ee.getCause());
             }
         } catch (InterruptedException ex) {
-            log.atInfo().setCause(ex).setMessage("Interrupted.  Done replaying").log();
+            log.atInfo().setCause(ex).setMessage("Interrupted.  Done reading traffic streams.").log();
         }
     }
 }

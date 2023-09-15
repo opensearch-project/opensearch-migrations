@@ -27,7 +27,6 @@ import java.util.stream.Stream;
 @WrapWithNettyLeakDetection
 public class NettyJsonToByteBufHandlerTest {
 
-    public static final int BUFFERED_THROUGHPUT_BOUND = 64;//16*1024;
     public static final int READ_CHUNK_SIZE_BOUND = 4;//4096;
     public static final int ORIGINAL_NUMBER_OF_CHUNKS = 4;
     public static final int ADDITIONAL_CHUNKS = 2;
