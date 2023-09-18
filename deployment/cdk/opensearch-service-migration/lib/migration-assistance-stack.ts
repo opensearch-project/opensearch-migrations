@@ -1,21 +1,12 @@
-import {CfnOutput, Stack} from "aws-cdk-lib";
-import {
-    Instance,
-    InstanceClass,
-    InstanceSize,
-    InstanceType,
-    IVpc,
-    MachineImage,
-    Peer,
-    Port,
-    SecurityGroup,
-    SubnetType
-} from "aws-cdk-lib/aws-ec2";
+import {CfnOutput, Names, Stack} from "aws-cdk-lib";
+import {IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
+import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
+import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 
 export interface migrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -29,6 +20,8 @@ export interface migrationStackProps extends StackPropsExt {
 export class MigrationAssistanceStack extends Stack {
 
     public readonly mskARN: string;
+    public readonly ecsCluster: Cluster;
+    public readonly serviceConnectSecurityGroup: SecurityGroup;
 
     constructor(scope: Construct, id: string, props: migrationStackProps) {
         super(scope, id, props);
@@ -126,6 +119,24 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc,
             securityGroup: replayerOutputSG
         });
+
+        this.serviceConnectSecurityGroup = new SecurityGroup(this, 'serviceConnectSecurityGroup', {
+            vpc: props.vpc,
+            // Required for retrieving ECR image at service startup
+            allowAllOutbound: true,
+        })
+        this.serviceConnectSecurityGroup.addIngressRule(replayerOutputSG, Port.allTraffic());
+        this.ecsCluster = new Cluster(this, 'migrationECSCluster', {
+            vpc: props.vpc,
+
+            clusterName: `migration-${props.stage}-ecs-cluster`
+        })
+        this.ecsCluster.addDefaultCloudMapNamespace( {
+            name: `migration.${props.stage}.local`,
+            type: NamespaceType.DNS_PRIVATE,
+            useForServiceConnect: true,
+            vpc: props.vpc
+        })
 
         let publicSubnetString = props.vpc.publicSubnets.map(_ => _.subnetId).join(",")
         let privateSubnetString = props.vpc.privateSubnets.map(_ => _.subnetId).join(",")

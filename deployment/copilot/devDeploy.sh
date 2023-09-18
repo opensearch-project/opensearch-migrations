@@ -138,6 +138,8 @@ fi
 # More details on the CDK used here can be found at opensearch-migrations/deployment/cdk/opensearch-service-migration/README.md
 cdk deploy "*" --tags $TAGS --c domainName="aos-domain" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=true --c enableDemoAdmin=true -O cdk.out/cdkOutput.json --require-approval never --concurrency 3
 
+exit 1
+
 # Collect export commands from CDK output, which are needed by Copilot, wrap the commands in double quotes and store them within the "environment" dir
 export_file_path=../../copilot/environments/$COPILOT_DEPLOYMENT_STAGE/envExports.sh
 grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdk.out/cdkOutput.json | sed 's/=/="/' | sed 's/.*/&"/' > "${export_file_path}"

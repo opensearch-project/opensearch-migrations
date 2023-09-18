@@ -9,6 +9,7 @@ import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {HistoricalCaptureStack} from "./historical-capture-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
+import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -187,6 +188,17 @@ export class StackComposer {
             })
             mskUtilityStack.addDependency(migrationStack)
             this.stacks.push(mskUtilityStack)
+
+            const migrationConsoleStack = new MigrationConsoleStack(scope, "migrationConsole", {
+                vpc: networkStack.vpc,
+                ecsCluster: migrationStack.ecsCluster,
+                serviceConnectSecurityGroup: migrationStack.serviceConnectSecurityGroup,
+                stackName: `OSMigrations-MigrationConsole-${stage}-${region}`,
+                description: "This stack contains resources for the Migration Console ECS service",
+                ...props,
+            })
+            this.stacks.push(migrationConsoleStack)
+
         }
 
         // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited
