@@ -10,6 +10,7 @@ import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {HistoricalCaptureStack} from "./historical-capture-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
+import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -169,7 +170,7 @@ export class StackComposer {
         if (migrationAssistanceEnabled && networkStack) {
             const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
                 vpc: networkStack.vpc,
-                mskARN: mskARN,
+                mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 mskBrokerNodeCount: mskBrokerNodeCount,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
@@ -192,12 +193,28 @@ export class StackComposer {
             const migrationConsoleStack = new MigrationConsoleStack(scope, "migrationConsole", {
                 vpc: networkStack.vpc,
                 ecsCluster: migrationStack.ecsCluster,
+                replayerOutputFileSystemId: migrationStack.replayerOutputFileSystemId,
+                migrationDomainEndpoint: opensearchStack.domainEndpoint,
                 serviceConnectSecurityGroup: migrationStack.serviceConnectSecurityGroup,
-                stackName: `OSMigrations-MigrationConsole-${stage}-${region}`,
+                additionalServiceSecurityGroups: [networkStack.defaultDomainAccessSecurityGroup, migrationStack.replayerOutputAccessSecurityGroup],
+                stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 ...props,
             })
             this.stacks.push(migrationConsoleStack)
+
+            const captureProxyESStack = new CaptureProxyESStack(scope, "captureProxyES", {
+                vpc: networkStack.vpc,
+                ecsCluster: migrationStack.ecsCluster,
+                mskBrokerEndpoints: mskUtilityStack.mskBrokerEndpoints,
+                mskClusterArn: migrationStack.mskARN,
+                serviceConnectSecurityGroup: migrationStack.serviceConnectSecurityGroup,
+                additionalServiceSecurityGroups: [migrationStack.mskAccessSecurityGroup],
+                stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
+                description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
+                ...props,
+            })
+            this.stacks.push(captureProxyESStack)
 
         }
 

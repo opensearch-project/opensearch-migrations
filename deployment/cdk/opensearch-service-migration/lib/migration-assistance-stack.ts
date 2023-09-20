@@ -1,5 +1,5 @@
 import {CfnOutput, Names, Stack} from "aws-cdk-lib";
-import {IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {ISecurityGroup, IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -11,7 +11,7 @@ import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 export interface migrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     // Future support needed to allow importing an existing MSK cluster
-    readonly mskARN?: string,
+    readonly mskImportARN?: string,
     readonly mskEnablePublicEndpoints?: boolean
     readonly mskBrokerNodeCount?: number
 }
@@ -20,8 +20,11 @@ export interface migrationStackProps extends StackPropsExt {
 export class MigrationAssistanceStack extends Stack {
 
     public readonly mskARN: string;
+    public readonly mskAccessSecurityGroup: ISecurityGroup;
     public readonly ecsCluster: Cluster;
-    public readonly serviceConnectSecurityGroup: SecurityGroup;
+    public readonly replayerOutputFileSystemId: string;
+    public readonly replayerOutputAccessSecurityGroup: ISecurityGroup;
+    public readonly serviceConnectSecurityGroup: ISecurityGroup;
 
     constructor(scope: Construct, id: string, props: migrationStackProps) {
         super(scope, id, props);
@@ -42,6 +45,7 @@ export class MigrationAssistanceStack extends Stack {
             mskSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.allTcp())
         }
         mskSecurityGroup.addIngressRule(mskSecurityGroup, Port.allTraffic())
+        this.mskAccessSecurityGroup = mskSecurityGroup
 
         const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
             retention: RetentionDays.THREE_MONTHS
@@ -113,12 +117,14 @@ export class MigrationAssistanceStack extends Stack {
             allowAllOutbound: false,
         });
         replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
+        this.replayerOutputAccessSecurityGroup = replayerOutputSG
 
         // Create an EFS file system for Traffic Replayer output
         const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
             vpc: props.vpc,
             securityGroup: replayerOutputSG
         });
+        this.replayerOutputFileSystemId = replayerOutputEFS.fileSystemId
 
         this.serviceConnectSecurityGroup = new SecurityGroup(this, 'serviceConnectSecurityGroup', {
             vpc: props.vpc,

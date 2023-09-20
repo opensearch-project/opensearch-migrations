@@ -26,6 +26,7 @@ export class NetworkStack extends Stack {
 
     public readonly vpc: IVpc;
     public readonly domainSubnets: SubnetSelection[]|undefined;
+    public readonly defaultDomainAccessSecurityGroup: ISecurityGroup;
     public readonly domainSecurityGroups: ISecurityGroup[];
 
     constructor(scope: Construct, id: string, props: networkStackProps) {
@@ -84,6 +85,7 @@ export class NetworkStack extends Stack {
         });
         defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
         securityGroups.push(defaultSecurityGroup)
+        this.defaultDomainAccessSecurityGroup = defaultSecurityGroup
         this.domainSecurityGroups = securityGroups
 
         new CfnOutput(this, 'CopilotDomainSGExports', {
