@@ -59,8 +59,10 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
         return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic, behavioralPolicy);
     }
 
-    public static Properties buildKafkaProperties(@NonNull String brokers, @NonNull String groupId, boolean enableMSKAuth,
-        String propertyFilePath) throws IOException {
+    public static Properties buildKafkaProperties(@NonNull String brokers,
+                                                  @NonNull String groupId,
+                                                  boolean enableMSKAuth,
+                                                  String propertyFilePath) throws IOException {
         var kafkaProps = new Properties();
         kafkaProps.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
         kafkaProps.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
