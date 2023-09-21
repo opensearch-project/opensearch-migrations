@@ -66,6 +66,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
         var kafkaProps = new Properties();
         kafkaProps.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
         kafkaProps.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
+        kafkaProps.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         kafkaProps.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         if (propertyFilePath != null) {
             try (InputStream input = new FileInputStream(propertyFilePath)) {
@@ -98,6 +99,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
             ConsumerRecords<String, byte[]> records;
             try {
                 records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
+                log.info("Kafka consumer poll has fetched {} records", records.count());
             } catch (RuntimeException e) {
                 log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. Swallowing and awaiting next " +
                         "metadata refresh to try again.").addArgument(topic).log();
@@ -125,6 +127,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     return null;
                 }
             }).filter(Objects::nonNull);
+            kafkaConsumer.commitSync();
             return trafficStream.collect(Collectors.toList());
         } catch (Exception e) {
             log.error("Terminating Kafka traffic stream");
