@@ -6,7 +6,9 @@ This repo contains an IaC CDK solution for deploying an OpenSearch Service Domai
 
 #### Project required setup
 
-It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
+1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
+
+2- Set the `CDK_DEPLOYMENT_STAGE` environment variable to assist in naming resources and preventing collisions. Typically, this would be set to a value such as `dev`, `gamma`, `Wave1`, `PROD` and will be used to distinguish AWS resources for a given region and deployment stage. For example the CloudFormation stack may be named like `OSServiceDomain-dev-us-east-1`. This stage environment variable should only be used for the disambiguation of user resources.
 
 #### First time using CDK?
 
@@ -17,11 +19,9 @@ If this is your first experience with CDK, follow the steps below to get started
 npm install -g aws-cdk
 ```
 
-2- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)***, as these will dictate the region and account used for deployment.
+2- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
 
-3- Set the `CDK_DEPLOYMENT_STAGE` environment variable to assist in naming resources and preventing collisions. Typically, this would be set to a value such as `dev`, `gamma`, `Wave1`, `PROD` and will be used to distinguish AWS resources for a given region and deployment stage. For example the CloudFormation stack may be named like `OSServiceDomain-dev-us-east-1`. This stage environment variable should only be used for the disambiguation of user resources.
-
-4- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command to set up a small CloudFormation stack of resources that CDK needs to function within your account
+3- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command to set up a small CloudFormation stack of resources that CDK needs to function within your account
 
 ```
 cdk bootstrap
