@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpRequestDecoder;
@@ -73,15 +74,15 @@ public class RequestPipelineOrchestrator<R> {
         }
     }
 
-    void addContentRepackingHandlers(ChannelPipeline pipeline,
+    void addContentRepackingHandlers(ChannelHandlerContext ctx,
                                      IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
-        addContentParsingHandlers(pipeline, null, authTransfomer);
+        addContentParsingHandlers(ctx, null, authTransfomer);
     }
 
-    void addJsonParsingHandlers(ChannelPipeline pipeline,
+    void addJsonParsingHandlers(ChannelHandlerContext ctx,
                                 IJsonTransformer transformer,
                                 IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
-        addContentParsingHandlers(pipeline, transformer, authTransfomer);
+        addContentParsingHandlers(ctx, transformer, authTransfomer);
     }
 
     void addInitialHandlers(ChannelPipeline pipeline, IJsonTransformer transformer) {
@@ -103,10 +104,11 @@ public class RequestPipelineOrchestrator<R> {
         addLoggingHandler(pipeline, "B");
     }
 
-    void addContentParsingHandlers(ChannelPipeline pipeline,
+    void addContentParsingHandlers(ChannelHandlerContext ctx,
                                    IJsonTransformer transformer,
                                    IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
         log.debug("Adding content parsing handlers to pipeline");
+        var pipeline = ctx.pipeline();
         //  IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
         pipeline.addLast(new HttpContentDecompressor());

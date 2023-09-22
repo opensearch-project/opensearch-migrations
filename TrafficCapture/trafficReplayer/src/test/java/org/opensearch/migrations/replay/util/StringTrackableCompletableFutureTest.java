@@ -3,11 +3,13 @@ package org.opensearch.migrations.replay.util;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 class StringTrackableCompletableFutureTest {
     @SneakyThrows
     private static void sneakyWait(CompletableFuture o) {

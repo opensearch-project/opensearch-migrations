@@ -168,15 +168,15 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
 
     @Override
     public String toString() {
-        return Utils.setPrintStyleFor(Utils.PacketPrintFormat.TRUNCATED, () -> {
+        return PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.TRUNCATED, () -> {
             final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
             sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n targetResponseDuration=").append(targetResponseDuration);
             sb.append("\n targetRequestData=")
-                    .append(Utils.httpPacketBufsToString(Utils.HttpMessageType.Request, targetRequestData.stream()));
+                    .append(PrettyPrinter.httpPacketBufsToString(PrettyPrinter.HttpMessageType.Request, targetRequestData.streamUnretained()));
             sb.append("\n targetResponseData=")
-                    .append(Utils.httpPacketBytesToString(Utils.HttpMessageType.Response, targetResponseData));
+                    .append(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.Response, targetResponseData));
             sb.append("\n transformStatus=").append(transformationStatus);
             sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
             sb.append('}');

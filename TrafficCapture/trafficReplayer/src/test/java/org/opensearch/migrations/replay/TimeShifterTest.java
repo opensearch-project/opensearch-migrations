@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -9,6 +10,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 class TimeShifterTest {
 
     public static final int RATE_MULTIPLIER = 8;

@@ -4,18 +4,18 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 
 import java.io.IOException;
 import java.util.Map;
 
+@Slf4j
 public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter {
     public static final int NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING = 1024;
-    final JsonEmitter jsonEmitter;
 
     public NettyJsonBodySerializeHandler() {
-        this.jsonEmitter = new JsonEmitter();
     }
 
     @Override
@@ -34,16 +34,17 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
         }
     }
 
-    private void serializePayload(ChannelHandlerContext ctx, Map<String,Object> payload) throws IOException {
-        var pac = jsonEmitter.getChunkAndContinuations(payload, NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING);
-        while (true) {
-            ctx.fireChannelRead(new DefaultHttpContent(pac.partialSerializedContents));
-            pac.partialSerializedContents.release();
-            if (pac.nextSupplier == null) {
-                ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
-                break;
+    private void serializePayload(ChannelHandlerContext ctx, Map<String, Object> payload) throws IOException {
+        try (var jsonEmitter = new JsonEmitter(ctx.alloc())) {
+            var pac = jsonEmitter.getChunkAndContinuations(payload, NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING);
+            while (true) {
+                ctx.fireChannelRead(new DefaultHttpContent(pac.partialSerializedContents));
+                if (pac.nextSupplier == null) {
+                    ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
+                    break;
+                }
+                pac = pac.nextSupplier.get();
             }
-            pac = pac.nextSupplier.get();
         }
     }
 }

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -13,12 +14,12 @@ import java.util.Arrays;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 class ExpiringTrafficStreamMapUnorderedTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
 
     public void testExpirations(Function<Integer,String> connectionGenerator, int window, int granularity,
-                                boolean forceMonotonicity,
                                 int timestamps[],
                                 int expectedExpirationCounts[]) {
         var expiredAccumulations = new ArrayList<Accumulation>();
@@ -50,13 +51,13 @@ class ExpiringTrafficStreamMapUnorderedTest {
 
     @Test
     public void testConnectionsAreExpired1() {
-        testExpirations(i->"connectionId_"+i, 5,1, true,
+        testExpirations(i->"connectionId_"+i, 5,1,
                 new int[] {1, 6, 3, 8, 4, 4, 3, 9, 12},
                 new int[] {0, 0, 0, 1, 1, 1, 1, 1,  3});
     }
     @Test
     public void testConnectionsAreExpired2() {
-        testExpirations(i->"connectionId_"+i, 5,1, true,
+        testExpirations(i->"connectionId_"+i, 5,1,
                 new int[] {1, 7, 3, 8, 4, 4, 3, 9, 13, 15},
                 new int[] {0, 1, 1, 1, 1, 1, 1, 1,  3,  8});
     }

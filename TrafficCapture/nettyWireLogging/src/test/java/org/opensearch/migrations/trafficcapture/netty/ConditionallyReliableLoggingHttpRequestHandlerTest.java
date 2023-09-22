@@ -2,18 +2,13 @@ package org.opensearch.migrations.trafficcapture.netty;
 
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.util.ResourceLeakDetector;
-import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
+import org.opensearch.migrations.testutils.TestUtilities;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -31,13 +26,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
-class ConditionallyReliableLoggingHttpRequestHandlerTest {
-
-    @BeforeAll
-    public static void setup() {
-        ResourceLeakDetectorFactory.setResourceLeakDetectorFactory(new CountingNettyResourceLeakDetector.MyResourceLeakDetectorFactory());
-        CountingNettyResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
-    }
+public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter)
             throws IOException {
@@ -90,23 +79,11 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         return bArr;
     }
 
-    private ByteBuf getByteBuf(byte[] src, boolean usePool) {
-        var unpooled = Unpooled.wrappedBuffer(src);
-        if (usePool) {
-            var pooled = ByteBufAllocator.DEFAULT.buffer(src.length);
-            pooled.writeBytes(unpooled);
-            unpooled.release();
-            return pooled;
-        } else {
-            return unpooled;
-        }
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testThatAPostInASinglePacketBlocksFutureActivity(boolean usePool) throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
-        var bb = getByteBuf(fullTrafficBytes, usePool);
+        var bb = TestUtilities.getByteBuf(fullTrafficBytes, usePool);
         writeMessageAndVerify(fullTrafficBytes, w -> {
             w.writeInbound(bb);
         });
@@ -119,37 +96,25 @@ class ConditionallyReliableLoggingHttpRequestHandlerTest {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
         writeMessageAndVerify(fullTrafficBytes, w -> {
             for (int i=0; i<fullTrafficBytes.length; ++i) {
-                var singleByte = getByteBuf(Arrays.copyOfRange(fullTrafficBytes, i, i+1), usePool);
+                var singleByte = TestUtilities.getByteBuf(Arrays.copyOfRange(fullTrafficBytes, i, i+1), usePool);
                 w.writeInbound(singleByte);
             }
         });
     }
 
-    @Test
-    public void testThatAPostInTinyPacketsBlocksFutureActivity_withLeakDetection() throws Exception {
-        CountingNettyResourceLeakDetector.activate();
-
-        var COUNT = 32;
-        for (int i=0; i<COUNT; ++i) {
-            testThatAPostInTinyPacketsBlocksFutureActivity((i%2)==0);
-            System.gc();
-            System.runFinalization();
-        }
-        Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @WrapWithNettyLeakDetection(repetitions = 16)
+    public void testThatAPostInTinyPacketsBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
+        testThatAPostInTinyPacketsBlocksFutureActivity(usePool);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);
     }
 
-    @Test
-    public void testThatAPostInASinglePacketBlocksFutureActivity_withLeakDetection() throws Exception {
-        CountingNettyResourceLeakDetector.activate();
-
-        var COUNT = 64;
-        for (int i=0; i<COUNT; ++i) {
-            testThatAPostInASinglePacketBlocksFutureActivity((i%2)==0);
-            System.gc();
-            System.runFinalization();
-            Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
-        }
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @WrapWithNettyLeakDetection(repetitions = 32)
+    public void testThatAPostInASinglePacketBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
+        testThatAPostInASinglePacketBlocksFutureActivity(usePool);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);
     }
 

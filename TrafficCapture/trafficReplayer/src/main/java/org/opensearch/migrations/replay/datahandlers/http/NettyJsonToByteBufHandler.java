@@ -97,7 +97,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
             int currentChunkProspectiveSize =
                     payloadBufferIndex >= headerChunkSizes.size() ? 0 :  headerChunkSizes.get(payloadBufferIndex);
             if (inProgressByteBuf == null && currentChunkProspectiveSize > 0) {
-                inProgressByteBuf = ByteBufAllocator.DEFAULT.buffer(currentChunkProspectiveSize);
+                inProgressByteBuf = ctx.alloc().buffer(currentChunkProspectiveSize);
             }
             if (inProgressByteBuf != null) {
                 var bytesLeftToWriteInCurrentChunk = currentChunkProspectiveSize - inProgressByteBuf.writerIndex();
@@ -154,27 +154,24 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
     {
         AtomicInteger chunkIdx = new AtomicInteger(headerChunkSizes.size());
         var bufs = headerChunkSizes.stream()
-                .map(i -> ByteBufAllocator.DEFAULT.buffer(chunkIdx.decrementAndGet()==0?maxLastBufferSize:i).retain())
+                .map(i -> ctx.alloc().buffer(chunkIdx.decrementAndGet()==0?maxLastBufferSize:i).retain())
                 .toArray(ByteBuf[]::new);
-        var cbb = ByteBufAllocator.DEFAULT.compositeBuffer(bufs.length);
-        ResourceLeakDetector<CompositeByteBuf> rld =
-                (ResourceLeakDetector<CompositeByteBuf>) ResourceLeakDetectorFactory.instance().newResourceLeakDetector(cbb.getClass());
-        rld.track(cbb);
-        cbb.addComponents(true, bufs);
-        log.debug("cbb.refcnt="+cbb.refCnt());
-        try (var bbos = new ByteBufOutputStream(cbb)) {
-            writeHeadersIntoStream(httpJson, bbos);
+        CompositeByteBuf cbb = null;
+        try {
+            cbb = ctx.alloc().compositeBuffer(bufs.length);
+            cbb.addComponents(true, bufs);
+            log.debug("cbb.refcnt=" + cbb.refCnt());
+            try (var bbos = new ByteBufOutputStream(cbb)) {
+                writeHeadersIntoStream(httpJson, bbos);
+            }
+            for (var bb : bufs) {
+                ctx.fireChannelRead(bb);
+            }
+        } finally {
+            if (cbb != null) {
+                cbb.release();
+            }
         }
-        log.debug("post write cbb.refcnt="+cbb.refCnt());
-        int debugCounter = 0;
-        for (var bb : bufs) {
-            log.debug("bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
-            ctx.fireChannelRead(bb);
-            bb.release();
-            log.debug("Post fire & decrement - bb[" + (debugCounter) +  "].refcnt=" + bb.refCnt());
-            debugCounter++;
-        }
-        cbb.release();
     }
 
     private static void writeHeadersIntoStream(HttpJsonMessageWithFaultingPayload httpJson,
