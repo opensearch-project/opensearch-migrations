@@ -14,12 +14,11 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
 
     private void wrapWithLeakChecks(ExtensionContext extensionContext, Callable repeatCall, Callable finalCall)
             throws Throwable {
-        CountingNettyResourceLeakDetector.activate();
-
         if (getAnnotation(extensionContext).map(a -> a.disableLeakChecks()).orElse(false)) {
             finalCall.call();
             return;
         } else {
+            CountingNettyResourceLeakDetector.activate();
             int repetitions = getAnnotation(extensionContext).map(a -> a.repetitions())
                     .orElseThrow(()->new IllegalStateException("No test method present"));
 

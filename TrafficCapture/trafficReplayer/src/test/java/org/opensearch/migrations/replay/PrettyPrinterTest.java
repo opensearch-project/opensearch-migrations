@@ -2,9 +2,11 @@ package org.opensearch.migrations.replay;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -57,16 +59,35 @@ public class PrettyPrinterTest {
         BYTE_ARRAY, UNPOOLED_BYTEBUF, POOLED_BYTEBUF
     }
 
+    enum BufferContent {
+        SimpleGetRequest, Empty
+    }
+
     private static Stream<Arguments> makeCombos() {
         return Arrays.stream(BufferType.values())
-                .flatMap(b-> Arrays.stream(PrettyPrinter.PacketPrintFormat.values()).map(e->Arguments.of(e,b)));
+                .flatMap(b->Arrays.stream(PrettyPrinter.PacketPrintFormat.values())
+                        .flatMap(fmt->Arrays.stream(BufferContent.values())
+                                .map(str->Arguments.of(fmt,b,str))));
+    }
+
+    public static byte[] getBytesForScenario(BufferContent contentDirective) {
+        switch (contentDirective) {
+            case SimpleGetRequest:
+                return SAMPLE_REQUEST_STRING.getBytes(StandardCharsets.UTF_8);
+            case Empty:
+                return new byte[0];
+            default:
+                throw new RuntimeException("Unknown scenario type: " + contentDirective);
+        }
     }
 
     @ParameterizedTest
     @MethodSource("makeCombos")
     @WrapWithNettyLeakDetection(repetitions = 4)
-    public void httpPacketBufsToString(PrettyPrinter.PacketPrintFormat format, BufferType bufferType) {
-        byte[] fullTrafficBytes = SAMPLE_REQUEST_STRING.getBytes(StandardCharsets.UTF_8);
+    public void httpPacketBufsToString(PrettyPrinter.PacketPrintFormat format,
+                                       BufferType bufferType,
+                                       BufferContent contentDirective) {
+        var fullTrafficBytes = getBytesForScenario(contentDirective);
         var byteArrays = new ArrayList<byte[]>();
         for (int i=0,step=1; i<fullTrafficBytes.length; i+=step) {
             byteArrays.add(Arrays.copyOfRange(fullTrafficBytes, i, i+step));
@@ -74,7 +95,24 @@ public class PrettyPrinterTest {
         String outputString =
                 PrettyPrinter.setPrintStyleFor(format, ()->
                         prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.Request, bufferType));
-        Assertions.assertEquals(getExpectedResult(format), outputString);
+        Assertions.assertEquals(getExpectedResult(format, contentDirective), outputString);
+    }
+
+    @Test
+    public void httpPostPacketToHttpParsedString() throws Exception {
+        try (var sampleStream = PrettyPrinterTest.class.getResourceAsStream(
+                "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
+            var fullTrafficBytes = sampleStream.readAllBytes();
+
+            var byteArrays = new ArrayList<byte[]>();
+            for (int i=0,step=1; i<fullTrafficBytes.length; i+=step) {
+                byteArrays.add(Arrays.copyOfRange(fullTrafficBytes, i, i+step));
+            }
+            String outputString =
+                    PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.PARSED_HTTP, ()->
+                            prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.Request, BufferType.POOLED_BYTEBUF));
+            Assertions.assertEquals(new String(fullTrafficBytes, StandardCharsets.UTF_8), outputString);
+        }
     }
 
     private static String prettyPrint(List<byte[]> byteArrays,
@@ -101,13 +139,27 @@ public class PrettyPrinterTest {
         return formattedString;
     }
 
-    static String getExpectedResult(PrettyPrinter.PacketPrintFormat format) {
+    static String getExpectedResult(PrettyPrinter.PacketPrintFormat format, BufferContent content) {
         switch (format) {
             case TRUNCATED:
             case FULL_BYTES:
-                return SAMPLE_REQUEST_AS_BLOCKS;
+                switch (content) {
+                    case Empty:
+                        return "";
+                    case SimpleGetRequest:
+                        return SAMPLE_REQUEST_AS_BLOCKS;
+                    default:
+                        throw new RuntimeException("Unknown BufferContent value: " + content);
+                }
             case PARSED_HTTP:
-                return SAMPLE_REQUEST_AS_PARSED_HTTP;
+                switch (content) {
+                    case Empty:
+                        return "[NULL]";
+                    case SimpleGetRequest:
+                        return SAMPLE_REQUEST_AS_PARSED_HTTP;
+                    default:
+                        throw new RuntimeException("Unknown BufferContent value: " + content);
+                }
             default:
                 throw new RuntimeException("Unknown PacketPrintFormat: "+format);
         }

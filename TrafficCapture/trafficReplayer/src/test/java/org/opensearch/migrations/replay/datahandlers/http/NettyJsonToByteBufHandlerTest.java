@@ -78,8 +78,11 @@ public class NettyJsonToByteBufHandlerTest {
         return channel.inboundMessages().stream()
                 .map(x -> {
                     var bb = ((ByteBuf) x);
-                    bb.release();
-                    return bb.readableBytes();
+                    try {
+                        return bb.readableBytes();
+                    } finally {
+                        bb.release();
+                    }
                 })
                 .collect(Collectors.toList());
     }
