@@ -6,15 +6,18 @@ import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 
+@WrapWithNettyLeakDetection
 class HttpJsonTransformingConsumerTest {
     @Test
     public void testPassThroughSinglePacketPost() throws Exception {
@@ -63,6 +66,34 @@ class HttpJsonTransformingConsumerTest {
     }
 
     @Test
+    public void testRemoveAuthHeadersWorks() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        var transformingHandler =
+                new HttpJsonTransformingConsumer<AggregatedRawResponse>(
+                        JsonJoltTransformer.newBuilder()
+                                .addHostSwitchOperation("test.domain")
+                                .build(),
+                        RemovingAuthTransformerFactory.instance,
+                        testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
+        byte[] testBytes;
+        try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+                "/requests/raw/get_withAuthHeader.txt")) {
+            testBytes = sampleStream.readAllBytes();
+            testBytes = new String(testBytes, StandardCharsets.UTF_8)
+                    .replace("foo.example", "test.domain")
+                    .replace("auTHorization: Basic YWRtaW46YWRtaW4=\n", "")
+                    .getBytes(StandardCharsets.UTF_8);
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8),
+                testPacketCapture.getCapturedAsString());
+        Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
+        Assertions.assertEquals(HttpRequestTransformationStatus.SKIPPED, returnedResponse.transformationStatus);
+    }
+
+    @Test
     public void testPartialBodyThrowsAndIsRedriven() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
@@ -100,4 +131,6 @@ class HttpJsonTransformingConsumerTest {
         Assertions.assertInstanceOf(NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException.class,
                 returnedResponse.error);
     }
+
+
 }

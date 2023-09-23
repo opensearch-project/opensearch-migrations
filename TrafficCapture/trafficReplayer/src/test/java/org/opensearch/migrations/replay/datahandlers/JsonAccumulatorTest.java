@@ -5,12 +5,14 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
+@WrapWithNettyLeakDetection
 public class JsonAccumulatorTest {
     public static final String TINY = "tiny";
     public static final String MEDIUM = "medium";
@@ -18,7 +20,7 @@ public class JsonAccumulatorTest {
     public static final String LARGE_PACKED = "largeAndPacked";
     GenerateRandomNestedJsonObject randomJsonGenerator = new GenerateRandomNestedJsonObject();
 
-    private static Object readJson(byte[] testFileBytes, int chunkBound) throws IOException {
+    static Object readJson(byte[] testFileBytes, int chunkBound) throws IOException {
         var jsonParser = new JsonAccumulator();
         Random r = new Random(2);
         var entireByteBuffer = ByteBuffer.wrap(testFileBytes);

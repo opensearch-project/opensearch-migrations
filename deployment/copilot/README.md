@@ -64,9 +64,9 @@ cd ../cdk/opensearch-service-migration
 export CDK_DEPLOYMENT_STAGE=dev2
 cdk deploy "*" --c domainName="test-domain-2-7" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c vpcId="$MIGRATION_VPC_ID" --c vpcSecurityGroupIds="[\"$MIGRATION_DOMAIN_SG_ID\"]" --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=false --c enableDemoAdmin=true --require-approval never --concurrency 3
 ```
-To launch an additional Replayer service that directs traffic to this new Domain, run a command like the one below. In this command, `id` is a unique label for the Replayer service, and `target-uri` is the endpoint of the target cluster where traffic will be replayed. You can obtain this endpoint either from the CDK command output mentioned earlier or from the AWS Console:
+To launch an additional Replayer service that directs traffic to this new Domain, run a command like the one below. In this command, `id` is a unique label for the Replayer service, `target-uri` is the endpoint of the target cluster where traffic will be replayed, and `extra-args` is specifying a Replayer Auth header option to use. You can obtain the below endpoint and secret name (or secret ARN) from either from the CDK command output mentioned earlier or from the AWS Console:
 ```shell
-./createReplayer.sh --id test-os-2-7 --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443
+./createReplayer.sh --id test-os-2-7 --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443 --extra-args "--auth-header-user-and-secret admin demo-user-secret-dev2-us-east-1" --tags migration_deployment=0.1.0
 ```
 More options can be found with:
 ```shell

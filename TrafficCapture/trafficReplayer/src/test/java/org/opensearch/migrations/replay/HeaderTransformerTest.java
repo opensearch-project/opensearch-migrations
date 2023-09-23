@@ -7,6 +7,7 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 public class HeaderTransformerTest {
 
     private static final String SILLY_TARGET_CLUSTER_NAME = "remoteguest";

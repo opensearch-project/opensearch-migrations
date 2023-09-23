@@ -115,19 +115,27 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
             log.trace("read the following message and sending it to consumeBytes: " + msg +
                     " hashCode=" + System.identityHashCode(msg) +
                     " ctx hash=" + System.identityHashCode(ctx));
-            var bb = ((ByteBuf) msg).retain();
-            log.trace("CR: old currentFuture="+currentFuture);
+            var bb = (ByteBuf) msg;
+            log.atTrace().setMessage(()->"Send bb.refCnt="+bb.refCnt() + " " + System.identityHashCode(bb)).log();
             // I don't want to capture the *this* object, the preexisting value of the currentFuture field only
             final var preexistingFutureForCapture = currentFuture;
             var numBytesToSend = bb.readableBytes();
-            currentFuture = currentFuture.thenCompose(v-> {
-                log.trace("chaining consumingBytes with " + msg + " lastFuture=" + preexistingFutureForCapture);
-                var rval = packetReceiver.consumeBytes(bb);
-                log.trace("packetReceiver.consumeBytes()="+rval);
-                bb.release();
-                return rval.map(cf->cf.thenApply(ignore->false),
-                        ()->"this NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is going to return a" +
-                                " completedValue of false to indicate that more packets may need to be sent");
+            currentFuture = currentFuture.getDeferredFutureThroughHandle((v,t)-> {
+                if (t != null) {
+                    bb.release();
+                    log.atInfo().setCause(t).setMessage(()->"got exception from a previous future that will prohibit " +
+                            "sending any more data to the packetReceiver").log();
+                    return StringTrackableCompletableFuture.failedFuture(t, ()->"failed previous future");
+                } else {
+                    log.trace("chaining consumingBytes with " + msg + " lastFuture=" + preexistingFutureForCapture);
+                    var rval = packetReceiver.consumeBytes(bb);
+                    bb.release();
+                    log.info("packetReceiver.consumeBytes()=" + rval + " bb.refCnt=" + bb.refCnt());
+                    return rval.map(cf -> cf.thenApply(ignore -> false),
+                            () -> "NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is going " +
+                                    "to return a completedValue of false to indicate that more packets may " +
+                                    "need to be sent");
+                }
             },
                     ()->"NettySendByteBufsToPacketHandlerHandler.channelRead waits for the previous future " +
                             "to finish before writing the next set of " + numBytesToSend + " bytes ");

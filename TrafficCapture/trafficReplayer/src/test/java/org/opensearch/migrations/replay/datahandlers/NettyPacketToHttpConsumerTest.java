@@ -24,6 +24,7 @@ import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 
 import javax.net.ssl.SSLException;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 class NettyPacketToHttpConsumerTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";

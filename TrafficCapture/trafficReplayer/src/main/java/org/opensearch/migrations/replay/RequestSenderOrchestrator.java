@@ -38,6 +38,7 @@ public class RequestSenderOrchestrator {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm close has finished");
+        log.atDebug().setMessage(()->"Scheduling work for "+requestKey+" at time "+timestamp).log();
         connectionSession.eventLoop.schedule(()->{
             task.get().map(f->f.whenComplete((v,t) -> {
                 if (t!=null) {
@@ -55,6 +56,7 @@ public class RequestSenderOrchestrator {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for final aggregated response");
+        log.atDebug().setMessage(()->"Scheduling request for "+requestKey+" at start time "+start).log();
         return asynchronouslyInvokeRunnableToSetupFuture(requestKey, false, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> scheduleSendOnCffr(requestKey, channelFutureAndRequestSchedule,
                         finalTunneledResponse, start, interval, packets));
@@ -64,6 +66,7 @@ public class RequestSenderOrchestrator {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm close has finished");
+        log.atDebug().setMessage(()->"Scheduling CLOSE for "+requestKey+" at time "+timestamp).log();
         asynchronouslyInvokeRunnableToSetupFuture(requestKey, true, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> {
                     scheduleOnCffr(requestKey, channelFutureAndRequestSchedule,
@@ -106,9 +109,15 @@ public class RequestSenderOrchestrator {
                                                             .getNow(null).channel();
                                             runAfterChannelSetup(channelFutureAndRequestSchedule,
                                                     finalTunneledResponse,
-                                                    cffr -> cffr.scheduleSequencer.add(requestKey.requestIndex,
-                                                            ()->successFn.accept(channelFutureAndRequestSchedule),
-                                                            x->x.run()));
+                                                    cffr -> {
+                                                        cffr.scheduleSequencer.add(requestKey.requestIndex,
+                                                                () -> successFn.accept(channelFutureAndRequestSchedule),
+                                                                x -> x.run());
+                                                        if (cffr.scheduleSequencer.hasPending()) {
+                                                            log.atDebug().setMessage(()->"Sequencer for "+requestKey+
+                                                                    " = "+cffr.scheduleSequencer).log();
+                                                        }
+                                                    });
                                         })
                                         .exceptionally(t->{
                                             log.atTrace().setCause(t).setMessage(()->requestKey.toString() +

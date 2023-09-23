@@ -59,7 +59,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
                 bufferedJsonMessage.headers().asStrictMap().remove(CONTENT_LENGTH_HEADER_NAME);
                 ctx.fireChannelRead(bufferedJsonMessage);
             } else {
-                bufferedContents = ByteBufAllocator.DEFAULT.compositeHeapBuffer();
+                bufferedContents = ctx.alloc().compositeHeapBuffer();
             }
         } else if (msg instanceof HttpContent) {
             boolean lastContent = (msg instanceof LastHttpContent);
@@ -75,7 +75,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
                     }
                     break;
                 case FIXED:
-                    bufferedContents.addComponents(true, dataByteBuf.retain());
+                    bufferedContents.addComponents(true, dataByteBuf);
                     if (lastContent) {
                         finalizeFixedContentStream(ctx);
                     }
@@ -91,7 +91,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     private void handleAsChunked(ChannelHandlerContext ctx, ByteBuf dataByteBuf) {
         var chunkSizePreamble = (Integer.toHexString(dataByteBuf.readableBytes()) + "\r\n")
                 .getBytes(StandardCharsets.UTF_8);
-        var compositeWrappedData = ByteBufAllocator.DEFAULT.compositeBuffer(2);
+        var compositeWrappedData = ctx.alloc().compositeBuffer(2);
         compositeWrappedData.addComponents(true, Unpooled.wrappedBuffer(chunkSizePreamble));
         compositeWrappedData.addComponents(true, dataByteBuf);
         compositeWrappedData.addComponents(true, Unpooled.wrappedBuffer("\r\n".getBytes(StandardCharsets.UTF_8)));

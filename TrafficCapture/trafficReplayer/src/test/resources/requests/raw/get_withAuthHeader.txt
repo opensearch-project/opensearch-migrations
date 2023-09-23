@@ -1,0 +1,5 @@
+GET /test HTTP/1.1
+Host: foo.example
+auTHorization: Basic YWRtaW46YWRtaW4=
+Content-Type: application/json
+
