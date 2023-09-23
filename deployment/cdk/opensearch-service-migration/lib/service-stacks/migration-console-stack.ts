@@ -22,6 +22,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
 export class MigrationConsoleStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
+        super(scope, id, props)
         let securityGroups = [props.serviceConnectSecurityGroup]
         if (props.additionalServiceSecurityGroups) {
             securityGroups = securityGroups.concat(props.additionalServiceSecurityGroups)
@@ -31,8 +32,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const replayerOutputEFSVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {
-                fileSystemId: props.replayerOutputFileSystemId
-            },
+                fileSystemId: props.replayerOutputFileSystemId,
+                transitEncryption: "ENABLED"
+            }
         };
 
         const replayerOutputMountPoint: MountPoint = {
@@ -41,7 +43,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             sourceVolume: volumeName
         }
 
-        super(scope, id, {
+        this.createService({
             serviceName: "migration-console",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,

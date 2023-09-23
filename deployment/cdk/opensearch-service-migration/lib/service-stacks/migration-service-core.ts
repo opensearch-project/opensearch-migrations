@@ -40,9 +40,11 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
 
 export class MigrationServiceCore extends Stack {
 
-    constructor(scope: Construct, id: string, props: MigrationServiceCoreProps) {
+    constructor(scope: Construct, id: string, props: StackPropsExt) {
         super(scope, id, props);
+    }
 
+    createService(props: MigrationServiceCoreProps) {
         const serviceTaskRole = new Role(this, 'ServiceTaskRole', {
             assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
             description: 'ECS Service Task Role'
@@ -65,6 +67,7 @@ export class MigrationServiceCore extends Stack {
         props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
+            family: `migration-${props.stage}-${props.serviceName}`,
             memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
             cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
             taskRole: serviceTaskRole
@@ -80,7 +83,7 @@ export class MigrationServiceCore extends Stack {
         const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
             retention: RetentionDays.ONE_MONTH,
             removalPolicy: RemovalPolicy.DESTROY,
-            logGroupName: `/migration/${props.stage}-${props.serviceName}`
+            logGroupName: `/migration/${props.stage}/${props.serviceName}`
         });
 
         const serviceContainer = serviceTaskDef.addContainer("ServiceContainer", {

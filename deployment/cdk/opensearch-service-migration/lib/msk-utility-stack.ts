@@ -7,6 +7,7 @@ import {NodejsFunction} from "aws-cdk-lib/aws-lambda-nodejs";
 import {Runtime} from "aws-cdk-lib/aws-lambda";
 import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId, Provider} from "aws-cdk-lib/custom-resources";
 import * as path from "path";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface mskUtilityStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -94,15 +95,20 @@ export class MSKUtilityStack extends Stack {
                 handle: wcHandle.ref
             })
             waitCondition.node.addDependency(customResource);
-            // TODO handle public case
+            // TODO Need to add setting SSM parameter for public endpoint case
             brokerEndpointsOutput = waitCondition.attrData.toString()
         }
         else {
             const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, props.mskARN)
             const brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")
+            //const brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
             brokerEndpointsOutput = `export MIGRATION_KAFKA_BROKER_ENDPOINTS=${brokerEndpoints}`
-            //brokerEndpointsOutput = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
             this.mskBrokerEndpoints = brokerEndpoints
+            new StringParameter(this, 'SSMParameterMSKBrokers', {
+                description: 'OpenSearch Migration Parameter for MSK Brokers',
+                parameterName: `/migration/${props.stage}/msk/cluster/brokers`,
+                stringValue: brokerEndpoints
+            });
         }
 
         const cfnOutput = new CfnOutput(this, 'CopilotBrokerEndpointsExport', {

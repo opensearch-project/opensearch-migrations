@@ -62,6 +62,8 @@ export class StackComposer {
         const mskARN = getContextForType('mskARN', 'string')
         const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
         const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
+        const captureProxyESEnabled = getContextForType('captureProxyESEnabled', 'boolean')
+        const migrationConsoleEnabled = getContextForType('migrationConsoleEnabled', 'boolean')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
         const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
@@ -167,8 +169,10 @@ export class StackComposer {
         this.stacks.push(opensearchStack)
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
+        let migrationStack
+        let mskUtilityStack
         if (migrationAssistanceEnabled && networkStack) {
-            const migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
+            migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
                 vpc: networkStack.vpc,
                 mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
@@ -179,7 +183,7 @@ export class StackComposer {
             })
             this.stacks.push(migrationStack)
 
-            const mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
+            mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
                 vpc: networkStack.vpc,
                 mskARN: migrationStack.mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
@@ -189,8 +193,28 @@ export class StackComposer {
             })
             mskUtilityStack.addDependency(migrationStack)
             this.stacks.push(mskUtilityStack)
+        }
 
-            const migrationConsoleStack = new MigrationConsoleStack(scope, "migrationConsole", {
+        let captureProxyESStack
+        if (captureProxyESEnabled && networkStack && migrationStack && mskUtilityStack) {
+            captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
+                vpc: networkStack.vpc,
+                ecsCluster: migrationStack.ecsCluster,
+                serviceConnectSecurityGroup: migrationStack.serviceConnectSecurityGroup,
+                additionalServiceSecurityGroups: [migrationStack.mskAccessSecurityGroup],
+                stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
+                description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
+                ...props,
+            })
+            captureProxyESStack.addDependency(mskUtilityStack)
+            captureProxyESStack.addDependency(migrationStack)
+            captureProxyESStack.addDependency(networkStack)
+            this.stacks.push(captureProxyESStack)
+        }
+
+        let migrationConsoleStack
+        if (migrationConsoleEnabled && networkStack && opensearchStack && migrationStack) {
+            migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
                 ecsCluster: migrationStack.ecsCluster,
                 replayerOutputFileSystemId: migrationStack.replayerOutputFileSystemId,
@@ -201,21 +225,15 @@ export class StackComposer {
                 description: "This stack contains resources for the Migration Console ECS service",
                 ...props,
             })
+            // To enable the Migration Console to make requests to the Capture Proxy with Service Connect,
+            // it should be deployed after the Capture Proxy
+            if (captureProxyESStack) {
+                migrationConsoleStack.addDependency(captureProxyESStack)
+            }
+            migrationConsoleStack.addDependency(migrationStack)
+            migrationConsoleStack.addDependency(opensearchStack)
+            migrationConsoleStack.addDependency(networkStack)
             this.stacks.push(migrationConsoleStack)
-
-            const captureProxyESStack = new CaptureProxyESStack(scope, "captureProxyES", {
-                vpc: networkStack.vpc,
-                ecsCluster: migrationStack.ecsCluster,
-                mskBrokerEndpoints: mskUtilityStack.mskBrokerEndpoints,
-                mskClusterArn: migrationStack.mskARN,
-                serviceConnectSecurityGroup: migrationStack.serviceConnectSecurityGroup,
-                additionalServiceSecurityGroups: [migrationStack.mskAccessSecurityGroup],
-                stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
-                description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
-                ...props,
-            })
-            this.stacks.push(captureProxyESStack)
-
         }
 
         // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited

@@ -7,6 +7,7 @@ import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface migrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -99,6 +100,11 @@ export class MigrationAssistanceStack extends Stack {
             }
         });
         this.mskARN = mskCluster.attrArn
+        new StringParameter(this, 'SSMParameterMSKARN', {
+            description: 'OpenSearch Migration Parameter for MSK ARN',
+            parameterName: `/migration/${props.stage}/msk/cluster/arn`,
+            stringValue: mskCluster.attrArn
+        });
 
         const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
             vpc: props.vpc,
@@ -132,6 +138,7 @@ export class MigrationAssistanceStack extends Stack {
             allowAllOutbound: true,
         })
         this.serviceConnectSecurityGroup.addIngressRule(replayerOutputSG, Port.allTraffic());
+
         this.ecsCluster = new Cluster(this, 'migrationECSCluster', {
             vpc: props.vpc,
 
