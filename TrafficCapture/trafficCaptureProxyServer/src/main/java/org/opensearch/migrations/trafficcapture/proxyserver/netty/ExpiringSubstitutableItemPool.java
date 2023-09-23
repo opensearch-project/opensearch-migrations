@@ -5,6 +5,7 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -63,6 +64,27 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         Duration totalDurationBuildingItems = Duration.ZERO;
         @Getter
         Duration totalWaitTimeForCallers = Duration.ZERO;
+
+        public Stats() {}
+
+        public Stats(long nItemsCreated,
+                     long nItemsExpired,
+                     long nHotGets,
+                     long nColdGets,
+                     Duration totalDurationBuildingItems,
+                     Duration totalWaitTimeForCallers) {
+            this.nItemsCreated = nItemsCreated;
+            this.nItemsExpired = nItemsExpired;
+            this.nHotGets = nHotGets;
+            this.nColdGets = nColdGets;
+            this.totalDurationBuildingItems = totalDurationBuildingItems;
+            this.totalWaitTimeForCallers = totalWaitTimeForCallers;
+        }
+
+        public Stats(Stats o) {
+            this(o.nItemsCreated, o.nItemsExpired, o.nHotGets, o.nColdGets,
+                    o.totalDurationBuildingItems, o.totalWaitTimeForCallers);
+        }
 
         @Override
         public String toString() {
@@ -130,8 +152,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     private final EventLoop eventLoop;
     private Duration inactivityTimeout;
     private GenericFutureListener<F> shuffleInProgressToReady;
-    @Getter
-    private Stats stats = new Stats();
+    private final Stats stats;
     private int poolSize;
 
     public ExpiringSubstitutableItemPool(@NonNull Duration inactivityTimeout,
@@ -153,6 +174,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         this.eventLoop = eventLoop;
         this.inactivityTimeout = inactivityTimeout;
         this.onExpirationConsumer = onExpirationConsumer;
+        this.stats = new Stats();
         this.itemSupplier = () -> {
             var startTime = Instant.now();
             var rval = itemSupplier.get();
@@ -175,6 +197,19 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
                 beginLoadingNewItemIfNecessary();
             }
         };
+    }
+
+    @SneakyThrows
+    public Stats getStats() {
+        // make a copy on the original thread making changes, which will be up to date at the time of capture and
+        // immutable for future accessors, making it thread-safe
+        var copiedStats = eventLoop.submit(()->{
+            log.atTrace().setMessage(()->"copying stats ("+System.identityHashCode(stats)+")="+stats).log();
+            return new Stats(stats);
+        }).get();
+        log.atTrace()
+                .setMessage(()->"Got copied value of (" + System.identityHashCode(copiedStats) + ")="+copiedStats).log();
+        return copiedStats;
     }
 
     public int reduceCapacity(int delta) {

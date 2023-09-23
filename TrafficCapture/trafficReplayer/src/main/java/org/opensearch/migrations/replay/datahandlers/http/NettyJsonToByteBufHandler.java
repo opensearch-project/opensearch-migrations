@@ -185,7 +185,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
             osw.append(httpJson.path());
             osw.append(" ");
             osw.append(httpJson.protocol());
-            osw.append("\n");
+            osw.append("\r\n");
 
             for (var kvpList : httpJson.headers().asStrictMap().entrySet()) {
                 var key = kvpList.getKey();
@@ -193,10 +193,10 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
                     osw.append(key);
                     osw.append(": ");
                     osw.append(valueEntry);
-                    osw.append("\n");
+                    osw.append("\r\n");
                 }
             }
-            osw.append("\n");
+            osw.append("\r\n");
             osw.flush();
         }
     }

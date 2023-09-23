@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.OnlineRadixSorterForIntegratedKeys;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 

@@ -58,6 +58,7 @@ export class StackComposer {
         const migrationAssistanceEnabled = getContextForType('migrationAssistanceEnabled', 'boolean')
         const mskARN = getContextForType('mskARN', 'string')
         const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
+        const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
         const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
@@ -168,6 +169,7 @@ export class StackComposer {
                 vpc: networkStack.vpc,
                 mskARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
+                mskBrokerNodeCount: mskBrokerNodeCount,
                 stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 ...props,

@@ -1,10 +1,12 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
+import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpMessageDecoderResult;
 import io.netty.handler.codec.http.HttpMethod;
@@ -15,13 +17,14 @@ import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 
-import java.io.IOException;
 import java.time.Instant;
-import java.util.List;
 
 @Slf4j
 public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
+    private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
+
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
          * Override this so that the HttpHeaders object can be a cheaper one.  PassThruHeaders
@@ -45,10 +48,14 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             if (msg instanceof HttpRequest) {
                 currentRequest = (HttpRequest) msg;
-            } else if (msg instanceof LastHttpContent) {
-                isDone = true;
+            } else if (msg instanceof HttpContent) {
+                ((HttpContent)msg).release();
+                if (msg instanceof LastHttpContent) {
+                    isDone = true;
+                }
+            } else {
+                super.channelRead(ctx, msg);
             }
-            super.channelRead(ctx, msg);
         }
 
         public HttpRequest resetCurrentRequest() {
@@ -75,15 +82,7 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
     }
 
     private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ByteBuf msg) throws Exception {
-        var bb = msg;
-        // Preserve ownership of this ByteBuf because the HttpRequestDecoder will take ownership of the
-        // ByteBuf, releasing it once the data has been copied into its cumulation buffer.  However,
-        // this handler still fires ByteBufs through the pipeline.  It's up to a future handler to perform
-        // the release, as it would have been if this method was implemented any other way.
-        bb.retain();
-        bb.markReaderIndex();
-        httpDecoderChannel.writeInbound(bb);
-        bb.resetReaderIndex();
+        httpDecoderChannel.writeInbound(msg); // Consume this outright, up to the caller to know what else to do
         return getHandlerThatHoldsParsedHttpRequest().isDone ?
                 HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE :
                 HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
@@ -127,15 +126,26 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
         super.channelRead(ctx, msg);
+        metricsLogger.atSuccess()
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .addKeyValue("httpMethod", httpRequest.method().toString())
+                .addKeyValue("httpEndpoint", httpRequest.uri())
+                .setMessage("Full request received").log();
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         var timestamp = Instant.now();
-        var bb = (ByteBuf) msg;
-        trafficOffloader.addReadEvent(timestamp, bb);
+        HttpCaptureSerializerUtil.HttpProcessedState httpProcessedState;
+        {
+            var bb = ((ByteBuf) msg).retainedDuplicate();
+            trafficOffloader.addReadEvent(timestamp, bb);
+            metricsLogger.atSuccess()
+                    .addKeyValue("channelId", ctx.channel().id().asLongText())
+                    .setMessage("Component of request received").log();
 
-        var httpProcessedState = parseHttpMessageParts(bb);
+            httpProcessedState = parseHttpMessageParts(bb); // bb is consumed/release by this method
+        }
         if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
             var httpRequest = getHandlerThatHoldsParsedHttpRequest().resetCurrentRequest();
             var decoderResultLoose = httpRequest.decoderResult();

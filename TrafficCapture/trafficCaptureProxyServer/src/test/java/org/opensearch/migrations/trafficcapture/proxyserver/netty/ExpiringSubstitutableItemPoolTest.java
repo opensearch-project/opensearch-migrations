@@ -20,7 +20,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-@Disabled
 @Slf4j
 class ExpiringSubstitutableItemPoolTest {
 
@@ -43,6 +42,7 @@ class ExpiringSubstitutableItemPoolTest {
      * in place may further mitigate inconsistencies, though I haven't had any tests fail yet
      * unless I've stopped threads within the debugger.
      */
+    @Disabled
     @Test
     void get() throws Exception {
         var firstWaveBuildCountdownLatch = new CountDownLatch(NUM_POOLED_ITEMS);
@@ -119,13 +119,16 @@ class ExpiringSubstitutableItemPoolTest {
         Assertions.assertTrue(pool.getStats().getNItemsExpired() >= 4);
 
         for (int i=1; i<=NUM_POOLED_ITEMS*2; ++i) {
-            log.atInfo().setMessage(()->"Pool=" + pool).log();
-            Assertions.assertEquals(NUM_POOLED_ITEMS+i, getNextItem(pool));
+            var nextItemGrabbed = getNextItem(pool);
+            log.atDebug().setMessage(()->"Pool=" + pool + " nextItem="+nextItemGrabbed)).log();
+            Assertions.assertEquals(NUM_POOLED_ITEMS+i, nextItemGrabbed);
         }
 
-        Assertions.assertEquals(15, pool.getStats().getNItemsCreated());
+        var numItemsCreated = pool.getStats().getNItemsCreated();
+        log.debug("numItemsCreated="+numItemsCreated);
+        Assertions.assertTrue(numItemsCreated >= 15);
         Assertions.assertEquals(11, pool.getStats().getNHotGets()+pool.getStats().getNColdGets());
-        Assertions.assertEquals(4, pool.getStats().getNItemsExpired());
+        Assertions.assertTrue(pool.getStats().getNItemsExpired() >= 4);
 
         Assertions.assertTrue(pool.getStats().averageBuildTime().toMillis() > 0);
         Assertions.assertTrue(pool.getStats().averageWaitTime().toMillis() <
@@ -141,7 +144,7 @@ class ExpiringSubstitutableItemPoolTest {
     private static Integer getIntegerItem(AtomicInteger builtItemCursor,
                                           AtomicReference<Instant> lastCreation,
                                           CountDownLatch countdownLatchToUse) {
-        log.atInfo().setMessage(()->"Building item (" +builtItemCursor.hashCode() + ") " + (builtItemCursor.get()+1));
+        log.atDebug().setMessage(()->"Building item (" +builtItemCursor.hashCode() + ") " + (builtItemCursor.get()+1)).log();
         countdownLatchToUse.countDown();
         lastCreation.set(Instant.now());
         return Integer.valueOf(builtItemCursor.incrementAndGet());

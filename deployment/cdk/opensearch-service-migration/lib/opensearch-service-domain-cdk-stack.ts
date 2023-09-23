@@ -69,7 +69,7 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     if (props.enableDemoAdmin) {
       adminUserName = "admin"
       adminUserSecret = new Secret(this, "demoUserSecret", {
-        secretName: "demo-user-secret",
+        secretName: `demo-user-secret-${props.stage}-${props.env?.region}`,
         // This is unsafe and strictly for ease of use in a demo mode setup
         secretStringValue: SecretValue.unsafePlainText("Admin123!")
       })
@@ -125,11 +125,10 @@ export class OpensearchServiceDomainCdkStack extends Stack {
       `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`
     ]
     if (domain.masterUserPassword && !adminUserSecret) {
-      console.log("A master user was configured without an existing Secrets Manager secret, will not export MIGRATION_DOMAIN_USER_NAME and MIGRATION_DOMAIN_USER_SECRET_ARN for Copilot")
+      console.log("A master user was configured without an existing Secrets Manager secret, will not export MIGRATION_DOMAIN_USER_AND_SECRET_ARN for Copilot")
     }
     else if (domain.masterUserPassword && adminUserSecret) {
-      exports.push(`export MIGRATION_DOMAIN_USER_NAME=${adminUserName}`)
-      exports.push(`export MIGRATION_DOMAIN_USER_SECRET_ARN=${adminUserSecret.secretArn}`)
+      exports.push(`export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=${adminUserName} ${adminUserSecret.secretArn}`)
     }
     new CfnOutput(this, 'CopilotDomainExports', {
       value: exports.join(";"),

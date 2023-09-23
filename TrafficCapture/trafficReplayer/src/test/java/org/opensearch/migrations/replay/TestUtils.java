@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -78,7 +79,7 @@ public class TestUtils {
                                           StringBuilder referenceStringAccumulator,
                                           Function<Integer, String> headersGenerator) {
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
-        String headers = headersGenerator.apply(contentLength) + "\n";
+        String headers = headersGenerator.apply(contentLength) + "\r\n";
         referenceStringAccumulator.append(headers);
         return chainedWriteHeadersAndDualWritePayloadParts(packetConsumer, stringParts, referenceStringAccumulator, headers);
     }
@@ -92,11 +93,8 @@ public class TestUtils {
 
         AtomicReference<FullHttpRequest> fullHttpRequestAtomicReference = new AtomicReference<>();
         EmbeddedChannel unpackVerifier = new EmbeddedChannel(
-                new LoggingHandler(LogLevel.ERROR),
                 new HttpRequestDecoder(),
-                new LoggingHandler(LogLevel.WARN),
                 new HttpContentDecompressor(),
-                new LoggingHandler(LogLevel.INFO),
                 new HttpObjectAggregator(bytesCaptured.length*2),
                 new SimpleChannelInboundHandler<FullHttpRequest>() {
                     @Override
@@ -129,21 +127,21 @@ public class TestUtils {
                                        DefaultHttpHeaders expectedRequestHeaders,
                                        Function<StringBuilder, String> expectedOutputGenerator) throws Exception {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
-                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), new ArrayList<>()));
+                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null));
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, authTransformer, testPacketCapture,
-                "TEST");
+                "TEST", new UniqueRequestKey("testConnectionId", 0));
 
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
-        var headerString = "GET / HTTP/1.1\n" +
-                "host: localhost\n" +
+        var headerString = "GET / HTTP/1.1\r\n" +
+                "host: localhost\r\n" +
                 (extraHeaders == null ? "" : extraHeaders) +
-                "content-length: " + contentLength + "\n\n";
+                "content-length: " + contentLength + "\r\n\r\n";
         var referenceStringBuilder = new StringBuilder();
         var allConsumesFuture = chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,
                         stringParts, referenceStringBuilder, headerString);
 
         var innermostFinalizeCallCount = new AtomicInteger();
-        DiagnosticTrackableCompletableFuture<String,AggregatedTransformedResponse> finalizationFuture =
+        DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse> finalizationFuture =
                 allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest(),
                         ()->"PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture");
         finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse, t) -> {

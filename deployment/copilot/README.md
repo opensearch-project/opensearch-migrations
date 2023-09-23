@@ -1,5 +1,9 @@
+## Deploying to AWS
+
 ### Copilot Deployment
 Copilot is a tool for deploying containerized applications on AWS ECS. Official documentation can be found [here](https://aws.github.io/copilot-cli/docs/overview/).
+
+**Notice**: These tools are free to use, but the user is responsible for the cost of underlying infrastructure required to operate the solution. We welcome feedback and contributions to optimize costs.
 
 ### Initial Setup
 
@@ -29,27 +33,12 @@ Otherwise, please follow the manual instructions [here](https://aws.github.io/co
 ### Deploy with an automated script
 
 The following script command can be executed to deploy both the CDK infrastructure and Copilot services for a development environment
-```
+```shell
 ./devDeploy.sh
 ```
-Options:
-```
-./devDeploy.sh -h
-
-Deploy migration solution infrastructure composed of resources deployed by CDK and Copilot
-
-Options:
-  --skip-bootstrap          Skip one-time setup of installing npm package, bootstrapping CDK, and building Docker images.
-  --skip-copilot-init       Skip one-time Copilot initialization of app, environments, and services
-  --copilot-app-name        [string, default: migration-copilot] Specify the Copilot application name to use for deployment
-  --destroy-env             Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
-  --destroy-all-copilot     Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions.
-  --auth-header-value       [string, default: null] Prepared "authorization" header to provide the Replayer, i.e. Basic YWRtaW46QWRtaW4xMjMh. This will override a CDK configured FGAC master user auth header if setup
-  --aws-auth-header-user    [string, default: null] Plaintext username to provide the Replayer to construct an "authorization" header. Used in conjunction with --aws-auth-header-secret. This will override a CDK configured FGAC master user auth header if setup
-  --aws-auth-header-secret  [string, default: null] Secret ARN or Secret name from AWS Secrets Manager to provide the Replayer to construct an "authorization" header. Used in conjunction with --aws-auth-header-user. This will override a CDK configured FGAC master user auth header if setup
-  -r, --region              [string, default: us-east-1] Specify the AWS region to deploy the CloudFormation stacks and resources.
-  -s, --stage               [string, default: dev] Specify the stage name to associate with the deployed resources
-
+Options can be found with:
+```shell
+./devDeploy.sh --help
 ```
 
 Requirements:
@@ -58,10 +47,31 @@ Requirements:
 
 #### How is an Authorization header set for requests from the Replayer to the target cluster?
 
-There is a level of precedence that will determine which or if any Auth header should be added to outgoing Replayer requests, which is listed below:
-1. `[--auth-header-value]` or `[--aws-auth-header-user, --aws-auth-header-secret]` are provided to the deployment script and will be used
-2. If the CDK deploys a target cluster with a configured FGAC user (see `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` CDK context options [here](../cdk/opensearch-service-migration/README.md)) or is running in demo mode (see `enableDemoAdmin` CDK context option), this username and secret key will be used for the Auth header
-3. Lastly, the Replayer will not use an explicit Auth header and instead use the same Auth header from the capture source cluster request, if one exists
+See Replayer explanation [here](../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
+
+### How to run multiple Replayer scenarios
+
+The migration solution has support for running multiple Replayer services simultaneously, such that captured traffic from the Capture Proxy (which has been stored on Kafka) can be replayed on multiple different cluster configurations at the same time. These additional independent and distinct Replayer services can either be spun up together initially to replay traffic as it comes in, or added later, in which case they will begin processing captured traffic from the beginning of what is stored in Kafka.
+
+A **prerequisite** to use this functionality is that the migration solution has been deployed with the `devDeploy.sh` script, so that necessary environment values from CDK resources like the VPC, MSK, and EFS volume can be retrieved for additional Replayer services
+
+To test this scenario, you can create an additional OpenSearch Domain target cluster within the existing VPC by executing the following series of commands:
+```shell
+# Assuming you are in the copilot directory and the default "dev" environment was used for ./devDeploy.sh
+source ./environments/dev/envExports.sh
+cd ../cdk/opensearch-service-migration
+# Pick a name to be used for identifying this new domain stack that is different from the one used for ./devDeploy.sh
+export CDK_DEPLOYMENT_STAGE=dev2
+cdk deploy "*" --c domainName="test-domain-2-7" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c vpcId="$MIGRATION_VPC_ID" --c vpcSecurityGroupIds="[\"$MIGRATION_DOMAIN_SG_ID\"]" --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=false --c enableDemoAdmin=true --require-approval never --concurrency 3
+```
+To launch an additional Replayer service that directs traffic to this new Domain, run a command like the one below. In this command, `id` is a unique label for the Replayer service, `target-uri` is the endpoint of the target cluster where traffic will be replayed, and `extra-args` is specifying a Replayer Auth header option to use. You can obtain the below endpoint and secret name (or secret ARN) from either from the CDK command output mentioned earlier or from the AWS Console:
+```shell
+./createReplayer.sh --id test-os-2-7 --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443 --extra-args "--auth-header-user-and-secret admin demo-user-secret-dev2-us-east-1" --tags migration_deployment=0.1.0
+```
+More options can be found with:
+```shell
+./createReplayer.sh --help
+```
 
 ### Deploy commands one at a time
 
@@ -74,8 +84,7 @@ The provided CDK will output export commands once deployed that can be ran on a 
 ```
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
-export MIGRATION_DOMAIN_USER_NAME=admin
-export MIGRATION_DOMAIN_USER_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_REPLAYER_OUTPUT_EFS_ID=fs-124
@@ -86,7 +95,7 @@ export MIGRATION_KAFKA_BROKER_ENDPOINTS=b-1-public.loggingmskcluster.123.45.kafk
 ```
 Additionally, if not using the deploy script, the following export is needed for the Replayer service:
 ```
-export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --aws-auth-header-user $MIGRATION_DOMAIN_USER_NAME --aws-auth-header-secret $MIGRATION_DOMAIN_USER_SECRET_ARN"
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --auth-header-user-and-secret $MIGRATION_DOMAIN_USER_AND_SECRET_ARN"
 ```
 
 #### Setting up existing Copilot infrastructure
@@ -141,14 +150,23 @@ Once the solution is deployed, the easiest way to test the solution is to exec i
 // Exec into container
 copilot svc exec -a migration-copilot -e dev -n migration-console -c "bash"
 
-// Run benchmark workload (i.e. geonames, nyc_taxis, http_logs)
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy-es:443 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
+// Run opensearch-benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+
+// Option 1: Automated script
+./runTestBenchmarks.sh
+
+// Option 2: Manually execute command
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=https://capture-proxy-es:9200 --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin"
 ```
 
 After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same migration-console container to confirm
 ```
+// Option 1: Automated script
+./catIndices.sh
+
+// Option 2: Manually execute cluster requests
 // Check source cluster
-curl https://capture-proxy-es:443/_cat/indices?v --insecure -u admin:admin
+curl https://capture-proxy-es:9200/_cat/indices?v --insecure -u admin:admin
 
 // Check target cluster
 curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:Admin123!
@@ -173,5 +191,12 @@ Official documentation on Addons can be found [here](https://aws.github.io/copil
 
 ### Useful Commands
 
-`copilot app show`: Provides details on the current app \
-`copilot svc show`: Provides details on a particular service
+`copilot app show` - Provides details on the current app \
+`copilot svc show` - Provides details on a particular service
+
+### Removing deployed resources from AWS
+
+To remove the resources installed from the steps above, follow these instructions:
+1.  `./devDeploy.sh --destroy-env` - Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
+2.  `./devDeploy.sh --destroy-all-copilot` - Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions
+3. After execution of the above steps, a CDK bootstrap stack remains. To remove this stack, begin by deleting the S3 objects and the associated bucket. After that, you can delete the stack using the AWS Console or CLI.

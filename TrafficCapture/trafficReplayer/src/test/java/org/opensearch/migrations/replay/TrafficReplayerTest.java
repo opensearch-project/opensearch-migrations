@@ -17,6 +17,7 @@ import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
@@ -103,22 +104,31 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testDelimitedDeserializer() throws IOException {
+    public void testDelimitedDeserializer() throws Exception {
         final Instant timestamp = Instant.now();
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger(0);
-            Assertions.assertTrue(new InputStreamOfTraffic(bais).supplyTrafficFromSource()
-                    .allMatch(ts-> {
+            var allMatch = new AtomicBoolean(true);
+            try (var trafficProducer = new InputStreamOfTraffic(bais)) {
+                while (true) {
+                    trafficProducer.readNextTrafficStreamChunk().get().stream().forEach(ts->{
                         var i = counter.incrementAndGet();
-                        var expectedStream = makeTrafficStream(timestamp.plus(i-1, ChronoUnit.SECONDS), i);
+                        var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
                         var isEqual = ts.equals(expectedStream);
                         if (!isEqual) {
-                            log.atError().setMessage(()->"Expected trafficStream: "+expectedStream).log();
-                            log.atError().setMessage(()->"Observed trafficStream: "+ts).log();
+                            log.atError().setMessage(()->"Expected trafficStream: " + expectedStream).log();
+                            log.atError().setMessage(()->"Observed trafficStream: " + ts).log();
                         }
-                        return isEqual;
-                    }));
+                        allMatch.set(allMatch.get() && isEqual);
+                    });
+                }
+            } catch (ExecutionException e) {
+                if (!(e.getCause() instanceof EOFException)) {
+                    throw e;
+                }
+            }
+            Assertions.assertTrue(allMatch.get());
         }
     }
 
@@ -147,13 +157,14 @@ class TrafficReplayerTest {
                         fullPair -> {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
-                        }
+                        },
+                        (rk,ts) -> {}
                 );
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
@@ -176,6 +187,7 @@ class TrafficReplayerTest {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                         },
+                        (rk,ts) -> {},
                         remaining -> remainingAccumulations.incrementAndGet()
                 );
         byte[] serializedChunks;
@@ -197,7 +209,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
@@ -215,6 +227,7 @@ class TrafficReplayerTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
                         (id,request) -> { gotAnythingElse.set(true); },
                         fullPair -> { gotAnythingElse.set(true); },
+                        (requestKey,ts) -> {},
                         accum -> gotWarning.set(true));
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
@@ -224,7 +237,7 @@ class TrafficReplayerTest {
         }
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource.supplyTrafficFromSource(), trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
@@ -238,5 +251,4 @@ class TrafficReplayerTest {
                 .map(ba -> new String(ba, StandardCharsets.UTF_8))
                 .collect(Collectors.joining());
     }
-
 }

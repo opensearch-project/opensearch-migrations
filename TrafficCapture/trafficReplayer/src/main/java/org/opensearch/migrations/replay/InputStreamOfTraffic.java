@@ -3,39 +3,46 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Objects;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 @Slf4j
 public class InputStreamOfTraffic implements ITrafficCaptureSource {
     private final InputStream inputStream;
+    private final AtomicInteger trafficStreamsRead = new AtomicInteger();
 
     public InputStreamOfTraffic(InputStream inputStream) {
         this.inputStream = inputStream;
     }
 
-    @Override
-    @SuppressWarnings("unchecked")
-    public Stream<TrafficStream> supplyTrafficFromSource() {
-        AtomicInteger trafficStreamsRead = new AtomicInteger();
-        return Stream.generate((Supplier) () -> {
+    /**
+     * Returns a CompletableFuture to a TrafficStream object or sets the cause exception to an
+     * EOFException if the input has been exhausted.
+     *
+     * @return
+     */
+    public CompletableFuture<List<TrafficStream>> readNextTrafficStreamChunk() {
+        return CompletableFuture.supplyAsync(() -> {
+            var builder = TrafficStream.newBuilder();
             try {
-                var builder = TrafficStream.newBuilder();
                 if (!builder.mergeDelimitedFrom(inputStream)) {
-                    return null;
+                    throw new EOFException();
                 }
-                var ts = builder.build();
-                log.atTrace().log("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
-                return ts;
-            } catch (IOException e) {
-                log.atError().setCause(e).setMessage(()->"Got exception while reading input").log();
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        }).takeWhile(Objects::nonNull);
+            var ts = builder.build();
+            log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+            return List.of(ts);
+        }).exceptionally(e->{
+            var ecf = new CompletableFuture<List<TrafficStream>>();
+            ecf.completeExceptionally(e.getCause().getCause());
+            return ecf.join();
+        });
     }
 
     @Override

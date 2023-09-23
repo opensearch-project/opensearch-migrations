@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.logging.LogLevel;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.slf4j.event.Level;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelDuplexHandler;
@@ -18,16 +19,13 @@ import lombok.extern.slf4j.Slf4j;
 import javax.net.ssl.SSLEngine;
 import java.net.URI;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 @Slf4j
 public class BacksideConnectionPool {
     private final URI backsideUri;
     private final SslContext backsideSslContext;
-    private final FastThreadLocal channelClassToConnectionCacheForEachThread;
+    private final FastThreadLocal connectionCacheForEachThread;
     private final Duration inactivityTimeout;
     private final int poolSize;
 
@@ -35,7 +33,7 @@ public class BacksideConnectionPool {
                                   int poolSize, Duration inactivityTimeout) {
         this.backsideUri = backsideUri;
         this.backsideSslContext = backsideSslContext;
-        this.channelClassToConnectionCacheForEachThread = new FastThreadLocal();
+        this.connectionCacheForEachThread = new FastThreadLocal();
         this.inactivityTimeout = inactivityTimeout;
         this.poolSize = poolSize;
     }
@@ -50,7 +48,7 @@ public class BacksideConnectionPool {
     private ExpiringSubstitutableItemPool<ChannelFuture, Void>
     getExpiringWarmChannelPool(EventLoop eventLoop) {
         var thisContextsConnectionCache = (ExpiringSubstitutableItemPool<ChannelFuture, Void>)
-                channelClassToConnectionCacheForEachThread.get();
+                connectionCacheForEachThread.get();
         if (thisContextsConnectionCache == null) {
             thisContextsConnectionCache =
                     new ExpiringSubstitutableItemPool<ChannelFuture, Void>(inactivityTimeout,
@@ -58,11 +56,10 @@ public class BacksideConnectionPool {
                             () -> buildConnectionFuture(eventLoop),
                             x->x.channel().close(), poolSize, Duration.ZERO);
             if (log.isInfoEnabled()) {
-                final var finalChannelClassToChannelPoolMap = thisContextsConnectionCache;
                 logProgressAtInterval(Level.INFO, eventLoop,
                         thisContextsConnectionCache, Duration.ofSeconds(30));
             }
-            channelClassToConnectionCacheForEachThread.set(thisContextsConnectionCache);
+            connectionCacheForEachThread.set(thisContextsConnectionCache);
         }
 
         return thisContextsConnectionCache;

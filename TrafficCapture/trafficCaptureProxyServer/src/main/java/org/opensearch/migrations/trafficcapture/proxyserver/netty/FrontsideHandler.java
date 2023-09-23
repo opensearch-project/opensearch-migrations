@@ -5,10 +5,8 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.logging.LogLevel;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-
-import java.net.URI;
 
 @Slf4j
 public class FrontsideHandler extends ChannelInboundHandlerAdapter {
@@ -61,6 +59,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
             outboundChannel.config().setAutoRead(true);
         } else { // if the outbound channel has died, so be it... let this frontside finish with it's caller naturally
             log.atWarn().setMessage(()->"Output channel (" + outboundChannel + ") is NOT active");
+            ReferenceCountUtil.release(msg);
         }
     }
 

@@ -9,6 +9,7 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -30,7 +31,7 @@ import java.util.Optional;
  * for that type.  e.g. &quot;HttpContent(1)&quot; vs &quot;HttpContent(2)&quot;.
  */
 @Slf4j
-public class RequestPipelineOrchestrator {
+public class RequestPipelineOrchestrator<R> {
     /**
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
@@ -39,20 +40,23 @@ public class RequestPipelineOrchestrator {
     public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
     public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
     private final List<List<Integer>> chunkSizes;
-    final IPacketFinalizingConsumer packetReceiver;
+    final IPacketFinalizingConsumer<R> packetReceiver;
     final String diagnosticLabel;
+    private UniqueRequestKey requestKeyForMetricsLogging;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
-                                       IPacketFinalizingConsumer packetReceiver,
+                                       IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
-                                       String diagnosticLabel) {
+                                       String diagnosticLabel,
+                                       UniqueRequestKey requestKeyForMetricsLogging) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
                 IAuthTransformerFactory.NullAuthTransformerFactory.instance;
         this.diagnosticLabel = diagnosticLabel;
+        this.requestKeyForMetricsLogging = requestKeyForMetricsLogging;
     }
 
     static void removeThisAndPreviousHandlers(ChannelPipeline pipeline, ChannelHandler targetHandler) {
@@ -94,7 +98,8 @@ public class RequestPipelineOrchestrator {
         // Note3: ByteBufs will be sent through when there were pending bytes left to be parsed by the
         //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
         //        NettyDecodedHttpRequestHandler is removed.
-        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler(transformer, chunkSizes, this, diagnosticLabel));
+        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler(transformer, chunkSizes, this,
+                diagnosticLabel, requestKeyForMetricsLogging));
         addLoggingHandler(pipeline, "B");
     }
 
@@ -147,6 +152,6 @@ public class RequestPipelineOrchestrator {
     }
 
     private void addLoggingHandler(ChannelPipeline pipeline, String name) {
-        PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler(name, logLevel)));
+        PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler("t"+name, logLevel)));
     }
 }

@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -27,20 +29,21 @@ public class HeaderTransformerTest {
     @Test
     public void testTransformer() throws Exception {
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(17, null, null,
-                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 17, null,
+                null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var jsonHandler = JsonJoltTransformer.newBuilder()
                 .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
                 .build();
-        var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, null, testPacketCapture, "TEST");
+        var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, null, testPacketCapture,
+                "TEST", new UniqueRequestKey("testConnectionId", 0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
-                contentLength -> "GET / HTTP/1.1\n" +
-                        "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
-                        "content-length: " + contentLength + "\n");
+                contentLength -> "GET / HTTP/1.1\r\n" +
+                        "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
+                        "content-length: " + contentLength + "\r\n");
     }
 
-    private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer transformingHandler,
+    private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer<AggregatedRawResponse> transformingHandler,
                                                  AggregatedRawResponse dummyAggregatedResponse,
                                                  TestCapturePacketToHttpHandler testPacketCapture,
                                                  Function<Integer,String> makeHeaders)
@@ -79,20 +82,20 @@ public class HeaderTransformerTest {
     public void testMalformedPayloadIsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null, null,
-                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 12, null,
+                null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
-                httpBasicAuthTransformer, testPacketCapture, "TEST");
+                httpBasicAuthTransformer, testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
-                contentLength -> "GET / HTTP/1.1\n" +
-                        "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
-                        "content-type: application/json\n" +
-                        "content-length: " + contentLength + "\n" +
-                        "authorization: Basic YWRtaW46YWRtaW4=\n");
+                contentLength -> "GET / HTTP/1.1\r\n" +
+                        "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
+                        "content-type: application/json\r\n" +
+                        "content-length: " + contentLength + "\r\n" +
+                        "authorization: Basic YWRtaW46YWRtaW4=\r\n");
     }
 
     /**
@@ -104,12 +107,12 @@ public class HeaderTransformerTest {
     public void testMalformedPayload_andTypeMappingUri_IsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedTransformedResponse(12, null, null,
-                null, AggregatedTransformedResponse.HttpRequestTransformationStatus.COMPLETED);
+        final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 12, null,
+                null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
-                null, testPacketCapture, "TEST");
+                null, testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)
@@ -119,10 +122,10 @@ public class HeaderTransformerTest {
                 TestUtils.chainedDualWriteHeaderAndPayloadParts(transformingHandler,
                         stringParts,
                         referenceStringBuilder,
-                        contentLength -> "PUT /foo HTTP/1.1\n" +
-                                "HoSt: " + SOURCE_CLUSTER_NAME + "\n" +
-                                "content-type: application/json\n" +
-                                "content-length: " + contentLength + "\n"
+                        contentLength -> "PUT /foo HTTP/1.1\r\n" +
+                                "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
+                                "content-type: application/json\r\n" +
+                                "content-length: " + contentLength + "\r\n"
                 );
 
         var finalizationFuture = allConsumesFuture.thenCompose(v->transformingHandler.finalizeRequest(),

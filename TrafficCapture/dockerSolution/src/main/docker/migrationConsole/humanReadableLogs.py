@@ -14,29 +14,32 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 logger = logging.getLogger(__name__)
 
 LOG_JSON_TUPLE_FIELD = "message"
-BASE64_ENCODED_TUPLE_PATHS = ["request.body", "primaryResponse.body", "shadowResponse.body"]
+BASE64_ENCODED_TUPLE_PATHS = ["sourceRequest.body", "targetRequest.body", "sourceResponse.body", "targetResponse.body"]
 # TODO: I'm not positive about the capitalization of the Content-Encoding and Content-Type headers.
 # This version worked on my test cases, but not guaranteed to work in all cases.
 CONTENT_ENCODING_PATH = {
-    BASE64_ENCODED_TUPLE_PATHS[0]: "request.Content-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.Content-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.Content-Encoding"
+    BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[3]: "targetResponse.Content-Encoding"
 }
 CONTENT_TYPE_PATH = {
-    BASE64_ENCODED_TUPLE_PATHS[0]: "request.Content-Type",
-    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.Content-Type",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.Content-Type"
+    BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Content-Type",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Content-Type",
+    BASE64_ENCODED_TUPLE_PATHS[3]: "targetResponse.Content-Type"
 }
 TRANSFER_ENCODING_PATH = {
-    BASE64_ENCODED_TUPLE_PATHS[0]: "request.Transfer-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[1]: "primaryResponse.Transfer-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "shadowResponse.Transfer-Encoding"
+    BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Transfer-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Transfer-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[3]: "targetResponse.Transfer-Encoding"
 }
 
 CONTENT_TYPE_JSON = "application/json"
 CONTENT_ENCODING_GZIP = "gzip"
 TRANSFER_ENCODING_CHUNKED = "chunked"
-URI_PATH = "request.Request-URI"
+URI_PATH = "sourceRequest.Request-URI"
 BULK_URI_PATH = "_bulk"
 
 

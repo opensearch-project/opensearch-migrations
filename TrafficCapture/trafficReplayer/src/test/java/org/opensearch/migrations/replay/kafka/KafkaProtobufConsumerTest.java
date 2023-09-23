@@ -42,7 +42,6 @@ class KafkaProtobufConsumerTest {
         KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME);
         initializeMockConsumerTopic(mockConsumer);
 
-        Stream<TrafficStream> trafficStream = protobufConsumer.supplyTrafficFromSource();
         List<Integer> substreamCounts = new ArrayList<>();
         // On a single poll() add records to the topic
         mockConsumer.schedulePollTask(() -> {
@@ -55,18 +54,24 @@ class KafkaProtobufConsumerTest {
         AtomicInteger foundStreamsCount = new AtomicInteger(0);
         // This assertion will fail the test case if not completed within its duration, as would be the case if there
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> trafficStream.limit(numTrafficStreams).forEach(stream -> {
-            log.atTrace().setMessage(()->"Stream has substream count: " + stream.getSubStreamCount());
-            Assertions.assertInstanceOf(TrafficStream.class, stream);
-            Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
-        }));
+
+        var tsCount = new AtomicInteger();
+        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+            while (tsCount.get() < numTrafficStreams) {
+                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(stream->{
+                    tsCount.incrementAndGet();
+                    log.atTrace().setMessage(()->"Stream has substream count: " + stream.getSubStreamCount()).log();
+                    Assertions.assertInstanceOf(TrafficStream.class, stream);
+                    Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                });
+            }
+        });
         Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
         try {
             protobufConsumer.close();
         } catch (IOException e) {
             e.printStackTrace();
         }
-
     }
 
     @Test
@@ -76,7 +81,6 @@ class KafkaProtobufConsumerTest {
         KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME);
         initializeMockConsumerTopic(mockConsumer);
 
-        Stream<TrafficStream> trafficStream = protobufConsumer.supplyTrafficFromSource();
         List<Integer> substreamCounts = new ArrayList<>();
         // On a single poll() add records to the topic
         mockConsumer.schedulePollTask(() -> {
@@ -98,11 +102,20 @@ class KafkaProtobufConsumerTest {
         AtomicInteger foundStreamsCount = new AtomicInteger(0);
         // This assertion will fail the test case if not completed within its duration, as would be the case if there
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> trafficStream.limit(numTrafficStreams).forEach(stream -> {
-            log.atTrace().setMessage(()->"Stream has substream count: " + stream.getSubStreamCount());
-            Assertions.assertInstanceOf(TrafficStream.class, stream);
-            Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
-        }));
+
+
+        var tsCount = new AtomicInteger();
+        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+            while (tsCount.get() < numTrafficStreams) {
+                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(stream->{
+                    tsCount.incrementAndGet();
+                    log.atTrace().setMessage(()->"Stream has substream count: " + stream.getSubStreamCount()).log();
+                    Assertions.assertInstanceOf(TrafficStream.class, stream);
+                    Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                });
+            }
+        });
+
         Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
         try {
             protobufConsumer.close();

@@ -2,11 +2,10 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.http.ProtocolVersion;
-import org.apache.http.client.methods.HttpGet;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.common.collect.Tuple;
+import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -209,7 +208,7 @@ class NettyScanningHttpProxyTest {
         return new Tuple<>(nshp.get(), underlyingPort);
     }
 
-    private static SimpleHttpResponse makeContext(SimpleHttpServer.HttpFirstLine request) {
+    private static SimpleHttpResponse makeContext(HttpFirstLine request) {
         var headers = Map.of(
         "Content-Type", "text/plain",
         "Funtime", "checkIt!",

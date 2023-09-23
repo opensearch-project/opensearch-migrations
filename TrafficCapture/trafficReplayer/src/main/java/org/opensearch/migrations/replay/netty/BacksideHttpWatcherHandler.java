@@ -5,6 +5,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.log4j.Log4j2;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
@@ -15,9 +16,9 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
     private boolean doneReadingRequest; // later, when connections are reused, switch this to a counter?
     Consumer<AggregatedRawResponse> responseCallback;
+    private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHttpWatcherHandler");
 
     public BacksideHttpWatcherHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder) {
-
         this.aggregatedRawResponseBuilder = aggregatedRawResponseBuilder;
         doneReadingRequest = false;
     }
@@ -26,13 +27,38 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse msg) throws Exception {
         doneReadingRequest = true;
         triggerResponseCallbackAndRemoveCallback();
+//      TODO: Add requestId to this metrics log entry
+        metricsLogger.atSuccess()
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .addKeyValue("httpStatus", msg.status().toString())
+                .setMessage("Full response received").log();
         super.channelReadComplete(ctx);
     }
 
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        triggerResponseCallbackAndRemoveCallback();
+        super.handlerRemoved(ctx);
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        aggregatedRawResponseBuilder.addErrorCause(cause);
+//      TODO: Add requestId to this metrics log entry
+        metricsLogger.atError(cause)
+                .addKeyValue("channelId", ctx.channel().id().asLongText())
+                .setMessage("Failed to receive full response").log();
+        triggerResponseCallbackAndRemoveCallback();
+        super.exceptionCaught(ctx, cause);
+    }
+
     private void triggerResponseCallbackAndRemoveCallback() {
+        log.atTrace().setMessage(()->"triggerResponseCallbackAndRemoveCallback, callback="+this.responseCallback).log();
         if (this.responseCallback != null) {
-            this.responseCallback.accept(aggregatedRawResponseBuilder.build());
+            // this method may be re-entrant upon calling the callback, so make sure that we don't loop
+            var responseCallback = this.responseCallback;
             this.responseCallback = null;
+            responseCallback.accept(aggregatedRawResponseBuilder.build());
             aggregatedRawResponseBuilder = null;
         }
     }
@@ -42,8 +68,10 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
             throw new RuntimeException("Callback was already triggered for the aggregated response");
         }
         if (doneReadingRequest) {
+            log.trace("calling callback because we're done reading the request");
             callback.accept(aggregatedRawResponseBuilder.build());
         } else {
+            log.trace("setting the callback to fire later");
             this.responseCallback = callback;
         }
     }

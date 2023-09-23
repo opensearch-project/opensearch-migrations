@@ -10,12 +10,18 @@ plugins {
 
 dependencies {
     implementation project(':captureOffloader')
-    api group: 'io.netty', name: 'netty-all', version: '4.1.89.Final'
+    implementation project(':coreUtilities')
+    api group: 'io.netty', name: 'netty-all', version: '4.1.94.Final'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
     testImplementation project(':captureProtobufs')
+    testImplementation project(':testUtilities')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
     testImplementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
     testImplementation group: 'com.google.protobuf', name: 'protobuf-java', version:'3.22.2'
+
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
 }
