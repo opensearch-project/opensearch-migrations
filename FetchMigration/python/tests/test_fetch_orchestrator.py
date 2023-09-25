@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock, ANY
 
-import orchestrator
+import fetch_orchestrator as orchestrator
 from migration_monitor_params import MigrationMonitorParams
 from pre_migration_params import PreMigrationParams
 from pre_migration_result import PreMigrationResult

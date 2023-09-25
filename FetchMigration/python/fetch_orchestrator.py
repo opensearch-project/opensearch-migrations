@@ -38,13 +38,13 @@ if __name__ == '__main__':  # pragma no cover
     logging.basicConfig(level=logging.INFO)
     # Set up parsing for command line arguments
     arg_parser = argparse.ArgumentParser(
-        prog="python orchestrator.py",
+        prog="python fetch_orchestrator.py",
         description="Orchestrator script for fetch migration",
         formatter_class=argparse.RawTextHelpFormatter
     )
     # Required positional argument
     arg_parser.add_argument(
-        "dp_path",
+        "data_prepper_path",
         help="Path to the base directory where Data Prepper is installed "
     )
     arg_parser.add_argument(
@@ -52,9 +52,9 @@ if __name__ == '__main__':  # pragma no cover
         help="Path to the Data Prepper pipeline YAML file to parse for source and target endpoint information"
     )
     arg_parser.add_argument(
-        "dp_endpoint",
+        "data_prepper_endpoint",
         help="Data Prepper endpoint for monitoring the migration"
     )
     cli_args = arg_parser.parse_args()
-    base_path = os.path.expandvars(cli_args.dp_path)
-    run(base_path, cli_args.config_file_path, cli_args.dp_endpoint)
+    base_path = os.path.expandvars(cli_args.data_prepper_path)
+    run(base_path, cli_args.config_file_path, cli_args.data_prepper_endpoint)
