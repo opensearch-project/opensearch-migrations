@@ -7,7 +7,7 @@ from metadata_migration_params import MetadataMigrationParams
 from metadata_migration_result import MetadataMigrationResult
 
 
-class MyTestCase(unittest.TestCase):
+class TestFetchOrchestrator(unittest.TestCase):
 
     @patch('migration_monitor.run')
     @patch('subprocess.Popen')
