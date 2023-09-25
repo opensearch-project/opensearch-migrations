@@ -4,9 +4,9 @@ import os
 import subprocess
 
 import migration_monitor
-import pre_migration
+import metadata_migration
 from migration_monitor_params import MigrationMonitorParams
-from pre_migration_params import PreMigrationParams
+from metadata_migration_params import MetadataMigrationParams
 
 
 __DP_EXECUTABLE_SUFFIX = "/bin/data-prepper"
@@ -16,15 +16,15 @@ __PIPELINE_OUTPUT_FILE_SUFFIX = "/pipelines/pipeline.yaml"
 def run(dp_base_path: str, dp_config_file: str, dp_endpoint: str):
     dp_exec_path = dp_base_path + __DP_EXECUTABLE_SUFFIX
     output_file = dp_base_path + __PIPELINE_OUTPUT_FILE_SUFFIX
-    pre_migration_params = PreMigrationParams(dp_config_file, output_file, report=True)
+    metadata_migration_params = MetadataMigrationParams(dp_config_file, output_file, report=True)
     logging.info("Running pre-migration steps...\n")
-    pre_migration_result = pre_migration.run(pre_migration_params)
-    if len(pre_migration_result.created_indices) > 0:
+    metadata_migration_result = metadata_migration.run(metadata_migration_params)
+    if len(metadata_migration_result.created_indices) > 0:
         # Kick off a subprocess for Data Prepper
         logging.info("Running Data Prepper...\n")
         proc = subprocess.Popen(dp_exec_path)
         # Data Prepper started successfully, run the migration monitor
-        migration_monitor_params = MigrationMonitorParams(pre_migration_result.target_doc_count, dp_endpoint)
+        migration_monitor_params = MigrationMonitorParams(metadata_migration_result.target_doc_count, dp_endpoint)
         logging.info("Starting migration monitor...\n")
         migration_monitor.run(migration_monitor_params)
         # Migration ended, the following is a workaround for
