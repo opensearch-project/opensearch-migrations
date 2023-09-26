@@ -20,10 +20,34 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
+          # Cluster level actions
           - Action:
               - kafka-cluster:*
             Effect: Allow
-            Resource: "*"
+            Resource:
+              - Fn::ImportValue: !Sub "${App}-${Env}-msk-cluster-arn"
+          # Topic level actions
+          - Action:
+              - kafka-cluster:*
+            Effect: Allow
+            Resource:
+              !Join
+              # Delimiter
+              - ''
+              # Values to join
+              - - { "Fn::Join": [ ":topic", { "Fn::Split": [ ":cluster", { "Fn::ImportValue": !Sub "${App}-${Env}-msk-cluster-arn" } ] } ] }
+                - "/*"
+          # Consumer group level actions
+          - Action:
+              - kafka-cluster:*
+            Effect: Allow
+            Resource:
+              !Join
+              # Delimiter
+              - ''
+              # Values to join
+              - - { "Fn::Join": [ ":group", { "Fn::Split": [ ":cluster", { "Fn::ImportValue": !Sub "${App}-${Env}-msk-cluster-arn" } ] } ] }
+                - "/*"
 
 Outputs:
   # 1. You need to output the IAM ManagedPolicy so that Copilot can add it as a managed policy to your ECS task role.
