@@ -1,0 +1,7 @@
+server.name: opensearch-dashboards
+server.host: "0.0.0.0"
+opensearch.hosts: ["https://opensearchtarget:9200"]
+opensearch.ssl.verificationMode: certificate
+opensearch.ssl.certificateAuthorities: ["/usr/share/opensearch-dashboards/config/certs/root-ca.pem"]
+opensearch.username: "admin"
+opensearch.password: "admin"

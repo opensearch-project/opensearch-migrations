@@ -84,6 +84,7 @@ services:
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:latest'
+    shm_size: '1gb'
     environment:
       - discovery.type=single-node
     networks:
@@ -117,6 +118,22 @@ services:
       # this needs to match the output db that traffic_comparator writes to
       - COMPARISONS_DB_LOCATION=/shared/comparisons.db
     command: /bin/sh -c 'cd trafficComparator && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'
+
+
+  opensearch-dashboards:
+    image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
+    container_name: opensearch-dashboards
+    ports:
+      - 5601:5601 # Map host port 5601 to container port 5601
+    expose:
+      - "5601" # Expose port 5601 for web access to OpenSearch Dashboards
+    networks:
+      - migrations
+    volumes:
+      - ./opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
+    depends_on:
+      - opensearchtarget
+      - capture-proxy-es
 
   migration-console:
     image: 'migrations/migration_console:latest'
