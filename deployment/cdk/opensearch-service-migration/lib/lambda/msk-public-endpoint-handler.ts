@@ -188,7 +188,7 @@ export const handler = async (event: any, context: Context): Promise<void> => {
                 Reason: "Cluster connectivity update has successfully finished",
                 // Since our wait condition only needs one occurrence this value can be any static value
                 UniqueId: "updateConnectivityID",
-                Data: `export MIGRATION_KAFKA_BROKER_ENDPOINTS=${brokerResponse.BootstrapBrokerStringPublicSaslIam}`
+                Data: `${brokerResponse.BootstrapBrokerStringPublicSaslIam}`
             }
             // @ts-ignore
             const waitConditionResponse = await fetch(payloadData.CallbackUrl, {method: 'PUT', body: JSON.stringify(responseBody)});

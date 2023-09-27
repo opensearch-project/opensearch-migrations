@@ -1,6 +1,6 @@
 import {Construct} from "constructs";
 import {RemovalPolicy, Stack, StackProps} from "aws-cdk-lib";
-import {OpensearchServiceDomainCdkStack} from "./opensearch-service-domain-cdk-stack";
+import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import {EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
 import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
@@ -23,7 +23,6 @@ export class StackComposer {
 
     constructor(scope: Construct, props: StackPropsExt) {
 
-        let networkStack: NetworkStack|undefined
         const stage = props.stage
         const account = props.env?.account
         const region = props.env?.region
@@ -114,20 +113,19 @@ export class StackComposer {
         }
 
         // If enabled re-use existing VPC and/or associated resources or create new
+        let networkStack: NetworkStack|undefined
         if (vpcEnabled) {
             networkStack = new NetworkStack(scope, 'networkStack', {
                 vpcId: vpcId,
-                vpcSubnetIds: vpcSubnetIds,
-                vpcSecurityGroupIds: vpcSecurityGroupIds,
                 availabilityZoneCount: availabilityZoneCount,
-                stackName: `OSServiceNetworkCDKStack-${stage}-${region}`,
+                stackName: `OSMigrations-${stage}-${region}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 ...props,
             })
             this.stacks.push(networkStack)
         }
 
-        const opensearchStack = new OpensearchServiceDomainCdkStack(scope, 'opensearchDomainStack', {
+        const openSearchStack = new OpenSearchDomainStack(scope, 'openSearchDomainStack', {
             version: version,
             domainName: domainName,
             dataNodeInstanceType: dataNodeType,
@@ -154,19 +152,19 @@ export class StackComposer {
             appLogGroup: loggingAppLogGroupARN,
             nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
             vpc: networkStack ? networkStack.vpc : undefined,
-            vpcSubnets: networkStack ? networkStack.domainSubnets : undefined,
-            vpcSecurityGroups: networkStack ? networkStack.domainSecurityGroups : undefined,
+            vpcSubnetIds: vpcSubnetIds,
+            vpcSecurityGroupIds: vpcSecurityGroupIds,
             availabilityZoneCount: availabilityZoneCount,
             domainRemovalPolicy: domainRemovalPolicy,
-            stackName: `OSServiceDomainCDKStack-${stage}-${region}`,
+            stackName: `OSMigrations-${stage}-${region}-OpenSearchDomain`,
             description: "This stack contains resources to create/manage an OpenSearch Service domain",
             ...props,
         });
 
         if (networkStack) {
-            opensearchStack.addDependency(networkStack)
+            openSearchStack.addDependency(networkStack)
         }
-        this.stacks.push(opensearchStack)
+        this.stacks.push(openSearchStack)
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
         let migrationStack
@@ -177,20 +175,21 @@ export class StackComposer {
                 mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 mskBrokerNodeCount: mskBrokerNodeCount,
-                stackName: `OSServiceMigrationCDKStack-${stage}-${region}`,
+                stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 ...props,
             })
+            migrationStack.addDependency(networkStack)
             this.stacks.push(migrationStack)
 
             mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
                 vpc: networkStack.vpc,
-                mskARN: migrationStack.mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
-                stackName: `OSServiceMSKUtilityCDKStack-${stage}-${region}`,
+                stackName: `OSMigrations-${stage}-${region}-MSKUtility`,
                 description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
                 ...props,
             })
+            mskUtilityStack.addDependency(networkStack)
             mskUtilityStack.addDependency(migrationStack)
             this.stacks.push(mskUtilityStack)
         }
@@ -199,9 +198,6 @@ export class StackComposer {
         if (captureProxyESEnabled && networkStack && migrationStack && mskUtilityStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
                 vpc: networkStack.vpc,
-                ecsCluster: migrationStack.ecsCluster,
-                serviceConnectSecurityGroup: migrationStack.serviceConnectSecurityGroup,
-                additionalServiceSecurityGroups: [migrationStack.mskAccessSecurityGroup],
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 ...props,
@@ -213,14 +209,9 @@ export class StackComposer {
         }
 
         let migrationConsoleStack
-        if (migrationConsoleEnabled && networkStack && opensearchStack && migrationStack) {
+        if (migrationConsoleEnabled && networkStack && openSearchStack && migrationStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
-                ecsCluster: migrationStack.ecsCluster,
-                replayerOutputFileSystemId: migrationStack.replayerOutputFileSystemId,
-                migrationDomainEndpoint: opensearchStack.domainEndpoint,
-                serviceConnectSecurityGroup: migrationStack.serviceConnectSecurityGroup,
-                additionalServiceSecurityGroups: [networkStack.defaultDomainAccessSecurityGroup, migrationStack.replayerOutputAccessSecurityGroup],
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 ...props,
@@ -231,7 +222,7 @@ export class StackComposer {
                 migrationConsoleStack.addDependency(captureProxyESStack)
             }
             migrationConsoleStack.addDependency(migrationStack)
-            migrationConsoleStack.addDependency(opensearchStack)
+            migrationConsoleStack.addDependency(openSearchStack)
             migrationConsoleStack.addDependency(networkStack)
             this.stacks.push(migrationConsoleStack)
         }
@@ -244,13 +235,12 @@ export class StackComposer {
                 vpc: networkStack.vpc,
                 logstashConfigFilePath: logstashConfigFilePath,
                 sourceEndpoint: sourceClusterEndpoint,
-                targetEndpoint: opensearchStack.domainEndpoint,
-                stackName: `OSServiceHistoricalCDKStack-${stage}-${region}`,
+                stackName: `OSMigrations-${stage}-${region}-HistoricalCapture`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 ...props,
             })
-
-            historicalCaptureStack.addDependency(opensearchStack)
+            historicalCaptureStack.addDependency(networkStack)
+            historicalCaptureStack.addDependency(openSearchStack)
             this.stacks.push(historicalCaptureStack)
         }
 

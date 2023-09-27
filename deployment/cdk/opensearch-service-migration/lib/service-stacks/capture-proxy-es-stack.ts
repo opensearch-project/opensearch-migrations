@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {ISecurityGroup, IVpc} from "aws-cdk-lib/aws-ec2";
-import {Cluster, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -11,19 +11,16 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface CaptureProxyESProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly ecsCluster: Cluster,
-    readonly serviceConnectSecurityGroup: ISecurityGroup
-    readonly additionalServiceSecurityGroups?: ISecurityGroup[]
 }
 
 export class CaptureProxyESStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
-        let securityGroups = [props.serviceConnectSecurityGroup]
-        if (props.additionalServiceSecurityGroups) {
-            securityGroups = securityGroups.concat(props.additionalServiceSecurityGroups)
-        }
+        let securityGroups = [
+            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskAccessSecurityGroupId`))
+        ]
 
         const servicePort: PortMapping = {
             name: "capture-proxy-es-connect",
@@ -37,7 +34,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             port: 9200
         }
 
-        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/msk/cluster/arn`);
+        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterARN`);
         const mskClusterConnectPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterARN],
@@ -57,7 +54,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             ]
         })
 
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/msk/cluster/brokers`);
+        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskBrokers`);
         this.createService({
             serviceName: "capture-proxy-es",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),

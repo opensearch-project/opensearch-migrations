@@ -1,7 +1,7 @@
 import {App} from 'aws-cdk-lib';
 import {Template} from 'aws-cdk-lib/assertions';
 import * as testDefaultValues from "./default-values-test.json";
-import {OpensearchServiceDomainCdkStack} from "../lib/opensearch-service-domain-cdk-stack";
+import {OpenSearchDomainStack} from "../lib/open-search-domain-stack";
 import {NetworkStack} from "../lib/network-stack";
 import {createStackComposer} from "./test-utils";
 
@@ -49,7 +49,7 @@ test('Test primary context options are mapped with standard data type', () => {
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     const networkStack = openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]
     const networkTemplate = Template.fromStack(networkStack)
@@ -95,7 +95,7 @@ test('Test primary context options are mapped with only string data type', () =>
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     const networkStack = openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]
     const networkTemplate = Template.fromStack(networkStack)
@@ -121,7 +121,7 @@ test('Test alternate context options are mapped with standard data type', () => 
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     assertAlternateDomainStackTemplate(domainTemplate)
 })
@@ -142,7 +142,7 @@ test('Test alternate context options are mapped with only string data type', () 
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     assertAlternateDomainStackTemplate(domainTemplate)
 })
@@ -156,7 +156,7 @@ test('Test openAccessPolicy setting creates access policy when enabled', () => {
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     // Check that openAccessPolicy is created
     domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)
@@ -172,7 +172,7 @@ test('Test openAccessPolicy setting does not create access policy when disabled'
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     // Check that openAccessPolicy is not created
     domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 0)
@@ -188,7 +188,7 @@ test('Test openAccessPolicy setting is mapped with string data type', () => {
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     // Check that openAccessPolicy is created
     domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)
@@ -203,7 +203,7 @@ test( 'Test default stack is created with default values when no context options
     const openSearchStacks = createStackComposer(app)
 
     const defaultValues: { [x: string]: (string); } = testDefaultValues
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
     domainTemplate.hasResourceProperties("AWS::OpenSearchService::Domain", {
@@ -248,7 +248,7 @@ test( 'Test default stack is created when empty context options are provided for
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })

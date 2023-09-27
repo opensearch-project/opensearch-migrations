@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {ISecurityGroup, IVpc, SubnetType, Vpc} from "aws-cdk-lib/aws-ec2";
 import {
     Cluster,
     ContainerImage,
@@ -16,12 +16,12 @@ import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly serviceName: string,
     readonly vpc: IVpc,
-    readonly ecsCluster: Cluster,
     readonly securityGroups: ISecurityGroup[],
     readonly dockerFilePath: string,
     readonly dockerImageCommand?: string[],
@@ -45,6 +45,13 @@ export class MigrationServiceCore extends Stack {
     }
 
     createService(props: MigrationServiceCoreProps) {
+        // TODO is ecsClusterARN needed now?
+        //const ecsCluster = Cluster.fromClusterArn(this, 'ecsCluster', StringParameter.valueForStringParameter(this, `/migration/${props.stage}/ecsClusterARN`))
+        const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
+            clusterName: `migration-${props.stage}-ecs-cluster`,
+            vpc: props.vpc
+        })
+
         const serviceTaskRole = new Role(this, 'ServiceTaskRole', {
             assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
             description: 'ECS Service Task Role'
@@ -103,7 +110,7 @@ export class MigrationServiceCore extends Stack {
 
         const serviceFargateService = new FargateService(this, "ServiceFargateService", {
             serviceName: `migration-${props.stage}-${props.serviceName}`,
-            cluster: props.ecsCluster,
+            cluster: ecsCluster,
             taskDefinition: serviceTaskDef,
             assignPublicIp: true,
             desiredCount: props.taskInstanceCount ? props.taskInstanceCount : 1,
@@ -112,6 +119,8 @@ export class MigrationServiceCore extends Stack {
             // This should be confirmed to be a requirement for Service Connect communication, otherwise be Private
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}),
             serviceConnectConfiguration: {
+                // TODO why did I need to specify this now
+                namespace: `migration.${props.stage}.local`,
                 services: props.serviceConnectServices ? props.serviceConnectServices : undefined,
                 logDriver: LogDrivers.awsLogs({
                     streamPrefix: "service-connect-logs",

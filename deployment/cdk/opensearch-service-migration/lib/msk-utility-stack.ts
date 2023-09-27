@@ -1,5 +1,5 @@
 import {StackPropsExt} from "./stack-composer";
-import {IVpc} from "aws-cdk-lib/aws-ec2";
+import {IVpc, Vpc} from "aws-cdk-lib/aws-ec2";
 import {CfnOutput, CfnWaitCondition, CfnWaitConditionHandle, CustomResource, Duration, Stack} from "aws-cdk-lib";
 import {Construct} from "constructs";
 import {Effect, ManagedPolicy, PolicyDocument, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
@@ -11,19 +11,17 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface mskUtilityStackProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly mskARN: string,
     readonly mskEnablePublicEndpoints?: boolean
 }
 
 
 export class MSKUtilityStack extends Stack {
 
-    public readonly mskBrokerEndpoints: string;
-
     constructor(scope: Construct, id: string, props: mskUtilityStackProps) {
         super(scope, id, props);
 
-        let brokerEndpointsOutput
+        const mskARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterARN`)
+        let brokerEndpoints
         if (props.mskEnablePublicEndpoints) {
             const lambdaInvokeStatement = new PolicyStatement({
                 effect: Effect.ALLOW,
@@ -43,7 +41,7 @@ export class MSKUtilityStack extends Stack {
                 actions: ["kafka:UpdateConnectivity",
                     "kafka:DescribeClusterV2",
                     "kafka:GetBootstrapBrokers"],
-                resources: [props.mskARN]
+                resources: [mskARN]
             })
             const lambdaExecDocument = new PolicyDocument({
                 statements: [lambdaInvokeStatement, describeVPCStatement, mskUpdateConnectivityStatement]
@@ -69,7 +67,7 @@ export class MSKUtilityStack extends Stack {
                 timeout: Duration.minutes(15),
                 entry: path.join(__dirname, 'lambda/msk-public-endpoint-handler.ts'),
                 role: lambdaExecRole,
-                environment: {MSK_ARN: props.mskARN, MAX_ATTEMPTS: "4"}
+                environment: {MSK_ARN: mskARN, MAX_ATTEMPTS: "4"}
             });
 
             const customResourceProvider = new Provider(this, 'customResourceProvider', {
@@ -95,25 +93,17 @@ export class MSKUtilityStack extends Stack {
                 handle: wcHandle.ref
             })
             waitCondition.node.addDependency(customResource);
-            // TODO Need to add setting SSM parameter for public endpoint case
-            brokerEndpointsOutput = waitCondition.attrData.toString()
+            brokerEndpoints = waitCondition.attrData.toString()
         }
         else {
-            const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, props.mskARN)
-            const brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")
-            //const brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
-            brokerEndpointsOutput = `export MIGRATION_KAFKA_BROKER_ENDPOINTS=${brokerEndpoints}`
-            this.mskBrokerEndpoints = brokerEndpoints
-            new StringParameter(this, 'SSMParameterMSKBrokers', {
-                description: 'OpenSearch Migration Parameter for MSK Brokers',
-                parameterName: `/migration/${props.stage}/msk/cluster/brokers`,
-                stringValue: brokerEndpoints
-            });
+            const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, mskARN)
+            brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")
+            //brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
         }
-
-        const cfnOutput = new CfnOutput(this, 'CopilotBrokerEndpointsExport', {
-            value: brokerEndpointsOutput,
-            description: 'Exported MSK broker endpoint values created by CDK that are needed by Copilot container deployments',
+        new StringParameter(this, 'SSMParameterMSKBrokers', {
+            description: 'OpenSearch Migration Parameter for MSK Brokers',
+            parameterName: `/migration/${props.stage}/mskBrokers`,
+            stringValue: brokerEndpoints
         });
     }
 }

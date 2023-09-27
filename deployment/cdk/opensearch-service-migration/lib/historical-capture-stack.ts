@@ -1,16 +1,17 @@
-import {Stack, StackProps} from "aws-cdk-lib";
-import {IVpc} from "aws-cdk-lib/aws-ec2";
+import {Stack} from "aws-cdk-lib";
+import {IVpc, Vpc} from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {Cluster, ContainerImage, FargateService, FargateTaskDefinition, LogDrivers} from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {join} from "path";
 import { readFileSync } from "fs"
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {StackPropsExt} from "./stack-composer";
 
-export interface historicalCaptureStackProps extends StackProps {
+export interface historicalCaptureStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly logstashConfigFilePath: string,
     readonly sourceEndpoint?: string,
-    readonly targetEndpoint: string
 }
 
 /**
@@ -31,11 +32,12 @@ export class HistoricalCaptureStack extends Stack {
             cpu: 512
         });
 
+        const targetEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osClusterEndpoint`)
         let logstashConfigData: string = readFileSync(props.logstashConfigFilePath, 'utf8');
         if (props.sourceEndpoint) {
             logstashConfigData = logstashConfigData.replace("<SOURCE_CLUSTER_HOST>", props.sourceEndpoint)
         }
-        logstashConfigData = logstashConfigData.replace("<TARGET_CLUSTER_HOST>", props.targetEndpoint + ":80")
+        logstashConfigData = logstashConfigData.replace("<TARGET_CLUSTER_HOST>", targetEndpoint + ":80")
         // Temporary measure to allow multi-line env variable
         logstashConfigData = logstashConfigData.replace(/(\n)/g, "PUT_LINE")
         // Create Historical Capture Container

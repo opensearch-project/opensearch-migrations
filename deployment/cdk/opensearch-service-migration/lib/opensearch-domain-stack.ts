@@ -1,15 +1,22 @@
 import {Construct} from "constructs";
-import {EbsDeviceVolumeType, ISecurityGroup, IVpc, SubnetSelection} from "aws-cdk-lib/aws-ec2";
+import {
+  EbsDeviceVolumeType,
+  ISecurityGroup, IVpc,
+  SecurityGroup,
+  SubnetFilter,
+  SubnetSelection, Vpc
+} from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
-import {CfnOutput, RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
+import {RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
 import {IKey, Key} from "aws-cdk-lib/aws-kms";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 
-export interface opensearchServiceDomainCdkProps extends StackPropsExt {
+export interface opensearchDomainStackProps extends StackPropsExt {
   readonly version: EngineVersion,
   readonly domainName: string,
   readonly dataNodeInstanceType?: string,
@@ -36,20 +43,17 @@ export interface opensearchServiceDomainCdkProps extends StackPropsExt {
   readonly appLogGroup?: string,
   readonly nodeToNodeEncryptionEnabled?: boolean,
   readonly vpc?: IVpc,
-  readonly vpcSubnets?: SubnetSelection[],
-  readonly vpcSecurityGroups?: ISecurityGroup[],
+  readonly vpcSubnetIds?: string[],
+  readonly vpcSecurityGroupIds?: string[],
   readonly availabilityZoneCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy
 }
 
 
-export class OpensearchServiceDomainCdkStack extends Stack {
-  public readonly domainEndpoint: string;
+export class OpenSearchDomainStack extends Stack {
 
-  constructor(scope: Construct, id: string, props: opensearchServiceDomainCdkProps) {
+  constructor(scope: Construct, id: string, props: opensearchDomainStackProps) {
     super(scope, id, props);
-
-    // The code that defines your stack goes here
 
     // Retrieve existing account resources if defined
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
@@ -61,6 +65,9 @@ export class OpensearchServiceDomainCdkStack extends Stack {
 
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
+
+    const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
+        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osAccessSecurityGroupId`))
 
     // Map objects from props
 
@@ -76,6 +83,26 @@ export class OpensearchServiceDomainCdkStack extends Stack {
     }
     const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
         {enabled: true, availabilityZoneCount: props.availabilityZoneCount} : undefined
+
+    // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
+    // to the Domain as it has existing behavior to select private subnets from a given VPC
+    let domainSubnets: SubnetSelection[]|undefined;
+    if (props.vpc && props.vpcSubnetIds) {
+      const selectSubnets = props.vpc.selectSubnets({
+        subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]
+      })
+      domainSubnets = [selectSubnets]
+    }
+
+    // Retrieve existing SGs to apply to VPC Domain endpoints
+    const securityGroups: ISecurityGroup[] = []
+    securityGroups.push(defaultOSClusterAccessGroup)
+    if (props.vpcSecurityGroupIds) {
+      for (let i = 0; i < props.vpcSecurityGroupIds.length; i++) {
+        securityGroups.push(SecurityGroup.fromLookupById(this, "domainSecurityGroup-" + i, props.vpcSecurityGroupIds[i]))
+      }
+    }
+
 
     const domain = new Domain(this, 'Domain', {
       version: props.version,
@@ -113,26 +140,27 @@ export class OpensearchServiceDomainCdkStack extends Stack {
         appLogGroup: appLG
       },
       vpc: props.vpc,
-      vpcSubnets: props.vpcSubnets,
-      securityGroups: props.vpcSecurityGroups,
+      vpcSubnets: domainSubnets,
+      securityGroups: securityGroups,
       zoneAwareness: zoneAwarenessConfig,
       removalPolicy: props.domainRemovalPolicy
     });
 
-    this.domainEndpoint = domain.domainEndpoint
+    new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
+      description: 'OpenSearch migration parameter for OpenSearch endpoint',
+      parameterName: `/migration/${props.stage}/osClusterEndpoint`,
+      stringValue: domain.domainEndpoint
+    });
 
-    const exports = [
-      `export MIGRATION_DOMAIN_ENDPOINT=${this.domainEndpoint}`
-    ]
     if (domain.masterUserPassword && !adminUserSecret) {
-      console.log("A master user was configured without an existing Secrets Manager secret, will not export MIGRATION_DOMAIN_USER_AND_SECRET_ARN for Copilot")
+      console.log(`A OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${props.stage}/osUserAndSecret`)
     }
     else if (domain.masterUserPassword && adminUserSecret) {
-      exports.push(`export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=${adminUserName} ${adminUserSecret.secretArn}`)
+      new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecret', {
+        description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
+        parameterName: `/migration/${props.stage}/osUserAndSecret`,
+        stringValue: `${adminUserName} ${adminUserSecret.secretArn}`
+      });
     }
-    new CfnOutput(this, 'CopilotDomainExports', {
-      value: exports.join(";"),
-      description: 'Exported Domain resource values created by CDK that are needed by Copilot container deployments',
-    });
   }
 }

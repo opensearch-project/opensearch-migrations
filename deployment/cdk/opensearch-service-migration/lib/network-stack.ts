@@ -1,33 +1,22 @@
-import {CfnOutput, Stack, StackProps} from "aws-cdk-lib";
+import {Stack} from "aws-cdk-lib";
 import {
-    IpAddresses,
-    ISecurityGroup,
-    IVpc,
-    Peer,
+    IpAddresses, IVpc,
     Port,
     SecurityGroup,
-    SubnetFilter,
-    SubnetSelection,
     SubnetType,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface networkStackProps extends StackPropsExt {
     readonly vpcId?: string
-    readonly vpcSubnetIds?: string[]
-    readonly vpcSecurityGroupIds?: string[]
     readonly availabilityZoneCount?: number
 }
 
-
 export class NetworkStack extends Stack {
-
     public readonly vpc: IVpc;
-    public readonly domainSubnets: SubnetSelection[]|undefined;
-    public readonly defaultDomainAccessSecurityGroup: ISecurityGroup;
-    public readonly domainSecurityGroups: ISecurityGroup[];
 
     constructor(scope: Construct, id: string, props: networkStackProps) {
         super(scope, id, props);
@@ -61,36 +50,23 @@ export class NetworkStack extends Stack {
                 ],
             });
         }
+        // new StringParameter(this, 'SSMParameterVpcId', {
+        //     description: 'OpenSearch migration parameter for VPC id',
+        //     parameterName: `/migration/${props.stage}/vpcId`,
+        //     stringValue: vpc.vpcId
+        // });
 
-        // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
-        // to the Domain as it has existing behavior to select private subnets from a given VPC
-        if (props.vpcSubnetIds) {
-            const selectSubnets = this.vpc.selectSubnets({
-                subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]
-            })
-            this.domainSubnets = [selectSubnets]
-        }
-
-        // Retrieve existing SGs to apply to VPC Domain endpoints
-        const securityGroups: ISecurityGroup[] = []
-        if (props.vpcSecurityGroupIds) {
-            for (let i = 0; i < props.vpcSecurityGroupIds.length; i++) {
-                securityGroups.push(SecurityGroup.fromLookupById(this, "domainSecurityGroup-" + i, props.vpcSecurityGroupIds[i]))
-            }
-        }
         // Create a default SG which only allows members of this SG to access the Domain endpoints
         const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
             vpc: this.vpc,
             allowAllOutbound: false,
         });
         defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
-        securityGroups.push(defaultSecurityGroup)
-        this.defaultDomainAccessSecurityGroup = defaultSecurityGroup
-        this.domainSecurityGroups = securityGroups
 
-        new CfnOutput(this, 'CopilotDomainSGExports', {
-            value: `export MIGRATION_DOMAIN_SG_ID=${defaultSecurityGroup.securityGroupId}`,
-            description: 'Domain Security Group created by CDK that is needed for Copilot container deployments',
+        new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
+            description: 'OpenSearch migration parameter for target OpenSearch access security group id',
+            parameterName: `/migration/${props.stage}/osAccessSecurityGroupId`,
+            stringValue: defaultSecurityGroup.securityGroupId
         });
 
     }

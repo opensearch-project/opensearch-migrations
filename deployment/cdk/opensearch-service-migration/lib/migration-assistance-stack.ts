@@ -1,5 +1,5 @@
-import {CfnOutput, Names, Stack} from "aws-cdk-lib";
-import {ISecurityGroup, IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {Stack} from "aws-cdk-lib";
+import {IVpc, Peer, Port, SecurityGroup, SubnetType, Vpc} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -20,13 +20,6 @@ export interface migrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
 
-    public readonly mskARN: string;
-    public readonly mskAccessSecurityGroup: ISecurityGroup;
-    public readonly ecsCluster: Cluster;
-    public readonly replayerOutputFileSystemId: string;
-    public readonly replayerOutputAccessSecurityGroup: ISecurityGroup;
-    public readonly serviceConnectSecurityGroup: ISecurityGroup;
-
     constructor(scope: Construct, id: string, props: migrationStackProps) {
         super(scope, id, props);
 
@@ -46,7 +39,11 @@ export class MigrationAssistanceStack extends Stack {
             mskSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.allTcp())
         }
         mskSecurityGroup.addIngressRule(mskSecurityGroup, Port.allTraffic())
-        this.mskAccessSecurityGroup = mskSecurityGroup
+        new StringParameter(this, 'SSMParameterMSKAccessGroupId', {
+            description: 'OpenSearch migration parameter for MSK access security group id',
+            parameterName: `/migration/${props.stage}/mskAccessSecurityGroupId`,
+            stringValue: mskSecurityGroup.securityGroupId
+        });
 
         const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
             retention: RetentionDays.THREE_MONTHS
@@ -99,10 +96,9 @@ export class MigrationAssistanceStack extends Stack {
                 }
             }
         });
-        this.mskARN = mskCluster.attrArn
         new StringParameter(this, 'SSMParameterMSKARN', {
             description: 'OpenSearch Migration Parameter for MSK ARN',
-            parameterName: `/migration/${props.stage}/msk/cluster/arn`,
+            parameterName: `/migration/${props.stage}/mskClusterARN`,
             stringValue: mskCluster.attrArn
         });
 
@@ -123,55 +119,51 @@ export class MigrationAssistanceStack extends Stack {
             allowAllOutbound: false,
         });
         replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
-        this.replayerOutputAccessSecurityGroup = replayerOutputSG
+
+        new StringParameter(this, 'SSMParameterReplayerOutputAccessGroupId', {
+            description: 'OpenSearch migration parameter for Replayer output access security group id',
+            parameterName: `/migration/${props.stage}/replayerAccessSecurityGroupId`,
+            stringValue: replayerOutputSG.securityGroupId
+        });
 
         // Create an EFS file system for Traffic Replayer output
         const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
             vpc: props.vpc,
             securityGroup: replayerOutputSG
         });
-        this.replayerOutputFileSystemId = replayerOutputEFS.fileSystemId
+        new StringParameter(this, 'SSMParameterReplayerOutputEFSId', {
+            description: 'OpenSearch migration parameter for Replayer output EFS filesystem id',
+            parameterName: `/migration/${props.stage}/replayerOutputEFSId`,
+            stringValue: replayerOutputEFS.fileSystemId
+        });
 
-        this.serviceConnectSecurityGroup = new SecurityGroup(this, 'serviceConnectSecurityGroup', {
+        const serviceConnectSecurityGroup = new SecurityGroup(this, 'serviceConnectSecurityGroup', {
             vpc: props.vpc,
             // Required for retrieving ECR image at service startup
             allowAllOutbound: true,
         })
-        this.serviceConnectSecurityGroup.addIngressRule(replayerOutputSG, Port.allTraffic());
+        serviceConnectSecurityGroup.addIngressRule(replayerOutputSG, Port.allTraffic());
 
-        this.ecsCluster = new Cluster(this, 'migrationECSCluster', {
+        new StringParameter(this, 'SSMParameterServiceConnectGroupId', {
+            description: 'OpenSearch migration parameter for Service Connect security group id',
+            parameterName: `/migration/${props.stage}/serviceConnectSecurityGroupId`,
+            stringValue: serviceConnectSecurityGroup.securityGroupId
+        });
+
+        const ecsCluster = new Cluster(this, 'migrationECSCluster', {
             vpc: props.vpc,
-
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
-        this.ecsCluster.addDefaultCloudMapNamespace( {
+        ecsCluster.addDefaultCloudMapNamespace( {
             name: `migration.${props.stage}.local`,
             type: NamespaceType.DNS_PRIVATE,
             useForServiceConnect: true,
             vpc: props.vpc
         })
-
-        let publicSubnetString = props.vpc.publicSubnets.map(_ => _.subnetId).join(",")
-        let privateSubnetString = props.vpc.privateSubnets.map(_ => _.subnetId).join(",")
-        const exports = [
-            `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
-            `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
-            `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
-            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`,
-            `export MIGRATION_REPLAYER_OUTPUT_EFS_ID=${replayerOutputEFS.fileSystemId}`,
-            `export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=${replayerOutputSG.securityGroupId}`]
-        if (publicSubnetString) exports.push(`export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`)
-        if (privateSubnetString) exports.push(`export MIGRATION_PRIVATE_SUBNETS=${privateSubnetString}`)
-
-        new CfnOutput(this, 'CopilotMigrationExports', {
-            value: exports.join(";"),
-            description: 'Exported migration resource values created by CDK that are needed by Copilot container deployments',
-        });
-        // Create export of MSK cluster ARN for Copilot stacks to use
-        new CfnOutput(this, 'migrationMSKClusterARN', {
-            value: mskCluster.attrArn,
-            exportName: `${props.copilotAppName}-${props.copilotEnvName}-msk-cluster-arn`,
-            description: 'Migration MSK Cluster ARN'
+        new StringParameter(this, 'SSMParameterECSClusterARN', {
+            description: 'OpenSearch migration parameter for ECS cluster ARN',
+            parameterName: `/migration/${props.stage}/ecsClusterARN`,
+            stringValue: ecsCluster.clusterArn
         });
 
     }

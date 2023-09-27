@@ -1,7 +1,7 @@
 import {App} from "aws-cdk-lib";
 import {StackComposer} from "../lib/stack-composer";
 import {Template} from "aws-cdk-lib/assertions";
-import {OpensearchServiceDomainCdkStack} from "../lib/opensearch-service-domain-cdk-stack";
+import {OpenSearchDomainStack} from "../lib/open-search-domain-stack";
 import {createStackComposer} from "./test-utils";
 
 test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
@@ -14,7 +14,7 @@ test('Test empty string provided for a parameter which has a default value, uses
 
     const openSearchStacks =  createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
@@ -44,7 +44,7 @@ test('Test ES 7.10 engine version format is parsed', () => {
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
@@ -59,7 +59,7 @@ test('Test OS 1.3 engine version format is parsed', () => {
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
@@ -90,7 +90,7 @@ test('Test access policy is parsed for proper array format', () => {
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     // Check that accessPolicies policy is created
     domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)
@@ -115,7 +115,7 @@ test('Test access policy is parsed for proper block format', () => {
 
     const openSearchStacks = createStackComposer(app)
 
-    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpensearchServiceDomainCdkStack)[0]
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
     const domainTemplate = Template.fromStack(domainStack)
     // Check that accessPolicies policy is created
     domainTemplate.resourceCountIs("Custom::OpenSearchAccessPolicy", 1)
