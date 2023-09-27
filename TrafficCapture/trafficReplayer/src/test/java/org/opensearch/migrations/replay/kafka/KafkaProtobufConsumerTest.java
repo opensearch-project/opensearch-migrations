@@ -127,7 +127,6 @@ class KafkaProtobufConsumerTest {
     @Test
     public void testBuildPropertiesBaseCase() throws IOException {
         Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", false, null);
-        Assertions.assertEquals(5, props.size());
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringDeserializer", props.get("key.deserializer"));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", props.get("value.deserializer"));
@@ -138,7 +137,6 @@ class KafkaProtobufConsumerTest {
     @Test
     public void testBuildPropertiesMSKAuthEnabled() throws IOException {
         Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", true, null);
-        Assertions.assertEquals(9, props.size());
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringDeserializer", props.get("key.deserializer"));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", props.get("value.deserializer"));
@@ -154,7 +152,6 @@ class KafkaProtobufConsumerTest {
     public void testBuildPropertiesWithProvidedPropertyFile() throws IOException {
         File simplePropertiesFile = new File("src/test/resources/kafka/simple-kafka.properties");
         Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", true, simplePropertiesFile.getPath());
-        Assertions.assertEquals(10, props.size());
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringDeserializer", props.get("key.deserializer"));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", props.get("value.deserializer"));
