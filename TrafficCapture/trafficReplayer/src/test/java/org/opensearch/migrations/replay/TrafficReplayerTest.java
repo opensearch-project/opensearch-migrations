@@ -14,13 +14,10 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
-import javax.net.ssl.SSLException;
-import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
@@ -150,7 +147,7 @@ class TrafficReplayerTest {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
+                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         (id,request) -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
@@ -166,7 +163,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator, new TimeShifter(1));
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
@@ -180,6 +177,7 @@ class TrafficReplayerTest {
         var remainingAccumulations = new AtomicInteger();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
+                        "update the test!",
                         (id,request) -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
@@ -211,7 +209,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator, new TimeShifter());
             }
         }
         trafficAccumulator.close();
@@ -226,7 +224,7 @@ class TrafficReplayerTest {
         var gotWarning = new AtomicBoolean();
         var gotAnythingElse = new AtomicBoolean();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
+                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         (id,request) -> { gotAnythingElse.set(true); },
                         fullPair -> { gotAnythingElse.set(true); },
                         (requestKey,ts) -> {},
@@ -239,7 +237,7 @@ class TrafficReplayerTest {
         }
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.runReplay(trafficSource, trafficAccumulator, new TimeShifter());
             }
         }
         trafficAccumulator.close();

@@ -55,16 +55,17 @@ public class ClientConnectionPool {
     }
 
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getResilientClientChannelProducer(EventLoop eventLoop, String s) {
+    getResilientClientChannelProducer(EventLoop eventLoop, String diagnosticLabel) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var clientConnectionChannelCreatedFuture =
                             new StringTrackableCompletableFuture<ChannelFuture>(new CompletableFuture<>(),
                                     () -> "waiting for createClientConnection to finish");
-                    var channelFuture =
-                            NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, serverUri, s);
+                    var channelFuture = NettyPacketToHttpConsumer.createClientConnection(eventLoop,
+                            sslContext, serverUri, diagnosticLabel);
                     channelFuture.addListener(f -> {
-                        log.atTrace().setMessage(()->s + " ChannelFuture result for create=" + f.isSuccess()).log();
+                        log.atInfo().setMessage(()->
+                                diagnosticLabel + " ChannelFuture result for create=" + f.isSuccess()).log();
                         if (f.isSuccess()) {
                             clientConnectionChannelCreatedFuture.future.complete(channelFuture);
                         } else {

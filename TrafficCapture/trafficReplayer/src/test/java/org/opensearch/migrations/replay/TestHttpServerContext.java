@@ -27,8 +27,12 @@ public class TestHttpServerContext {
     public static Duration SERVER_RESPONSE_LATENCY = Duration.ofMillis(100);
 
     public static SimpleHttpResponse makeResponse(HttpFirstLine r) {
+        return makeResponse(r, SERVER_RESPONSE_LATENCY);
+    }
+
+    public static SimpleHttpResponse makeResponse(HttpFirstLine r, Duration responseWaitTime) {
         try {
-            Thread.sleep(SERVER_RESPONSE_LATENCY.toMillis());
+            Thread.sleep(responseWaitTime.toMillis());
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }

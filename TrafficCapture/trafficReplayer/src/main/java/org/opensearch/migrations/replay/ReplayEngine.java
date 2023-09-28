@@ -10,7 +10,6 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -25,7 +24,6 @@ public class ReplayEngine {
     private final AtomicLong lastCompletedSourceTimeEpochMs;
     private final AtomicLong lastIdleUpdatedTimestampEpochMs;
     private final TimeShifter timeShifter;
-    private final double maxSpeedupFactor;
     private static final MetricsLogger metricsLogger = new MetricsLogger("ReplayEngine");
     /**
      * If this proves to be a contention bottleneck, we can move to a scheme with ThreadLocals
@@ -47,12 +45,10 @@ public class ReplayEngine {
      */
     public ReplayEngine(RequestSenderOrchestrator networkSendOrchestrator,
                         BufferedTimeController contentTimeController,
-                        TimeShifter timeShifter,
-                        double maxSpeedupFactor) {
+                        TimeShifter timeShifter) {
         this.networkSendOrchestrator = networkSendOrchestrator;
         this.contentTimeController = contentTimeController;
         this.timeShifter = timeShifter;
-        this.maxSpeedupFactor = maxSpeedupFactor;
         this.totalCountOfScheduledTasksOutstanding = new AtomicLong();
         this.lastCompletedSourceTimeEpochMs = new AtomicLong(0);
         this.lastIdleUpdatedTimestampEpochMs = new AtomicLong(0);
@@ -89,7 +85,10 @@ public class ReplayEngine {
         var currentSourceTimeEpochMs = currentSourceTimeOp.get().toEpochMilli();
         var lastUpdatedTimeEpochMs =
                 Math.max(lastCompletedSourceTimeEpochMs.get(), lastIdleUpdatedTimestampEpochMs.get());
-        var maxSkipTimeEpochMs = lastUpdatedTimeEpochMs + (long) (getUpdatePeriodMs()*this.maxSpeedupFactor);
+        var maxSkipTimeEpochMs =
+                //(lastUpdatedTimeEpochMs == 0 ? currentSourceTimeEpochMs : lastUpdatedTimeEpochMs) +
+                        lastUpdatedTimeEpochMs +
+                        (long) (getUpdatePeriodMs()*this.timeShifter.maxRateMultiplier());
         lastIdleUpdatedTimestampEpochMs.set(Math.min(currentSourceTimeEpochMs, maxSkipTimeEpochMs));
         contentTimeController.stopReadsPast(Instant.ofEpochMilli(lastIdleUpdatedTimestampEpochMs.get()));
     }
@@ -159,5 +158,9 @@ public class ReplayEngine {
 
     public int getNumConnectionsClosed() {
         return networkSendOrchestrator.clientConnectionPool.getNumConnectionsClosed();
+    }
+
+    public void setFirstTimestamp(Instant firstPacketTimestamp) {
+        timeShifter.setFirstTimestamp(firstPacketTimestamp);
     }
 }

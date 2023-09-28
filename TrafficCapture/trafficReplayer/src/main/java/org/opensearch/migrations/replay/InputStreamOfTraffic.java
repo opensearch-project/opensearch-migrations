@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.io.EOFException;
 import java.io.IOException;

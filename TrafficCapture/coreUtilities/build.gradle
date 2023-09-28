@@ -40,6 +40,9 @@ repositories {
 }
 
 dependencies {
+    implementation project(':captureProtobufs')
+
+    implementation "com.google.protobuf:protobuf-java:3.22.2"
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'

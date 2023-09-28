@@ -22,6 +22,9 @@ class TimeShifterTest {
         var sourceTime = nowTime.minus(Duration.ofHours(1));
 
         Assertions.assertEquals(Optional.empty(), shifter.transformRealTimeToSourceTime(nowTime));
+        Assertions.assertThrows(Exception.class, ()->shifter.transformRealTimeToSourceTime(
+                shifter.transformSourceTimeToRealTime(sourceTime)).get());
+        shifter.setFirstTimestamp(sourceTime);
         Assertions.assertEquals(sourceTime, shifter.transformRealTimeToSourceTime(
                 shifter.transformSourceTimeToRealTime(sourceTime)).get());
 

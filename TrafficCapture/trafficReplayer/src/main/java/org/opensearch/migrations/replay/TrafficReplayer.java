@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -38,6 +39,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -56,6 +58,7 @@ public class TrafficReplayer {
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String AWS_AUTH_HEADER_USER_AND_SECRET_ARG = "--auth-header-user-and-secret";
     public static final Duration TRAFFIC_SOURCE_BUFFER_SIZE = Duration.ofSeconds(35);
+    public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
     private final ClientConnectionPool clientConnectionPool;
 
@@ -174,11 +177,11 @@ public class TrafficReplayer {
         String outputFilename;
 
         @Parameter(required = false,
-                names = {"-t", "--packet-timeout-seconds"},
+                names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME},
                 arity = 1,
                 description = "assume that connections were terminated after this many " +
                         "seconds of inactivity observed in the captured stream")
-        int observedPacketConnectionTimeout = 30;
+        int observedPacketConnectionTimeout = 70;
         @Parameter(required = false,
                 names = {"--speedup-factor"},
                 arity = 1,
@@ -322,7 +325,7 @@ public class TrafficReplayer {
         AtomicInteger exceptionCount = new AtomicInteger();
 
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
-        var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, timeShifter, 2.0);
+        var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, timeShifter);
 
         var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         ConcurrentHashMap<HttpMessageAndTimestamp, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap =
@@ -331,12 +334,13 @@ public class TrafficReplayer {
                 requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
+                        "(see " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                         getRecordedRequestReconstructCompleteHandler(replayEngine, requestFutureMap),
                         getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
                                 tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap),
                         (requestKey, ts) -> replayEngine.closeConnection(requestKey, ts));
         try {
-            runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
+            runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator, timeShifter);
         } catch (Exception e) {
             log.warn("Terminating runReplay due to", e);
             throw e;
@@ -379,6 +383,8 @@ public class TrafficReplayer {
     getRecordedRequestReconstructCompleteHandler(ReplayEngine replayEngine, ConcurrentHashMap<HttpMessageAndTimestamp,
             DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap) {
         return (requestKey, request) -> {
+            replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
+
             var requestPushFuture = transformAndSendRequest(replayEngine, request, requestKey);
             requestFutureMap.put(request, requestPushFuture);
             requestPushFuture.map(f->f.whenComplete((v,t)-> log.atTrace()
@@ -386,6 +392,8 @@ public class TrafficReplayer {
                     ()->"logging summary");
         };
     }
+
+    private final static Instant startTime = Instant.now();
 
     private static Consumer<RequestResponsePacketPair>
     getRecordedRequestAndResponseReconstructCompleteHandler(
@@ -402,14 +410,16 @@ public class TrafficReplayer {
             var resultantCf = responseInProgressMap.remove(requestData)
                     .map(f ->
                             f.handle((summary, t) -> {
+                                TransformedTargetRequestAndResponse rval = null;
                                 try {
-                                    TransformedTargetRequestAndResponse rval =
-                                            packageAndWriteResponse(tupleWriter, rrPair, summary, t);
+                                    rval = packageAndWriteResponse(tupleWriter, rrPair, summary, t);
                                     successCount.incrementAndGet();
                                     return rval;
                                 } catch (Exception e) {
-                                    log.atInfo().setCause(e).setMessage("Exception - base64 gzipped traffic stream: " +
-                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream())).log();
+//                                    log.atInfo().setCause(e).setMessage("Exception - base64 gzipped traffic stream: " +
+//                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream())).log();
+                                    log.atInfo().setCause(e).setMessage("Exception for request {}: ")
+                                            .addArgument(rrPair.connectionId).log();
                                     exceptionCount.incrementAndGet();
                                     throw e;
                                 } finally {
@@ -584,11 +594,20 @@ public class TrafficReplayer {
     }
 
     public void runReplay(ITrafficCaptureSource trafficChunkStream,
-                          CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
+                          CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator,
+                          TimeShifter timeShifter) {
         try {
             while (true) {
                 log.trace("Reading next chunk from TrafficStream supplier");
                 var trafficStreams = trafficChunkStream.readNextTrafficStreamChunk().get();
+                final var INDENT = "  ";
+                if (log.isInfoEnabled()) {
+                    Optional.of(trafficStreams.stream()
+                                    .map(ts->TrafficStreamUtils.summarizeTrafficStream(ts))
+                                    .collect(Collectors.joining("\n"+INDENT)))
+                            .filter(s->!s.isEmpty())
+                            .ifPresent(s->log.atInfo().log("TrafficStream Summary: {\n" + INDENT + s + "}"));
+                }
                 trafficStreams.forEach(ts->trafficToHttpTransactionAccumulator.accept(ts));
             }
         } catch (ExecutionException ee) {

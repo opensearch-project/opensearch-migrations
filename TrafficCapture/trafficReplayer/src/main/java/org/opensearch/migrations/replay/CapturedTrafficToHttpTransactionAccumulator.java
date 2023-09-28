@@ -7,6 +7,7 @@ import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -60,24 +61,29 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     private final static MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
 
-    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
+    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
                                                        BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler,
                                                        BiConsumer<UniqueRequestKey,Instant> connectionCloseListener)
     {
-        this(minTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener,
+        this(minTimeout, hintStringToConfigureTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener,
                 accumulation -> log.atWarn()
                         .setMessage(()->"TrafficStreams are still pending for this expiring accumulation: " +
                                 accumulation).log());
     }
 
-    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
+    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
                                                        BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler,
                                                        BiConsumer<UniqueRequestKey,Instant> connectionCloseListener,
                                                        Consumer<Accumulation> onTrafficStreamMissingOnExpiration) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new BehavioralPolicy() {
+                    @Override
+                    public String appendageToDescribeHowToSetMinimumGuaranteedLifetime() {
+                        return hintStringToConfigureTimeout;
+                    }
+
                     @Override
                     public void onExpireAccumulation(String partitionId, Accumulation accumulation) {
                         connectionsExpiredCounter.incrementAndGet();
@@ -110,6 +116,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .append(ts.getConnectionId())
                 .append(" index: ")
                 .append(ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk())
+                .append(" firstTimestamp: ")
+                .append(ts.getSubStreamList().stream().findFirst()
+                        .map(tso -> tso.getTs()).map(TrafficStreamUtils::instantFromProtoTimestamp)
+                        .map(instant->instant.toString())
+                        .orElse("[None]"))
                 .toString();
     }
 
@@ -134,7 +145,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         .takeWhile(b->!b)
                         .forEach(b->{}));
         if (terminated.get()) {
-            log.atTrace().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
+            log.atInfo().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
                     " from liveStreams map").log();
             liveStreams.remove(partitionId, connectionId);
         }
@@ -148,7 +159,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                           TrafficObservation observation) {
         var connectionId = accum.rrPair.connectionId.connectionId;
         var timestamp =
-                Optional.of(observation.getTs()).map(t->Instant.ofEpochSecond(t.getSeconds(), t.getNanos())).get();
+                Optional.of(observation.getTs()).map(t-> TrafficStreamUtils.instantFromProtoTimestamp(t)).get();
         liveStreams.expireOldEntries(nodeId, accum.rrPair.connectionId.connectionId, accum, timestamp);
         if (observation.hasRead()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);

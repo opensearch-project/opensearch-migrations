@@ -8,6 +8,7 @@ import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -24,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 class BlockingTrafficSourceTest {
     private static final Instant sourceStartTime = Instant.EPOCH;
+    public static final int SHIFT = 1;
 
     @Test
     void readNextChunkTest() throws Exception {
@@ -32,27 +34,27 @@ class BlockingTrafficSourceTest {
         var testSource = new TestTrafficCaptureSource(nStreamsToCreate);
 
         var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS));
+        blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
         var firstChunk = new ArrayList<TrafficStream>();
-        for (int i=0; i<=BUFFER_MILLIS+2; ++i) {
+        for (int i = 0; i<=BUFFER_MILLIS+SHIFT; ++i) {
             var nextPieceFuture = blockingSource.readNextTrafficStreamChunk();
             nextPieceFuture.get(500000, TimeUnit.MILLISECONDS)
                 .forEach(ts->firstChunk.add(ts));
         }
         log.info("blockingSource=" + blockingSource);
-        Assertions.assertTrue(BUFFER_MILLIS+2 <= firstChunk.size());
+        Assertions.assertTrue(BUFFER_MILLIS+SHIFT <= firstChunk.size());
         Instant lastTime = null;
-        for (int i=1; i<nStreamsToCreate-BUFFER_MILLIS-2; ++i) {
+        for (int i =SHIFT; i<nStreamsToCreate-BUFFER_MILLIS-SHIFT; ++i) {
             var blockedFuture = blockingSource.readNextTrafficStreamChunk();
             Thread.sleep(5);
-            Assertions.assertFalse(blockedFuture.isDone());
-            Assertions.assertEquals(i+BUFFER_MILLIS+2, testSource.counter.get());
-            blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i+1)));
+            Assertions.assertFalse(blockedFuture.isDone(), "for i="+i+" and coounter="+testSource.counter.get());
+            Assertions.assertEquals(i+BUFFER_MILLIS+SHIFT, testSource.counter.get());
+            blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i)));
             log.info("after stopReadsPast blockingSource=" + blockingSource);
-            var protoBufTime =
-                    blockedFuture.get(100, TimeUnit.MILLISECONDS).get(0).getSubStreamList().get(0).getTs();
-            lastTime = Instant.ofEpochSecond(protoBufTime.getSeconds(), protoBufTime.getNanos());
+            var completedFutureValue = blockedFuture.get(10000, TimeUnit.MILLISECONDS);
+            lastTime = TrafficStreamUtils.getFirstTimestamp(completedFutureValue.get(0)).get();
         }
-        Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate-1)), lastTime);
+        Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate-SHIFT)), lastTime);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
         var exception = Assertions.assertThrows(ExecutionException.class,
                 ()->blockingSource.readNextTrafficStreamChunk().get(10, TimeUnit.MILLISECONDS));
@@ -62,7 +64,7 @@ class BlockingTrafficSourceTest {
     private static class TestTrafficCaptureSource implements ITrafficCaptureSource {
         int nStreamsToCreate;
         AtomicInteger counter = new AtomicInteger();
-        Instant replayStartTime = Instant.EPOCH.plus(Duration.ofSeconds(1));
+        Instant replayStartTime = Instant.EPOCH.plus(Duration.ofSeconds(SHIFT));
 
         TestTrafficCaptureSource(int nStreamsToCreate) {
             this.nStreamsToCreate = nStreamsToCreate;

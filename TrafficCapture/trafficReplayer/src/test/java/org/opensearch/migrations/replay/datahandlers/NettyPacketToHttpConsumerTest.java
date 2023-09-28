@@ -149,10 +149,12 @@ class NettyPacketToHttpConsumerTest {
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
                 new JsonJoltTransformBuilder().build(), null);
+        var timeShifter = new TimeShifter();
+        timeShifter.setFirstTimestamp(Instant.now());
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
                         new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
-                new TestTimeController(), new TimeShifter(), 2.0);
+                new TestTimeController(), timeShifter);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;

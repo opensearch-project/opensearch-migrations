@@ -122,7 +122,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             }
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, e);
         } finally {
-            channel.close();
+            var cf = channel.close();
+            log.atInfo().setCause(cf.cause()).log();
         }
         if (offloadingHandler == null) {
             // the NettyDecodedHttpRequestHandler gave up and didn't bother installing the baseline handlers -
