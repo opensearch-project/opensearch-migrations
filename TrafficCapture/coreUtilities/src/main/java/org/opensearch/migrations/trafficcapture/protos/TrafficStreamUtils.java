@@ -28,7 +28,11 @@ public class TrafficStreamUtils {
         var listSummaryStr = ts.getSubStreamList().stream()
                 .map(tso->instantFromProtoTimestamp(tso.getTs()) + ": " + captureCaseToString(tso.getCaptureCase()))
                 .collect(Collectors.joining(", "));
-        return ts.getConnectionId() + " [" + listSummaryStr + "]";
+        return ts.getConnectionId() + " (#" + getTrafficStreamIndex(ts) + ")[" + listSummaryStr + "]";
+    }
+
+    private static int getTrafficStreamIndex(TrafficStream ts) {
+        return ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk();
     }
 
     private static String captureCaseToString(TrafficObservation.CaptureCase captureCase) {

@@ -9,7 +9,7 @@ import org.slf4j.spi.LoggingEventBuilder;
 @Slf4j
 public
 class MetricsLogger {
-    private static Logger logger;
+    private Logger logger;
 
     /**
      * Creates a MetricLogger instance. Under the hood this creates a slf4j logger instance.

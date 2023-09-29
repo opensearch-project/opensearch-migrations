@@ -65,7 +65,7 @@ public class ClientConnectionPool {
                             sslContext, serverUri, diagnosticLabel);
                     channelFuture.addListener(f -> {
                         log.atInfo().setMessage(()->
-                                diagnosticLabel + " ChannelFuture result for create=" + f.isSuccess()).log();
+                                "New network connection result for " + diagnosticLabel + "=" + f.isSuccess()).log();
                         if (f.isSuccess()) {
                             clientConnectionChannelCreatedFuture.future.complete(channelFuture);
                         } else {
@@ -119,7 +119,7 @@ public class ClientConnectionPool {
     }
 
     public void closeConnection(String connId) {
-        log.atDebug().setMessage(() -> "closing connection for " + connId).log();
+        log.atInfo().setMessage(() -> "closing connection for " + connId).log();
         var channelsFuture = connectionId2ChannelCache.getIfPresent(connId);
         if (channelsFuture != null) {
             closeClientConnectionChannel(channelsFuture);
