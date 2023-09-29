@@ -100,10 +100,16 @@ public class ReplayEngine {
     }
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
-    hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp) {
+    hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp,
+                             UniqueRequestKey requestKey, String taskDescription) {
         return future.map(f->f
                         .whenComplete((v,t)->Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
-                        .whenComplete((v,t)->totalCountOfScheduledTasksOutstanding.decrementAndGet())
+                        .whenComplete((v,t)->{
+                            var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
+                            log.atDebug().setMessage(()->"onFinished:" + taskDescription + "(" + requestKey +
+                                    ") decremented tasksOutstanding to "+newCount).log();
+
+                        })
                         .whenComplete((v,t)->contentTimeController.stopReadsPast(timestamp))
                         .whenComplete((v,t)->log.atDebug().
                                 setMessage(()->"work finished and used timestamp="+timestamp+" for updates " +
@@ -115,18 +121,20 @@ public class ReplayEngine {
     scheduleTransformationWork(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
                                Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        log.atDebug().setMessage(()->"scheduleWork: incremented tasksOutstanding to "+newCount).log();
+        log.atDebug().setMessage(()->"schedule:work(" + requestKey +
+                "): incremented tasksOutstanding to "+newCount).log();
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var result = networkSendOrchestrator.scheduleWork(requestKey, end.minus(EXPECTED_TRANSFORMATION_DURATION) ,task);
-        return hookWorkFinishingUpdates(result, originalStart);
+        return hookWorkFinishingUpdates(result, originalStart, requestKey, "work");
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
     scheduleRequest(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        log.atDebug().setMessage(()->"scheduleRequest: incremented tasksOutstanding to "+newCount).log();
+        log.atDebug().setMessage(()->"schedule:request (" + requestKey +
+                "): incremented tasksOutstanding to " + newCount).log();
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
@@ -137,15 +145,16 @@ public class ReplayEngine {
                 .addKeyValue("scheduledStartTime", start.toString())
                 .setMessage("Request scheduled to be sent").log();
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);
-        return hookWorkFinishingUpdates(sendResult, originalStart);
+        return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, "request");
     }
 
     public void closeConnection(UniqueRequestKey requestKey, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        log.atDebug().setMessage(()->"scheduleClose: incremented tasksOutstanding to "+newCount).log();
+        log.atDebug().setMessage(()->"schedule:close(" + requestKey +
+                ") incremented tasksOutstanding to "+newCount).log();
         var future = networkSendOrchestrator
                 .scheduleClose(requestKey, timeShifter.transformSourceTimeToRealTime(timestamp));
-        hookWorkFinishingUpdates(future, timestamp);
+        hookWorkFinishingUpdates(future, timestamp, requestKey, "close");
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void> close() {

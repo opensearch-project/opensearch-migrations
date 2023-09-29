@@ -35,7 +35,8 @@ public class TimeShifter {
             var didSetSystemStart = systemTimeStart.compareAndSet(null, Instant.now());
             assert didSetSystemStart : "expected to always start systemTimeStart immediately after sourceTimeStart ";
         }
-        log.atLevel(didSet ? Level.INFO : Level.TRACE).setMessage("Set first source timestamp to {}")
+        log.atLevel(didSet ? Level.INFO : Level.TRACE)
+                .setMessage("Set baseline source timestamp for all future interactions to {}")
                 .addArgument(sourceTime).log();
     }
 

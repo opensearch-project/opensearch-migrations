@@ -37,7 +37,8 @@ public class InputStreamOfTraffic implements ITrafficCaptureSource {
                 throw new RuntimeException(e);
             }
             var ts = builder.build();
-            log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+            trafficStreamsRead.incrementAndGet();
+            log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.get(), ts);
             return List.of(ts);
         }).exceptionally(e->{
             var ecf = new CompletableFuture<List<TrafficStream>>();

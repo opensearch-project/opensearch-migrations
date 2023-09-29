@@ -26,8 +26,17 @@ public class TrafficStreamUtils {
 
     public static String summarizeTrafficStream(TrafficStream ts) {
         var listSummaryStr = ts.getSubStreamList().stream()
-                .map(tso->instantFromProtoTimestamp(tso.getTs()) + ": " + tso.getCaptureCase())
-                .collect(Collectors.joining(";  "));
+                .map(tso->instantFromProtoTimestamp(tso.getTs()) + ": " + captureCaseToString(tso.getCaptureCase()))
+                .collect(Collectors.joining(", "));
         return ts.getConnectionId() + " [" + listSummaryStr + "]";
+    }
+
+    private static String captureCaseToString(TrafficObservation.CaptureCase captureCase) {
+        switch (captureCase) {
+            case ENDOFMESSAGEINDICATOR:
+                return "EOM";
+            default:
+                return captureCase.toString();
+        }
     }
 }
