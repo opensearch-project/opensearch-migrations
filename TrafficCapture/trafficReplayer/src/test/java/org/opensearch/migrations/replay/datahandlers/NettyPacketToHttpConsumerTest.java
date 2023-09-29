@@ -161,7 +161,7 @@ class NettyPacketToHttpConsumerTest {
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, Instant.now(), Instant.now(),
                         new UniqueRequestKey(connId, i),
-                        Stream.of(Unpooled.wrappedBuffer(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8))));
+                        ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 log.info("requestFinishFuture="+requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();
                 log.debug("Got aggregated response=" + aggregatedResponse);

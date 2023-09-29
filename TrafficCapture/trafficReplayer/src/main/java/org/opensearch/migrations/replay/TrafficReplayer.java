@@ -47,6 +47,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -416,8 +417,6 @@ public class TrafficReplayer {
                                     successCount.incrementAndGet();
                                     return rval;
                                 } catch (Exception e) {
-//                                    log.atInfo().setCause(e).setMessage("Exception - base64 gzipped traffic stream: " +
-//                                            Utils.packetsToCompressedTrafficStream(rrPair.requestData.stream())).log();
                                     log.atInfo().setCause(e).setMessage("Exception for request {}: ")
                                             .addArgument(rrPair.connectionId).log();
                                     exceptionCount.incrementAndGet();
@@ -430,7 +429,7 @@ public class TrafficReplayer {
                                 }
                             }), () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
             if (!resultantCf.future.isDone()) {
-                log.info("Adding " + rrPair.connectionId + " to targetTransactionInProgressMap");
+                log.trace("Adding " + rrPair.connectionId + " to targetTransactionInProgressMap");
                 targetTransactionInProgressMap.put(rrPair.requestData, resultantCf);
                 if (resultantCf.future.isDone()) {
                     targetTransactionInProgressMap.remove(rrPair.requestData);
@@ -491,7 +490,7 @@ public class TrafficReplayer {
     }
 
     private static TransformedTargetRequestAndResponse
-    packageAndWriteResponse(SourceTargetCaptureTuple.TupleToFileWriter tripleWriter,
+    packageAndWriteResponse(SourceTargetCaptureTuple.TupleToFileWriter tupleWriter,
                             RequestResponsePacketPair rrPair,
                             TransformedTargetRequestAndResponse summary,
                             Throwable t) {
@@ -499,7 +498,7 @@ public class TrafficReplayer {
 
         try (var requestResponseTriple = getSourceTargetCaptureTuple(rrPair, summary, t)) {
             log.atInfo().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTriple).log();
-            tripleWriter.writeJSON(requestResponseTriple);
+            tupleWriter.writeJSON(requestResponseTriple);
         } catch (IOException e) {
             log.error("Caught an IOException while writing triples output.");
             e.printStackTrace();
@@ -540,7 +539,7 @@ public class TrafficReplayer {
     transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request, UniqueRequestKey requestKey) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
-                request.packetBytes.stream().map(b-> Unpooled.wrappedBuffer(b)));
+                ()->request.packetBytes.stream());
     }
 
     public static DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
@@ -548,13 +547,13 @@ public class TrafficReplayer {
                             ReplayEngine replayEngine,
                             Instant start, Instant end,
                             UniqueRequestKey requestKey,
-                            Stream<ByteBuf> packets)
+                            Supplier<Stream<byte[]>> packetsSupplier)
     {
         try {
-            log.debug("Assembled request/response - starting to write to socket");
             var transformationCompleteFuture = replayEngine.scheduleTransformationWork(requestKey, start, end, ()->
-                    transformAllData(inputRequestTransformerFactory.create(requestKey), packets));
-            log.debug("finalizeRequest future for transformation = " + transformationCompleteFuture);
+                    transformAllData(inputRequestTransformerFactory.create(requestKey), packetsSupplier));
+            log.atDebug().setMessage(()->"finalizeRequest future for transformation of " + requestKey +
+                    " = " + transformationCompleteFuture).log();
             // It might be safer to chain this work directly inside the scheduleWork call above so that the
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
@@ -581,16 +580,24 @@ public class TrafficReplayer {
     }
 
     private static <R> DiagnosticTrackableCompletableFuture<String, R>
-    transformAllData(IPacketFinalizingConsumer<R> packetHandler, Stream<ByteBuf> packets) {
-        var logLabel = packetHandler.getClass().getSimpleName();
-        packets.forEach(packetData-> {
-            log.atDebug().setMessage(()->logLabel + " sending " + packetData.readableBytes() +
-                    " bytes to the packetHandler").log();
-            var consumeFuture = packetHandler.consumeBytes(packetData);
-            log.atDebug().setMessage(()->logLabel + " consumeFuture = " + consumeFuture).log();
-        });
-        log.atDebug().setMessage(()->logLabel + "  done sending bytes, now finalizing the request").log();
-        return packetHandler.finalizeRequest();
+    transformAllData(IPacketFinalizingConsumer<R> packetHandler, Supplier<Stream<byte[]>> packetSupplier) {
+        try {
+            var logLabel = packetHandler.getClass().getSimpleName();
+            var packets = packetSupplier.get().map(b-> Unpooled.wrappedBuffer(b));
+            packets.forEach(packetData -> {
+                log.atDebug().setMessage(() -> logLabel + " sending " + packetData.readableBytes() +
+                        " bytes to the packetHandler").log();
+                var consumeFuture = packetHandler.consumeBytes(packetData);
+                log.atDebug().setMessage(() -> logLabel + " consumeFuture = " + consumeFuture).log();
+            });
+            log.atDebug().setMessage(() -> logLabel + "  done sending bytes, now finalizing the request").log();
+            return packetHandler.finalizeRequest();
+        } catch (Exception e) {
+            log.atInfo().setCause(e).setMessage("Encountered an exception while transforming the http request.  " +
+                    "The base64 gzipped traffic stream, for later diagnostic purposes, is: " +
+                    Utils.packetsToCompressedTrafficStream(packetSupplier.get())).log();
+            throw e;
+        }
     }
 
     public void runReplay(ITrafficCaptureSource trafficChunkStream,
@@ -600,13 +607,12 @@ public class TrafficReplayer {
             while (true) {
                 log.trace("Reading next chunk from TrafficStream supplier");
                 var trafficStreams = trafficChunkStream.readNextTrafficStreamChunk().get();
-                final var INDENT = "  ";
                 if (log.isInfoEnabled()) {
                     Optional.of(trafficStreams.stream()
                                     .map(ts->TrafficStreamUtils.summarizeTrafficStream(ts))
-                                    .collect(Collectors.joining("\n"+INDENT)))
+                                    .collect(Collectors.joining(";")))
                             .filter(s->!s.isEmpty())
-                            .ifPresent(s->log.atInfo().log("TrafficStream Summary: {\n" + INDENT + s + "}"));
+                            .ifPresent(s->log.atInfo().log("TrafficStream Summary: {" + s + "}"));
                 }
                 trafficStreams.forEach(ts->trafficToHttpTransactionAccumulator.accept(ts));
             }
