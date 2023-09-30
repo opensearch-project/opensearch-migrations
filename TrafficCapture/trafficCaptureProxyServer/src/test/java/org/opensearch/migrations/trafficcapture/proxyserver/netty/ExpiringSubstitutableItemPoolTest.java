@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultPromise;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -13,6 +14,7 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -49,7 +51,7 @@ class ExpiringSubstitutableItemPoolTest {
         var expirationsAreDoneFuture = new CompletableFuture<Boolean>();
         var builtItemCursor = new AtomicInteger();
         var expiredItems = new ArrayList<Integer>();
-        var eventLoop = new NioEventLoopGroup(1);
+        var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("testPool"));
         var lastCreation = new AtomicReference<Instant>();
         var pool = new ExpiringSubstitutableItemPool<Future<Integer>,Integer>(
                 INACTIVITY_TIMEOUT, eventLoop.next(),

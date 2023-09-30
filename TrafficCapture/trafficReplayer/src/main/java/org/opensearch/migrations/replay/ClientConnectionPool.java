@@ -9,6 +9,7 @@ import io.netty.channel.EventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.DefaultPromise;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -37,7 +38,8 @@ public class ClientConnectionPool {
     public ClientConnectionPool(URI serverUri, SslContext sslContext, int numThreads) {
         this.serverUri = serverUri;
         this.sslContext = sslContext;
-        this.eventLoopGroup = new NioEventLoopGroup(numThreads);
+        this.eventLoopGroup =
+                new NioEventLoopGroup(numThreads, new DefaultThreadFactory("targetConnectionPool"));
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(new CacheLoader<>() {
             @Override

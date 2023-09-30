@@ -4,6 +4,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -125,7 +126,7 @@ class NettyPacketToHttpConsumerTest {
             var testServer = testServers.get(useTls);
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-            var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4),
+            var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
                     testServer.localhostEndpoint(), sslContext, "unitTest"+i,
                     new UniqueRequestKey("testConnectionId", 0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));

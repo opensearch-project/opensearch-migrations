@@ -357,8 +357,8 @@ public class TrafficReplayer {
                     waitForRemainingWork(logLevel, timeout, replayEngine, requestToFinalWorkFuturesMap);
                     break;
                 } catch (TimeoutException e) {
-                    log.atLevel(logLevel).log("Caught timeout exception while waiting for the remaining " +
-                            "requests to be finalized.");
+                    log.atLevel(logLevel).log("Timed out while waiting for the remaining " +
+                            "requests to be finalized...");
                     logLevel = SECONDARY_LOG_LEVEL;
                 }
             }

@@ -19,6 +19,7 @@ import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -60,8 +61,10 @@ public class SimpleNettyHttpServer implements AutoCloseable {
 
     public static final String LOCALHOST = "localhost";
 
-    EventLoopGroup bossGroup = new NioEventLoopGroup();
-    EventLoopGroup workerGroup = new NioEventLoopGroup();
+    EventLoopGroup bossGroup =
+            new NioEventLoopGroup(0, new DefaultThreadFactory("simpleServerBoss"));
+    EventLoopGroup workerGroup =
+            new NioEventLoopGroup(0, new DefaultThreadFactory("simpleServerWorkerPool"));
 
     public final boolean useTls;
     public final int port;
