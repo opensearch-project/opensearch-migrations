@@ -12,10 +12,10 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    public final UniqueRequestKey connectionId;
+    public final UniqueRequestKey requestKey;
 
-    public RequestResponsePacketPair(UniqueRequestKey connectionId) {
-        this.connectionId = connectionId;
+    public RequestResponsePacketPair(UniqueRequestKey requestKey) {
+        this.requestKey = requestKey;
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {

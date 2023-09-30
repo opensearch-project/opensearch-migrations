@@ -127,10 +127,12 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
                             "sending any more data to the packetReceiver").log();
                     return StringTrackableCompletableFuture.failedFuture(t, ()->"failed previous future");
                 } else {
-                    log.trace("chaining consumingBytes with " + msg + " lastFuture=" + preexistingFutureForCapture);
+                    log.atTrace().setMessage(()->"chaining consumingBytes with " + msg +
+                            " lastFuture=" + preexistingFutureForCapture).log();
                     var rval = packetReceiver.consumeBytes(bb);
                     bb.release();
-                    log.info("packetReceiver.consumeBytes()=" + rval + " bb.refCnt=" + bb.refCnt());
+                    log.atTrace().setMessage(()->"packetReceiver.consumeBytes()=" + rval + " bb.refCnt=" + bb.refCnt())
+                            .log();
                     return rval.map(cf -> cf.thenApply(ignore -> false),
                             () -> "NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is going " +
                                     "to return a completedValue of false to indicate that more packets may " +

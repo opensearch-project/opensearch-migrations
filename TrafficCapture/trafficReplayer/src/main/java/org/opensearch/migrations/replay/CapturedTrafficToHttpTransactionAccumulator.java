@@ -50,7 +50,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final ExpiringTrafficStreamMap liveStreams;
     private final BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
-    private final Consumer<Accumulation> onTrafficStreamMissingOnExpiration;
+    private final Consumer<Accumulation> onTrafficStreamMissingOnClose;
     private final BiConsumer<UniqueRequestKey,Instant> connectionCloseListener;
 
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -68,15 +68,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     {
         this(minTimeout, hintStringToConfigureTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener,
                 accumulation -> log.atWarn()
-                        .setMessage(()->"TrafficStreams are still pending for this expiring accumulation: " +
-                                accumulation).log());
+                        .setMessage(()->"TrafficStreams are still pending for this accumulation upon it being closed: "
+                                + accumulation).log());
     }
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
                                                        BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler,
                                                        BiConsumer<UniqueRequestKey,Instant> connectionCloseListener,
-                                                       Consumer<Accumulation> onTrafficStreamMissingOnExpiration) {
+                                                       Consumer<Accumulation> onTrafficStreamMissingOnClose) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new BehavioralPolicy() {
                     @Override
@@ -96,7 +96,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
         this.connectionCloseListener = connectionCloseListener;
-        this.onTrafficStreamMissingOnExpiration = onTrafficStreamMissingOnExpiration;
+        this.onTrafficStreamMissingOnClose = onTrafficStreamMissingOnClose;
     }
 
     public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
@@ -157,10 +157,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public CONNECTION_STATUS addObservationToAccumulation(String nodeId, Accumulation accum,
                                                           TrafficObservation observation) {
-        var connectionId = accum.rrPair.connectionId.connectionId;
+        var connectionId = accum.rrPair.requestKey.connectionId;
         var timestamp =
                 Optional.of(observation.getTs()).map(t-> TrafficStreamUtils.instantFromProtoTimestamp(t)).get();
-        liveStreams.expireOldEntries(nodeId, accum.rrPair.connectionId.connectionId, accum, timestamp);
+        liveStreams.expireOldEntries(nodeId, accum.rrPair.requestKey.connectionId, accum, timestamp);
         if (observation.hasRead()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
             assert accum.state == Accumulation.State.NOTHING_SENT;
@@ -293,7 +293,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void fireAccumulationsCallbacksAndClose(Accumulation accumulation) {
         try {
             if (accumulation.trafficStreamsSorter.hasPending()) {
-                onTrafficStreamMissingOnExpiration.accept(accumulation);
+                onTrafficStreamMissingOnClose.accept(accumulation);
             }
             switch (accumulation.state) {
                 case NOTHING_SENT:
