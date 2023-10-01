@@ -41,7 +41,7 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 @Slf4j
-public class Main {
+public class CaptureProxy {
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
     public final static String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
