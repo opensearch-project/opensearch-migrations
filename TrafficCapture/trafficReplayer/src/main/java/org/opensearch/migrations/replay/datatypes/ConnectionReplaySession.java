@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay.datatypes;
 
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -26,6 +28,10 @@ public class ConnectionReplaySession {
     public DiagnosticTrackableCompletableFuture<String,ChannelFuture> channelFutureFuture;
     public OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
+
+    @Getter
+    @Setter
+    private UniqueRequestKey currentConnectionId;
 
     public ConnectionReplaySession(EventLoop eventLoop) {
         this.eventLoop = eventLoop;

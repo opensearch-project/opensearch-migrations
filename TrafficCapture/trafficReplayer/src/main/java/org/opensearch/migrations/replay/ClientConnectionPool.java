@@ -149,8 +149,12 @@ public class ClientConnectionPool {
 
     @SneakyThrows
     public ConnectionReplaySession getCachedSession(UniqueRequestKey requestKey, boolean dontCreate) {
-        return dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.connectionId) :
+        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.connectionId) :
                 connectionId2ChannelCache.get(requestKey.connectionId);
+        if (crs != null) {
+            crs.setCurrentConnectionId(requestKey);
+        }
+        return crs;
     }
 
     private DiagnosticTrackableCompletableFuture<String, Channel>
@@ -171,9 +175,11 @@ public class ClientConnectionPool {
                                         }
                                     });
                             if (!channelAndFutureWork.hasWorkRemaining()) {
-                                log.atWarn().setMessage(()->"Work items are still remaining.  "
-                                        + channelAndFutureWork.calculateSizeSlowly() + " " +
-                                        "requests that were enqueued won't be run").log();
+                                log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
+                                        "(last associated with connection=" +
+                                        channelAndFutureWork.getCurrentConnectionId() +
+                                        ").  " + channelAndFutureWork.calculateSizeSlowly() +
+                                        " requests that were enqueued won't be run").log();
                             }
                         })
                         .exceptionally(t->{channelClosedFuture.future.completeExceptionally(t);return null;}),

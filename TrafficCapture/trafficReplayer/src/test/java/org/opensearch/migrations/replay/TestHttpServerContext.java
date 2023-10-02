@@ -36,12 +36,12 @@ public class TestHttpServerContext {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+        String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
+        var payloadBytes = body.getBytes(StandardCharsets.UTF_8);
         var headers = Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
-                "Content-Transfer-Encoding", "chunked");
-        String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
-        var payloadBytes = body.getBytes(StandardCharsets.UTF_8);
+                "Content-Length", ""+payloadBytes.length);
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 

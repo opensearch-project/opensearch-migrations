@@ -18,7 +18,10 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -125,11 +128,16 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                             HttpVersion.HTTP_1_1,
                             HttpResponseStatus.valueOf(specifiedResponse.statusCode, specifiedResponse.statusText),
                             Unpooled.wrappedBuffer(specifiedResponse.payloadBytes),
-                            convertHeaders(specifiedResponse.headers), null
+                            convertHeaders(specifiedResponse.headers),
+                            new DefaultHttpHeaders()
                     );
-                    ctx.writeAndFlush(fullResponse);
+                    log.atInfo().setMessage(()->"writing "+fullResponse).log();
+                    var cf = ctx.writeAndFlush(fullResponse);
+                    log.atInfo().setMessage(()->"wrote "+fullResponse).log();
+                    cf.addListener(f->log.atInfo().setMessage(()->"success=" + f.isSuccess() +
+                            " finished writing "+fullResponse).log());
                 } catch (Exception e) {
-                    log.atDebug().setCause(e).log("Closing connection due to exception");
+                    log.atWarn().setCause(e).log("Closing connection due to exception");
                     ctx.close();
                 }
             }
@@ -154,10 +162,10 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                             engine.setUseClientMode(false);
                             pipeline.addFirst("SSL", new SslHandler(engine));
                         }
+                        //pipeline.addLast(new ReadTimeoutHandler(500));
                         pipeline.addLast(new HttpServerCodec());
                         pipeline.addLast(new HttpObjectAggregator(16*1024));
                         pipeline.addLast(makeHandlerFromResponseContext(responseBuilder));
-                        pipeline.addLast();
                     }
                 });
         serverChannel = b.bind(port).sync().channel();

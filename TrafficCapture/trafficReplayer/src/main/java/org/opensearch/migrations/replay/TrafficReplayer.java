@@ -352,7 +352,7 @@ public class TrafficReplayer {
             var PRIMARY_LOG_LEVEL = Level.INFO;
             var SECONDARY_LOG_LEVEL = Level.WARN;
             var logLevel = PRIMARY_LOG_LEVEL;
-            for (var timeout = Duration.ofSeconds(1); ; timeout = timeout.multipliedBy(2)) {
+            for (var timeout = Duration.ofSeconds(60); ; timeout = timeout.multipliedBy(2)) {
                 try {
                     waitForRemainingWork(logLevel, timeout, replayEngine, requestToFinalWorkFuturesMap);
                     break;
@@ -423,7 +423,7 @@ public class TrafficReplayer {
                                     exceptionCount.incrementAndGet();
                                     throw e;
                                 } finally {
-                                    targetTransactionInProgressMap.remove(rrPair.requestData);
+                                    targetTransactionInProgressMap.remove(rrPair.requestKey);
                                     log.trace("removed rrPair.requestData to " +
                                             "targetTransactionInProgressMap for " +
                                             rrPair.requestKey);
@@ -433,7 +433,7 @@ public class TrafficReplayer {
                 log.trace("Adding " + rrPair.requestKey + " to targetTransactionInProgressMap");
                 targetTransactionInProgressMap.put(rrPair.requestKey, resultantCf);
                 if (resultantCf.future.isDone()) {
-                    targetTransactionInProgressMap.remove(rrPair.requestData);
+                    targetTransactionInProgressMap.remove(rrPair.requestKey);
                 }
             }
         };
