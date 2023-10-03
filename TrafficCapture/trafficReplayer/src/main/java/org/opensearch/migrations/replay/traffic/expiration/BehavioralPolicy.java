@@ -31,8 +31,7 @@ public class BehavioralPolicy {
                 "the Accumulation was expired.  This indicates that the minimumGuaranteedLifetime " +
                 "must be set to at least " + Duration.between(lastPacketTimestamp, endOfWindow) +
                 ".  The beginning of the valid time window is currently " + endOfWindow +
-                " for (" + partitionId + "," + connectionId + ") and the last timestamp of the " +
-                "Accumulation object that was being assembled was");
+                " for (" + partitionId + "," + connectionId + ")");
     }
 
     public void onNewDataArrivingWithATimestampThatIsAlreadyExpired(
@@ -41,8 +40,7 @@ public class BehavioralPolicy {
                 "the Accumulation was expired.  This indicates that the minimumGuaranteedLifetime " +
                 "must be set to at least " + Duration.between(timestamp, endOfWindow) +
                 ".  The beginning of the valid time window is currently " + endOfWindow +
-                " for (" + partitionId + "," + connectionId + ") and the last timestamp of the " +
-                "Accumulation object that was being assembled was");
+                " for (" + partitionId + "," + connectionId + ")");
     }
 
     public boolean shouldRetryAfterAccumulationTimestampRaceDetected(String partitionId, String connectionId,

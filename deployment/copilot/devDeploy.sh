@@ -117,7 +117,7 @@ fi
 if [ "$DESTROY_ALL_COPILOT" = true ] ; then
     # Reset AWS_DEFAULT_REGION as the SDK used by Copilot will first check here for region to use to locate the Copilot app (https://github.com/aws/copilot-cli/issues/5138)
     export AWS_DEFAULT_REGION=""
-    copilot app delete
+    copilot app delete --name $COPILOT_APP_NAME
     echo "Destroying a Copilot app will not remove generated manifest.yml files in the copilot/environments directory. These should be manually deleted before deploying again. "
     exit 1
 fi
@@ -140,6 +140,9 @@ cdk deploy "*" --tags $TAGS --c domainName="aos-domain" --c engineVersion="OS_2.
 
 # Collect export commands from CDK output, which are needed by Copilot, wrap the commands in double quotes and store them within the "environment" dir
 export_file_path=../../copilot/environments/$COPILOT_DEPLOYMENT_STAGE/envExports.sh
+
+mkdir -p $(dirname "${export_file_path}")
+
 grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdk.out/cdkOutput.json | sed 's/=/="/' | sed 's/.*/&"/' > "${export_file_path}"
 source "${export_file_path}"
 chmod +x "${export_file_path}"
