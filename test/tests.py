@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # times every "delay" seconds IF the requests returned a status code other than what's expected.
 # So this "retry_request" function's arguments are a request function's name and whatever arguments that function
 # expects, and the status code the request function is expecting to get.
-def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, delay: float = 0.5,
+def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 15, delay: float = 1.5,
                   expected_status_code: HTTPStatus = None):
     for attempt in range(1, max_attempts + 1):
         try:
