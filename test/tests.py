@@ -122,7 +122,8 @@ class E2ETests(unittest.TestCase):
         source_response = get_document(self.source_endpoint, self.index, self.doc_id, self.auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        target_response = get_document(self.target_endpoint, self.index, self.doc_id, self.auth)
+        target_response = retry_request(get_document, args=(self.target_endpoint, self.index, self.doc_id, self.auth),
+                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
 
         # Comparing the document's content on both endpoints, asserting that they match.
