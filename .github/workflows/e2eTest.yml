@@ -1,0 +1,30 @@
+name: Docker Compose Test with Gradlew
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK
+        uses: actions/setup-java@v2
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+
+      - name: Build and run Docker Compose with Gradlew
+        run: |
+          cd TrafficCapture
+          chmod +x ./gradlew
+          ./gradlew dockerSolution:ComposeUp
+
