@@ -61,7 +61,7 @@ class E2ETests(unittest.TestCase):
         self.set_common_values()
         retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
-        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.auth),
+        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.doc_id, self.auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
 
     def tearDown(self):
