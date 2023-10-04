@@ -1,4 +1,4 @@
-name: Docker Compose Test with Gradlew
+name: E2E Testing
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           java-version: '11'
           distribution: 'adopt'
 
-      - name: Build and run Docker Compose with Gradlew
+      - name: Start Docker Solution
         run: |
           cd TrafficCapture
           chmod +x ./gradlew
@@ -40,7 +40,7 @@ jobs:
           pip install -r requirements.txt 
 
 
-      - name: Run e2e test script
+      - name: Run E2E test script
         run: |
           cd test
           chmod +x ./tests.py
