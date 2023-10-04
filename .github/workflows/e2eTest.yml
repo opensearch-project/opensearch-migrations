@@ -40,6 +40,6 @@ jobs:
 
       - name: Run e2e test script
         run: |
-          cd ../test
+          cd test
           chmod +x ./tests.py
           pytest tests.py
