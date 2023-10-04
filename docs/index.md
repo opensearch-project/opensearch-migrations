@@ -35,10 +35,27 @@ OpenSearch UpgradeOptim is used to facilitate migrations to OpenSearch, upgrades
 ## Overview
 - Purpose of the guide
 - Intended audience
+- Glossary
+    - Capture Proxy
+    - Source Cluster - OpenSearch/ Elasticsearch
+    - Kafka Event Streamer 
+        - ZooKeeper
+    - Replayer
+    - Results Store
+        - EFS - Elastic File Store
+        - OpenSearch Cluster
+    - Target Cluster - OpenSeach/ Elasticsearch
+    - Monitoring Dashboard
 - Getting Started
 
 
 ## System requirements
+This solution may work with other verions of the libraries below but it has been tested with the following:
+ - Java 11 (There is a restriction so that the solution will not build with other verions)
+ - Gradle 8
+ - Python 3 (for experimental tooling and results comparisons)
+ - AWS Cloud Developerment Kit (CDK) 2.84 (for AWS deployments)
+ - Docker version 4.12.0, Engine 20.10.17, Compose v2.10.2
   
 
 ## High Level Overview 
