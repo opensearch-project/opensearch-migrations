@@ -48,7 +48,7 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, d
 class E2ETests(unittest.TestCase):
     def set_common_values(self):
         self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
-        self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'http://localhost:19200')
+        self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:19200')
         self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
         self.jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
         self.username = os.getenv('username', 'admin')
