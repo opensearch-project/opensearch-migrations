@@ -7,6 +7,7 @@ import os
 import logging
 import time
 import requests
+import uuid
 from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class E2ETests(unittest.TestCase):
         self.username = os.getenv('username', 'admin')
         self.password = os.getenv('password', 'admin')
         self.auth = (self.username, self.password)
-        self.index = "my_index"
+        self.index = f"my_index_{uuid.uuid4()}"
         self.doc_id = '7'
 
     def setUp(self):
