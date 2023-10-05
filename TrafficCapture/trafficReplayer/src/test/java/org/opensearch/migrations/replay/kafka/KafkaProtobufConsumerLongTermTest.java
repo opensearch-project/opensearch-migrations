@@ -114,7 +114,7 @@ public class KafkaProtobufConsumerLongTermTest {
             var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk();
             var recordsList = nextChunkFuture.get((2+ TEST_RECORD_COUNT)*PRODUCER_SLEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
             for (int j=0; j<recordsList.size(); ++j) {
-                Assertions.assertEquals(getConnectionId(i+j), recordsList.get(j).getConnectionId());
+                Assertions.assertEquals(getConnectionId(i+j), recordsList.get(j).getStream().getConnectionId());
             }
             log.info("Got "+recordsList.size()+" records and already had " + i);
             i += recordsList.size();

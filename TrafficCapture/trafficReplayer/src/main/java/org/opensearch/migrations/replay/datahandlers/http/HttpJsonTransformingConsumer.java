@@ -142,7 +142,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                         } else {
                             metricsLogger.atError(t)
                                     .addKeyValue("requestId", requestKeyForMetricsLogging)
-                                    .addKeyValue("connectionId", requestKeyForMetricsLogging.connectionId)
+                                    .addKeyValue("connectionId", requestKeyForMetricsLogging.trafficStreamKey.connectionId)
                                     .addKeyValue("channelId", channel.id().asLongText())
                                     .setMessage("Request failed to be transformed").log();
                             throw new CompletionException(t);
@@ -150,7 +150,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                     } else {
                         metricsLogger.atSuccess()
                                 .addKeyValue("requestId", requestKeyForMetricsLogging)
-                                .addKeyValue("connectionId", requestKeyForMetricsLogging.connectionId)
+                                .addKeyValue("connectionId", requestKeyForMetricsLogging.trafficStreamKey.connectionId)
                                 .addKeyValue("channelId", channel.id().asLongText())
                                 .setMessage("Request was transformed").log();
                         return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
@@ -182,7 +182,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
         metricsLogger.atError(reason)
                 .addKeyValue("requestId", requestKeyForMetricsLogging)
-                .addKeyValue("connectionId", requestKeyForMetricsLogging.connectionId)
+                .addKeyValue("connectionId", requestKeyForMetricsLogging.trafficStreamKey.connectionId)
                 .addKeyValue("channelId", channel.id().asLongText())
                 .setMessage("Request was redriven without transformation").log();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?

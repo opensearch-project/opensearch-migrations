@@ -10,6 +10,7 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -58,11 +59,12 @@ class KafkaProtobufConsumerTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(stream->{
+                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
                     tsCount.incrementAndGet();
-                    log.trace("Stream has substream count: " + stream.getSubStreamCount());
-                    Assertions.assertInstanceOf(TrafficStream.class, stream);
-                    Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                    log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                    Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                    Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                            substreamCounts.get(foundStreamsCount.getAndIncrement()));
                 });
             }
         });
@@ -107,11 +109,12 @@ class KafkaProtobufConsumerTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(stream->{
+                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
                     tsCount.incrementAndGet();
-                    log.trace("Stream has substream count: " + stream.getSubStreamCount());
-                    Assertions.assertInstanceOf(TrafficStream.class, stream);
-                    Assertions.assertEquals(stream.getSubStreamCount(), substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                    log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                    Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                    Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                            substreamCounts.get(foundStreamsCount.getAndIncrement()));
                 });
             }
         });

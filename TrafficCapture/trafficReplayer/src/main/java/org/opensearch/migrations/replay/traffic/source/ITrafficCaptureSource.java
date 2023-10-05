@@ -1,5 +1,6 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.traffic.source;
 
+import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.Closeable;
@@ -8,5 +9,5 @@ import java.util.concurrent.CompletableFuture;
 
 public interface ITrafficCaptureSource extends Closeable {
 
-    CompletableFuture<List<TrafficStream>> readNextTrafficStreamChunk();
+    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk();
 }

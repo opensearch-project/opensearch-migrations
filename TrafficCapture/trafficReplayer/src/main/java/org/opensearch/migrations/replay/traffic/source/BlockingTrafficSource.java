@@ -1,9 +1,10 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.traffic.source;
 
 import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.slf4j.event.Level;
 
 import java.io.IOException;
@@ -13,7 +14,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -30,23 +33,28 @@ import java.util.concurrent.atomic.AtomicReference;
  * to complete before another caller calls it again.
  */
 @Slf4j
-public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTimeController {
-    private final ITrafficCaptureSource underlyingSource;
+public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlowController {
+    private final ISimpleTrafficCaptureSource underlyingSource;
     private final AtomicReference<Instant> lastTimestampSecondsRef;
     private final AtomicReference<Instant> stopReadingAtRef;
     /**
      * Limit the number of readers to one at a time and only if we haven't yet maxed out our time buffer
      */
     private final Semaphore readGate;
+    private final Semaphore liveTrafficStreamAvailableGate;
+    private final ConcurrentHashMap<TrafficStreamKey, AtomicInteger> requestsOutstanding;
 
     private final Duration bufferTimeWindow;
 
-    public BlockingTrafficSource(ITrafficCaptureSource underlying, Duration bufferTimeWindow) {
+    public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying, Duration bufferTimeWindow,
+                                 int maxConcurrentTrafficStreams) {
         this.underlyingSource = underlying;
         this.stopReadingAtRef = new AtomicReference<>(Instant.EPOCH);
         this.lastTimestampSecondsRef = new AtomicReference<>(Instant.EPOCH);
         this.bufferTimeWindow = bufferTimeWindow;
         this.readGate = new Semaphore(0);
+        this.liveTrafficStreamAvailableGate = new Semaphore(maxConcurrentTrafficStreams);
+        requestsOutstanding = new ConcurrentHashMap<>();
     }
 
     /**
@@ -73,6 +81,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
         }
     }
 
+    @Override
+    public void doneProcessing(TrafficStreamKey key) {
+        liveTrafficStreamAvailableGate.release();
+    }
+
     public Instant lastReadTimestamp() {
         return lastTimestampSecondsRef.get();
     }
@@ -92,7 +105,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
      * @return
      */
     @Override
-    public CompletableFuture<List<TrafficStream>>
+    public CompletableFuture<List<ITrafficStreamWithKey>>
     readNextTrafficStreamChunk() {
         var trafficStreamListFuture =
                 CompletableFuture.supplyAsync(() -> {
@@ -113,18 +126,39 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
                                     return null;
                                 },
                                 task -> new Thread(task).start())
-                        .thenCompose(v->underlyingSource.readNextTrafficStreamChunk());
+                        .thenCompose(v->
+                        {
+                            try {
+                                liveTrafficStreamAvailableGate.acquire();
+                                return underlyingSource.readNextTrafficStreamChunk()
+                                                .whenComplete((c,t)-> {
+                                                    var adjustment = (t == null ? 0 : c.size()) -1;
+                                                    try {
+                                                        if (adjustment > 0) {
+                                                            liveTrafficStreamAvailableGate.acquire(adjustment);
+                                                        } else if (adjustment < 0) {
+                                                            assert adjustment == -1;
+                                                            liveTrafficStreamAvailableGate.release();
+                                                        }
+                                                    } catch (InterruptedException e) {
+                                                        throw new RuntimeException(e);
+                                                    }
+                                                });
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
         return trafficStreamListFuture.whenComplete((v,t)->{
             if (t != null) {
                 return;
             }
-            var maxLocallyObserved = v.stream().flatMap(ts->ts.getSubStreamList().stream())
+            var maxLocallyObservedTimestamp = v.stream().flatMap(tswk->tswk.getStream().getSubStreamList().stream())
                     .map(tso->tso.getTs())
                     .max(Comparator.comparingLong(Timestamp::getSeconds)
                             .thenComparingInt(Timestamp::getNanos))
                     .map(TrafficStreamUtils::instantFromProtoTimestamp)
                     .orElse(Instant.EPOCH);
-            Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObserved);
+            Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObservedTimestamp);
             log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
                     +lastTimestampSecondsRef.get()).log();
         });

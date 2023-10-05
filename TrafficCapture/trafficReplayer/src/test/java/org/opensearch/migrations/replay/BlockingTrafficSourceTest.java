@@ -4,6 +4,11 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
+import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -33,9 +38,9 @@ class BlockingTrafficSourceTest {
         var BUFFER_MILLIS = 10;
         var testSource = new TestTrafficCaptureSource(nStreamsToCreate);
 
-        var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS));
+        var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS), Integer.MAX_VALUE);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
-        var firstChunk = new ArrayList<TrafficStream>();
+        var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i<=BUFFER_MILLIS+SHIFT; ++i) {
             var nextPieceFuture = blockingSource.readNextTrafficStreamChunk();
             nextPieceFuture.get(500000, TimeUnit.MILLISECONDS)
@@ -52,7 +57,7 @@ class BlockingTrafficSourceTest {
             blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i)));
             log.info("after stopReadsPast blockingSource=" + blockingSource);
             var completedFutureValue = blockedFuture.get(10000, TimeUnit.MILLISECONDS);
-            lastTime = TrafficStreamUtils.getFirstTimestamp(completedFutureValue.get(0)).get();
+            lastTime = TrafficStreamUtils.getFirstTimestamp(completedFutureValue.get(0).getStream()).get();
         }
         Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate-SHIFT)), lastTime);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
@@ -61,7 +66,7 @@ class BlockingTrafficSourceTest {
         Assertions.assertInstanceOf(EOFException.class, exception.getCause());
     }
 
-    private static class TestTrafficCaptureSource implements ITrafficCaptureSource {
+    private static class TestTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         int nStreamsToCreate;
         AtomicInteger counter = new AtomicInteger();
         Instant replayStartTime = Instant.EPOCH.plus(Duration.ofSeconds(SHIFT));
@@ -71,7 +76,7 @@ class BlockingTrafficSourceTest {
         }
 
         @Override
-        public CompletableFuture<List<TrafficStream>> readNextTrafficStreamChunk() {
+        public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
             log.atTrace().setMessage(()->"Test.readNextTrafficStreamChunk.counter="+counter).log();
             var i = counter.getAndIncrement();
             if (i >= nStreamsToCreate) {
@@ -80,7 +85,7 @@ class BlockingTrafficSourceTest {
 
             var t = sourceStartTime.plus(Duration.ofMillis(i));
             log.debug("Built timestamp for " + i);
-            return CompletableFuture.completedFuture(List.of(
+            return CompletableFuture.completedFuture(List.of(new TrafficStreamWithEmbeddedKey(
                     TrafficStream.newBuilder()
                             .setNumberOfThisLastChunk(0)
                             .setConnectionId("conn_" + i)
@@ -91,10 +96,15 @@ class BlockingTrafficSourceTest {
                                             .build())
                                     .setClose(CloseObservation.getDefaultInstance())
                                     .build())
-                            .build()));
+                            .build())));
         }
 
         @Override
         public void close() throws IOException {}
+
+        @Override
+        public void commitTrafficStream(TrafficStreamKey trafficStreamKey) {
+            // do nothing
+        }
     }
 }

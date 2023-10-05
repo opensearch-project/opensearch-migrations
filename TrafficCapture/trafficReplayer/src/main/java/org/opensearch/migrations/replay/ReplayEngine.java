@@ -5,6 +5,7 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
 import java.time.Duration;
@@ -20,7 +21,7 @@ public class ReplayEngine {
     public static final TimeUnit TIME_UNIT_MILLIS = TimeUnit.MILLISECONDS;
     public static final Duration EXPECTED_TRANSFORMATION_DURATION = Duration.ofSeconds(1);
     private final RequestSenderOrchestrator networkSendOrchestrator;
-    private final BufferedTimeController contentTimeController;
+    private final BufferedFlowController contentTimeController;
     private final AtomicLong lastCompletedSourceTimeEpochMs;
     private final AtomicLong lastIdleUpdatedTimestampEpochMs;
     private final TimeShifter timeShifter;
@@ -37,14 +38,9 @@ public class ReplayEngine {
      * @param networkSendOrchestrator
      * @param contentTimeController
      * @param timeShifter
-     * @param maxSpeedupFactor - when we've been idle and the last value to stopReadsPast was much
-     *                         different than the inverted realtime, it wouldn't make sense to have
-     *                         the supplier start to load a huge amount of messages.  This factor
-     *                         will throttle how much we can advance time every iteration if we're
-     *                         behind our idealized time.
      */
     public ReplayEngine(RequestSenderOrchestrator networkSendOrchestrator,
-                        BufferedTimeController contentTimeController,
+                        BufferedFlowController contentTimeController,
                         TimeShifter timeShifter) {
         this.networkSendOrchestrator = networkSendOrchestrator;
         this.contentTimeController = contentTimeController;
@@ -143,7 +139,7 @@ public class ReplayEngine {
         logStartOfWork(requestKey, newCount, start, label);
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", requestKey.toString())
-                .addKeyValue("connectionId", requestKey.connectionId)
+                .addKeyValue("connectionId", requestKey.trafficStreamKey.connectionId)
                 .addKeyValue("delayFromOriginalToScheduledStartInMs", Duration.between(originalStart, start).toMillis())
                 .addKeyValue("scheduledStartTime", start.toString())
                 .setMessage("Request scheduled to be sent").log();

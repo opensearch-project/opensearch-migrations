@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -41,7 +42,7 @@ public class AddCompressionEncodingTest {
                 JsonJoltTransformer.newBuilder()
                         .addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP)
                         .build(), null, testPacketCapture, "TEST",
-                new UniqueRequestKey("testConnectionId", 0));
+                new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
 
         final var payloadPartSize = 511;
         final var numParts = 1025;

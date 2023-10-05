@@ -5,6 +5,7 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -114,7 +115,7 @@ class TrafficReplayerTest {
                     trafficProducer.readNextTrafficStreamChunk().get().stream().forEach(ts->{
                         var i = counter.incrementAndGet();
                         var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
-                        var isEqual = ts.equals(expectedStream);
+                        var isEqual = ts.getStream().equals(expectedStream);
                         if (!isEqual) {
                             log.error("Expected trafficStream: " + expectedStream);
                             log.error("Observed trafficStream: " + ts);
@@ -163,7 +164,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
@@ -209,7 +210,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
@@ -237,7 +238,7 @@ class TrafficReplayerTest {
         }
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();

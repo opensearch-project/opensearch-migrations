@@ -40,10 +40,6 @@ public class TimeShifter {
                 .addArgument(sourceTime).log();
     }
 
-    public boolean hasFirstTimestamp() {
-        return sourceTimeStart.get() != null;
-    }
-
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
         // realtime = systemTimeStart + rateMultiplier * (sourceTime-sourceTimeStart)
         if (sourceTimeStart.get() == null) {

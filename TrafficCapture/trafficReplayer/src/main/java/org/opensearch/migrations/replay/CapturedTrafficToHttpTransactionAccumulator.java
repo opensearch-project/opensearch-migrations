@@ -5,6 +5,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -136,11 +137,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .toString();
     }
 
-    public void accept(TrafficStream yetToBeSequencedTrafficStream) {
+    public void accept(ITrafficStreamWithKey yetToBeSequencedTrafficStreamAndKey) {
+        var yetToBeSequencedTrafficStream = yetToBeSequencedTrafficStreamAndKey.getStream();
         log.atTrace().setMessage(()->"Got trafficStream: "+summarizeTrafficStream(yetToBeSequencedTrafficStream)).log();
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
-        var accum = liveStreams.getOrCreateWithoutExpiration(partitionId, connectionId);
+        var accum = liveStreams.getOrCreateWithoutExpiration(yetToBeSequencedTrafficStreamAndKey.getKey());
         var terminated = new AtomicBoolean(false);
         accum.sequenceTrafficStream(yetToBeSequencedTrafficStream,
                 ts -> ts.getSubStreamList().stream()
@@ -149,8 +151,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                 log.error("Got a traffic observation AFTER a Close observation for the stream " +  ts);
                                 return true;
                             }
-                            var didTerminate = CONNECTION_STATUS.CLOSED ==
-                                    addObservationToAccumulation(ts.getNodeId(), accum, o);
+                            var didTerminate = CONNECTION_STATUS.CLOSED == addObservationToAccumulation(accum, o);
                             terminated.set(didTerminate);
                             return didTerminate;
                         })
@@ -167,12 +168,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         ALIVE, CLOSED
     }
 
-    public CONNECTION_STATUS addObservationToAccumulation(String nodeId, Accumulation accum,
+    public CONNECTION_STATUS addObservationToAccumulation(Accumulation accum,
                                                           TrafficObservation observation) {
-        var connectionId = accum.rrPair.requestKey.connectionId;
+        var connectionId = accum.rrPair.requestKey.trafficStreamKey.connectionId;
         var timestamp =
                 Optional.of(observation.getTs()).map(t-> TrafficStreamUtils.instantFromProtoTimestamp(t)).get();
-        liveStreams.expireOldEntries(nodeId, accum.rrPair.requestKey.connectionId, accum, timestamp);
+        liveStreams.expireOldEntries(accum.rrPair.requestKey.trafficStreamKey, accum, timestamp);
         if (observation.hasRead()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
             assert accum.state == Accumulation.State.NOTHING_SENT;
@@ -272,7 +273,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var requestPacketBytes = accumulation.rrPair.requestData;
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", accumulation.getRequestId())
-                .addKeyValue("connectionId", accumulation.getRequestId().connectionId)
+                .addKeyValue("connectionId", accumulation.getRequestId().trafficStreamKey.connectionId)
                 .setMessage("Full captured source request was accumulated").log();
         if (requestPacketBytes != null) {
             requestHandler.accept(accumulation.getRequestId(), requestPacketBytes);
@@ -290,7 +291,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         assert accumulation.state == Accumulation.State.REQUEST_SENT;
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", accumulation.getRequestId())
-                .addKeyValue("connectionId", accumulation.getRequestId().connectionId)
+                .addKeyValue("connectionId", accumulation.getRequestId().trafficStreamKey.connectionId)
                 .setMessage("Full captured source response was accumulated").log();
         fullDataHandler.accept(accumulation.rrPair);
         accumulation.resetForNextRequest();

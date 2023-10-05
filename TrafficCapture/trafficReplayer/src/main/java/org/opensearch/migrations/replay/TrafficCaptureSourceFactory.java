@@ -3,6 +3,10 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.kafka.KafkaBehavioralPolicy;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
+import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
+import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -12,11 +16,13 @@ import java.time.Duration;
 public class TrafficCaptureSourceFactory {
 
     public static BlockingTrafficSource
-    createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow) throws IOException {
-        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow);
+    createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow,
+                               int maxConcurrentTrafficStreams) throws IOException {
+        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow,
+                maxConcurrentTrafficStreams);
     }
 
-    public static ITrafficCaptureSource
+    public static ISimpleTrafficCaptureSource
     createUnbufferedTrafficCaptureSource(TrafficReplayer.Parameters appParams) throws IOException {
         boolean isKafkaActive = TrafficReplayer.validateRequiredKafkaParams(appParams.kafkaTrafficBrokers, appParams.kafkaTrafficTopic, appParams.kafkaTrafficGroupId);
         boolean isInputFileActive = appParams.inputFilename != null;

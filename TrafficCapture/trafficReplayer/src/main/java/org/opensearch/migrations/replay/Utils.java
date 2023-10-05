@@ -43,12 +43,12 @@ public class Utils {
     public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 128;
     public static final int MAX_PAYLOAD_SIZE_TO_PRINT = 1024 * 1024; // 1MB
 
-    static Instant setIfLater(AtomicReference<Instant> referenceValue, Instant pointInTime) {
+    public static Instant setIfLater(AtomicReference<Instant> referenceValue, Instant pointInTime) {
         return referenceValue.updateAndGet(existingInstant -> existingInstant.isBefore(pointInTime) ?
                 pointInTime : existingInstant);
     }
 
-    static long setIfLater(AtomicLong referenceValue, long pointInTimeMillis) {
+    public static long setIfLater(AtomicLong referenceValue, long pointInTimeMillis) {
         return referenceValue.updateAndGet(existing -> Math.max(existing, pointInTimeMillis));
     }
 

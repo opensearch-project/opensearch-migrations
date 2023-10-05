@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.OnlineRadixSorterForIntegratedKeys;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -24,11 +25,11 @@ public class Accumulation {
     State state = State.NOTHING_SENT;
     AtomicInteger numberOfResets;
 
-    public Accumulation(String connectionId) {
+    public Accumulation(TrafficStreamKey streamKey) {
         trafficStreamsSorter = new OnlineRadixSorterForIntegratedKeys<>(1,
                 ts->ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk());
         numberOfResets = new AtomicInteger();
-        this.resetForRequest(new UniqueRequestKey(connectionId, 0));
+        this.resetForRequest(new UniqueRequestKey(streamKey, 0));
     }
 
     void sequenceTrafficStream(TrafficStream ts, Consumer<TrafficStream> sortedVisitor) {
@@ -68,7 +69,7 @@ public class Accumulation {
 
     public void resetForNextRequest() {
         numberOfResets.incrementAndGet();
-        resetForRequest(new UniqueRequestKey(getRequestId().connectionId, getIndexOfCurrentRequest()));
+        resetForRequest(new UniqueRequestKey(getRequestId().trafficStreamKey, getIndexOfCurrentRequest()));
     }
 
     private void resetForRequest(UniqueRequestKey key) {
