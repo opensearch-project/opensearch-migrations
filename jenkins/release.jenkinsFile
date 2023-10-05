@@ -1,0 +1,19 @@
+lib = library(identifier: 'jenkins@5.9.1', retriever: modernSCM([
+    $class: 'GitSCMSource',
+    remote: 'https://github.com/opensearch-project/opensearch-build-libraries.git',
+]))
+
+standardReleasePipelineWithGenericTrigger(
+    tokenIdCredential: 'jenkins-opensearch-migrations-generic-webhook-token',
+    causeString: 'A tag was cut on opensearch-project/opensearch-migrations repository causing this workflow to run',
+    downloadReleaseAsset: true,
+    publishRelease: true) {
+                        publishToArtifactsProdBucket(
+                            assumedRoleName: 'opensearch-migrations-upload-role',
+                            source: "${WORKSPACE}/artifacts.tar.gz",
+                            destination: "migrations/${tag}/opensearch-migrations-${tag}.tar.gz",
+                            signingPlatform: 'linux',
+                            sigType: '.sig',
+                            sigOverwrite: true
+                        )
+    }
