@@ -163,7 +163,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator, new TimeShifter(1));
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
@@ -209,7 +209,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator, new TimeShifter());
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
@@ -237,7 +237,7 @@ class TrafficReplayerTest {
         }
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator, new TimeShifter());
+                tr.runReplay(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();

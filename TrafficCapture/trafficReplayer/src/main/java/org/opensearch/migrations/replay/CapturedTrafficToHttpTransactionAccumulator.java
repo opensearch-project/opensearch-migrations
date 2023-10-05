@@ -12,6 +12,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
@@ -53,11 +54,22 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final Consumer<Accumulation> onTrafficStreamMissingOnClose;
     private final BiConsumer<UniqueRequestKey,Instant> connectionCloseListener;
 
+    private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
     private final AtomicInteger closedConnectionCounter = new AtomicInteger();
     private final AtomicInteger exceptionConnectionCounter = new AtomicInteger();
     private final AtomicInteger connectionsExpiredCounter = new AtomicInteger();
     private final AtomicInteger requestsTerminatedUponAccumulatorCloseCounter = new AtomicInteger();
+
+    public String getStatsString() {
+        return new StringJoiner(" ")
+                .add("requests: "+requestCounter.get())
+                .add("reused: "+reusedKeepAliveCounter.get())
+                .add("closed: "+closedConnectionCounter.get())
+                .add("expired: "+connectionsExpiredCounter.get())
+                .add("hardClosedAtShutdown: "+requestsTerminatedUponAccumulatorCloseCounter.get())
+                .toString();
+    }
 
     private final static MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
 
@@ -164,6 +176,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         if (observation.hasRead()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
             assert accum.state == Accumulation.State.NOTHING_SENT;
+            if (accum.rrPair.requestData == null) {
+                requestCounter.incrementAndGet();
+            }
             log.atTrace().setMessage(()->"Adding request data for accum[" + connectionId + "]=" + accum).log();
             accum.rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             log.atTrace().setMessage(()->"Added request data for accum[" + connectionId + "]=" + accum).log();
@@ -185,6 +200,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             log.atTrace().setMessage(()->"Adding request segment for accum[" + connectionId + "]=" + accum).log();
             if (accum.rrPair.requestData == null) {
                 accum.rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
+                requestCounter.incrementAndGet();
             }
             accum.rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
             log.atTrace().setMessage(()->"Added request segment for accum[" + connectionId + "]=" + accum).log();

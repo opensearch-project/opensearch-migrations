@@ -64,6 +64,8 @@ public class TrafficReplayer {
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
     private final ClientConnectionPool clientConnectionPool;
+    private ConcurrentHashMap<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap;
+    private ConcurrentHashMap<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestToFinalWorkFuturesMap;
 
     public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
         var joltJsonTransformerBuilder = JsonJoltTransformer.newBuilder()
@@ -100,6 +102,8 @@ public class TrafficReplayer {
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
         clientConnectionPool = new ClientConnectionPool(serverUri,
                 loadSslContext(serverUri, allowInsecureConnections), numSendingThreads);
+        requestFutureMap = new ConcurrentHashMap<>();
+        requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
     }
 
     private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
@@ -331,19 +335,15 @@ public class TrafficReplayer {
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, timeShifter);
 
         var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
-        ConcurrentHashMap<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap =
-                new ConcurrentHashMap<>();
-        ConcurrentHashMap<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>
-                requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         "(see " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                        getRecordedRequestReconstructCompleteHandler(replayEngine, requestFutureMap),
+                        getRecordedRequestReconstructCompleteHandler(replayEngine),
                         getRecordedRequestAndResponseReconstructCompleteHandler(successCount, exceptionCount,
-                                tupleWriter, requestFutureMap, requestToFinalWorkFuturesMap),
+                                tupleWriter),
                         (requestKey, ts) -> replayEngine.closeConnection(requestKey, ts));
         try {
-            runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator, timeShifter);
+            runReplay(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {
             log.warn("Terminating runReplay due to", e);
             throw e;
@@ -354,7 +354,7 @@ public class TrafficReplayer {
             var logLevel = PRIMARY_LOG_LEVEL;
             for (var timeout = Duration.ofSeconds(60); ; timeout = timeout.multipliedBy(2)) {
                 try {
-                    waitForRemainingWork(logLevel, timeout, replayEngine, requestToFinalWorkFuturesMap);
+                    waitForRemainingWork(logLevel, timeout, replayEngine);
                     break;
                 } catch (TimeoutException e) {
                     log.atLevel(logLevel).log("Timed out while waiting for the remaining " +
@@ -383,8 +383,7 @@ public class TrafficReplayer {
     }
 
     private BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp>
-    getRecordedRequestReconstructCompleteHandler(ReplayEngine replayEngine, ConcurrentHashMap<UniqueRequestKey,
-            DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap) {
+    getRecordedRequestReconstructCompleteHandler(ReplayEngine replayEngine) {
         return (requestKey, request) -> {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
@@ -398,18 +397,14 @@ public class TrafficReplayer {
 
     private final static Instant startTime = Instant.now();
 
-    private static Consumer<RequestResponsePacketPair>
+    private Consumer<RequestResponsePacketPair>
     getRecordedRequestAndResponseReconstructCompleteHandler(
             AtomicInteger successCount,
             AtomicInteger exceptionCount,
-            SourceTargetCaptureTuple.TupleToFileWriter tupleWriter,
-            ConcurrentHashMap<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>
-                    responseInProgressMap,
-            ConcurrentHashMap<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>
-                    targetTransactionInProgressMap) {
+            SourceTargetCaptureTuple.TupleToFileWriter tupleWriter) {
         return rrPair -> {
             log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
-            var resultantCf = responseInProgressMap.remove(rrPair.requestKey)
+            var resultantCf = requestFutureMap.remove(rrPair.requestKey)
                     .map(f ->
                             f.handle((summary, t) -> {
                                 TransformedTargetRequestAndResponse rval = null;
@@ -423,7 +418,7 @@ public class TrafficReplayer {
                                     exceptionCount.incrementAndGet();
                                     throw e;
                                 } finally {
-                                    targetTransactionInProgressMap.remove(rrPair.requestKey);
+                                    requestToFinalWorkFuturesMap.remove(rrPair.requestKey);
                                     log.trace("removed rrPair.requestData to " +
                                             "targetTransactionInProgressMap for " +
                                             rrPair.requestKey);
@@ -431,9 +426,9 @@ public class TrafficReplayer {
                             }), () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
             if (!resultantCf.future.isDone()) {
                 log.trace("Adding " + rrPair.requestKey + " to targetTransactionInProgressMap");
-                targetTransactionInProgressMap.put(rrPair.requestKey, resultantCf);
+                requestToFinalWorkFuturesMap.put(rrPair.requestKey, resultantCf);
                 if (resultantCf.future.isDone()) {
-                    targetTransactionInProgressMap.remove(rrPair.requestKey);
+                    requestToFinalWorkFuturesMap.remove(rrPair.requestKey);
                 }
             }
         };
@@ -441,10 +436,7 @@ public class TrafficReplayer {
 
     private void waitForRemainingWork(Level logLevel,
                                       @NonNull Duration timeout,
-                                      ReplayEngine replayEngine,
-                                      @NonNull ConcurrentHashMap<UniqueRequestKey,
-                                      DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>
-                                              requestToFinalWorkFuturesMap)
+                                      ReplayEngine replayEngine)
             throws ExecutionException, InterruptedException, TimeoutException {
         Map.Entry<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
                 allRemainingWorkArray = requestToFinalWorkFuturesMap.entrySet().toArray(Map.Entry[]::new);
@@ -613,8 +605,7 @@ public class TrafficReplayer {
     }
 
     public void runReplay(ITrafficCaptureSource trafficChunkStream,
-                          CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator,
-                          TimeShifter timeShifter) {
+                          CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         try {
             while (true) {
                 log.trace("Reading next chunk from TrafficStream supplier");
