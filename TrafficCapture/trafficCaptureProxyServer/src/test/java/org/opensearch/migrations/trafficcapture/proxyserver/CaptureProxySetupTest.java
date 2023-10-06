@@ -9,16 +9,16 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.Properties;
 
-public class MainSetupTest {
+public class CaptureProxySetupTest {
 
     public final static String kafkaBrokerString = "invalid:9092";
 
     @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {
-        Main.Parameters parameters = Main.parseArgs(new String[]{"--destinationUri", "invalid:9200", "--listenPort", "80", "--kafkaConnection", kafkaBrokerString});
-        Properties props = Main.buildKafkaProperties(parameters);
+        CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(new String[]{"--destinationUri", "invalid:9200", "--listenPort", "80", "--kafkaConnection", kafkaBrokerString});
+        Properties props = CaptureProxy.buildKafkaProperties(parameters);
 
-        Assertions.assertEquals(Main.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
+        Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringSerializer", props.get(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArraySerializer", props.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
@@ -27,10 +27,10 @@ public class MainSetupTest {
 
     @Test
     public void testBuildKafkaPropertiesWithMSKAuth() throws IOException {
-        Main.Parameters parameters = Main.parseArgs(new String[]{"--destinationUri", "invalid:9200", "--listenPort", "80", "--kafkaConnection", kafkaBrokerString, "--enableMSKAuth"});
-        Properties props = Main.buildKafkaProperties(parameters);
+        CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(new String[]{"--destinationUri", "invalid:9200", "--listenPort", "80", "--kafkaConnection", kafkaBrokerString, "--enableMSKAuth"});
+        Properties props = CaptureProxy.buildKafkaProperties(parameters);
 
-        Assertions.assertEquals(Main.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
+        Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringSerializer", props.get(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArraySerializer", props.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
@@ -42,11 +42,11 @@ public class MainSetupTest {
 
     @Test
     public void testBuildKafkaPropertiesWithPropertyFile() throws IOException {
-        Main.Parameters parameters = Main.parseArgs(new String[]{"--destinationUri", "invalid:9200", "--listenPort", "80", "--kafkaConnection", kafkaBrokerString, "--enableMSKAuth", "--kafkaConfigFile", "src/test/resources/simple-kafka.properties"});
-        Properties props = Main.buildKafkaProperties(parameters);
+        CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(new String[]{"--destinationUri", "invalid:9200", "--listenPort", "80", "--kafkaConnection", kafkaBrokerString, "--enableMSKAuth", "--kafkaConfigFile", "src/test/resources/simple-kafka.properties"});
+        Properties props = CaptureProxy.buildKafkaProperties(parameters);
 
         // Default settings which property file does not provide remain intact
-        Assertions.assertEquals(Main.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
+        Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArraySerializer", props.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
 

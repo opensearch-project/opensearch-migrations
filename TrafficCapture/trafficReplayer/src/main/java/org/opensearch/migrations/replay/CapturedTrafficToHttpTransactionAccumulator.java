@@ -7,10 +7,12 @@ import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
@@ -49,35 +51,51 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final ExpiringTrafficStreamMap liveStreams;
     private final BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
-    private final Consumer<Accumulation> onTrafficStreamMissingOnExpiration;
+    private final Consumer<Accumulation> onTrafficStreamMissingOnClose;
     private final BiConsumer<UniqueRequestKey,Instant> connectionCloseListener;
 
+    private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
     private final AtomicInteger closedConnectionCounter = new AtomicInteger();
     private final AtomicInteger exceptionConnectionCounter = new AtomicInteger();
     private final AtomicInteger connectionsExpiredCounter = new AtomicInteger();
     private final AtomicInteger requestsTerminatedUponAccumulatorCloseCounter = new AtomicInteger();
 
+    public String getStatsString() {
+        return new StringJoiner(" ")
+                .add("requests: "+requestCounter.get())
+                .add("reused: "+reusedKeepAliveCounter.get())
+                .add("closed: "+closedConnectionCounter.get())
+                .add("expired: "+connectionsExpiredCounter.get())
+                .add("hardClosedAtShutdown: "+requestsTerminatedUponAccumulatorCloseCounter.get())
+                .toString();
+    }
+
     private final static MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
 
-    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
+    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
                                                        BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler,
                                                        BiConsumer<UniqueRequestKey,Instant> connectionCloseListener)
     {
-        this(minTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener,
+        this(minTimeout, hintStringToConfigureTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener,
                 accumulation -> log.atWarn()
-                        .setMessage(()->"TrafficStreams are still pending for this expiring accumulation: " +
-                                accumulation).log());
+                        .setMessage(()->"TrafficStreams are still pending for this accumulation upon it being closed: "
+                                + accumulation).log());
     }
 
-    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout,
+    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
                                                        BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
                                                        Consumer<RequestResponsePacketPair> fullDataHandler,
                                                        BiConsumer<UniqueRequestKey,Instant> connectionCloseListener,
-                                                       Consumer<Accumulation> onTrafficStreamMissingOnExpiration) {
+                                                       Consumer<Accumulation> onTrafficStreamMissingOnClose) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new BehavioralPolicy() {
+                    @Override
+                    public String appendageToDescribeHowToSetMinimumGuaranteedLifetime() {
+                        return hintStringToConfigureTimeout;
+                    }
+
                     @Override
                     public void onExpireAccumulation(String partitionId, Accumulation accumulation) {
                         connectionsExpiredCounter.incrementAndGet();
@@ -90,7 +108,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
         this.connectionCloseListener = connectionCloseListener;
-        this.onTrafficStreamMissingOnExpiration = onTrafficStreamMissingOnExpiration;
+        this.onTrafficStreamMissingOnClose = onTrafficStreamMissingOnClose;
     }
 
     public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
@@ -110,6 +128,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .append(ts.getConnectionId())
                 .append(" index: ")
                 .append(ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk())
+                .append(" firstTimestamp: ")
+                .append(ts.getSubStreamList().stream().findFirst()
+                        .map(tso -> tso.getTs()).map(TrafficStreamUtils::instantFromProtoTimestamp)
+                        .map(instant->instant.toString())
+                        .orElse("[None]"))
                 .toString();
     }
 
@@ -134,7 +157,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         .takeWhile(b->!b)
                         .forEach(b->{}));
         if (terminated.get()) {
-            log.atTrace().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
+            log.atInfo().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
                     " from liveStreams map").log();
             liveStreams.remove(partitionId, connectionId);
         }
@@ -146,13 +169,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public CONNECTION_STATUS addObservationToAccumulation(String nodeId, Accumulation accum,
                                                           TrafficObservation observation) {
-        var connectionId = accum.rrPair.connectionId.connectionId;
+        var connectionId = accum.rrPair.requestKey.connectionId;
         var timestamp =
-                Optional.of(observation.getTs()).map(t->Instant.ofEpochSecond(t.getSeconds(), t.getNanos())).get();
-        liveStreams.expireOldEntries(nodeId, accum.rrPair.connectionId.connectionId, accum, timestamp);
+                Optional.of(observation.getTs()).map(t-> TrafficStreamUtils.instantFromProtoTimestamp(t)).get();
+        liveStreams.expireOldEntries(nodeId, accum.rrPair.requestKey.connectionId, accum, timestamp);
         if (observation.hasRead()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
             assert accum.state == Accumulation.State.NOTHING_SENT;
+            if (accum.rrPair.requestData == null) {
+                requestCounter.incrementAndGet();
+            }
             log.atTrace().setMessage(()->"Adding request data for accum[" + connectionId + "]=" + accum).log();
             accum.rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             log.atTrace().setMessage(()->"Added request data for accum[" + connectionId + "]=" + accum).log();
@@ -174,6 +200,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             log.atTrace().setMessage(()->"Adding request segment for accum[" + connectionId + "]=" + accum).log();
             if (accum.rrPair.requestData == null) {
                 accum.rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
+                requestCounter.incrementAndGet();
             }
             accum.rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
             log.atTrace().setMessage(()->"Added request segment for accum[" + connectionId + "]=" + accum).log();
@@ -282,7 +309,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void fireAccumulationsCallbacksAndClose(Accumulation accumulation) {
         try {
             if (accumulation.trafficStreamsSorter.hasPending()) {
-                onTrafficStreamMissingOnExpiration.accept(accumulation);
+                onTrafficStreamMissingOnClose.accept(accumulation);
             }
             switch (accumulation.state) {
                 case NOTHING_SENT:

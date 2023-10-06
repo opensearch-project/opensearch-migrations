@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.slf4j.event.Level;
 
@@ -66,9 +67,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
             readGate.release();
         } else {
             log.atTrace()
-                    .setMessage(() -> "stopReadsPast: " + pointInTime + " -> (" + prospectiveBarrier +
-                            ") didn't move the cursor because the value was " +
-                            "already at " + newValue
+                    .setMessage(() -> "stopReadsPast: " + pointInTime + " [ +buffer=" + prospectiveBarrier +
+                            "] didn't move the cursor because the value was already at " + newValue
                     ).log();
         }
     }
@@ -96,13 +96,18 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
     readNextTrafficStreamChunk() {
         var trafficStreamListFuture =
                 CompletableFuture.supplyAsync(() -> {
+                                    if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
                                     while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
                                         try {
-                                            log.info("blocking until signaled to read the next chunk");
+                                            log.atInfo().setMessage(
+                                                            "blocking until signaled to read the next chunk last={} stop={}")
+                                                    .addArgument(lastTimestampSecondsRef.get())
+                                                    .addArgument(stopReadingAtRef.get())
+                                                    .log();
                                             readGate.acquire();
                                         } catch (InterruptedException e) {
-                                            log.atWarn().setCause(e)
-                                                    .log("Interrupted while waiting to read more data");
+                                            log.atWarn().setCause(e).log("Interrupted while waiting to read more data");
+                                            throw new RuntimeException(e);
                                         }
                                     }
                                     return null;
@@ -117,13 +122,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
                     .map(tso->tso.getTs())
                     .max(Comparator.comparingLong(Timestamp::getSeconds)
                             .thenComparingInt(Timestamp::getNanos))
-                    .map(protobufTs->Instant.ofEpochSecond(protobufTs.getSeconds(), protobufTs.getNanos()))
+                    .map(TrafficStreamUtils::instantFromProtoTimestamp)
                     .orElse(Instant.EPOCH);
-            // base case - if this is the first time through, set the time expiration boundary relative to
-            // the value that just came in (+ the bufferedWindow)
-            if (lastTimestampSecondsRef.get().equals(Instant.EPOCH)) {
-                Utils.setIfLater(stopReadingAtRef, maxLocallyObserved.plus(bufferTimeWindow));
-            }
             Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObserved);
             log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
                     +lastTimestampSecondsRef.get()).log();

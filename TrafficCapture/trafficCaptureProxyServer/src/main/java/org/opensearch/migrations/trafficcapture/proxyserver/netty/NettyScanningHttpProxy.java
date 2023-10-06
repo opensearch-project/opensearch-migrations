@@ -6,6 +6,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.JdkLoggerFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -31,8 +32,8 @@ public class NettyScanningHttpProxy {
                       int numThreads,
                       Supplier<SSLEngine> sslEngineSupplier,
                       IConnectionCaptureFactory connectionCaptureFactory) throws InterruptedException {
-        bossGroup = new NioEventLoopGroup(1);
-        workerGroup = new NioEventLoopGroup(numThreads);
+        bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("captureProxyPoolBoss"));
+        workerGroup = new NioEventLoopGroup(numThreads, new DefaultThreadFactory("captureProxyPoolWorker"));
         ServerBootstrap serverBootstrap = new ServerBootstrap();
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)

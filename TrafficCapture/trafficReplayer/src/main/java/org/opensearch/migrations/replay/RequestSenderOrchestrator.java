@@ -162,6 +162,8 @@ public class RequestSenderOrchestrator {
             scheduledFuture.addListener(f->{
                 if (!f.isSuccess()) {
                     log.atError().setCause(f.cause()).setMessage(()->"Error scheduling task").log();
+                } else {
+                    log.atInfo().setMessage(()->"scheduled future has finished for "+requestKey).log();
                 }
             });
         } else {

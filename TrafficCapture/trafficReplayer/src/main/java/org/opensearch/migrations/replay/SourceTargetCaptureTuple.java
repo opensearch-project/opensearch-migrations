@@ -109,7 +109,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             if (triple.targetResponseData != null && !triple.targetResponseData.isEmpty()) {
                 meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData, triple.targetResponseDuration));
             }
-            meta.put("connectionId", triple.sourcePair.connectionId);
+            meta.put("connectionId", triple.sourcePair.requestKey);
             return meta;
         }
 
@@ -170,7 +170,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     public String toString() {
         return PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.TRUNCATED, () -> {
             final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
-            sb.append("\n diagnosticLabel=").append(sourcePair.connectionId);
+            sb.append("\n diagnosticLabel=").append(sourcePair.requestKey);
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n targetResponseDuration=").append(targetResponseDuration);
             sb.append("\n targetRequestData=")
