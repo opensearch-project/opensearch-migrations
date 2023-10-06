@@ -11,10 +11,9 @@ encoded [TrafficStream](../captureProtobufs/src/main/proto/TrafficCaptureStream.
 Currently, these TrafficStream objects are ingested via stdin and are reconstructed into entire traffic channels. This
 involves some buffering for those connections whose contents are divided into a number of TrafficStream objects.
 Read and write observations are extracted from TrafficStream objects into source requests and source responses.
-The [TrafficCaptureToHttpTransactionAccumulator](src/main/java/org/opensearch/migrations/replay/TrafficCaptureToHttpTransactionAccumulator.java)
+The [CapturedTrafficToHttpTransactionAccumulator](src/main/java/org/opensearch/migrations/replay/CapturedTrafficToHttpTransactionAccumulator.java)
 takes full requests (as defined by the data, not necessarily by the HTTP format) and sends them to
-an [IPacketToHttpHandler](
-src/main/java/org/opensearch/migrations/replay/datahandlers/IPacketToHttpHandler.java). The packet handler is
+an [IPacketConsumer](src/main/java/org/opensearch/migrations/replay/datahandlers/IPacketConsumer.java). The packet handler is
 responsible for doing
 any transformation of the request and sending it to the target server. It is also responsible for aggregating the HTTP
 response from the server and returning that as a CompletableFuture via finalizeRequest().
@@ -25,9 +24,9 @@ other pertinent information is sent to stdout.
 ## The Netty Request Transformation Pipeline
 
 There are two implementations of
-IPacketToHttpHandler, [NettyPacketToHttpHandler](../trafficReplayer/src/main/java/org/opensearch/migrations/replay/datahandlers/NettyPacketToHttpHandler.java),
+IPacketToHttpHandler, [NettyPacketToHttpConsumer](../trafficReplayer/src/main/java/org/opensearch/migrations/replay/datahandlers/NettyPacketToHttpConsumer.java),
 which will send packets to the target server
-and [HttpJsonTransformer](../trafficReplayer/src/main/java/org/opensearch/migrations/replay/datahandlers/http/HttpJsonTransformer.java)
+and [HttpJsonTransformingConsumer](./src/main/java/org/opensearch/migrations/replay/datahandlers/http/HttpJsonTransformingConsumer.java)
 that is capable of transforming the message as per directives passed to the JsonTransformer.
 
 Examples of transformations that the HttpJsonTransfomer needs to run include mapping the host header to match the new
@@ -40,9 +39,9 @@ over the constructed JSON document.
 Since payloads can be arbitrarily complex (compression, chunking), and may not be subject to any changes via the
 transformation rules, the HttpJsonTransformer creates the channel pipeline *only* to parse the HTTP headers. The
 transformation is run on this partial, in-construction
-[HttpJsonMessageWithFaultablePayload](../trafficReplayer/src/main/java/org/opensearch/migrations/replay/datahandlers/http/HttpJsonMessageWithFaultablePayload.java)
+[HttpJsonMessageWithFaultablePayload](./src/main/java/org/opensearch/migrations/replay/datahandlers/http/HttpJsonMessageWithFaultingPayload.java)
 message. When the transformation (or any other code), attempts to access the payload contents, it will throw a
-[PayloadNotLoadedException](TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/datahandlers/PayloadNotLoadedException.java)
+[PayloadNotLoadedException](./src/main/java/org/opensearch/migrations/replay/datahandlers/PayloadNotLoadedException.java)
 exception. That exception triggers the HttpJsonTransformer to add channel handlers to the pipeline to parse the HTTP
 content stream into JSON, transform it, and to repackage it as the HTTP headers indicate, observing the content-encoding
 (gzip, etc) and transfer-encoding (chunked)/content-length values. Fixed length streams will be used by default, with
@@ -78,7 +77,7 @@ target URI.
 ## Transformations
 
 Transformations are performed via a simple class defined by
-[JsonTransformer](../trafficReplayer/src/main/java/org/opensearch/migrations/transform/JsonTransformer.java). Currently,
+[IJsonTransformer](../trafficReplayer/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java). Currently,
 this class uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms that are composed of modular
 operations that are defined in the [resources](../trafficReplayer/src/main/resources/jolt/operations) associated with
 the package. Future work will include adding more JSON transformations and other potential JSON transformation tools
