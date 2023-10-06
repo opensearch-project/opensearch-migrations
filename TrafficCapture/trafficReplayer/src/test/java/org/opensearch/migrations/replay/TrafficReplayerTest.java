@@ -178,7 +178,8 @@ class TrafficReplayerTest {
         var remainingAccumulations = new AtomicInteger();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
-                        "update the test!",
+                        "change the minTimeout argument to the c'tor of " +
+                                "CapturedTrafficToHttpTransactionAccumulator that's being used in this unit test!",
                         (id,request) -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);

@@ -110,7 +110,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             readGate.release();
         } else {
             log.atTrace()
-                    .setMessage(() -> "stopReadsPast: " + pointInTime + " [ +buffer=" + prospectiveBarrier +
+                    .setMessage(() -> "stopReadsPast: " + pointInTime + " [buffer=" + prospectiveBarrier +
                             "] didn't move the cursor because the value was already at " + newValue
                     ).log();
         }

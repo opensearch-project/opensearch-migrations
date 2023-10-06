@@ -29,10 +29,10 @@ public class BehavioralPolicy {
                 "This means that there was larger than expected temporal jitter in packets.  " +
                 "The traffic for this connection may have already been reported as expired and processed " +
                 "(potentially partially). This data may not be properly handled due to other data " +
-                "within the connection being prematurely expired.  Trying to send the data through a new " +
-                "instance of this object with a minimumGuaranteedLifetime of " +
-                Duration.between(timestamp, endOfWindow) + " will allow for this packet to be properly " +
-                "accumulated for (" + formatPartitionAndConnectionIds(trafficStreamKey) + ")." +
+                "within the connection being prematurely expired.  Setting the minimumGuaranteedLifetime to " +
+                Duration.between(timestamp, endOfWindow) +
+                " would have allowed for this packet to be properly accumulated for. (" +
+                formatPartitionAndConnectionIds(trafficStreamKey) + ")." +
                 (hintString == null ? "" : "  " + hintString));
     }
 

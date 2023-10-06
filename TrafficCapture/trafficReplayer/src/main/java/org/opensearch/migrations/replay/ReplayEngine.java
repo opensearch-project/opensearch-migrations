@@ -82,7 +82,6 @@ public class ReplayEngine {
         var lastUpdatedTimeEpochMs =
                 Math.max(lastCompletedSourceTimeEpochMs.get(), lastIdleUpdatedTimestampEpochMs.get());
         var maxSkipTimeEpochMs =
-                //(lastUpdatedTimeEpochMs == 0 ? currentSourceTimeEpochMs : lastUpdatedTimeEpochMs) +
                         lastUpdatedTimeEpochMs +
                         (long) (getUpdatePeriodMs()*this.timeShifter.maxRateMultiplier());
         lastIdleUpdatedTimestampEpochMs.set(Math.min(currentSourceTimeEpochMs, maxSkipTimeEpochMs));
@@ -107,8 +106,9 @@ public class ReplayEngine {
                         })
                         .whenComplete((v,t)->contentTimeController.stopReadsPast(timestamp))
                         .whenComplete((v,t)->log.atDebug().
-                                setMessage(()->"work finished and used timestamp="+timestamp+" for updates " +
-                                        "(tasksOutstanding=" + totalCountOfScheduledTasksOutstanding.get() +")").log()),
+                                setMessage(()->"work finished and used timestamp=" + timestamp +
+                                        " to update contentTimeController (tasksOutstanding=" +
+                                        totalCountOfScheduledTasksOutstanding.get() +")").log()),
                 ()->"Updating fields for callers to poll progress and updating backpressure");
     }
 

@@ -19,7 +19,7 @@ import java.util.stream.Stream;
  * aware of when items have been expired.
  *
  * This doesn't use more typical out-of-the-box LRU mechanisms.  Our requirements are a little bit different.
- * First, we're fine buffering a variable number of items and secondly, this should be threadsafe an able to
+ * First, we're fine buffering a variable number of items and secondly, this should be threadsafe and able to
  * be used in highly concurrent contexts.
  *
  * TODO - there will be a race condition in the ExpiringTrafficStream maps/sets where items could be expunged from
@@ -104,7 +104,7 @@ public class ExpiringTrafficStreamMap {
         if (targetBucketHashSet == null) {
             var startOfWindow = expiringQueue.firstKey().toInstant();
             assert !timestampMillis.test(startOfWindow, (ts, windowStart) -> ts < windowStart) :
-                    "Only expected to NOT find the target bucket when the incoming timestamp was before the " +
+                    "Only expected the target bucket to be missing when the incoming timestamp was before the " +
                             "expiring queue's time window";
             behavioralPolicy.onDataArrivingBeforeTheStartOfTheCurrentProcessingWindow(trafficStreamKey,
                     timestampMillis.toInstant(), latestPossibleKeyValueAtIncoming);
