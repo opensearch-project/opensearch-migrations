@@ -1,9 +1,12 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import com.google.protobuf.Timestamp;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.Utils;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.slf4j.event.Level;
 
@@ -18,6 +21,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.ToIntFunction;
+import java.util.stream.Collectors;
 
 /**
  * The BlockingTrafficSource class implements ITrafficCaptureSource and wraps another instance.
@@ -34,6 +39,29 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Slf4j
 public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlowController {
+
+    @ToString
+    static class OutstandingInfo {
+        AtomicInteger countRemaining;
+        int cost;
+
+        public OutstandingInfo(int expectedSignalsToReceive, int cost) {
+            this.countRemaining = new AtomicInteger(expectedSignalsToReceive);
+            this.cost = cost;
+        }
+    }
+
+    @EqualsAndHashCode
+    @ToString
+    static class TrafficStreamOutstandingInfoKey {
+        String connectionId;
+        int index;
+        public TrafficStreamOutstandingInfoKey(ITrafficStreamKey k) {
+            connectionId = k.getConnectionId();
+            index = k.getTrafficStreamIndex();
+        }
+    }
+
     private final ISimpleTrafficCaptureSource underlyingSource;
     private final AtomicReference<Instant> lastTimestampSecondsRef;
     private final AtomicReference<Instant> stopReadingAtRef;
@@ -41,20 +69,27 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * Limit the number of readers to one at a time and only if we haven't yet maxed out our time buffer
      */
     private final Semaphore readGate;
-    private final Semaphore liveTrafficStreamAvailableGate;
-    private final ConcurrentHashMap<TrafficStreamKey, AtomicInteger> requestsOutstanding;
+    private final Semaphore liveTrafficStreamCostGate;
+    private final ToIntFunction<TrafficStream> computeExpectedSignalsToReceive;
+    private final ToIntFunction<TrafficStream> computeSemaphoreCost;
+    private final ConcurrentHashMap<TrafficStreamOutstandingInfoKey, OutstandingInfo> outstandingTrafficStreamInfoMap;
 
     private final Duration bufferTimeWindow;
 
-    public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying, Duration bufferTimeWindow,
-                                 int maxConcurrentTrafficStreams) {
+    public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying,
+                                 Duration bufferTimeWindow,
+                                 int maxConcurrentCost,
+                                 ToIntFunction<TrafficStream> computeExpectedSignalsToReceive,
+                                 ToIntFunction<TrafficStream> computeSemaphoreCost) {
         this.underlyingSource = underlying;
         this.stopReadingAtRef = new AtomicReference<>(Instant.EPOCH);
         this.lastTimestampSecondsRef = new AtomicReference<>(Instant.EPOCH);
         this.bufferTimeWindow = bufferTimeWindow;
         this.readGate = new Semaphore(0);
-        this.liveTrafficStreamAvailableGate = new Semaphore(maxConcurrentTrafficStreams);
-        requestsOutstanding = new ConcurrentHashMap<>();
+        this.liveTrafficStreamCostGate = new Semaphore(maxConcurrentCost);
+        this.outstandingTrafficStreamInfoMap = new ConcurrentHashMap<>();
+        this.computeExpectedSignalsToReceive = computeExpectedSignalsToReceive;
+        this.computeSemaphoreCost = computeSemaphoreCost;
     }
 
     /**
@@ -82,20 +117,22 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public void doneProcessing(TrafficStreamKey key) {
-        liveTrafficStreamAvailableGate.release();
-    }
-
-    public Instant lastReadTimestamp() {
-        return lastTimestampSecondsRef.get();
+    public void doneProcessing(ITrafficStreamKey key) {
+        var k = new TrafficStreamOutstandingInfoKey(key);
+        var existingOutstandingInfo = outstandingTrafficStreamInfoMap.get(k);
+        log.atDebug().setMessage(()->"existingOutstandingInfo for " + k + " = " + existingOutstandingInfo).log();
+        var newCount = existingOutstandingInfo.countRemaining.decrementAndGet();
+        if (newCount == 0) {
+            liveTrafficStreamCostGate.release(existingOutstandingInfo.cost);
+            outstandingTrafficStreamInfoMap.remove(k);
+            log.atDebug().setMessage(()->"released "+existingOutstandingInfo.cost+
+                    " liveTrafficStreamCostGate.availablePermits="+liveTrafficStreamCostGate.availablePermits()+
+                    "outstandingTrafficStreamInfoMap.size="+outstandingTrafficStreamInfoMap.size()).log();
+        }
     }
 
     public Duration getBufferTimeWindow() {
         return bufferTimeWindow;
-    }
-
-    public Instant unblockedReadBoundary() {
-        return lastReadTimestamp().equals(Instant.EPOCH) ? null : stopReadingAtRef.get();
     }
 
     /**
@@ -127,27 +164,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                                 },
                                 task -> new Thread(task).start())
                         .thenCompose(v->
-                        {
-                            try {
-                                liveTrafficStreamAvailableGate.acquire();
-                                return underlyingSource.readNextTrafficStreamChunk()
-                                                .whenComplete((c,t)-> {
-                                                    var adjustment = (t == null ? 0 : c.size()) -1;
-                                                    try {
-                                                        if (adjustment > 0) {
-                                                            liveTrafficStreamAvailableGate.acquire(adjustment);
-                                                        } else if (adjustment < 0) {
-                                                            assert adjustment == -1;
-                                                            liveTrafficStreamAvailableGate.release();
-                                                        }
-                                                    } catch (InterruptedException e) {
-                                                        throw new RuntimeException(e);
-                                                    }
-                                                });
-                            } catch (InterruptedException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
+                            // We already look ahead in time.  In this case, we don't know what the cost will be of
+                            // the next chunk until we get the chunk.  So, don't bother checking the semaphore until
+                            // we have the chunk
+                            underlyingSource.readNextTrafficStreamChunk()
+                                        .whenComplete(this::adjustOutstandingWorkGivenResponse));
         return trafficStreamListFuture.whenComplete((v,t)->{
             if (t != null) {
                 return;
@@ -162,6 +183,37 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
                     +lastTimestampSecondsRef.get()).log();
         });
+    }
+
+    private void adjustOutstandingWorkGivenResponse(List<ITrafficStreamWithKey> trafficStreamWithKeys, Throwable t) {
+        if (trafficStreamWithKeys == null) {
+            return;
+        }
+        var totalCost = trafficStreamWithKeys.stream()
+                .mapToInt(tswk -> {
+                    var cost = computeSemaphoreCost.applyAsInt(tswk.getStream());
+                    var oldVal = outstandingTrafficStreamInfoMap.put(new TrafficStreamOutstandingInfoKey(tswk.getKey()),
+                            new OutstandingInfo(computeExpectedSignalsToReceive.applyAsInt(tswk.getStream()), cost));
+                    assert oldVal == null;
+                    return cost;
+                }).sum();
+        log.atDebug().setMessage(()->"liveTrafficStreamCostGate.permits: {} acquiring: {} costDistribution: {}")
+                .addArgument(liveTrafficStreamCostGate.availablePermits())
+                .addArgument(totalCost)
+                .addArgument(()->trafficStreamWithKeys.stream().map(tswk->{
+                            var k = new TrafficStreamOutstandingInfoKey(tswk.getKey());
+                            var info = outstandingTrafficStreamInfoMap.get(k);
+                            return tswk + ": " + info.cost + " (" + info.countRemaining + ")";
+                        })
+                        .collect(Collectors.joining(",")))
+                .log();
+        try {
+            liveTrafficStreamCostGate.acquire(totalCost);
+            log.atDebug().setMessage(()->"Acquired liveTrafficStreamCostGate (available=" +
+                    liveTrafficStreamCostGate.availablePermits()+")").log();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

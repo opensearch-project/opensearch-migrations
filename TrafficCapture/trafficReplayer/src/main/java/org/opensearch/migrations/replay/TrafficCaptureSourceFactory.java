@@ -5,7 +5,6 @@ import org.opensearch.migrations.replay.kafka.KafkaBehavioralPolicy;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 
 import java.io.FileInputStream;
@@ -19,7 +18,9 @@ public class TrafficCaptureSourceFactory {
     createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow,
                                int maxConcurrentTrafficStreams) throws IOException {
         return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow,
-                maxConcurrentTrafficStreams);
+                maxConcurrentTrafficStreams, CapturedTrafficToHttpTransactionAccumulator::countRequestsInTrafficStream,
+                CapturedTrafficToHttpTransactionAccumulator::countRequestsInTrafficStream
+        );
     }
 
     public static ISimpleTrafficCaptureSource

@@ -1,12 +1,10 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import lombok.AllArgsConstructor;
-
 public class UniqueRequestKey {
-    public final TrafficStreamKey trafficStreamKey;
+    public final ITrafficStreamKey trafficStreamKey;
     public final int requestIndex;
 
-    public UniqueRequestKey(TrafficStreamKey streamKey, int requestIndex) {
+    public UniqueRequestKey(ITrafficStreamKey streamKey, int requestIndex) {
         this.trafficStreamKey = streamKey;
         this.requestIndex = requestIndex;
     }

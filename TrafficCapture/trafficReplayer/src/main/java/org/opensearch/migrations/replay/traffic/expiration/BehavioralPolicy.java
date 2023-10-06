@@ -2,7 +2,7 @@ package org.opensearch.migrations.replay.traffic.expiration;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Accumulation;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -13,8 +13,8 @@ import java.time.Instant;
  */
 @Slf4j
 public class BehavioralPolicy {
-    private static String formatPartitionAndConnectionIds(TrafficStreamKey trafficStreamKey) {
-        return trafficStreamKey.connectionId + "[" + trafficStreamKey.nodeId + "]";
+    private static String formatPartitionAndConnectionIds(ITrafficStreamKey trafficStreamKey) {
+        return trafficStreamKey.getConnectionId() + "[" + trafficStreamKey.getNodeId() + "]";
     }
 
     public String appendageToDescribeHowToSetMinimumGuaranteedLifetime() {
@@ -22,7 +22,7 @@ public class BehavioralPolicy {
     }
 
     public void onDataArrivingBeforeTheStartOfTheCurrentProcessingWindow(
-            TrafficStreamKey trafficStreamKey, Instant timestamp, Instant endOfWindow) {
+            ITrafficStreamKey trafficStreamKey, Instant timestamp, Instant endOfWindow) {
         var hintString = appendageToDescribeHowToSetMinimumGuaranteedLifetime();
         log.error("Could not update the expiration of an object whose timestamp is before the " +
                 "oldest point in time that packets are still being processed for this partition.  " +
@@ -37,7 +37,7 @@ public class BehavioralPolicy {
     }
 
     public void onNewDataArrivingAfterItsAccumulationHasBeenExpired(
-            TrafficStreamKey trafficStreamKey, Instant packetTimestamp,
+            ITrafficStreamKey trafficStreamKey, Instant packetTimestamp,
             long lastPacketTimestampMs, Instant endOfLastWindow, Duration minimumGuaranteedLifetime) {
         var extraGap = Duration.between(Instant.ofEpochMilli(lastPacketTimestampMs), packetTimestamp);
         var hintString = appendageToDescribeHowToSetMinimumGuaranteedLifetime();
@@ -53,7 +53,7 @@ public class BehavioralPolicy {
                 ".  To remedy this, set the minimumGuaranteedLifetime to at least " + extraGap).log();
     }
 
-    public boolean shouldRetryAfterAccumulationTimestampRaceDetected(TrafficStreamKey trafficStreamKey,
+    public boolean shouldRetryAfterAccumulationTimestampRaceDetected(ITrafficStreamKey trafficStreamKey,
                                                                      Instant timestamp, Accumulation accumulation,
                                                                      int attempts) {
         if (attempts > ExpiringTrafficStreamMap.DEFAULT_NUM_TIMESTAMP_UPDATE_ATTEMPTS) {
@@ -67,7 +67,7 @@ public class BehavioralPolicy {
         }
     }
 
-    public void onNewDataArrivingAfterItsAccumulationHadBeenRemoved(TrafficStreamKey trafficStreamKey) {
+    public void onNewDataArrivingAfterItsAccumulationHadBeenRemoved(ITrafficStreamKey trafficStreamKey) {
         log.error("A race condition was detected that shows that while trying to add additional captured data for " +
                 formatPartitionAndConnectionIds(trafficStreamKey) +
                 ", the accumulation was previously deleted.  Typically, the accumulation value will be purged from " +

@@ -230,7 +230,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                                 .addKeyValue("channelId", channel.id().asLongText())
                                 .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
                                 .addKeyValue("connectionId",
-                                        uniqueRequestKeyForMetricsLogging.trafficStreamKey.connectionId)
+                                        uniqueRequestKeyForMetricsLogging.trafficStreamKey.getConnectionId())
                                 .setMessage("Failed to write component of request").log();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
@@ -241,7 +241,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         metricsLogger.atSuccess()
                 .addKeyValue("channelId", channel.id().asLongText())
                 .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
-                .addKeyValue("connectionId", uniqueRequestKeyForMetricsLogging.trafficStreamKey.connectionId)
+                .addKeyValue("connectionId", uniqueRequestKeyForMetricsLogging.trafficStreamKey.getConnectionId())
                 .addKeyValue("sizeInBytes", readableBytes)
                 .setMessage("Component of request written to target").log();
         return completableFuture;

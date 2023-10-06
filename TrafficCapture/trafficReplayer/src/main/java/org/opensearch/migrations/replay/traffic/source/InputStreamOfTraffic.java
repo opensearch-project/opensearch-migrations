@@ -1,7 +1,7 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.EOFException;
@@ -49,7 +49,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void commitTrafficStream(TrafficStreamKey trafficStreamKey) {
+    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         // do nothing - this datasource isn't transactional
     }
 

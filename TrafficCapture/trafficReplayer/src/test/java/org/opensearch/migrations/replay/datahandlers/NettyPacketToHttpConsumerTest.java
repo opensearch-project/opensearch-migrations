@@ -18,7 +18,8 @@ import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TestTrafficStreamKey;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpFirstLine;
@@ -160,7 +161,7 @@ class NettyPacketToHttpConsumerTest {
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
-                var trafficStreamKey = new TrafficStreamKey("testNodeId", connId, 0);
+                var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, Instant.now(), Instant.now(),
                         new UniqueRequestKey(trafficStreamKey, i),
@@ -198,6 +199,6 @@ class NettyPacketToHttpConsumerTest {
         }
 
         @Override
-        public void doneProcessing(TrafficStreamKey key) {}
+        public void doneProcessing(ITrafficStreamKey key) {}
     }
 }

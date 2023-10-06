@@ -69,6 +69,8 @@ message TrafficObservation {
 message TrafficStream {
   string connectionId = 1; // persistent identifier for all stream objects within a single connection
   string nodeId = 5; // unique namespace such as a nodeId or computer mac address
+  optional int32 requestCount = 6;
+  optional bool lastObservationWasRequestRead = 7;
   repeated TrafficObservation subStream = 2;
   oneof index {
     int32 number = 3;

@@ -1,6 +1,6 @@
 package org.opensearch.migrations.replay;
 
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.OnlineRadixSorterForIntegratedKeys;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -25,7 +25,7 @@ public class Accumulation {
     State state = State.NOTHING_SENT;
     AtomicInteger numberOfResets;
 
-    public Accumulation(TrafficStreamKey streamKey) {
+    public Accumulation(ITrafficStreamKey streamKey) {
         trafficStreamsSorter = new OnlineRadixSorterForIntegratedKeys<>(1,
                 ts->ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk());
         numberOfResets = new AtomicInteger();

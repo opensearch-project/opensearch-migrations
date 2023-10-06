@@ -1,8 +1,9 @@
 package org.opensearch.migrations.replay;
 
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 
 public class TestTrafficStreamKey {
-    public final static TrafficStreamKey instance =
-            new TrafficStreamKey("testNodeId", "testConnectionId", 0);
+    public final static ITrafficStreamKey instance =
+            new PojoTrafficStreamKey("testNodeId", "testConnectionId", 0);
 }

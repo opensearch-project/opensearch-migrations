@@ -72,7 +72,7 @@ public class RequestSenderOrchestrator {
                     scheduleOnCffr(requestKey, channelFutureAndRequestSchedule,
                             finalTunneledResponse, timestamp, "close", () -> {
                                 log.trace("Closing client connection " + requestKey);
-                                clientConnectionPool.closeConnection(requestKey.trafficStreamKey.connectionId);
+                                clientConnectionPool.closeConnection(requestKey.trafficStreamKey.getConnectionId());
                                 finalTunneledResponse.future.complete(null);
                             });
                 });

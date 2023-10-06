@@ -8,7 +8,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
@@ -139,7 +139,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void commitTrafficStream(TrafficStreamKey trafficStreamKey) {
+    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         kafkaConsumer.commitSync(Map.of());
     }
 

@@ -4,7 +4,7 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -38,7 +38,8 @@ class BlockingTrafficSourceTest {
         var BUFFER_MILLIS = 10;
         var testSource = new TestTrafficCaptureSource(nStreamsToCreate);
 
-        var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS), Integer.MAX_VALUE);
+        var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS), Integer.MAX_VALUE,
+                CapturedTrafficToHttpTransactionAccumulator::countRequestsInTrafficStream, x->1);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
         var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i<=BUFFER_MILLIS+SHIFT; ++i) {
@@ -103,7 +104,7 @@ class BlockingTrafficSourceTest {
         public void close() throws IOException {}
 
         @Override
-        public void commitTrafficStream(TrafficStreamKey trafficStreamKey) {
+        public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             // do nothing
         }
     }

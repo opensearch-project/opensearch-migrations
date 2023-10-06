@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;

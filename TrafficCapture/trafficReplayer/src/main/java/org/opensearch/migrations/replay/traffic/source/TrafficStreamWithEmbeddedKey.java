@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 public class TrafficStreamWithEmbeddedKey implements ITrafficStreamWithKey {
@@ -11,8 +12,8 @@ public class TrafficStreamWithEmbeddedKey implements ITrafficStreamWithKey {
     }
 
     @Override
-    public TrafficStreamKey getKey() {
-        return new TrafficStreamKey(stream.getNodeId(), stream.getConnectionId(),
+    public ITrafficStreamKey getKey() {
+        return new PojoTrafficStreamKey(stream.getNodeId(), stream.getConnectionId(),
                 stream.hasNumber() ? stream.getNumber() : stream.getNumberOfThisLastChunk());
     }
 
