@@ -60,3 +60,13 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This project is licensed under the Apache-2.0 License.
+
+
+## Releasing
+
+The release process is standard across repositories in this org and is run by a release manager volunteering from amongst [maintainers](MAINTAINERS.md).
+
+1. Create a tag, e.g. 0.1.0, and push it to this GitHub repository.
+2. The [release-drafter.yml](.github/workflows/release-drafter.yml) will be automatically kicked off and a draft release will be created.
+3. This draft release triggers the [jenkins release workflow](https://build.ci.opensearch.org/job/opensearch-migrations-release) as a result of which the opensearch-migrations toolset is released and published on artifacts.opensearch.org example as https://artifacts.opensearch.org/migrations/0.1.0/opensearch-migrations-0.1.0.tar.gz. 
+4. Once the above release workflow is successful, the drafted release on GitHub is published automatically.

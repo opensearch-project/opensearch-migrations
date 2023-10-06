@@ -1,0 +1,35 @@
+name: Release drafter
+
+# Push events to every tag not containing "/"
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  draft-a-release:
+    name: Draft a release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - id: get_data
+        run: |
+          echo "approvers=$(cat .github/CODEOWNERS | grep @ | tr -d '*\n ' | sed 's/@/,/g' | sed 's/,//1')" >> $GITHUB_OUTPUT
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: ${{ steps.get_data.outputs.approvers }}
+          minimum-approvals: 2
+          issue-title: 'Release opensearch-migrations version ${{ steps.get_data.outputs.version }}'
+          issue-body: "Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION** : ${{ steps.get_data.outputs.version }} "
+          exclude-workflow-initiator-as-approver: true
+      - name: Download Repo Tar
+        run: |
+          wget https://github.com/opensearch-project/opensearch-migrations/archive/refs/tags/${{ steps.get_data.outputs.version }}.tar.gz -O artifacts.tar.gz
+      - name: Draft a release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: artifacts.tar.gz

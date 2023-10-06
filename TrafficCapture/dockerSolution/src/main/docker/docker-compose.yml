@@ -124,6 +124,8 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
+    environment:
+      - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
 
 volumes:
   zookeeper_data:
