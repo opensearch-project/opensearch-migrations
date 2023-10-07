@@ -14,7 +14,7 @@ When configuring the Traffic Replayer, you can provide a set of credentials that
 
 In this case, an attacker could send a series of large and potentially malformed requests to the source cluster via the capture proxy. These messages would be relayed to the Kafka cluster, and if they were PUT/POST/UPDATE requests, block sending the request to the source cluster until the message was finished. If the attacker is able to use this strategy to tie up the proxy and/or Kafka cluster, all other incoming mutating requests to the source cluster would be blocked.
 
-We have partially mitigated this by preventing the proxy from blocking for more than a fixed period of time (10 seconds by default, configurable [here](./TrafficCapture/trafficCaptureProxyServer/src/main/java/org/opensearch/migrations/trafficcapture/proxyserver/Main.java) line #182, however the flow of messages to Kafka could still be disrupted.
+We have partially mitigated this by preventing the proxy from blocking for more than a fixed period of time (10 seconds by default, configurable [here](./TrafficCapture/trafficCaptureProxyServer/src/main/java/org/opensearch/migrations/trafficcapture/proxyserver/CaptureProxy.java) on line #182, however the flow of messages to Kafka could still be disrupted.
 
 If you are concerned about this scenario, we recommend fully mitigating it by putting a load-shedder in front of the proxy.
 
