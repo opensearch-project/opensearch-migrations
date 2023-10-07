@@ -27,17 +27,21 @@ public class TestHttpServerContext {
     public static Duration SERVER_RESPONSE_LATENCY = Duration.ofMillis(100);
 
     public static SimpleHttpResponse makeResponse(HttpFirstLine r) {
+        return makeResponse(r, SERVER_RESPONSE_LATENCY);
+    }
+
+    public static SimpleHttpResponse makeResponse(HttpFirstLine r, Duration responseWaitTime) {
         try {
-            Thread.sleep(SERVER_RESPONSE_LATENCY.toMillis());
+            Thread.sleep(responseWaitTime.toMillis());
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+        String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
+        var payloadBytes = body.getBytes(StandardCharsets.UTF_8);
         var headers = Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
-                "Content-Transfer-Encoding", "chunked");
-        String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
-        var payloadBytes = body.getBytes(StandardCharsets.UTF_8);
+                "Content-Length", ""+payloadBytes.length);
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 

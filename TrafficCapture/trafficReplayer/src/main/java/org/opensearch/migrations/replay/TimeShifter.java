@@ -1,30 +1,25 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.slf4j.event.Level;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
+
+// TODO - Reconsider how time shifting is done
 @Slf4j
-public
-class TimeShifter {
+public class TimeShifter {
 
-    private static class TimeAdjustData {
-        public final Instant sourceTimeStart;
-        public final Instant systemTimeStart;
-
-        public TimeAdjustData(Instant sourceTimeStart) {
-            this.sourceTimeStart = sourceTimeStart;
-            this.systemTimeStart = Instant.now();
-        }
-    }
+    private final AtomicReference<Instant> sourceTimeStart = new AtomicReference<>();
+    private AtomicReference<Instant> systemTimeStart = new AtomicReference<>();
 
     private final double rateMultiplier;
 
-    // TODO - Reconsider how time shifting is done
-    private final AtomicReference<TimeAdjustData> firstTimestampRef = new AtomicReference<>();
 
     public TimeShifter() {
         this(1.0);
@@ -34,27 +29,47 @@ class TimeShifter {
         this.rateMultiplier = rateMultiplier;
     }
 
+    public void setFirstTimestamp(Instant sourceTime) {
+        var didSet = sourceTimeStart.compareAndSet(null, sourceTime);
+        if (didSet) {
+            var didSetSystemStart = systemTimeStart.compareAndSet(null, Instant.now());
+            assert didSetSystemStart : "expected to always start systemTimeStart immediately after sourceTimeStart ";
+        }
+        log.atLevel(didSet ? Level.INFO : Level.TRACE)
+                .setMessage("Set baseline source timestamp for all future interactions to {}")
+                .addArgument(sourceTime).log();
+    }
+
+    public boolean hasFirstTimestamp() {
+        return sourceTimeStart.get() != null;
+    }
+
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
-        firstTimestampRef.compareAndSet(null, new TimeAdjustData(sourceTime));
-        var tad = firstTimestampRef.get();
         // realtime = systemTimeStart + rateMultiplier * (sourceTime-sourceTimeStart)
-        var rval = tad.systemTimeStart
+        if (sourceTimeStart.get() == null) {
+            throw new RuntimeException("setFirstTimestamp has not yet been called");
+        }
+        var rval = systemTimeStart.get()
                 .plus(Duration.ofMillis((long)
-                        (Duration.between(firstTimestampRef.get().sourceTimeStart, sourceTime).toMillis() / rateMultiplier)));
-        log.trace("Transformed real time=" + rval + " <- " + sourceTime);
+                        (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)));
+        //log.trace("Transformed real time=" + rval + " <- " + sourceTime);
         return rval;
     }
 
     Optional<Instant> transformRealTimeToSourceTime(Instant realTime) {
-        return Optional.ofNullable(firstTimestampRef.get())
-                .map(tad->{
+        return Optional.ofNullable(sourceTimeStart.get())
+                .map(sourceTimeStart->{
                     // sourceTime = realTime - systemTimeStart + sourceTimeStart
                     // sourceTime = sourceTimeStart + (realTime-systemTimeStart) / rateMultiplier
-                    var rval = tad.sourceTimeStart
+                    var rval = sourceTimeStart
                             .plus(Duration.ofMillis((long)
-                                    (Duration.between(tad.systemTimeStart, realTime).toMillis() * rateMultiplier)));
-                    log.trace("Transformed source time=" + rval + " <- " + realTime);
+                                    (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier)));
+                    //log.trace("Transformed source time=" + rval + " <- " + realTime);
                     return rval;
                 });
+    }
+
+    public double maxRateMultiplier() {
+        return rateMultiplier;
     }
 }

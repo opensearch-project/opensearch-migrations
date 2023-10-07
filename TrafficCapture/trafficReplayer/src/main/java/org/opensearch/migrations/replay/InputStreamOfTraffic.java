@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -36,7 +37,8 @@ public class InputStreamOfTraffic implements ITrafficCaptureSource {
                 throw new RuntimeException(e);
             }
             var ts = builder.build();
-            log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+            trafficStreamsRead.incrementAndGet();
+            log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.get(), ts);
             return List.of(ts);
         }).exceptionally(e->{
             var ecf = new CompletableFuture<List<TrafficStream>>();

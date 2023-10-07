@@ -41,7 +41,7 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 @Slf4j
-public class Main {
+public class CaptureProxy {
 
     private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
     public final static String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
@@ -254,6 +254,8 @@ public class Main {
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
+        System.err.println("Starting Capture Proxy");
+        System.err.println("Got args: "+ String.join("; ", args));
 
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);

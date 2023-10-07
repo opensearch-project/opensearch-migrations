@@ -32,7 +32,8 @@ class RequestSenderOrchestratorTest {
 
     @Test
     public void testThatSchedulingWorks() throws Exception {
-        var httpServer = SimpleHttpServer.makeServer(false, TestHttpServerContext::makeResponse);
+        var httpServer = SimpleHttpServer.makeServer(false,
+                r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)));
         var testServerUri = httpServer.localhostEndpoint();
         var clientConnectionPool = new ClientConnectionPool(testServerUri, null, 1);
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);

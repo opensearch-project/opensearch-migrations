@@ -108,27 +108,26 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
 
         var pipeline = ctx.pipeline();
         if (streamingAuthTransformer != null) {
-            log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
-                    "reformatted, adding Content Handlers to this pipeline.");
+            log.info(diagnosticLabel + "An Authorization Transformation is required for this message.  " +
+                    "The headers and payload will be parsed and reformatted.");
             requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         } else if (headerFieldsAreIdentical(request, httpJsonMessage)) {
             log.info(diagnosticLabel + "Transformation isn't necessary.  " +
-                    "Clearing pipeline to let the parent context redrive directly.");
+                    "Resetting the processing pipeline to let the caller send the original network bytes as-is.");
             while (pipeline.first() != null) {
                 pipeline.removeFirst();
             }
         } else if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                 headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
             log.info(diagnosticLabel + "There were changes to the headers that require the message to be reformatted " +
-                    "through this pipeline but the content (payload) doesn't need to be transformed.  " +
-                    "Content Handlers are not being added to the pipeline");
+                    "but the payload doesn't need to be transformed.");
             requestPipelineOrchestrator.addBaselineHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
             RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
         } else {
             log.info(diagnosticLabel + "New headers have been specified that require the payload stream to be " +
-                    "reformatted, adding Content Handlers to this pipeline.");
+                    "reformatted.  Setting up the processing pipeline to parse and reformat the request payload.");
             requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         }
