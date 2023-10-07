@@ -197,7 +197,7 @@ Addons are a Copilot concept for adding additional AWS resources outside the cor
 
 An example of this can be seen in the `traffic-replayer/addons/taskRole.yml`  service which has an `addons` directory and yaml file.
 
-That yaml file adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK. (Note that `taskRole.yml` would only exist after building.)
+That yaml file adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK. (Note that `taskRole.yml` will only exist after building.)
 
 Official documentation on Addons can be found [here](https://aws.github.io/copilot-cli/docs/developing/addons/workload/).
 
