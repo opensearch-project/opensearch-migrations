@@ -191,9 +191,13 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         }
         var totalCost = trafficStreamWithKeys.stream()
                 .mapToInt(tswk -> {
+                    var expectedSignalsToReceive =  computeExpectedSignalsToReceive.applyAsInt(tswk.getStream());;
+                    if (expectedSignalsToReceive == 0) {
+                        return 0;
+                    }
                     var cost = computeSemaphoreCost.applyAsInt(tswk.getStream());
                     var oldVal = outstandingTrafficStreamInfoMap.put(new TrafficStreamOutstandingInfoKey(tswk.getKey()),
-                            new OutstandingInfo(computeExpectedSignalsToReceive.applyAsInt(tswk.getStream()), cost));
+                            new OutstandingInfo(expectedSignalsToReceive, cost));
                     assert oldVal == null;
                     return cost;
                 }).sum();
@@ -203,7 +207,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 .addArgument(()->trafficStreamWithKeys.stream().map(tswk->{
                             var k = new TrafficStreamOutstandingInfoKey(tswk.getKey());
                             var info = outstandingTrafficStreamInfoMap.get(k);
-                            return tswk + ": " + info.cost + " (" + info.countRemaining + ")";
+                            return tswk.getKey() + ": " + (info == null ? "0 (0)" :
+                                    info.cost + " (" + info.countRemaining + ")");
                         })
                         .collect(Collectors.joining(",")))
                 .log();

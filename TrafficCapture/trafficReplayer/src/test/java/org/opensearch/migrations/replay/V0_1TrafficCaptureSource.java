@@ -65,9 +65,10 @@ public class V0_1TrafficCaptureSource implements ISimpleTrafficCaptureSource {
         var progress = connectionProgressMap.get(incoming.getConnectionId());
         if (progress == null) {
             progress = new Progress();
+            progress.lastWasRead = streamWithKey.getKey().getTrafficStreamIndex() != 0;
             connectionProgressMap.put(incoming.getConnectionId(), progress);
         }
-        outgoingBuilder.setLastObservationWasRequestRead(progress.lastWasRead);
+        outgoingBuilder.setLastObservationWasUnterminatedRead(progress.lastWasRead);
         outgoingBuilder.setRequestCount(progress.requestCount);
         outgoingBuilder.addAllSubStream(incoming.getSubStreamList());
         progress.add(incoming);

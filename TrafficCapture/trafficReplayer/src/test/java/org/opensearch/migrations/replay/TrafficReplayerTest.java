@@ -189,8 +189,7 @@ class TrafficReplayerTest {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                         },
-                        (rk,ts) -> {},
-                        remaining -> remainingAccumulations.incrementAndGet()
+                        (rk,ts) -> {}
                 );
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
@@ -229,8 +228,7 @@ class TrafficReplayerTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         (id,request) -> { gotAnythingElse.set(true); },
                         fullPair -> { gotAnythingElse.set(true); },
-                        (requestKey,ts) -> {},
-                        accum -> gotWarning.set(true));
+                        (requestKey,ts) -> {});
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
             // create ONLY a TrafficStream object with index=3.  Skip 1 and 2 to cause the issue that we're testing

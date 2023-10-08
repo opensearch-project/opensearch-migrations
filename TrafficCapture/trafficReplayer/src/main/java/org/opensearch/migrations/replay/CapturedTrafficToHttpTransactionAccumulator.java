@@ -52,7 +52,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final ExpiringTrafficStreamMap liveStreams;
     private final BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp> requestHandler;
     private final Consumer<RequestResponsePacketPair> fullDataHandler;
-    private final Consumer<Accumulation> onTrafficStreamMissingOnClose;
     private final BiConsumer<UniqueRequestKey,Instant> connectionCloseListener;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
@@ -62,16 +61,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final AtomicInteger connectionsExpiredCounter = new AtomicInteger();
     private final AtomicInteger requestsTerminatedUponAccumulatorCloseCounter = new AtomicInteger();
 
-    public static int countRequestsInTrafficStream(TrafficStream ts) {
+    public static int countTransactionFinishesInTrafficStream(TrafficStream ts) {
         int count = 0;
-        var skipReadsUntilEom = ts.getLastObservationWasRequestRead();
+        var skipReadsUntilEomOrWrite = ts.getLastObservationWasUnterminatedRead();
         for (var tso : ts.getSubStreamList()) {
-            if (!skipReadsUntilEom && (tso.hasRead() || tso.hasReadSegment())) {
-                skipReadsUntilEom = true;
+            if (!skipReadsUntilEomOrWrite && (tso.hasRead() || tso.hasReadSegment())) {
+                skipReadsUntilEomOrWrite = true;
                 ++count;
             }
-            if (tso.hasEndOfMessageIndicator()) {
-                skipReadsUntilEom = false;
+            if (tso.hasEndOfMessageIndicator() || tso.hasWrite() || tso.hasWriteSegment()) {
+                skipReadsUntilEomOrWrite = false;
             }
         }
         return count;
@@ -94,17 +93,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                        Consumer<RequestResponsePacketPair> fullDataHandler,
                                                        BiConsumer<UniqueRequestKey,Instant> connectionCloseListener)
     {
-        this(minTimeout, hintStringToConfigureTimeout, requestReceivedHandler, fullDataHandler, connectionCloseListener,
-                accumulation -> log.atWarn()
-                        .setMessage(()->"TrafficStreams are still pending for this accumulation upon it being closed: "
-                                + accumulation).log());
-    }
-
-    public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
-                                                       BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
-                                                       Consumer<RequestResponsePacketPair> fullDataHandler,
-                                                       BiConsumer<UniqueRequestKey,Instant> connectionCloseListener,
-                                                       Consumer<Accumulation> onTrafficStreamMissingOnClose) {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new BehavioralPolicy() {
                     @Override
@@ -124,7 +112,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         this.requestHandler = requestReceivedHandler;
         this.fullDataHandler = fullDataHandler;
         this.connectionCloseListener = connectionCloseListener;
-        this.onTrafficStreamMissingOnClose = onTrafficStreamMissingOnClose;
     }
 
     public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
@@ -143,7 +130,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .append(" connId: ")
                 .append(ts.getConnectionId())
                 .append(" index: ")
-                .append(ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk())
+                .append(TrafficStreamUtils.getTrafficStreamIndex(ts))
                 .append(" firstTimestamp: ")
                 .append(ts.getSubStreamList().stream().findFirst()
                         .map(tso -> tso.getTs()).map(TrafficStreamUtils::instantFromProtoTimestamp)
@@ -152,18 +139,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .toString();
     }
 
-    public void accept(ITrafficStreamWithKey yetToBeSequencedTrafficStreamAndKey) {
-        var yetToBeSequencedTrafficStream = yetToBeSequencedTrafficStreamAndKey.getStream();
+    public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
+        var yetToBeSequencedTrafficStream = trafficStreamAndKey.getStream();
         log.atTrace().setMessage(()->"Got trafficStream: "+summarizeTrafficStream(yetToBeSequencedTrafficStream)).log();
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
-        var accum = liveStreams.getOrCreateWithoutExpiration(yetToBeSequencedTrafficStreamAndKey.getKey());
+        var accum = liveStreams.getOrCreateWithoutExpiration(trafficStreamAndKey.getKey(),
+                tsk->createInitialAccumulation(trafficStreamAndKey));
         var terminated = new AtomicBoolean(false);
-        accum.sequenceTrafficStream(yetToBeSequencedTrafficStream,
-                ts -> ts.getSubStreamList().stream()
+        var trafficStream = trafficStreamAndKey.getStream();
+        trafficStream.getSubStreamList().stream()
                         .map(o -> {
                             if (terminated.get()) {
-                                log.error("Got a traffic observation AFTER a Close observation for the stream " +  ts);
+                                log.error("Got a traffic observation AFTER a Close observation for the stream " +
+                                        trafficStream);
                                 return true;
                             }
                             var didTerminate = CONNECTION_STATUS.CLOSED == addObservationToAccumulation(accum, o);
@@ -171,12 +160,30 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                             return didTerminate;
                         })
                         .takeWhile(b->!b)
-                        .forEach(b->{}));
+                        .forEach(b->{});
         if (terminated.get()) {
             log.atInfo().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
                     " from liveStreams map").log();
             liveStreams.remove(partitionId, connectionId);
         }
+    }
+
+    private Accumulation createInitialAccumulation(ITrafficStreamWithKey streamWithKey) {
+        var stream = streamWithKey.getStream();
+        var key = streamWithKey.getKey();
+
+        if (key.getTrafficStreamIndex() == 0 &&
+                (stream.getRequestCount() > 0 || stream.getLastObservationWasUnterminatedRead())) {
+            log.atWarn().setMessage(()->"Encountered a TrafficStream object with inconsistent values between " +
+                    "the prior request count (" + stream.getRequestCount() + ", " +
+                    "lastObservationWasUnterminatedRead (" + stream.getLastObservationWasUnterminatedRead() +
+                    ") and the index (" + key.getTrafficStreamIndex() +
+                    ").  Traffic Observations will be ignored until Reads after the next EndOfMessage" +
+                    " are encountered.   Full stream object=" + stream).log();
+        }
+
+        return new Accumulation(new UniqueRequestKey(streamWithKey.getKey(), stream.getRequestCount()),
+                stream.getLastObservationWasUnterminatedRead());
     }
 
     private static enum CONNECTION_STATUS {
@@ -189,6 +196,22 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var timestamp =
                 Optional.of(observation.getTs()).map(t-> TrafficStreamUtils.instantFromProtoTimestamp(t)).get();
         liveStreams.expireOldEntries(accum.rrPair.requestKey.trafficStreamKey, accum, timestamp);
+
+        if (accum.state == Accumulation.State.IGNORING_LAST_REQUEST) {
+            if (observation.hasWrite() || observation.hasWriteSegment() || observation.hasEndOfMessageIndicator()) {
+                accum.state = Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK;
+            }
+            // ignore everything until we hit an EOM
+            return CONNECTION_STATUS.ALIVE;
+        } else if (accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK) {
+            // already processed EOMs above.  Be on the lookout to ignore writes
+            if (!(observation.hasRead() || observation.hasReadSegment())) {
+                return CONNECTION_STATUS.ALIVE;
+            } else {
+                accum.state = Accumulation.State.NOTHING_SENT;
+                // fall through
+            }
+        }
         if (observation.hasRead()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
             assert accum.state == Accumulation.State.NOTHING_SENT;
@@ -324,9 +347,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     private void fireAccumulationsCallbacksAndClose(Accumulation accumulation) {
         try {
-            if (accumulation.trafficStreamsSorter.hasPending()) {
-                onTrafficStreamMissingOnClose.accept(accumulation);
-            }
             switch (accumulation.state) {
                 case NOTHING_SENT:
                     if (!handleEndOfRequest(accumulation)) {
@@ -335,6 +355,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     // fall through
                 case REQUEST_SENT:
                     handleEndOfResponse(accumulation);
+                default:
+                    // do nothing for IGNORING... and RESPONSE_SENT
             }
         } finally {
             switch (accumulation.state) {

@@ -39,7 +39,7 @@ class BlockingTrafficSourceTest {
         var testSource = new TestTrafficCaptureSource(nStreamsToCreate);
 
         var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS), Integer.MAX_VALUE,
-                CapturedTrafficToHttpTransactionAccumulator::countRequestsInTrafficStream, x->1);
+                CapturedTrafficToHttpTransactionAccumulator::countTransactionFinishesInTrafficStream, x->1);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
         var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i<=BUFFER_MILLIS+SHIFT; ++i) {

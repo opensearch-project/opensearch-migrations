@@ -18,8 +18,8 @@ public class TrafficCaptureSourceFactory {
     createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow,
                                int maxConcurrentTrafficStreams) throws IOException {
         return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow,
-                maxConcurrentTrafficStreams, CapturedTrafficToHttpTransactionAccumulator::countRequestsInTrafficStream,
-                CapturedTrafficToHttpTransactionAccumulator::countRequestsInTrafficStream
+                maxConcurrentTrafficStreams, CapturedTrafficToHttpTransactionAccumulator::countTransactionFinishesInTrafficStream,
+                CapturedTrafficToHttpTransactionAccumulator::countTransactionFinishesInTrafficStream
         );
     }
 

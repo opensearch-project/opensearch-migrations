@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
-import org.opensearch.migrations.replay.util.OnlineRadixSorterForIntegratedKeys;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -12,12 +11,15 @@ import java.util.function.Consumer;
 public class Accumulation {
 
     enum State {
+        // Ignore all initial READs, the first EOM & the following WRITEs (if they or EOMs exist)
+        IGNORING_LAST_REQUEST,
+        // Finished scanning past initial READs.  The next request should be processed,
+        // so be on the lookout for the next READ
+        WAITING_FOR_NEXT_READ_CHUNK,
         NOTHING_SENT,
         REQUEST_SENT,
         RESPONSE_SENT
     }
-
-    OnlineRadixSorterForIntegratedKeys<TrafficStream> trafficStreamsSorter;
 
     RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
@@ -25,15 +27,16 @@ public class Accumulation {
     State state = State.NOTHING_SENT;
     AtomicInteger numberOfResets;
 
-    public Accumulation(ITrafficStreamKey streamKey) {
-        trafficStreamsSorter = new OnlineRadixSorterForIntegratedKeys<>(1,
-                ts->ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk());
-        numberOfResets = new AtomicInteger();
-        this.resetForRequest(new UniqueRequestKey(streamKey, 0));
+    public Accumulation(UniqueRequestKey nextRequestKey, boolean dropLeftoverObservations) {
+        this(nextRequestKey);
+        if (dropLeftoverObservations) {
+            this.state = State.IGNORING_LAST_REQUEST;
+        }
     }
 
-    void sequenceTrafficStream(TrafficStream ts, Consumer<TrafficStream> sortedVisitor) {
-        trafficStreamsSorter.add(ts, sortedVisitor);
+    public Accumulation(UniqueRequestKey nextRequestKey) {
+        numberOfResets = new AtomicInteger();
+        this.resetForRequest(nextRequestKey);
     }
 
     public UniqueRequestKey getRequestId() {
@@ -49,9 +52,6 @@ public class Accumulation {
         final StringBuilder sb = new StringBuilder("Accumulation{");
         sb.append("rrPair=").append(rrPair);
         sb.append(", state=").append(state);
-        if (trafficStreamsSorter.hasPending()) {
-            sb.append(", sorter=").append(trafficStreamsSorter);
-        }
         sb.append('}');
         return sb.toString();
     }

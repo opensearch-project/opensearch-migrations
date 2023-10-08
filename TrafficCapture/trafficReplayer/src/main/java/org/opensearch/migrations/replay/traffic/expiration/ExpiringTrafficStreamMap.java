@@ -3,12 +3,14 @@ package org.opensearch.migrations.replay.traffic.expiration;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Accumulation;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -147,11 +149,13 @@ public class ExpiringTrafficStreamMap {
         return accumulation;
     }
 
-    public Accumulation getOrCreateWithoutExpiration(ITrafficStreamKey trafficStreamKey) {
+    public Accumulation getOrCreateWithoutExpiration(
+            ITrafficStreamKey trafficStreamKey,
+            Function<ITrafficStreamKey, Accumulation> accumulationGenerator) {
         var key = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
         return connectionAccumulationMap.computeIfAbsent(key, k -> {
             newConnectionCounter.incrementAndGet();
-            return new Accumulation(trafficStreamKey);
+            return accumulationGenerator.apply(trafficStreamKey);
         });
     }
 
