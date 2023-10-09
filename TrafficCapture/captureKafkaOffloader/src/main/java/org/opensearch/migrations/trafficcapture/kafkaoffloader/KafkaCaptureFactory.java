@@ -71,16 +71,16 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                     CompletableFuture cf = new CompletableFuture<>();
                     log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
                     // Async request to Kafka cluster
-                    producer.send(record, handleProducerRecordSent(cf, recordId));
+                    singleAggregateCfRef[0].whenComplete((v,t)->
+                            producer.send(record, handleProducerRecordSent(cf, recordId)));
                     metricsLogger.atSuccess()
                             .addKeyValue("channelId", connectionId)
                             .addKeyValue("topicName", topicNameForTraffic)
                             .addKeyValue("sizeInBytes", record.value().length)
                             .addKeyValue("diagnosticId", recordId)
                             .setMessage("Sent message to Kafka").log();
-                    // Note that ordering is not guaranteed to be preserved here
-                    // A more desirable way to cut off our tree of cf aggregation should be investigated
-                    singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
+                    // A more desirable way to cut off our tree of cf aggregation may need to be investigated
+                    singleAggregateCfRef[0] = cf;
                     return singleAggregateCfRef[0];
                 } catch (Exception e) {
                     metricsLogger.atError(e)
