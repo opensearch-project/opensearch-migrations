@@ -1,34 +1,248 @@
-### Deployment
-This directory is aimed at housing deployment/distribution methods for various migration related images and infrastructure. It is not specific to any given platform and should be expanded to more platforms as needed. 
+# Deploying to AWS using CDK and Copilot
 
+Copilot is a tool for deploying containerized applications on AWS ECS. Official documentation can be found [here](https://aws.github.io/copilot-cli/docs/overview/).
 
-### Deploying Migration solution to AWS
+**Notice**: These tools are free to use, but the user is responsible for the cost of underlying infrastructure required to operate the solution. We welcome feedback and contributions to optimize costs.
 
-**Note**: These features are still under development and subject to change
+## Initial Setup
 
-Detailed instructions for deploying the CDK and setting up its prerequisites can be found in the opensearch-service-migration [README](./cdk/opensearch-service-migration/README.md). This could involve setting CDK context parameters to customize your OpenSearch Service Domain and VPC as well as setting needed migration parameters. A sample **testing** `cdk.context.json` for an E2E migration setup could be:
+### Install Prerequisites
+
+#### Docker
+Docker is used by Copilot to build container images. If not installed, follow the steps [here](https://docs.docker.com/engine/install/) to set up. Later versions are recommended.
+#### Git
+Git is used by the opensearch-migrations repo to fetch associated repositories (such as the traffic-comparator repo) for constructing their respective Dockerfiles. Steps to set up can be found [here](https://github.com/git-guides/install-git).
+#### Java 11
+Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 11.
+
+#### Creating Dockerfiles
+This project needs to build the required Dockerfiles that Copilot will use in its services. From the `TrafficCapture` directory the following command can be ran to build these files
 ```
-{
-  "engineVersion": "OS_1.3",
-  "domainName": "aos-test-domain",
-  "dataNodeCount": 2,
-  "vpcEnabled": true,
-  "availabilityZoneCount": 2,
-  "openAccessPolicyEnabled": true,
-  "domainRemovalPolicy": "DESTROY",
-  "migrationAssistanceEnabled": true,
-  "MSKARN": "arn:aws:kafka:us-east-1:12345678912:cluster/logging-msk-cluster/123456789-12bd-4f34-932b-52060474aa0f-7",
-  "MSKBrokers": [
-    "b-2-public.loggingmskcluster.abc123.c7.kafka.us-east-1.amazonaws.com:9198",
-    "b-1-public.loggingmskcluster.abc123.c7.kafka.us-east-1.amazonaws.com:9198"
-  ],
-  "MSKTopic": "logging-traffic-topic"
-}
+./gradlew :dockerSolution:buildDockerImages
+```
+More details can be found [here](../TrafficCapture/dockerSolution/README.md)
+
+#### Setting up Copilot CLI
+If you are on Mac the following Homebrew command can be run to set up the Copilot CLI:
+```
+brew install aws/tap/copilot-cli
+```
+Otherwise, please follow the manual instructions [here](https://aws.github.io/copilot-cli/docs/getting-started/install/)
+
+## Deployment
+
+### Using the devDeploy script
+
+The following script command can be executed to deploy both the CDK infrastructure and Copilot services for a development environment
+```shell
+./devDeploy.sh
+```
+Options can be found with:
+```shell
+./devDeploy.sh --help
 ```
 
+Before using the script, please ensure that prerequisites have been completed, and AWS credentials have been configured.
 
+### Step-by-step deployment
 
-Once prerequisites are met and context parameters are set, deploying the resources to AWS can be done simply by running the following command:
+#### CDK
+
+Before starting this section, ensure that AWS credentials have been configured and are still valid.
+
+* Ensure that `cdk/opensearch-service-migration` is your working directory
+* Export environment variables required by CDK and Copilot:
+  * `export COPILOT_APP_NAME=migration-copilot`
+  * `export CDK_DEPLOYMENT_STAGE=dev && COPILOT_DEPLOYMENT_STAGE=dev`
+  * If necessary, `export AWS_DEFAULT_REGION=<aws-region-deploy-to>`
+  * `export COPILOT_REGION=$AWS_DEFAULT_REGION`
+* Set up the `cdk.context.json` file as necessary. For more documentation on the available options, see the README [here](cdk/opensearch-service-migration/README.md)
+* If required, update/customize the [dp_pipeline_template.yaml](cdk/opensearch-service-migration/dp_pipeline_template.yaml) Data Prepper pipeline configuration file. Consult the [Data Prepper documentation](https://github.com/opensearch-project/data-prepper/blob/main/docs/overview.md) for more information
+  * Note: leave the `<*_CLUSTER_HOST>` values as-is - these will be replaced by CDK
+* Deploy all stacks using CDK:
+  * `cdk bootstrap`
+  * `cdk deploy -O cdkOutput.json --require-approval never --concurrency 2 "*"`
+* If the historical migration stack was deployed, note down the ECS run task command from the CDK output
+* Finally, eval the exports from the CDK output
+  * `eval "$(grep -o "export [a-zA-Z0-9_]*=[^\\;\"]*" cdkOutput.json | sed 's/=/="/' | sed 's/.*/&"/')"`
+
+Additionally, the following export is needed for the Replayer Copilot service:
 ```
-cdk deploy "*"
+export MIGRATION_REPLAYER_COMMAND=/bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $MIGRATION_DOMAIN_ENDPOINT --insecure --kafka-traffic-brokers $MIGRATION_KAFKA_BROKER_ENDPOINTS --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --kafka-traffic-enable-msk-auth --auth-header-user-and-secret $MIGRATION_DOMAIN_USER_AND_SECRET_ARN | nc traffic-comparator 9220"
 ```
+
+#### Copilot
+
+##### Overview
+
+It is **vital** to run any `copilot` commands from within the `deployment/copilot` directory. When components are initialized the name given will be searched for in the immediate directory structure to look for an existing `manifest.yml` for that component. If found it will use the existing manifest and not create its own. This Copilot app already has existing manifests for each of its services and a dev environment, which should be used for proper operation.
+
+When initially setting up Copilot, each component (apps, services, and environments) need to be initialized. Beware when initializing an environment in Copilot, it will prompt you for values even if you've defined them in the `manifest.yml`, though values input at the prompt are ignored in favor of what was specified in the file.
+
+If using temporary environment credentials when initializing an environment:
+* Copilot will prompt you to enter each variable (AWS Access Key ID, AWS Secret Access Key, AWS Session Token). If these variables are already available in your environment, these three prompts can be `enter`'d through and ignored. 
+* When prompted ` Would you like to use the default configuration for a new environment?` select `Yes, use default.` as this will ultimately get ignored for what has been configured in the existing `manifest.yml`
+* The last prompt will ask for the desired deployment region and should be filled out as Copilot will store this internally.
+
+This Copilot app supports deploying the Capture Proxy and Elasticsearch as a single service `capture-proxy-es` (as shown below) or as separate services `capture-proxy` and `elasticsearch`
+
+**Note**: This app also contains `kafka-broker` and `kafka-zookeeper` services which are currently experimental and usage of MSK is preferred. These services do not need to be deployed, and as so are not listed below.
+
+##### Commands
+
+Before starting this section, ensure that AWS credentials have been configured and are still valid.
+
+* Unset the AWS region environment variable to prevent potential conflicts in Copilot
+  * `export AWS_DEFAULT_REGION=`
+* Initialize the app: `copilot app init $COPILOT_APP_NAME`
+* Initialize the environment using the environment variables exported from the CDK:
+
+```shell
+copilot env init -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE --import-vpc-id $MIGRATION_VPC_ID --import-public-subnets $MIGRATION_PUBLIC_SUBNETS --import-private-subnets $MIGRATION_PRIVATE_SUBNETS --aws-access-key-id $AWS_ACCESS_KEY_ID --aws-secret-access-key $AWS_SECRET_ACCESS_KEY --aws-session-token $AWS_SESSION_TOKEN --region $COPILOT_REGION
+```
+
+* Initialize services by name:
+
+```shell
+copilot svc init --name traffic-replayer
+copilot svc init --name traffic-comparator
+copilot svc init --name traffic-comparator-jupyter
+copilot svc init --name capture-proxy-es
+copilot svc init --name migration-console
+```
+
+* Deploy the environment: `copilot env deploy -a $COPILOT_APP_NAME --name $COPILOT_DEPLOYMENT_STAGE`
+* Deploy services by name:
+
+```shell
+copilot svc deploy --name traffic-comparator-jupyter --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy --name traffic-comparator --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy --name traffic-replayer --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy --name capture-proxy-es --env $COPILOT_DEPLOYMENT_STAGE
+copilot svc deploy --name migration-console --env $COPILOT_DEPLOYMENT_STAGE
+```
+
+Currently, Copilot does not support deploying all services at once (issue [here](https://github.com/aws/copilot-cli/issues/3474)) or creating dependencies between separate services. Thus, services need to be initialized and deployed one at a time as shown above.
+
+Note - When deploying a service with the Copilot CLI, a status bar will be displayed that gets updated as the deployment progresses. The command will complete when the specific service has all its resources created and health checks are passing on the deployed containers.
+
+## Working with the deployed solution
+
+### Executing Commands on a Service
+
+A command shell can be opened in the service's container if that service has enabled `exec: true` in their `manifest.yml` and the SSM Session Manager plugin is installed when prompted.
+```
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n traffic-comparator-jupyter -c "bash"
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n traffic-comparator -c "bash"
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n traffic-replayer -c "bash"
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n elasticsearch -c "bash"
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n capture-proxy -c "bash"
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n capture-proxy-es -c "bash"
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n migration-console -c "bash"
+```
+
+### Running OpenSearch Benchmarks
+
+Once the solution is deployed, the easiest way to test the solution is to access the migration-console container and run a benchmark test through, as the following steps illustrate:
+
+```
+// Access Migration Console container
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n migration-console -c "bash"
+
+// Run simple opensearch-benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+
+// Option 1: Automated script
+./runTestBenchmarks.sh
+
+// Option 2: Manually execute command
+opensearch-benchmark execute-test --distribution-version=1.0.0 --pipeline=benchmark-only --kill-running-processes --workload=geonames --workload-params "target_throughput:10,bulk_size:1000,bulk_indexing_clients:2,search_clients:1" --client-options "use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin" --target-host=https://capture-proxy-es:9200
+```
+
+After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same migration-console container to confirm
+```
+// Option 1: Automated script
+./catIndices.sh
+
+// Option 2: Manually execute cluster requests
+// Check source cluster
+curl https://capture-proxy-es:9200/_cat/indices?v --insecure -u admin:admin
+
+// Check target cluster
+curl https://$MIGRATION_DOMAIN_ENDPOINT:443/_cat/indices?v --insecure -u admin:Admin123!
+```
+
+### Kicking off Fetch Migration
+
+* First, access the Migration Console container
+
+```shell
+copilot svc exec -a $COPILOT_APP_NAME -e $COPILOT_DEPLOYMENT_STAGE -n migration-console -c "bash"
+```
+
+* Assume the Fetch Migration Task Execution role:
+
+```shell
+export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" \
+$(aws sts assume-role --duration-seconds 900 --role-session-name FetchMigrationExec --output text \
+--query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" \
+--role-arn $EXEC_ROLE_ARN))
+```
+
+* Execute the ECS run task command that you noted when deploying the CDK
+  * The status of the ECS Task can be monitored from the AWS Console. Once the task is in the `Running` state, logs and progress can be viewed via CloudWatch.
+
+The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
+
+## Teardown
+
+To remove the resources installed from the steps above, follow these instructions:
+1.  `./devDeploy.sh --destroy-env` - Destroy all CDK and Copilot CloudFormation stacks deployed, excluding the Copilot app level stack, for the given env/stage and return to a clean state.
+2.  `./devDeploy.sh --destroy-all-copilot` - Destroy Copilot app and all Copilot CloudFormation stacks deployed for the given app across all regions
+3. After execution of the above steps, a CDK bootstrap stack remains. To remove this stack, begin by deleting the S3 objects and the associated bucket. After that, you can delete the stack using the AWS Console or CLI.
+
+## Frequently Asked Questions (FAQs)
+
+### How is an Authorization header set for requests from the Replayer to the target cluster?
+
+See Replayer explanation [here](../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
+
+### How to run multiple Replayer scenarios
+
+The migration solution has support for running multiple Replayer services simultaneously, such that captured traffic from the Capture Proxy (which has been stored on Kafka) can be replayed on multiple different cluster configurations at the same time. These additional independent and distinct Replayer services can either be spun up together initially to replay traffic as it comes in, or added later, in which case they will begin processing captured traffic from the beginning of what is stored in Kafka.
+
+A **prerequisite** to use this functionality is that the migration solution has been deployed with the `devDeploy.sh` script, so that necessary environment values from CDK resources like the VPC, MSK, and EFS volume can be retrieved for additional Replayer services
+
+To test this scenario, you can create an additional OpenSearch Domain target cluster within the existing VPC by executing the following series of commands:
+```shell
+# Assuming you are in the copilot directory and the default "dev" environment was used for ./devDeploy.sh
+source ./environments/dev/envExports.sh
+cd ../cdk/opensearch-service-migration
+# Pick a name to be used for identifying this new domain stack that is different from the one used for ./devDeploy.sh
+export CDK_DEPLOYMENT_STAGE=dev2
+cdk deploy "*" --c domainName="test-domain-2-7" --c engineVersion="OS_2.7" --c  dataNodeCount=2 --c vpcEnabled=true --c vpcId="$MIGRATION_VPC_ID" --c vpcSecurityGroupIds="[\"$MIGRATION_DOMAIN_SG_ID\"]" --c availabilityZoneCount=2 --c openAccessPolicyEnabled=true --c domainRemovalPolicy="DESTROY" --c migrationAssistanceEnabled=false --c enableDemoAdmin=true --require-approval never --concurrency 3
+```
+To launch an additional Replayer service that directs traffic to this new Domain, run a command like the one below. In this command, `id` is a unique label for the Replayer service, `target-uri` is the endpoint of the target cluster where traffic will be replayed, and `extra-args` is specifying a Replayer Auth header option to use. You can obtain the below endpoint and secret name (or secret ARN) from either from the CDK command output mentioned earlier or from the AWS Console:
+```shell
+./createReplayer.sh --id test-os-2-7 --target-uri https://vpc-aos-domain-123.us-east-1.es.amazonaws.com:443 --extra-args "--auth-header-user-and-secret admin demo-user-secret-dev2-us-east-1" --tags migration_deployment=0.1.0
+```
+More options can be found with:
+```shell
+./createReplayer.sh --help
+```
+
+## Appendix
+
+### Useful Copilot Commands
+
+`copilot app show` - Provides details on the current app \
+`copilot svc show` - Provides details on a particular service
+
+### Addons
+
+Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. 
+
+An example of this can be seen in the `traffic-replayer/addons/taskRole.yml`  service which has an `addons` directory and yaml file.
+
+That yaml file adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK. (Note that `taskRole.yml` will only exist after building.)
+
+Official documentation on Addons can be found [here](https://aws.github.io/copilot-cli/docs/developing/addons/workload/).

@@ -1,43 +1,38 @@
-# Index Configuration Tool
+# "Fetch" Data Migration / Backfill
 
-Python package that automates the creation of indices on a target cluster based on the contents of a source cluster. 
-Index settings and index mappings are correctly copied over, but no data is transferred. 
-This tool seeks to eliminate the need to [specify index templates](https://github.com/awslabs/logstash-output-amazon_es#optional-parameters) when migrating data from one cluster to another.
-The tool currently supports ElasticSearch or OpenSearch as source and target.
+Fetch Migration provides an easy-to-use tool that simplifies the process of moving indices and their data from a 
+"source" cluster (either Elasticsearch or OpenSearch) to a "target" OpenSearch cluster. It automates the process of 
+comparing indices between the two clusters and only creates index metadata (settings and mappings) that do not already 
+exist on the target cluster. Internally, the tool uses [Data Prepper](https://github.com/opensearch-project/data-prepper) 
+to migrate data for these created indices.
 
-## Parameters
+The Fetch Migration tool is implemented in Python.
+A Docker image can be built using the included [Dockerfile](./Dockerfile).
 
-The first required input to the tool is a path to a [Data Prepper](https://github.com/opensearch-project/data-prepper) pipeline YAML file, which is parsed to obtain the source and target cluster endpoints.
-The second required input is an output path to which a modified version of the pipeline YAML file is written.
-This version of the pipeline adds an index inclusion configuration to the sink, specifying only those indices that were created by the index configuration tool.
-The tool also supports several optional flags:
+## Components
 
-| Flag | Purpose |
-| ------------- | ------------- |
-| `-h, --help`    | Prints help text and exits |
-| `--report, -r`  | Prints a report of indices indicating which ones will be created, along with indices that are identical or have conflicting settings/mappings.  |
-| `--dryrun`      | Skips the actual creation of indices on the target cluster |
+The tool consists of 3 components:
+* A "metadata migration" module that handles metadata comparison between the source and target clusters. 
+This can output a human-readable report as well as a Data Prepper pipeline `yaml` file.
+* A "migration monitor" module that monitors the progress of the migration and shuts down the Data Prepper pipeline 
+once the target document count has been reached
+* An "orchestrator" module that sequences these steps as a workflow and manages the kick-off of the Data Prepper 
+process between them.
 
-### Reporting
-
-If `--report` is specified, the tool prints all processed indices organized into 3 buckets:
-* Successfully created on the target cluster
-* Skipped due to a conflict in settings/mappings
-* Skipped since the index configuration is identical on source and target
+The orchestrator module is the Docker entrypoint for the tool, though each component can be executed separately 
+via Python. Help text for each module can be printed by supplying the `-h / --help` flag.
 
 ## Current Limitations
 
-* Only supports ElasticSearch and OpenSearch endpoints for source and target
-* Only supports basic auth
-* Type mappings for legacy indices are not handled
-* Index templates and index aliases are not copied
-* Index health is not validated after creation
+* Fetch Migration runs as a single instance and does not support vertical scaling or data slicing
+* The tool does not support customizing the list of indices included for migration
+* Metadata migration only supports basic auth
+* The migration does not filter out `red` indices
+* In the event that the migration fails or the process dies, the created indices on the target cluster are not rolled back
 
-## Usage
+## Execution
 
-### Command-Line
-
-#### Setup:
+### Python
 
 * [Clone](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) this GitHub repo
 * Install [Python](https://www.python.org/)
@@ -47,15 +42,13 @@ If `--report` is specified, the tool prints all processed indices organized into
 Navigate to the cloned GitHub repo. Then, install the required Python dependencies by running:
 
 ```shell
-python -m pip install -r index_configuration_tool/requirements.txt
+python -m pip install -r python/requirements.txt
 ```
 
-#### Execution:
-
-After [setup](#setup), the tool can be executed using:
+The Fetch Migration workflow can then be kicked off via the orchestrator module:
 
 ```shell
-python index_configuration_tool/metadata_migration.py <pipeline_yaml_path> <output_file>
+python python/fetch_orchestrator.py --help
 ```
 
 ### Docker
@@ -67,42 +60,46 @@ docker build -t fetch-migration .
 ```
 
 Then run the `fetch-migration` image.
-Replace `<pipeline_yaml_path>` in the command below with the path to your Logstash config file:
+Replace `<pipeline_yaml_path>` in the command below with the path to your Data Prepper pipeline `yaml` file:
 
 ```shell
-docker run -p 4900:4900 -v <pipeline_yaml_path>:/code/input.yaml ict
+docker run -p 4900:4900 -v <pipeline_yaml_path>:/code/input.yaml fetch-migration
 ```
+
+### AWS deployment
+
+Refer to [AWS Deployment](../deployment/README.md) to deploy this solution to AWS.
 
 ## Development
 
-The source code for the tool is located under the `index_configuration_tool/` directory. Please refer to the [Setup](#setup) section to ensure that the necessary dependencies are installed prior to development.
+The source code for the tool is located under the `python/` directory, with unit test in the `tests/` subdirectory. 
+Please refer to the [Setup](#setup) section to ensure that the necessary dependencies are installed prior to development.
 
 Additionally, you'll also need to install development dependencies by running:
 
 ```shell
-python -m pip install -r index_configuration_tool/dev-requirements.txt
+python -m pip install -r python/dev-requirements.txt
 ```
 
 ### Unit Tests
 
-Unit tests are located in a sub-directory named `tests`. Unit tests can be run using:
-
-```shell
-python -m unittest
-```
-
-### Coverage
-
-Code coverage metrics can be generated by first running unit tests using _coverage run_:
+Unit tests can be run from the `python/` directory using:
 
 ```shell
 python -m coverage run -m unittest
 ```
 
-Then a report can either be printed on the command line or generated as HTML.
-Note that the `--omit` parameter must be specified to avoid tracking code coverage on unit test code:
+_Code coverage_ metrics can be generated after a unit-test run. A report can either be printed on the command line:
+
+```shell
+python -m coverage report --omit "*/tests/*"
+```
+
+or generated as HTML:
 
 ```shell
 python -m coverage report --omit "*/tests/*"
 python -m coverage html --omit "*/tests/*"
 ```
+
+Note that the `--omit` parameter must be specified to avoid tracking code coverage on unit test code itself.
