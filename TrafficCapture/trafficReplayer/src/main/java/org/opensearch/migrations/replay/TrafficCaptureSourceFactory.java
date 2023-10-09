@@ -15,12 +15,8 @@ import java.time.Duration;
 public class TrafficCaptureSourceFactory {
 
     public static BlockingTrafficSource
-    createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow,
-                               int maxConcurrentTrafficStreams) throws IOException {
-        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow,
-                maxConcurrentTrafficStreams, CapturedTrafficToHttpTransactionAccumulator::countTransactionFinishesInTrafficStream,
-                CapturedTrafficToHttpTransactionAccumulator::countTransactionFinishesInTrafficStream
-        );
+    createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow) throws IOException {
+        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow);
     }
 
     public static ISimpleTrafficCaptureSource

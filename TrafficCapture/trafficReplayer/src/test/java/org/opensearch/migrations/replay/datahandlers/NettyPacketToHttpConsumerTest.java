@@ -197,8 +197,5 @@ class NettyPacketToHttpConsumerTest {
         public Duration getBufferTimeWindow() {
             return Duration.ofSeconds(1);
         }
-
-        @Override
-        public void doneProcessing(ITrafficStreamKey key) {}
     }
 }

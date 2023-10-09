@@ -14,8 +14,8 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
-import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -66,6 +66,7 @@ public class TrafficReplayer {
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
     private final ClientConnectionPool clientConnectionPool;
+    private final TrafficStreamLimiter liveTrafficStreamLimiter;
     private final AtomicInteger successCount;
     private final AtomicInteger exceptionCount;
     private ConcurrentHashMap<UniqueRequestKey,
@@ -84,7 +85,17 @@ public class TrafficReplayer {
                            IAuthTransformerFactory authTransformerFactory,
                            boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, authTransformerFactory, allowInsecureConnections, 1,
+        this(serverUri, authTransformerFactory, allowInsecureConnections, 0, 1024);
+    }
+
+
+    public TrafficReplayer(URI serverUri,
+                           IAuthTransformerFactory authTransformerFactory,
+                           boolean allowInsecureConnections,
+                           int numSendingThreads, int maxConcurrentOutstandingRequests)
+            throws SSLException {
+        this(serverUri, authTransformerFactory, allowInsecureConnections,
+                numSendingThreads, maxConcurrentOutstandingRequests,
                 buildDefaultJsonTransformer(serverUri.getHost())
         );
     }
@@ -92,7 +103,7 @@ public class TrafficReplayer {
     public TrafficReplayer(URI serverUri,
                            IAuthTransformerFactory authTransformer,
                            boolean allowInsecureConnections,
-                           int numSendingThreads,
+                           int numSendingThreads, int maxConcurrentOutstandingRequests,
                            IJsonTransformer jsonTransformer)
             throws SSLException
     {
@@ -112,6 +123,7 @@ public class TrafficReplayer {
         requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         successCount = new AtomicInteger();
         exceptionCount = new AtomicInteger();
+        liveTrafficStreamLimiter = new TrafficStreamLimiter(maxConcurrentOutstandingRequests);
     }
 
     private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
@@ -214,6 +226,11 @@ public class TrafficReplayer {
                 arity = 1,
                 description = "Maximum number of requests at a time that can be outstanding")
         int maxConcurrentRequests = 1024;
+        @Parameter(required = false,
+                names = {"--num-client-threads"},
+                arity = 1,
+                description = "Number of threads to use to send requests from.")
+        int numClientThreads = 0;
 
         @Parameter(required = false,
             names = {"--kafka-traffic-brokers"},
@@ -276,9 +293,9 @@ public class TrafficReplayer {
                 new FileOutputStream(params.outputFilename, true)) {
             try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
                 try (var blockingTrafficStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
-                        Duration.ofSeconds(params.lookaheadTimeSeconds), params.maxConcurrentRequests)) {
+                        Duration.ofSeconds(params.lookaheadTimeSeconds))) {
                     var tr = new TrafficReplayer(uri, buildAuthTransformerFactory(params),
-                            params.allowInsecureConnections);
+                            params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
                     tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
                             blockingTrafficStream, bufferedOutputStream, new TimeShifter(params.speedupFactor));
                     log.info("reached the end of the ingestion output stream");
@@ -355,7 +372,7 @@ public class TrafficReplayer {
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         "(see " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                         getRecordedRequestReconstructCompleteHandler(replayEngine),
-                        getRecordedRequestAndResponseReconstructCompleteHandler(tupleWriter, trafficChunkStream),
+                        getRecordedRequestAndResponseReconstructCompleteHandler(tupleWriter),
                         (requestKey, ts) -> replayEngine.closeConnection(requestKey, ts));
         try {
             pullReplayFromSourceToAccumulator(trafficChunkStream, trafficToHttpTransactionAccumulator);
@@ -397,15 +414,23 @@ public class TrafficReplayer {
         }
     }
 
+    ConcurrentHashMap<UniqueRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
+
     private BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp>
     getRecordedRequestReconstructCompleteHandler(ReplayEngine replayEngine) {
         return (requestKey, request) -> {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
+            liveTrafficStreamLimiter.addWork(1);
             var requestPushFuture = transformAndSendRequest(replayEngine, request, requestKey);
             requestFutureMap.put(requestKey, requestPushFuture);
-            requestPushFuture.map(f->f.whenComplete((v,t)-> log.atTrace()
-                    .setMessage(()->"Summary response value for " + requestKey + " returned=" + v).log()),
+            liveRequests.put(requestKey, true);
+            requestPushFuture.map(f->f.whenComplete((v,t)->{
+                        liveRequests.remove(requestKey);
+                liveTrafficStreamLimiter.doneProcessing(1);
+                        log.atTrace()
+                                .setMessage(()->"Summary response value for " + requestKey + " returned=" + v).log();
+                    }),
                     ()->"logging summary");
         };
     }
@@ -413,8 +438,7 @@ public class TrafficReplayer {
     private final static Instant startTime = Instant.now();
 
     private Consumer<RequestResponsePacketPair>
-    getRecordedRequestAndResponseReconstructCompleteHandler(SourceTargetCaptureTuple.TupleToFileWriter tupleWriter,
-                                                            BufferedFlowController flowController) {
+    getRecordedRequestAndResponseReconstructCompleteHandler(SourceTargetCaptureTuple.TupleToFileWriter tupleWriter) {
         return rrPair -> {
             log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
             var resultantCf = requestFutureMap.remove(rrPair.requestKey)
@@ -431,7 +455,6 @@ public class TrafficReplayer {
                                     exceptionCount.incrementAndGet();
                                     throw e;
                                 } finally {
-                                    flowController.doneProcessing(rrPair.requestKey.trafficStreamKey);
                                     requestToFinalWorkFuturesMap.remove(rrPair.requestKey);
                                     log.trace("removed rrPair.requestData to " +
                                             "targetTransactionInProgressMap for " +

@@ -24,7 +24,7 @@ public class TestHttpServerContext {
     }
 
     public static String SERVER_RESPONSE_BODY_PREFIX = "Boring Response to ";
-    public static Duration SERVER_RESPONSE_LATENCY = Duration.ofMillis(100);
+    public static Duration SERVER_RESPONSE_LATENCY = Duration.ofMillis((int)(Math.random()*250));
 
     public static SimpleHttpResponse makeResponse(HttpFirstLine r) {
         return makeResponse(r, SERVER_RESPONSE_LATENCY);
