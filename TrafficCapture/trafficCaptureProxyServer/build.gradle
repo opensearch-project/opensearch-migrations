@@ -53,5 +53,5 @@ tasks.withType(Zip){
 
 application {
     // Define the main class for the application.
-    mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.Main'
+    mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy'
 }
