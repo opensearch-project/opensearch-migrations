@@ -74,15 +74,15 @@ test('Test access policy is parsed for proper array format', () => {
                     "Statement": [
                         {
                         "Effect": "Allow",
-                        "Principal": {"AWS": "arn:aws:iam::123456789123:user/test-user"},
+                        "Principal": {"AWS": "arn:aws:iam::12345678912:user/test-user"},
                         "Action": "es:ESHttp*",
-                        "Resource": "arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"
+                        "Resource": "arn:aws:es:us-east-1:12345678912:domain/test-os-domain/*"
                         },
                         {
                             "Effect": "Allow",
-                            "Principal": {"AWS": "arn:aws:iam::123456789123:user/test-user2"},
+                            "Principal": {"AWS": "arn:aws:iam::12345678912:user/test-user2"},
                             "Action": "es:ESHttp*",
-                            "Resource": "arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"
+                            "Resource": "arn:aws:es:us-east-1:12345678912:domain/test-os-domain/*"
                         }]
                 }
         }
@@ -107,7 +107,7 @@ test('Test access policy is parsed for proper block format', () => {
                         "Effect": "Allow",
                         "Principal": {"AWS": "*"},
                         "Action": "es:ESHttp*",
-                        "Resource": "arn:aws:es:us-east-1:123456789123:domain/test-os-domain/*"
+                        "Resource": "arn:aws:es:us-east-1:12345678912:domain/test-os-domain/*"
                     }
                 }
         }
