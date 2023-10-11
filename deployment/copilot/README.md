@@ -84,7 +84,7 @@ The provided CDK will output export commands once deployed that can be ran on a 
 ```
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
-export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:12345678912:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;

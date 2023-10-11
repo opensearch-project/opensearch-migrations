@@ -17,7 +17,7 @@ Detailed instructions for deploying the CDK and setting up its prerequisites can
   "openAccessPolicyEnabled": true,
   "domainRemovalPolicy": "DESTROY",
   "migrationAssistanceEnabled": true,
-  "MSKARN": "arn:aws:kafka:us-east-1:123456789123:cluster/logging-msk-cluster/123456789-12bd-4f34-932b-52060474aa0f-7",
+  "MSKARN": "arn:aws:kafka:us-east-1:12345678912:cluster/logging-msk-cluster/123456789-12bd-4f34-932b-52060474aa0f-7",
   "MSKBrokers": [
     "b-2-public.loggingmskcluster.abc123.c7.kafka.us-east-1.amazonaws.com:9198",
     "b-1-public.loggingmskcluster.abc123.c7.kafka.us-east-1.amazonaws.com:9198"
