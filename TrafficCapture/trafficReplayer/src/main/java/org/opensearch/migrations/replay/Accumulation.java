@@ -1,12 +1,9 @@
 package org.opensearch.migrations.replay;
 
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
 public class Accumulation {
 
@@ -69,7 +66,7 @@ public class Accumulation {
 
     public void resetForNextRequest() {
         numberOfResets.incrementAndGet();
-        resetForRequest(new UniqueRequestKey(getRequestId().trafficStreamKey, getIndexOfCurrentRequest()));
+        resetForRequest(new UniqueRequestKey(getRequestId().trafficStreamKeyAndOffset, getIndexOfCurrentRequest()));
     }
 
     private void resetForRequest(UniqueRequestKey key) {

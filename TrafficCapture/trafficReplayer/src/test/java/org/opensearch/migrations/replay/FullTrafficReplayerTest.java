@@ -19,7 +19,7 @@ public class FullTrafficReplayerTest {
         var httpServer = SimpleNettyHttpServer.makeServer(false, TestHttpServerContext::makeResponse);
         var tr = new TrafficReplayer(httpServer.localhostEndpoint(),
                 new StaticAuthTransformerFactory("TEST"),
-                true, 10, 1024,
+                true, 10, 10*1024,
                 TrafficReplayer.buildDefaultJsonTransformer(httpServer.localhostEndpoint().getHost()));
 
         try (var os = new NullOutputStream();
@@ -32,5 +32,6 @@ public class FullTrafficReplayerTest {
             log.atError().setCause(e).setMessage(()->"eating exception to check for memory leaks.").log();
             throw e;
         }
+        log.error("done");
     }
 }

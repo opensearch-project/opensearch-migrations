@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.traffic.expiration;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Accumulation;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
 import java.time.Duration;
 import java.time.Instant;

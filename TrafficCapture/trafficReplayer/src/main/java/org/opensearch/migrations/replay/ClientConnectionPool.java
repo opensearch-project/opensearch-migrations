@@ -142,7 +142,7 @@ public class ClientConnectionPool {
             if (channelFutureAndSchedule.channelFutureFuture == null) {
                 channelFutureAndSchedule.channelFutureFuture =
                         getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop,
-                                requestKey.trafficStreamKey.getConnectionId());
+                                requestKey.getTrafficStreamKey().getConnectionId());
             }
             return channelFutureAndSchedule;
         });
@@ -150,8 +150,8 @@ public class ClientConnectionPool {
 
     @SneakyThrows
     public ConnectionReplaySession getCachedSession(UniqueRequestKey requestKey, boolean dontCreate) {
-        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.trafficStreamKey.getConnectionId()) :
-                connectionId2ChannelCache.get(requestKey.trafficStreamKey.getConnectionId());
+        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.getTrafficStreamKey().getConnectionId()) :
+                connectionId2ChannelCache.get(requestKey.getTrafficStreamKey().getConnectionId());
         if (crs != null) {
             crs.setCurrentConnectionId(requestKey);
         }

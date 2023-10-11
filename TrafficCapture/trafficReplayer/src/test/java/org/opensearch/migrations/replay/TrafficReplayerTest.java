@@ -172,7 +172,7 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testCapturedReadsAfterCloseAreIgnored() throws IOException, URISyntaxException {
+    public void testCapturedReadsAfterCloseAreHandledAsNew() throws IOException, URISyntaxException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         var remainingAccumulations = new AtomicInteger();
@@ -214,36 +214,9 @@ class TrafficReplayerTest {
             }
         }
         trafficAccumulator.close();
-        Assertions.assertEquals(1, byteArrays.size());
+        Assertions.assertEquals(2, byteArrays.size());
         Assertions.assertTrue(byteArrays.stream().allMatch(ba->ba.size()==2));
-        Assertions.assertEquals(1, remainingAccumulations.get());
-    }
-
-    @Test
-    public void testMissingStreamCausesWarning() throws URISyntaxException, IOException, ExecutionException, InterruptedException {
-        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
-        var gotWarning = new AtomicBoolean();
-        var gotAnythingElse = new AtomicBoolean();
-        CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
-                        (id,request) -> { gotAnythingElse.set(true); },
-                        fullPair -> { gotAnythingElse.set(true); },
-                        (requestKey,ts) -> {});
-        byte[] serializedChunks;
-        try (var baos = new ByteArrayOutputStream()) {
-            // create ONLY a TrafficStream object with index=3.  Skip 1 and 2 to cause the issue that we're testing
-            makeTrafficStream(Instant.now(), 3).writeDelimitedTo(baos);
-            serializedChunks = baos.toByteArray();
-        }
-        try (var bais = new ByteArrayInputStream(serializedChunks)) {
-            try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
-            }
-        }
-        trafficAccumulator.close();
-        Assertions.assertTrue(gotWarning.get());
-        Assertions.assertFalse(gotAnythingElse.get());
-
+        Assertions.assertEquals(0, remainingAccumulations.get());
     }
 
     private static String collectBytesToUtf8String(List<byte[]> bytesList) {

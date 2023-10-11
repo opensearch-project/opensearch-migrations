@@ -7,7 +7,6 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;

@@ -9,6 +9,10 @@ import java.util.Map;
 
 public class TestHttpServerContext {
 
+    public static final int MAX_RESPONSE_TIME_MS = 250;
+
+    public static String SERVER_RESPONSE_BODY_PREFIX = "Boring Response to ";
+
     static String getUriForIthRequest(int i) {
         return String.format("/%04d", i);
     }
@@ -23,11 +27,8 @@ public class TestHttpServerContext {
                 getUriForIthRequest(i));
     }
 
-    public static String SERVER_RESPONSE_BODY_PREFIX = "Boring Response to ";
-    public static Duration SERVER_RESPONSE_LATENCY = Duration.ofMillis((int)(Math.random()*250));
-
     public static SimpleHttpResponse makeResponse(HttpFirstLine r) {
-        return makeResponse(r, SERVER_RESPONSE_LATENCY);
+        return makeResponse(r, Duration.ofMillis((int)(Math.random()* MAX_RESPONSE_TIME_MS)));
     }
 
     public static SimpleHttpResponse makeResponse(HttpFirstLine r, Duration responseWaitTime) {

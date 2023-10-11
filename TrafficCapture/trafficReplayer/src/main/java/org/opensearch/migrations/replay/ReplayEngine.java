@@ -139,7 +139,7 @@ public class ReplayEngine {
         logStartOfWork(requestKey, newCount, start, label);
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", requestKey.toString())
-                .addKeyValue("connectionId", requestKey.trafficStreamKey.getConnectionId())
+                .addKeyValue("connectionId", requestKey.getTrafficStreamKey().getConnectionId())
                 .addKeyValue("delayFromOriginalToScheduledStartInMs", Duration.between(originalStart, start).toMillis())
                 .addKeyValue("scheduledStartTime", start.toString())
                 .setMessage("Request scheduled to be sent").log();

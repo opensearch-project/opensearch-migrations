@@ -1,17 +1,8 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import lombok.EqualsAndHashCode;
-import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.ToIntFunction;
-import java.util.stream.Collectors;
 
 @Slf4j
 public class TrafficStreamLimiter {

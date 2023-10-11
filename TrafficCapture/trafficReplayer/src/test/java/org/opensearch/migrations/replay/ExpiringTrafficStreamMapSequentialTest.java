@@ -36,7 +36,7 @@ class ExpiringTrafficStreamMapSequentialTest {
             var ts = Instant.ofEpochSecond(i+1);
             var tsk = new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0);
             var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk,
-                    k->new Accumulation(new UniqueRequestKey(k, 0)));
+                    k->new Accumulation(new UniqueRequestKey(k, 0, 0)));
             createdAccumulations.add(accumulation);
             expiringMap.expireOldEntries(new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0),
                     accumulation, ts);
