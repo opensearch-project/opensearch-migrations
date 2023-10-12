@@ -191,7 +191,7 @@ export class StackComposer {
 
         // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited
         // TODO: Future work to provide orchestration between historical capture and migration assistance
-        if (historicalCaptureEnabled && networkStack) {
+        if (historicalCaptureEnabled && networkStack && migrationAssistanceEnabled) {
             const historicalCaptureStack = new HistoricalCaptureStack(scope, "historicalCaptureStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,
