@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class PreMigrationParams:
+class MetadataMigrationParams:
     config_file_path: str
     output_file: str = ""
     report: bool = False

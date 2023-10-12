@@ -11,26 +11,25 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 /**
- * This object manages the lifecycle of Accumulation objects, creating new ones and (eventually, once implemented)
- * expiring old entries.  Callers are expected to modify the Accumulation values themselves, but to proxy every
- * distinct interaction through this class along with the timestamp of the observed interaction.  That (will)
- * allow this class to expunge outdated entries. Notice that a callback (or calling) mechanism still needs to
- * be implemented so that the calling context is aware that items have been expired.
+ * This object manages the lifecycle of Accumulation objects, creating new ones and expiring old entries.
+ * Callers are expected to modify the Accumulation values themselves, but to proxy every distinct interaction
+ * through this class along with the timestamp of the observed interaction.  That allows this class to expunge
+ * outdated entries. Notice that a callback (or calling) mechanism is provided so that the calling context is
+ * aware of when items have been expired.
  *
  * This doesn't use more typical out-of-the-box LRU mechanisms.  Our requirements are a little bit different.
  * First, we're fine buffering a variable number of items and secondly, this should be threadsafe an able to
  * be used in highly concurrent contexts.
- * 
- *  TODO - there will be a race condition in the ExpiringTrafficStream maps/sets where items
- *  could be expunged from the collections while they're still in use.  Adding refCounts to
- *  the collection items that can be checked atomically before purging would mitigate this
- *  situation
+ *
+ * TODO - there will be a race condition in the ExpiringTrafficStream maps/sets where items could be expunged from
+ * the collections while they're still in use because this class doesn't have visibility into how items are being used.
+ * If that is an issue, using collection items with atomically updated refCounts would mitigate that situation.
  */
 @Slf4j
 public class ExpiringTrafficStreamMap {
 
     public static final int DEFAULT_NUM_TIMESTAMP_UPDATE_ATTEMPTS = 2;
-    public static final int ACCUMULATION_DEAD_SENTINEL = Integer.MAX_VALUE;
+    public static final long ACCUMULATION_DEAD_SENTINEL = Long.MAX_VALUE;
     public static final int ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL = 0;
 
     protected final AccumulatorMap connectionAccumulationMap;
@@ -80,13 +79,14 @@ public class ExpiringTrafficStreamMap {
                                              EpochMillis observedTimestampMillis,
                                              Accumulation accumulation, int attempts) {
         var expiringQueue = getOrCreateNodeMap(partitionId, observedTimestampMillis);
+        var latestPossibleKeyValueAtIncoming = expiringQueue.getLatestPossibleKeyValue();
+        var incomingLastTimestampForAccumulation = accumulation.getNewestPacketTimestampInMillisReference().get();
         // for expiration tracking purposes, push incoming packets' timestamps to be monotonic?
         var timestampMillis = new EpochMillis(Math.max(observedTimestampMillis.millis, expiringQueue.lastKey().millis));
 
         var lastPacketTimestamp = new EpochMillis(accumulation.getNewestPacketTimestampInMillisReference().get());
         if (lastPacketTimestamp.millis == ACCUMULATION_DEAD_SENTINEL) {
-            behavioralPolicy.onNewDataArrivingAfterItsAccumulationHasBeenExpired(partitionId, connectionId,
-                    lastPacketTimestamp.toInstant(), expiringQueue.getLatestPossibleKeyValue());
+            behavioralPolicy.onNewDataArrivingAfterItsAccumulationHadBeenRemoved(partitionId, connectionId);
             return false;
         }
         if (timestampMillis.test(lastPacketTimestamp, (newTs, lastTs) -> newTs > lastTs)) {
@@ -109,10 +109,10 @@ public class ExpiringTrafficStreamMap {
         if (targetBucketHashSet == null) {
             var startOfWindow = expiringQueue.firstKey().toInstant();
             assert !timestampMillis.test(startOfWindow, (ts, windowStart) -> ts < windowStart) :
-                    "Only expected to not find the target bucket when the incoming timestamp was before the " +
+                    "Only expected to NOT find the target bucket when the incoming timestamp was before the " +
                             "expiring queue's time window";
             behavioralPolicy.onDataArrivingBeforeTheStartOfTheCurrentProcessingWindow(partitionId, connectionId,
-                    timestampMillis.toInstant(), expiringQueue.getLatestPossibleKeyValue());
+                    timestampMillis.toInstant(), latestPossibleKeyValueAtIncoming);
             return false;
         }
         if (lastPacketTimestamp.millis > ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL) {
@@ -120,7 +120,8 @@ public class ExpiringTrafficStreamMap {
             if (sourceBucket != targetBucketHashSet) {
                 if (sourceBucket == null) {
                     behavioralPolicy.onNewDataArrivingAfterItsAccumulationHasBeenExpired(partitionId, connectionId,
-                            timestampMillis.toInstant(), expiringQueue.getLatestPossibleKeyValue());
+                            timestampMillis.toInstant(), lastPacketTimestamp.millis,
+                            latestPossibleKeyValueAtIncoming, minimumGuaranteedLifetime);
                     return false;
                 }
                 // this will do nothing if it was already removed, such as in the previous recursive run

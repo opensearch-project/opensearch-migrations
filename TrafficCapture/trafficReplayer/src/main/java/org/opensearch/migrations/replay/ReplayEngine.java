@@ -10,7 +10,6 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -25,7 +24,6 @@ public class ReplayEngine {
     private final AtomicLong lastCompletedSourceTimeEpochMs;
     private final AtomicLong lastIdleUpdatedTimestampEpochMs;
     private final TimeShifter timeShifter;
-    private final double maxSpeedupFactor;
     private static final MetricsLogger metricsLogger = new MetricsLogger("ReplayEngine");
     /**
      * If this proves to be a contention bottleneck, we can move to a scheme with ThreadLocals
@@ -47,12 +45,10 @@ public class ReplayEngine {
      */
     public ReplayEngine(RequestSenderOrchestrator networkSendOrchestrator,
                         BufferedTimeController contentTimeController,
-                        TimeShifter timeShifter,
-                        double maxSpeedupFactor) {
+                        TimeShifter timeShifter) {
         this.networkSendOrchestrator = networkSendOrchestrator;
         this.contentTimeController = contentTimeController;
         this.timeShifter = timeShifter;
-        this.maxSpeedupFactor = maxSpeedupFactor;
         this.totalCountOfScheduledTasksOutstanding = new AtomicLong();
         this.lastCompletedSourceTimeEpochMs = new AtomicLong(0);
         this.lastIdleUpdatedTimestampEpochMs = new AtomicLong(0);
@@ -89,7 +85,10 @@ public class ReplayEngine {
         var currentSourceTimeEpochMs = currentSourceTimeOp.get().toEpochMilli();
         var lastUpdatedTimeEpochMs =
                 Math.max(lastCompletedSourceTimeEpochMs.get(), lastIdleUpdatedTimestampEpochMs.get());
-        var maxSkipTimeEpochMs = lastUpdatedTimeEpochMs + (long) (getUpdatePeriodMs()*this.maxSpeedupFactor);
+        var maxSkipTimeEpochMs =
+                //(lastUpdatedTimeEpochMs == 0 ? currentSourceTimeEpochMs : lastUpdatedTimeEpochMs) +
+                        lastUpdatedTimeEpochMs +
+                        (long) (getUpdatePeriodMs()*this.timeShifter.maxRateMultiplier());
         lastIdleUpdatedTimestampEpochMs.set(Math.min(currentSourceTimeEpochMs, maxSkipTimeEpochMs));
         contentTimeController.stopReadsPast(Instant.ofEpochMilli(lastIdleUpdatedTimestampEpochMs.get()));
     }
@@ -101,10 +100,15 @@ public class ReplayEngine {
     }
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
-    hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp) {
+    hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp,
+                             UniqueRequestKey requestKey, String taskDescription) {
         return future.map(f->f
                         .whenComplete((v,t)->Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
-                        .whenComplete((v,t)->totalCountOfScheduledTasksOutstanding.decrementAndGet())
+                        .whenComplete((v,t)->{
+                            var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
+                            log.atInfo().setMessage(()->"Scheduled task '" + taskDescription + "' finished ("
+                                    + requestKey + ") decremented tasksOutstanding to "+newCount).log();
+                        })
                         .whenComplete((v,t)->contentTimeController.stopReadsPast(timestamp))
                         .whenComplete((v,t)->log.atDebug().
                                 setMessage(()->"work finished and used timestamp="+timestamp+" for updates " +
@@ -112,25 +116,31 @@ public class ReplayEngine {
                 ()->"Updating fields for callers to poll progress and updating backpressure");
     }
 
+    private static void logStartOfWork(UniqueRequestKey requestKey, long newCount, Instant start, String label) {
+        log.atInfo().setMessage(()->"Scheduling '" + label + "' (" + requestKey +
+                ") to run at " + start + " incremented tasksOutstanding to "+ newCount).log();
+    }
+
     public <T> DiagnosticTrackableCompletableFuture<String, T>
-    scheduleTransformationWork(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
+    scheduleTransformationWork(UniqueRequestKey requestKey, Instant originalStart,
                                Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        log.atDebug().setMessage(()->"scheduleWork: incremented tasksOutstanding to "+newCount).log();
+        final String label = "processing";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
-        var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
-        var result = networkSendOrchestrator.scheduleWork(requestKey, end.minus(EXPECTED_TRANSFORMATION_DURATION) ,task);
-        return hookWorkFinishingUpdates(result, originalStart);
+        logStartOfWork(requestKey, newCount, start, label);
+        var result = networkSendOrchestrator.scheduleWork(requestKey, start.minus(EXPECTED_TRANSFORMATION_DURATION), task);
+        return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
     scheduleRequest(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        log.atDebug().setMessage(()->"scheduleRequest: incremented tasksOutstanding to "+newCount).log();
+        final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
+        logStartOfWork(requestKey, newCount, start, label);
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", requestKey.toString())
                 .addKeyValue("connectionId", requestKey.connectionId)
@@ -138,15 +148,16 @@ public class ReplayEngine {
                 .addKeyValue("scheduledStartTime", start.toString())
                 .setMessage("Request scheduled to be sent").log();
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);
-        return hookWorkFinishingUpdates(sendResult, originalStart);
+        return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }
 
     public void closeConnection(UniqueRequestKey requestKey, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        log.atDebug().setMessage(()->"scheduleClose: incremented tasksOutstanding to "+newCount).log();
-        var future = networkSendOrchestrator
-                .scheduleClose(requestKey, timeShifter.transformSourceTimeToRealTime(timestamp));
-        hookWorkFinishingUpdates(future, timestamp);
+        final String label = "close";
+        var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
+        logStartOfWork(requestKey, newCount, atTime, label);
+        var future = networkSendOrchestrator.scheduleClose(requestKey, atTime);
+        hookWorkFinishingUpdates(future, timestamp, requestKey, label);
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void> close() {
@@ -159,5 +170,9 @@ public class ReplayEngine {
 
     public int getNumConnectionsClosed() {
         return networkSendOrchestrator.clientConnectionPool.getNumConnectionsClosed();
+    }
+
+    public void setFirstTimestamp(Instant firstPacketTimestamp) {
+        timeShifter.setFirstTimestamp(firstPacketTimestamp);
     }
 }

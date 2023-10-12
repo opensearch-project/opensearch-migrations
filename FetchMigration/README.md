@@ -55,7 +55,7 @@ python -m pip install -r index_configuration_tool/requirements.txt
 After [setup](#setup), the tool can be executed using:
 
 ```shell
-python index_configuration_tool/pre_migration.py <pipeline_yaml_path> <output_file>
+python index_configuration_tool/metadata_migration.py <pipeline_yaml_path> <output_file>
 ```
 
 ### Docker

@@ -1,0 +1,47 @@
+name: E2E Testing
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK
+        uses: actions/setup-java@v2
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+
+      - name: Start Docker Solution
+        run: |
+          cd TrafficCapture
+          chmod +x ./gradlew
+          ./gradlew dockerSolution:ComposeUp
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          cd test
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 
+
+
+      - name: Run E2E test script
+        run: |
+          cd test
+          chmod +x ./tests.py
+          pytest -n 3 tests.py

@@ -36,7 +36,7 @@ public class Accumulation {
     }
 
     public UniqueRequestKey getRequestId() {
-        return rrPair.connectionId;
+        return rrPair.requestKey;
     }
 
     public AtomicLong getNewestPacketTimestampInMillisReference() {

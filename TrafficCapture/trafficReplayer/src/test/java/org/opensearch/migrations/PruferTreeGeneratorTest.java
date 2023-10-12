@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -10,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Random;
 import java.util.stream.IntStream;
 
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class PruferTreeGeneratorTest {
 
     @Test

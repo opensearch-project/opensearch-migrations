@@ -4,6 +4,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -24,6 +25,7 @@ import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 
 import javax.net.ssl.SSLException;
@@ -42,6 +44,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 class NettyPacketToHttpConsumerTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
@@ -123,7 +126,7 @@ class NettyPacketToHttpConsumerTest {
             var testServer = testServers.get(useTls);
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-            var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4),
+            var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
                     testServer.localhostEndpoint(), sslContext, "unitTest"+i,
                     new UniqueRequestKey("testConnectionId", 0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
@@ -147,17 +150,19 @@ class NettyPacketToHttpConsumerTest {
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
                 new JsonJoltTransformBuilder().build(), null);
+        var timeShifter = new TimeShifter();
+        timeShifter.setFirstTimestamp(Instant.now());
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
                         new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
-                new TestTimeController(), new TimeShifter(), 2.0);
+                new TestTimeController(), timeShifter);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, Instant.now(), Instant.now(),
                         new UniqueRequestKey(connId, i),
-                        Stream.of(Unpooled.wrappedBuffer(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8))));
+                        ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 log.info("requestFinishFuture="+requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();
                 log.debug("Got aggregated response=" + aggregatedResponse);

@@ -9,8 +9,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.CompositeByteBuf;
-import io.netty.util.ResourceLeakDetector;
-import io.netty.util.ResourceLeakDetectorFactory;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +28,7 @@ import java.util.function.Supplier;
  * the memory load rather than expanding the working set for a large textual stream.
  */
 @Slf4j
-public class JsonEmitter {
+public class JsonEmitter implements AutoCloseable {
 
     public final static int NUM_SEGMENT_THRESHOLD = 256;
 
@@ -63,37 +61,40 @@ public class JsonEmitter {
         }
     }
 
-    static class ImmediateByteBufOutputStream extends OutputStream {
+    static class ChunkingByteBufOutputStream extends OutputStream {
+        private final ByteBufAllocator byteBufAllocator;
         @Getter
         CompositeByteBuf compositeByteBuf;
-        ResourceLeakDetector<ByteBuf> leakDetector = ResourceLeakDetectorFactory.instance()
-                .newResourceLeakDetector(ByteBuf.class);
 
-        public ImmediateByteBufOutputStream() {
-            compositeByteBuf = ByteBufAllocator.DEFAULT.compositeBuffer();
+        public ChunkingByteBufOutputStream(ByteBufAllocator byteBufAllocator) {
+            this.byteBufAllocator = byteBufAllocator;
+            compositeByteBuf = byteBufAllocator.compositeBuffer();
         }
 
         @Override
         public void write(int b) throws IOException {
-            var byteBuf = ByteBufAllocator.DEFAULT.buffer(1);
+            var byteBuf = byteBufAllocator.buffer(1);
             write(byteBuf.writeByte(b));
         }
 
         @Override
         public void write(byte[] buff, int offset, int len) throws IOException {
-            var byteBuf = ByteBufAllocator.DEFAULT.buffer(len - offset);
+            var byteBuf = byteBufAllocator.buffer(len - offset);
             write(byteBuf.writeBytes(buff, offset, len));
         }
 
         private void write(ByteBuf byteBuf) {
-            leakDetector.track(byteBuf);
             compositeByteBuf.addComponents(true, byteBuf);
         }
 
         @Override
-        public void close() throws IOException {
+        public void close() {
             compositeByteBuf.release();
-            super.close();
+            try {
+                super.close();
+            } catch (IOException e) {
+                throw new RuntimeException("Expected OutputStream::close() to be empty as per docs in Java 11");
+            }
         }
 
         /**
@@ -103,22 +104,27 @@ public class JsonEmitter {
          */
         public ByteBuf recycleByteBufRetained() {
             var rval = compositeByteBuf;
-            compositeByteBuf = ByteBufAllocator.DEFAULT.compositeBuffer(rval.maxNumComponents());
+            compositeByteBuf = byteBufAllocator.compositeBuffer(rval.maxNumComponents());
             return rval;
         }
     }
 
     private JsonGenerator jsonGenerator;
-    private ImmediateByteBufOutputStream outputStream;
+    private ChunkingByteBufOutputStream outputStream;
     private ObjectMapper objectMapper;
     private Stack<LevelContext> cursorStack;
 
     @SneakyThrows
-    public JsonEmitter() {
-        outputStream = new ImmediateByteBufOutputStream();
+    public JsonEmitter(ByteBufAllocator byteBufAllocator) {
+        outputStream = new ChunkingByteBufOutputStream(byteBufAllocator);
         jsonGenerator = new JsonFactory().createGenerator(outputStream, JsonEncoding.UTF8);
         objectMapper = new ObjectMapper();
         cursorStack = new Stack<>();
+    }
+
+    @Override
+    public void close() {
+        outputStream.close();
     }
 
     /**

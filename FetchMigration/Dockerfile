@@ -6,13 +6,13 @@ RUN apk update
 RUN apk add --no-cache python3 py-pip
 RUN pip install --user -r requirements.txt
 
-ENV ICT_CODE_PATH /code
-WORKDIR $ICT_CODE_PATH
+ENV FM_CODE_PATH /code
+WORKDIR $FM_CODE_PATH
 # Copy only source code
 COPY python/*.py .
 
 # update PATH
 ENV PATH=/root/.local:$PATH
 
-# make sure you include the -u flag to have our stdout logged
-ENTRYPOINT python -u ./main.py -r $ICT_CODE_PATH/input.yaml $DATA_PREPPER_PATH/pipelines/pipelines.yaml; $DATA_PREPPER_PATH/bin/data-prepper
+# Include the -u flag to have stdout logged
+ENTRYPOINT python -u ./fetch_orchestrator.py $DATA_PREPPER_PATH $FM_CODE_PATH/input.yaml https://localhost:4900

@@ -9,6 +9,7 @@ import io.netty.channel.EventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.DefaultPromise;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -37,7 +38,8 @@ public class ClientConnectionPool {
     public ClientConnectionPool(URI serverUri, SslContext sslContext, int numThreads) {
         this.serverUri = serverUri;
         this.sslContext = sslContext;
-        this.eventLoopGroup = new NioEventLoopGroup(numThreads);
+        this.eventLoopGroup =
+                new NioEventLoopGroup(numThreads, new DefaultThreadFactory("targetConnectionPool"));
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(new CacheLoader<>() {
             @Override
@@ -55,16 +57,17 @@ public class ClientConnectionPool {
     }
 
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getResilientClientChannelProducer(EventLoop eventLoop, String s) {
+    getResilientClientChannelProducer(EventLoop eventLoop, String diagnosticLabel) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var clientConnectionChannelCreatedFuture =
                             new StringTrackableCompletableFuture<ChannelFuture>(new CompletableFuture<>(),
                                     () -> "waiting for createClientConnection to finish");
-                    var channelFuture =
-                            NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, serverUri, s);
+                    var channelFuture = NettyPacketToHttpConsumer.createClientConnection(eventLoop,
+                            sslContext, serverUri, diagnosticLabel);
                     channelFuture.addListener(f -> {
-                        log.atTrace().setMessage(()->s + " ChannelFuture result for create=" + f.isSuccess()).log();
+                        log.atInfo().setMessage(()->
+                                "New network connection result for " + diagnosticLabel + "=" + f.isSuccess()).log();
                         if (f.isSuccess()) {
                             clientConnectionChannelCreatedFuture.future.complete(channelFuture);
                         } else {
@@ -118,7 +121,7 @@ public class ClientConnectionPool {
     }
 
     public void closeConnection(String connId) {
-        log.atDebug().setMessage(() -> "closing connection for " + connId).log();
+        log.atInfo().setMessage(() -> "closing connection for " + connId).log();
         var channelsFuture = connectionId2ChannelCache.getIfPresent(connId);
         if (channelsFuture != null) {
             closeClientConnectionChannel(channelsFuture);
@@ -146,8 +149,12 @@ public class ClientConnectionPool {
 
     @SneakyThrows
     public ConnectionReplaySession getCachedSession(UniqueRequestKey requestKey, boolean dontCreate) {
-        return dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.connectionId) :
+        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.connectionId) :
                 connectionId2ChannelCache.get(requestKey.connectionId);
+        if (crs != null) {
+            crs.setCurrentConnectionId(requestKey);
+        }
+        return crs;
     }
 
     private DiagnosticTrackableCompletableFuture<String, Channel>
@@ -168,9 +175,11 @@ public class ClientConnectionPool {
                                         }
                                     });
                             if (!channelAndFutureWork.hasWorkRemaining()) {
-                                log.atWarn().setMessage(()->"Work items are still remaining.  "
-                                        + channelAndFutureWork.calculateSizeSlowly() + " " +
-                                        "requests that were enqueued won't be run").log();
+                                log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
+                                        "(last associated with connection=" +
+                                        channelAndFutureWork.getCurrentConnectionId() +
+                                        ").  " + channelAndFutureWork.calculateSizeSlowly() +
+                                        " requests that were enqueued won't be run").log();
                             }
                         })
                         .exceptionally(t->{channelClosedFuture.future.completeExceptionally(t);return null;}),

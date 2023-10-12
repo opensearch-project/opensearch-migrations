@@ -5,6 +5,7 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -13,13 +14,10 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
-import javax.net.ssl.SSLException;
-import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 class TrafficReplayerTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
@@ -132,7 +131,7 @@ class TrafficReplayerTest {
         }
     }
 
-    private byte[] synthesizeTrafficStreamsIntoByteArray(Instant timestamp, int numStreams) throws IOException {
+    static byte[] synthesizeTrafficStreamsIntoByteArray(Instant timestamp, int numStreams) throws IOException {
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
             for (int i=0; i<numStreams; ++i) {
@@ -148,7 +147,7 @@ class TrafficReplayerTest {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
+                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         (id,request) -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
@@ -178,6 +177,7 @@ class TrafficReplayerTest {
         var remainingAccumulations = new AtomicInteger();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
+                        "update the test!",
                         (id,request) -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
@@ -224,7 +224,7 @@ class TrafficReplayerTest {
         var gotWarning = new AtomicBoolean();
         var gotAnythingElse = new AtomicBoolean();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
+                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         (id,request) -> { gotAnythingElse.set(true); },
                         fullPair -> { gotAnythingElse.set(true); },
                         (requestKey,ts) -> {},

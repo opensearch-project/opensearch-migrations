@@ -1,6 +1,8 @@
 import argparse
+import logging
 import time
 from typing import Optional, List
+import math
 
 import requests
 from prometheus_client import Metric
@@ -41,41 +43,58 @@ def get_metric_value(metric_families: List, metric_suffix: str) -> Optional[int]
     return None
 
 
-def check_if_complete(doc_count: Optional[int], in_flight: Optional[int], no_part_count: Optional[int],
-                      prev_no_part_count: int, target: int) -> bool:
+def check_if_complete(doc_count: Optional[int], in_flight: Optional[int], no_partition_count: Optional[int],
+                      prev_no_partition: int, target: int) -> bool:
     # Check for target doc_count
     # TODO Add a check for partitionsCompleted = indices
     if doc_count is not None and doc_count >= target:
         # Check for idle pipeline
+        logging.info("Target doc count reached, checking for idle pipeline...")
+        # Debug metrics
+        if logging.getLogger().isEnabledFor(logging.DEBUG):  # pragma no cover
+            debug_msg_template: str = "Idle pipeline metrics - " + \
+                "Records in flight: [{0}], " + \
+                "No-partitions counter: [{1}]" + \
+                "Previous no-partition value: [{2}]"
+            logging.debug(debug_msg_template.format(in_flight, no_partition_count, prev_no_partition))
+
         if in_flight is not None and in_flight == 0:
             # No-partitions metrics should steadily tick up
-            if no_part_count is not None and no_part_count > prev_no_part_count > 0:
+            if no_partition_count is not None and no_partition_count > prev_no_partition > 0:
                 return True
     return False
 
 
-def run(args: MigrationMonitorParams, wait_seconds: int = 30) -> None:
+def run(args: MigrationMonitorParams, poll_interval_seconds: int = 30) -> None:
     # TODO Remove hardcoded EndpointInfo
     default_auth = ('admin', 'admin')
-    endpoint = EndpointInfo(args.dp_endpoint, default_auth, False)
+    endpoint = EndpointInfo(args.data_prepper_endpoint, default_auth, False)
+    target_doc_count: int = args.target_count
     prev_no_partitions_count = 0
     terminal = False
+    logging.info("Starting migration monitor until target doc count: " + str(target_doc_count))
     while not terminal:
+        time.sleep(poll_interval_seconds)
         # If the API call fails, the response is empty
         metrics = fetch_prometheus_metrics(endpoint)
         if metrics is not None:
             success_docs = get_metric_value(metrics, __DOC_SUCCESS_METRIC)
             rec_in_flight = get_metric_value(metrics, __RECORDS_IN_FLIGHT_METRIC)
             no_partitions_count = get_metric_value(metrics, __NO_PARTITIONS_METRIC)
+            if success_docs is not None:  # pragma no cover
+                completion_percentage: int = math.floor((success_docs * 100) / target_doc_count)
+                progress_message: str = "Completed " + str(success_docs) + \
+                                        " docs ( " + str(completion_percentage) + "% )"
+                logging.info(progress_message)
+            else:
+                logging.info("Could not fetch metrics from Data Prepper, will retry on next polling cycle...")
             terminal = check_if_complete(success_docs, rec_in_flight, no_partitions_count,
-                                         prev_no_partitions_count, args.target_count)
+                                         prev_no_partitions_count, target_doc_count)
             if not terminal:
                 # Save no_partitions_count
                 prev_no_partitions_count = no_partitions_count
-
-        if not terminal:
-            time.sleep(wait_seconds)
     # Loop terminated, shut down the Data Prepper pipeline
+    logging.info("Migration monitor observed successful migration and idle pipeline, shutting down...\n")
     shutdown_pipeline(endpoint)
 
 
@@ -90,7 +109,7 @@ if __name__ == '__main__':  # pragma no cover
     )
     # Required positional arguments
     arg_parser.add_argument(
-        "dp_endpoint",
+        "data_prepper_endpoint",
         help="URL endpoint for the running Data Prepper process"
     )
     arg_parser.add_argument(
@@ -100,5 +119,5 @@ if __name__ == '__main__':  # pragma no cover
     )
     namespace = arg_parser.parse_args()
     print("\n##### Starting monitor tool... #####\n")
-    run(MigrationMonitorParams(namespace.target_count, namespace.dp_endpoint))
+    run(MigrationMonitorParams(namespace.target_count, namespace.data_prepper_endpoint))
     print("\n##### Ending monitor tool... #####\n")

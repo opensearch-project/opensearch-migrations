@@ -6,12 +6,14 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Map;
 
 @Slf4j
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 class JsonTransformerTest {
     public static final String DUMMY_HOSTNAME_TEST_STRING = "THIS_IS_A_TEST_STRING_THAT_ONLY_EXISTS_IN_ONE_PLACE";
     ObjectMapper mapper = new ObjectMapper();

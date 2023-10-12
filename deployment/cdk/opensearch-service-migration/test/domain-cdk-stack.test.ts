@@ -21,12 +21,12 @@ test('Test primary context options are mapped with standard data type', () => {
                 "Version": "2012-10-17",
                 "Statement": [{
                     "Effect": "Allow",
-                    "Principal": {"AWS": "arn:aws:iam::123456789123:user/test-user"},
+                    "Principal": {"AWS": "arn:aws:iam::12345678912:user/test-user"},
                     "Action": "es:ESHttp*",
-                    "Resource": "arn:aws:es:us-east-1:123456789123:domain/cdk-os-service-domain/*"
+                    "Resource": "arn:aws:es:us-east-1:12345678912:domain/cdk-os-service-domain/*"
                 }]
             },
-            fineGrainedManagerUserARN: "arn:aws:iam::123456789123:user/test-user",
+            fineGrainedManagerUserARN: "arn:aws:iam::12345678912:user/test-user",
             enforceHTTPS: true,
             tlsSecurityPolicy: "TLS_1_2",
             ebsEnabled: true,
@@ -34,9 +34,9 @@ test('Test primary context options are mapped with standard data type', () => {
             ebsVolumeSize: 15,
             ebsVolumeType: "GP3",
             encryptionAtRestEnabled: true,
-            encryptionAtRestKmsKeyARN: "arn:aws:kms:us-east-1:123456789123:key/abc123de-4888-4fa7-a508-3811e2d49fc3",
+            encryptionAtRestKmsKeyARN: "arn:aws:kms:us-east-1:12345678912:key/abc123de-4888-4fa7-a508-3811e2d49fc3",
             loggingAppLogEnabled: true,
-            loggingAppLogGroupARN: "arn:aws:logs:us-east-1:123456789123:log-group:test-log-group:*",
+            loggingAppLogGroupARN: "arn:aws:logs:us-east-1:12345678912:log-group:test-log-group:*",
             nodeToNodeEncryptionEnabled: true,
             vpcEnabled: true,
             vpcId: "vpc-123456789abcdefgh",
@@ -71,8 +71,8 @@ test('Test primary context options are mapped with only string data type', () =>
             dedicatedManagerNodeCount: "3",
             warmNodeType: "ultrawarm1.medium.search",
             warmNodeCount: "2",
-            accessPolicies: "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"arn:aws:iam::123456789123:user/test-user\"},\"Action\":\"es:ESHttp*\",\"Resource\":\"arn:aws:es:us-east-1:123456789123:domain/cdk-os-service-domain/*\"}]}",
-            fineGrainedManagerUserARN: "arn:aws:iam::123456789123:user/test-user",
+            accessPolicies: "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"arn:aws:iam::12345678912:user/test-user\"},\"Action\":\"es:ESHttp*\",\"Resource\":\"arn:aws:es:us-east-1:12345678912:domain/cdk-os-service-domain/*\"}]}",
+            fineGrainedManagerUserARN: "arn:aws:iam::12345678912:user/test-user",
             enforceHTTPS: "true",
             tlsSecurityPolicy: "TLS_1_2",
             ebsEnabled: "true",
@@ -80,9 +80,9 @@ test('Test primary context options are mapped with only string data type', () =>
             ebsVolumeSize: "15",
             ebsVolumeType: "GP3",
             encryptionAtRestEnabled: "true",
-            encryptionAtRestKmsKeyARN: "arn:aws:kms:us-east-1:123456789123:key/abc123de-4888-4fa7-a508-3811e2d49fc3",
+            encryptionAtRestKmsKeyARN: "arn:aws:kms:us-east-1:12345678912:key/abc123de-4888-4fa7-a508-3811e2d49fc3",
             loggingAppLogEnabled: "true",
-            loggingAppLogGroupARN: "arn:aws:logs:us-east-1:123456789123:log-group:test-log-group:*",
+            loggingAppLogGroupARN: "arn:aws:logs:us-east-1:12345678912:log-group:test-log-group:*",
             nodeToNodeEncryptionEnabled: "true",
             vpcEnabled: "true",
             vpcId: "vpc-123456789abcdefgh",
@@ -111,7 +111,7 @@ test('Test alternate context options are mapped with standard data type', () => 
         context: {
             useUnsignedBasicAuth: true,
             fineGrainedManagerUserName: "admin",
-            fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:123456789123:secret:master-user-os-pass-123abc",
+            fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
             // Fine-grained access requires enforceHTTPS, encryptionAtRest, and nodeToNodeEncryption to be enabled
             enforceHTTPS: true,
             encryptionAtRestEnabled: true,
@@ -132,7 +132,7 @@ test('Test alternate context options are mapped with only string data type', () 
         context: {
             useUnsignedBasicAuth: "true",
             fineGrainedManagerUserName: "admin",
-            fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:123456789123:secret:master-user-os-pass-123abc",
+            fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
             // Fine-grained access requires enforceHTTPS, encryptionAtRest, and nodeToNodeEncryption to be enabled
             enforceHTTPS: "true",
             encryptionAtRestEnabled: "true",
@@ -268,7 +268,7 @@ function assertPrimaryDomainStackTemplate(template: Template) {
         AdvancedSecurityOptions: {
             Enabled: true,
             MasterUserOptions: {
-                MasterUserARN: "arn:aws:iam::123456789123:user/test-user"
+                MasterUserARN: "arn:aws:iam::12345678912:user/test-user"
             }
         },
         ClusterConfig: {
@@ -300,7 +300,7 @@ function assertPrimaryDomainStackTemplate(template: Template) {
         },
         LogPublishingOptions: {
             ES_APPLICATION_LOGS: {
-                CloudWatchLogsLogGroupArn: "arn:aws:logs:us-east-1:123456789123:log-group:test-log-group:*",
+                CloudWatchLogsLogGroupArn: "arn:aws:logs:us-east-1:12345678912:log-group:test-log-group:*",
                 Enabled: true
             }
         },
@@ -334,7 +334,7 @@ function assertAlternateDomainStackTemplate(template: Template) {
             Enabled: true,
             MasterUserOptions: {
                 MasterUserName: "admin",
-                MasterUserPassword: "{{resolve:secretsmanager:arn:aws:secretsmanager:us-east-1:123456789123:secret:master-user-os-pass-123abc:SecretString:::}}"
+                MasterUserPassword: "{{resolve:secretsmanager:arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc:SecretString:::}}"
             }
         }
     })

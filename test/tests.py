@@ -7,6 +7,7 @@ import os
 import logging
 import time
 import requests
+import uuid
 from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 # times every "delay" seconds IF the requests returned a status code other than what's expected.
 # So this "retry_request" function's arguments are a request function's name and whatever arguments that function
 # expects, and the status code the request function is expecting to get.
-def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, delay: float = 0.5,
+def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 15, delay: float = 1.5,
                   expected_status_code: HTTPStatus = None):
     for attempt in range(1, max_attempts + 1):
         try:
@@ -48,20 +49,20 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 10, d
 class E2ETests(unittest.TestCase):
     def set_common_values(self):
         self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
-        self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'http://localhost:19200')
+        self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:19200')
         self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
         self.jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
         self.username = os.getenv('username', 'admin')
         self.password = os.getenv('password', 'admin')
         self.auth = (self.username, self.password)
-        self.index = "my_index"
+        self.index = f"my_index_{uuid.uuid4()}"
         self.doc_id = '7'
 
     def setUp(self):
         self.set_common_values()
         retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
-        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.auth),
+        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.doc_id, self.auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
 
     def tearDown(self):
@@ -122,7 +123,8 @@ class E2ETests(unittest.TestCase):
         source_response = get_document(self.source_endpoint, self.index, self.doc_id, self.auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        target_response = get_document(self.target_endpoint, self.index, self.doc_id, self.auth)
+        target_response = retry_request(get_document, args=(self.target_endpoint, self.index, self.doc_id, self.auth),
+                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
 
         # Comparing the document's content on both endpoints, asserting that they match.

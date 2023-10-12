@@ -8,6 +8,7 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 
@@ -23,11 +24,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPInputStream;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 public class AddCompressionEncodingTest {
 
     public static final byte BYTE_FILL_VALUE = (byte) '7';
 
     @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void addingCompressionRequestHeaderCompressesPayload() throws ExecutionException, InterruptedException, IOException {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
 
