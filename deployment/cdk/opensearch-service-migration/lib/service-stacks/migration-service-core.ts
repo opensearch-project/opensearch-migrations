@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import {ISecurityGroup, IVpc, SubnetType, Vpc} from "aws-cdk-lib/aws-ec2";
+import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
     Cluster,
     ContainerImage,
@@ -10,20 +10,19 @@ import {
     PortMapping,
     Volume
 } from "aws-cdk-lib/aws-ecs";
-import {Construct} from "constructs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly serviceName: string,
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
-    readonly dockerFilePath: string,
+    readonly dockerFilePath?: string,
+    readonly dockerImageRegistryName?: string,
     readonly dockerImageCommand?: string[],
     readonly taskRolePolicies?: PolicyStatement[],
     readonly mountPoints?: MountPoint[],
@@ -40,11 +39,11 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
 
 export class MigrationServiceCore extends Stack {
 
-    constructor(scope: Construct, id: string, props: StackPropsExt) {
-        super(scope, id, props);
-    }
-
     createService(props: MigrationServiceCoreProps) {
+        if ((!props.dockerFilePath && !props.dockerImageRegistryName) || (props.dockerFilePath && props.dockerImageRegistryName)) {
+            throw new Error(`Exactly one option [dockerFilePath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
+        }
+
         // TODO is ecsClusterARN needed now?
         //const ecsCluster = Cluster.fromClusterArn(this, 'ecsCluster', StringParameter.valueForStringParameter(this, `/migration/${props.stage}/ecsClusterARN`))
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
@@ -83,9 +82,16 @@ export class MigrationServiceCore extends Stack {
             props.volumes.forEach(vol => serviceTaskDef.addVolume(vol))
         }
 
-        const serviceImage = new DockerImageAsset(this, "ServiceImage", {
-            directory: props.dockerFilePath
-        });
+        let serviceImage
+        if (props.dockerFilePath) {
+            serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
+                directory: props.dockerFilePath
+            }))
+        }
+        else {
+            // @ts-ignore
+            serviceImage = ContainerImage.fromRegistry(props.dockerImageRegistryName)
+        }
 
         const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
             retention: RetentionDays.ONE_MONTH,
@@ -94,7 +100,7 @@ export class MigrationServiceCore extends Stack {
         });
 
         const serviceContainer = serviceTaskDef.addContainer("ServiceContainer", {
-            image: ContainerImage.fromDockerImageAsset(serviceImage),
+            image: serviceImage,
             containerName: props.serviceName,
             command: props.dockerImageCommand,
             environment: props.environment,
@@ -108,7 +114,7 @@ export class MigrationServiceCore extends Stack {
             serviceContainer.addMountPoints(...props.mountPoints)
         }
 
-        const serviceFargateService = new FargateService(this, "ServiceFargateService", {
+        new FargateService(this, "ServiceFargateService", {
             serviceName: `migration-${props.stage}-${props.serviceName}`,
             cluster: ecsCluster,
             taskDefinition: serviceTaskDef,

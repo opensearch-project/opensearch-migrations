@@ -9,21 +9,13 @@ import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 
-export interface CaptureProxyESProps extends StackPropsExt {
+export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
 }
 
-/**
- * The stack for the "capture-proxy-es" service. This service will spin up a Capture Proxy instance
- * and an Elasticsearch with Search Guard instance on a single container. You will also find in this directory these two
- * items split into their own services to give more flexibility in setup. A current limitation of this joined approach
- * is that we are currently unable to expose two ports (one for the capture proxy and one for elasticsearch) to other
- * services from a limitation to only allow exposing the default path "/" to a single port, in our case we will expose
- * the Capture Proxy port. If elasticsearch needs to be accessed directly it would need to be done from this container.
- */
-export class CaptureProxyESStack extends MigrationServiceCore {
+export class CaptureProxyStack extends MigrationServiceCore {
 
-    constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
+    constructor(scope: Construct, id: string, props: CaptureProxyProps) {
         super(scope, id, props)
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/serviceConnectSecurityGroupId`)),
@@ -31,14 +23,14 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         ]
 
         const servicePort: PortMapping = {
-            name: "capture-proxy-es-connect",
+            name: "capture-proxy-connect",
             hostPort: 9200,
             containerPort: 9200,
             protocol: Protocol.TCP
         }
         const serviceConnectService: ServiceConnectService = {
-            portMappingName: "capture-proxy-es-connect",
-            dnsName: "capture-proxy-es",
+            portMappingName: "capture-proxy-connect",
+            dnsName: "capture-proxy",
             port: 9200
         }
 
@@ -64,19 +56,15 @@ export class CaptureProxyESStack extends MigrationServiceCore {
 
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskBrokers`);
         this.createService({
-            serviceName: "capture-proxy-es",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
-            dockerImageCommand: ['/bin/sh', '-c', `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1`],
+            serviceName: "capture-proxy",
+            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer/Dockerfile"),
+            dockerImageCommand: ['/bin/sh', '-c', `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri https://elasticsearch:9200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`],
             securityGroups: securityGroups,
             taskRolePolicies: [mskClusterConnectPolicy, mskTopicProducerPolicy],
             portMappings: [servicePort],
-            environment: {
-                // Set Elasticsearch port to 19200 to allow capture proxy at port 9200
-                "http.port": "19200"
-            },
             serviceConnectServices: [serviceConnectService],
-            taskCpuUnits: 1024,
-            taskMemoryLimitMiB: 4096,
+            taskCpuUnits: 512,
+            taskMemoryLimitMiB: 2048,
             ...props
         });
     }

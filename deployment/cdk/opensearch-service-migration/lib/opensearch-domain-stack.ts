@@ -153,12 +153,12 @@ export class OpenSearchDomainStack extends Stack {
     });
 
     if (domain.masterUserPassword && !adminUserSecret) {
-      console.log(`A OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${props.stage}/osUserAndSecret`)
+      console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${props.stage}/osUserAndSecret`)
     }
     else if (domain.masterUserPassword && adminUserSecret) {
-      new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecret', {
+      new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
         description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
-        parameterName: `/migration/${props.stage}/osUserAndSecret`,
+        parameterName: `/migration/${props.stage}/osUserAndSecretArn`,
         stringValue: `${adminUserName} ${adminUserSecret.secretArn}`
       });
     }
