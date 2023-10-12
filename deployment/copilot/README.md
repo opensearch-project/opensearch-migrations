@@ -84,7 +84,7 @@ The provided CDK will output export commands once deployed that can be ran on a 
 ```
 export MIGRATION_DOMAIN_SG_ID=sg-123;
 export MIGRATION_DOMAIN_ENDPOINT=vpc-aos-domain-123.us-east-1.es.amazonaws.com;
-export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:123456789123:secret:demo-user-secret-123abc
+export MIGRATION_DOMAIN_USER_AND_SECRET_ARN=admin arn:aws:secretsmanager:us-east-1:12345678912:secret:demo-user-secret-123abc
 export MIGRATION_VPC_ID=vpc-123;
 export MIGRATION_CAPTURE_MSK_SG_ID=sg-123;
 export MIGRATION_COMPARATOR_EFS_ID=fs-123;
@@ -193,7 +193,11 @@ copilot svc exec -a migration-copilot -e dev -n migration-console -c "bash"
 
 ### Addons
 
-Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. An example of this can be seen in the [traffic-replayer](traffic-replayer/addons/taskRole.yml) service which has an `addons` directory and yaml file which adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK.
+Addons are a Copilot concept for adding additional AWS resources outside the core ECS resources that it sets up. 
+
+An example of this can be seen in the `traffic-replayer/addons/taskRole.yml`  service which has an `addons` directory and yaml file.
+
+That yaml file adds an IAM ManagedPolicy to the task role that Copilot creates for the service. This added policy is to allow communication with MSK. (Note that `taskRole.yml` will only exist after building.)
 
 Official documentation on Addons can be found [here](https://aws.github.io/copilot-cli/docs/developing/addons/workload/).
 

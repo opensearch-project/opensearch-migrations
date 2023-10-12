@@ -7,8 +7,8 @@ import utils
 
 # Constants
 from endpoint_info import EndpointInfo
-from pre_migration_params import PreMigrationParams
-from pre_migration_result import PreMigrationResult
+from metadata_migration_params import MetadataMigrationParams
+from metadata_migration_result import MetadataMigrationResult
 
 SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
 SOURCE_KEY = "source"
@@ -153,7 +153,7 @@ def compute_endpoint_and_fetch_indices(config: dict, key: str) -> tuple[Endpoint
     return endpoint_info, indices
 
 
-def run(args: PreMigrationParams) -> PreMigrationResult:
+def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     # Sanity check
     if not args.report and len(args.output_file) == 0:
         raise ValueError("No output file specified")
@@ -170,7 +170,7 @@ def run(args: PreMigrationParams) -> PreMigrationResult:
     diff = get_index_differences(source_indices, target_indices)
     # The first element in the tuple is the set of indices to create
     indices_to_create = diff[0]
-    result = PreMigrationResult()
+    result = MetadataMigrationResult()
     if indices_to_create:
         result.created_indices = indices_to_create
         result.target_doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)
@@ -193,7 +193,7 @@ def run(args: PreMigrationParams) -> PreMigrationResult:
 if __name__ == '__main__':  # pragma no cover
     # Set up parsing for command line arguments
     arg_parser = argparse.ArgumentParser(
-        prog="python pre_migration.py",
+        prog="python metadata_migration.py",
         description="This tool creates indices on a target cluster based on the contents of a source cluster.\n" +
         "The first input to the tool is a path to a Data Prepper pipeline YAML file, which is parsed to obtain " +
         "the source and target cluster endpoints.\nThe second input is an output path to which a modified version " +
@@ -220,4 +220,4 @@ if __name__ == '__main__':  # pragma no cover
     arg_parser.add_argument("--dryrun", action="store_true",
                             help="Skips the actual creation of indices on the target cluster")
     namespace = arg_parser.parse_args()
-    run(PreMigrationParams(namespace.config_file_path, namespace.output_file, namespace.report, namespace.dryrun))
+    run(MetadataMigrationParams(namespace.config_file_path, namespace.output_file, namespace.report, namespace.dryrun))

@@ -89,11 +89,10 @@ class TestMigrationMonitor(unittest.TestCase):
         wait_time = 3
         migration_monitor.run(test_input, wait_time)
         # Test that fetch was called with the expected EndpointInfo
-        expected_endpoint_info = EndpointInfo(test_input.dp_endpoint, ('admin', 'admin'), False)
+        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint, ('admin', 'admin'), False)
         self.assertEqual(2, mock_fetch.call_count)
         mock_fetch.assert_called_with(expected_endpoint_info)
-        # We expect one wait cycle
-        mock_sleep.assert_called_once_with(wait_time)
+        mock_sleep.assert_called_with(wait_time)
         mock_shut.assert_called_once_with(expected_endpoint_info)
 
     @patch('migration_monitor.shutdown_pipeline')
@@ -114,11 +113,11 @@ class TestMigrationMonitor(unittest.TestCase):
         wait_time = 3
         migration_monitor.run(test_input, wait_time)
         # Test that fetch was called with the expected EndpointInfo
-        expected_endpoint_info = EndpointInfo(test_input.dp_endpoint, ('admin', 'admin'), False)
+        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint, ('admin', 'admin'), False)
         self.assertEqual(2, mock_fetch.call_count)
         mock_fetch.assert_called_with(expected_endpoint_info)
         # We expect one wait cycle
-        mock_sleep.assert_called_once_with(wait_time)
+        mock_sleep.assert_called_with(wait_time)
         mock_shut.assert_called_once_with(expected_endpoint_info)
 
     def test_check_if_complete(self):
