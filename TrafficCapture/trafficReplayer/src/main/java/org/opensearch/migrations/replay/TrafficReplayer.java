@@ -373,7 +373,10 @@ public class TrafficReplayer {
                         "(see " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                         getRecordedRequestReconstructCompleteHandler(replayEngine),
                         getRecordedRequestAndResponseReconstructCompleteHandler(tupleWriter),
-                        (requestKey, ts) -> replayEngine.closeConnection(requestKey, ts));
+                        (requestKey, timestamp) -> {
+                            replayEngine.setFirstTimestamp(timestamp);
+                            replayEngine.closeConnection(requestKey, timestamp);
+                        });
         try {
             pullReplayFromSourceToAccumulator(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {
