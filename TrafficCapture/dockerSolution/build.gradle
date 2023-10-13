@@ -118,8 +118,8 @@ dockerCompose {
             exposeAsEnvironment(this)
         }
     useComposeFiles = project.hasProperty('multiProxy') ?
-            ['src/main/docker/docker-compose-multiproxy.yml'] :
-            ['src/main/docker/docker-compose.yml']
+            ['src/main/docker/docker-compose.yml', 'src/main/docker/docker-compose-multi.yml'] :
+            ['src/main/docker/docker-compose.yml', 'src/main/docker/docker-compose-single.yml']
 }
 
 task buildDockerImages {
