@@ -107,11 +107,21 @@ export class MigrationAssistanceStack extends Stack {
             allowAllOutbound: false,
         });
         comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
+        new StringParameter(this, 'SSMParameterComparatorSQLAccessGroupId', {
+            description: 'OpenSearch migration parameter for Comparator SQL volume access security group id',
+            parameterName: `/migration/${props.stage}/comparatorSQLAccessSecurityGroupId`,
+            stringValue: comparatorSQLiteSG.securityGroupId
+        });
 
         // Create an EFS file system for the traffic-comparator
         const comparatorSQLiteEFS = new FileSystem(this, 'comparatorSQLiteEFS', {
             vpc: props.vpc,
             securityGroup: comparatorSQLiteSG
+        });
+        new StringParameter(this, 'SSMParameterComparatorSQLVolumeEFSId', {
+            description: 'OpenSearch migration parameter for Comparator SQL EFS filesystem id',
+            parameterName: `/migration/${props.stage}/comparatorSQLVolumeEFSId`,
+            stringValue: comparatorSQLiteEFS.fileSystemId
         });
 
         const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {

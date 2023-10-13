@@ -11,11 +11,16 @@ import {HistoricalCaptureStack} from "./historical-capture-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
+import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
+import {TrafficComparatorStack} from "./service-stacks/traffic-comparator-stack";
+import {TrafficComparatorJupyterStack} from "./service-stacks/traffic-comparator-jupyter-stack";
+import {CaptureProxyStack} from "./service-stacks/capture-proxy-stack";
+import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
+import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
+import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
 
 export interface StackPropsExt extends StackProps {
-    readonly stage: string,
-    readonly copilotAppName: string,
-    readonly copilotEnvName: string
+    readonly stage: string
 }
 
 export class StackComposer {
@@ -61,8 +66,15 @@ export class StackComposer {
         const mskARN = getContextForType('mskARN', 'string')
         const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
         const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
-        const captureProxyESEnabled = getContextForType('captureProxyESEnabled', 'boolean')
-        const migrationConsoleEnabled = getContextForType('migrationConsoleEnabled', 'boolean')
+        const captureProxyESServiceEnabled = getContextForType('captureProxyESServiceEnabled', 'boolean')
+        const migrationConsoleServiceEnabled = getContextForType('migrationConsoleServiceEnabled', 'boolean')
+        const trafficReplayerServiceEnabled = getContextForType('trafficReplayerServiceEnabled', 'boolean')
+        const trafficComparatorServiceEnabled = getContextForType('trafficComparatorServiceEnabled', 'boolean')
+        const trafficComparatorJupyterServiceEnabled = getContextForType('trafficComparatorJupyterServiceEnabled', 'boolean')
+        const captureProxyServiceEnabled = getContextForType('captureProxyServiceEnabled', 'boolean')
+        const elasticsearchServiceEnabled = getContextForType('kafkaBrokerServiceEnabled', 'boolean')
+        const kafkaBrokerServiceEnabled = getContextForType('migrationConsoleEnabled', 'boolean')
+        const kafkaZookeeperServiceEnabled = getContextForType('kafkaZookeeperServiceEnabled', 'boolean')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
         const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
@@ -195,7 +207,7 @@ export class StackComposer {
         }
 
         let captureProxyESStack
-        if (captureProxyESEnabled && networkStack && migrationStack && mskUtilityStack) {
+        if (captureProxyESServiceEnabled && networkStack && migrationStack && mskUtilityStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
@@ -209,7 +221,7 @@ export class StackComposer {
         }
 
         let migrationConsoleStack
-        if (migrationConsoleEnabled && networkStack && openSearchStack && migrationStack) {
+        if (migrationConsoleServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
@@ -221,10 +233,105 @@ export class StackComposer {
             if (captureProxyESStack) {
                 migrationConsoleStack.addDependency(captureProxyESStack)
             }
+            migrationConsoleStack.addDependency(mskUtilityStack)
             migrationConsoleStack.addDependency(migrationStack)
             migrationConsoleStack.addDependency(openSearchStack)
             migrationConsoleStack.addDependency(networkStack)
             this.stacks.push(migrationConsoleStack)
+        }
+
+        let trafficReplayerStack
+        if (trafficReplayerServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) {
+            trafficReplayerStack = new TrafficReplayerStack(scope, "traffic-replayer", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-TrafficReplayer`,
+                description: "This stack contains resources for the Traffic Replayer ECS service",
+                ...props,
+            })
+            trafficReplayerStack.addDependency(mskUtilityStack)
+            trafficReplayerStack.addDependency(migrationStack)
+            trafficReplayerStack.addDependency(openSearchStack)
+            trafficReplayerStack.addDependency(networkStack)
+            this.stacks.push(trafficReplayerStack)
+        }
+
+        let trafficComparatorStack
+        if (trafficComparatorServiceEnabled && networkStack && migrationStack) {
+            trafficComparatorStack = new TrafficComparatorStack(scope, "traffic-comparator", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-TrafficComparator`,
+                description: "This stack contains resources for the Traffic Comparator ECS service",
+                ...props,
+            })
+            trafficComparatorStack.addDependency(migrationStack)
+            trafficComparatorStack.addDependency(networkStack)
+            this.stacks.push(trafficComparatorStack)
+        }
+
+        let trafficComparatorJupyterStack
+        if (trafficComparatorJupyterServiceEnabled && networkStack && migrationStack) {
+            trafficComparatorJupyterStack = new TrafficComparatorJupyterStack(scope, "traffic-comparator-jupyter", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-TrafficComparatorJupyter`,
+                description: "This stack contains resources for the Traffic Comparator Jupyter ECS service",
+                ...props,
+            })
+            trafficComparatorJupyterStack.addDependency(migrationStack)
+            trafficComparatorJupyterStack.addDependency(networkStack)
+            this.stacks.push(trafficComparatorJupyterStack)
+        }
+
+        let captureProxyStack
+        if (captureProxyServiceEnabled && networkStack && migrationStack && mskUtilityStack) {
+            captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
+                description: "This stack contains resources for the Capture Proxy ECS service",
+                ...props,
+            })
+            captureProxyStack.addDependency(mskUtilityStack)
+            captureProxyStack.addDependency(migrationStack)
+            captureProxyStack.addDependency(networkStack)
+            this.stacks.push(captureProxyStack)
+        }
+
+        let elasticsearchStack
+        if (elasticsearchServiceEnabled && networkStack && migrationStack) {
+            elasticsearchStack = new ElasticsearchStack(scope, "elasticsearch", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-Elasticsearch`,
+                description: "This stack contains resources for the Elasticsearch ECS service",
+                ...props,
+            })
+            elasticsearchStack.addDependency(migrationStack)
+            elasticsearchStack.addDependency(networkStack)
+            this.stacks.push(elasticsearchStack)
+        }
+
+        let kafkaBrokerStack
+        if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
+            kafkaBrokerStack = new KafkaBrokerStack(scope, "kafka-broker", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
+                description: "This stack contains resources for the Kafka Broker ECS service",
+                ...props,
+            })
+            kafkaBrokerStack.addDependency(migrationStack)
+            kafkaBrokerStack.addDependency(networkStack)
+            this.stacks.push(kafkaBrokerStack)
+        }
+
+        let kafkaZookeeperStack
+        if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
+            kafkaZookeeperStack = new KafkaZookeeperStack(scope, "kafka-zookeeper", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-KafkaZookeeper`,
+                description: "This stack contains resources for the Kafka Zookeeper ECS service",
+                ...props,
+            })
+            kafkaZookeeperStack.addDependency(migrationStack)
+            kafkaZookeeperStack.addDependency(networkStack)
+            this.stacks.push(kafkaZookeeperStack)
         }
 
         // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited
@@ -246,6 +353,7 @@ export class StackComposer {
 
 
         function getContextForType(optionName: string, expectedType: string): any {
+            const block = scope.node.tryGetContext("dev-deploy-1")
             const option = scope.node.tryGetContext(optionName)
 
             // If no context is provided (undefined or empty string) and a default value exists, use it
