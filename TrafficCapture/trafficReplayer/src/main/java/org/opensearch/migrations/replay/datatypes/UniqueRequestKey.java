@@ -2,28 +2,33 @@ package org.opensearch.migrations.replay.datatypes;
 
 public class UniqueRequestKey {
     public final TrafficStreamKeyWithRequestOffset trafficStreamKeyAndOffset;
-    public final int sourceRequestIndex;
+    public final int replayerRequestIndex;
 
-    public UniqueRequestKey(ITrafficStreamKey streamKey, int sourceOffset, int sourceRequestIndex) {
-        this(new TrafficStreamKeyWithRequestOffset(streamKey, sourceOffset), sourceRequestIndex);
+    public UniqueRequestKey(ITrafficStreamKey streamKey, int sourceOffset, int replayerIndex) {
+        this(new TrafficStreamKeyWithRequestOffset(streamKey, sourceOffset), replayerIndex);
     }
 
-    public UniqueRequestKey(TrafficStreamKeyWithRequestOffset keyWithRequestOffset, int sourceRequestIndex) {
+    public UniqueRequestKey(TrafficStreamKeyWithRequestOffset keyWithRequestOffset, int replayerIndex) {
         this.trafficStreamKeyAndOffset = keyWithRequestOffset;
-        this.sourceRequestIndex = sourceRequestIndex;
+        this.replayerRequestIndex = replayerIndex;
+    }
+
+    public int getSourceRequestIndex() {
+        return replayerRequestIndex + trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation();
+    }
+
+    public int getReplayerRequestIndex() {
+        return replayerRequestIndex;
     }
 
     @Override
     public String toString() {
-        return trafficStreamKeyAndOffset.getTrafficStreamKey() + "." + sourceRequestIndex +
-                "(-"+trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation()+")";
+        return trafficStreamKeyAndOffset.getTrafficStreamKey() + "." + getSourceRequestIndex() +
+                (trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation() == 0 ? "" :
+                        "(offset: "+trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation()+")");
     }
 
     public ITrafficStreamKey getTrafficStreamKey() {
         return trafficStreamKeyAndOffset.getTrafficStreamKey();
-    }
-
-    public int getReplayerIndex() {
-        return sourceRequestIndex - trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation();
     }
 }

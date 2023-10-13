@@ -167,7 +167,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     " are encountered.   Full stream object=" + stream).log();
         }
 
-        var requestKey = new UniqueRequestKey(key, stream.getRequestCount(), stream.getRequestCount());
+        var requestKey = new UniqueRequestKey(key, stream.getRequestCount(), 0);
         return new Accumulation(requestKey, stream.getLastObservationWasUnterminatedRead());
     }
 
