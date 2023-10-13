@@ -1,0 +1,50 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+  hostmetrics:
+    scrapers:
+      cpu:
+      disk:
+      filesystem:
+      load:
+      memory:
+      network:
+      process:
+      processes:
+      paging:
+
+processors:
+  memory_limiter:
+    limit_mib: 300
+  batch:
+  # filter:
+  #   attributes:
+  #     include:
+  #       - "service.name"
+  #       - "span.kind"
+
+exporters:
+  elasticsearch:
+    endpoints: ["https://opensearchanalytics:9200"]
+    logs_index: "logs"
+    traces_index: "traces"
+    user: "admin"
+    password: "admin"
+  logging:
+
+extensions:
+  pprof:
+    endpoint: "localhost:1777"
+
+service:
+  extensions: [pprof]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [elasticsearch]
+    metrics:
+      receivers: [hostmetrics]
+      processors: []
+      exporters: [logging]
