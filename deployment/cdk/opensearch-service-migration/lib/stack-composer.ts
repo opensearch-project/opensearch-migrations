@@ -60,9 +60,9 @@ export class StackComposer {
         const mskARN = getContextForType('mskARN', 'string')
         const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
         const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
-        const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
-        const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
+        const dpPipelineTemplatePath = getContextForType('dpPipelineTemplatePath', 'string')
+        const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
 
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
@@ -190,19 +190,17 @@ export class StackComposer {
         }
 
         // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited
-        // Note: Future work to provide orchestration between historical capture and migration assistance as the current
-        // state will potentially have both stacks trying to add the same data
-        if (historicalCaptureEnabled && networkStack) {
+        // TODO: Future work to provide orchestration between historical capture and migration assistance
+        if (historicalCaptureEnabled && networkStack && migrationAssistanceEnabled) {
             const historicalCaptureStack = new HistoricalCaptureStack(scope, "historicalCaptureStack", {
                 vpc: networkStack.vpc,
-                logstashConfigFilePath: logstashConfigFilePath,
+                dpPipelineTemplatePath: dpPipelineTemplatePath,
                 sourceEndpoint: sourceClusterEndpoint,
-                targetEndpoint: opensearchStack.domainEndpoint,
+                targetEndpoint: process.env.MIGRATION_DOMAIN_ENDPOINT!,
                 stackName: `OSServiceHistoricalCDKStack-${stage}-${region}`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 ...props,
             })
-
             historicalCaptureStack.addDependency(opensearchStack)
             this.stacks.push(historicalCaptureStack)
         }

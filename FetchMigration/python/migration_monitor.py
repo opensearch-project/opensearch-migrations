@@ -66,9 +66,7 @@ def check_if_complete(doc_count: Optional[int], in_flight: Optional[int], no_par
 
 
 def run(args: MigrationMonitorParams, poll_interval_seconds: int = 30) -> None:
-    # TODO Remove hardcoded EndpointInfo
-    default_auth = ('admin', 'admin')
-    endpoint = EndpointInfo(args.data_prepper_endpoint, default_auth, False)
+    endpoint = EndpointInfo(args.data_prepper_endpoint)
     target_doc_count: int = args.target_count
     prev_no_partitions_count = 0
     terminal = False

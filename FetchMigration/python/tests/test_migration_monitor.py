@@ -89,7 +89,7 @@ class TestMigrationMonitor(unittest.TestCase):
         wait_time = 3
         migration_monitor.run(test_input, wait_time)
         # Test that fetch was called with the expected EndpointInfo
-        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint, ('admin', 'admin'), False)
+        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
         self.assertEqual(2, mock_fetch.call_count)
         mock_fetch.assert_called_with(expected_endpoint_info)
         mock_sleep.assert_called_with(wait_time)
@@ -113,7 +113,7 @@ class TestMigrationMonitor(unittest.TestCase):
         wait_time = 3
         migration_monitor.run(test_input, wait_time)
         # Test that fetch was called with the expected EndpointInfo
-        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint, ('admin', 'admin'), False)
+        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
         self.assertEqual(2, mock_fetch.call_count)
         mock_fetch.assert_called_with(expected_endpoint_info)
         # We expect one wait cycle
