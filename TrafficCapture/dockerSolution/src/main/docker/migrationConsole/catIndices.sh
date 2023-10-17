@@ -7,7 +7,7 @@ source_no_auth=false
 target_no_auth=false
 
 # Check for the presence of COPILOT_SERVICE_NAME environment variable
-if [ -n "$COPILOT_SERVICE_NAME" ]; then
+if [ -n "$MIGRATION_DOMAIN_ENDPOINT" ]; then
     target_endpoint="https://${MIGRATION_DOMAIN_ENDPOINT}:443"
     target_auth_user_and_pass="admin:Admin123!"
 else

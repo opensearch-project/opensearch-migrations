@@ -96,9 +96,14 @@ export class MSKUtilityStack extends Stack {
             brokerEndpoints = waitCondition.attrData.toString()
         }
         else {
-            const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, mskARN)
-            brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")
-            //brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
+            // TODO reference ticket to replace this temporary workaround
+            try {
+                brokerEndpoints = StringParameter.valueFromLookup(this, `/migration/${props.stage}/mskBrokers`)
+            } catch (error) {
+                const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, mskARN)
+                brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")
+                //brokerEndpoints = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
+            }
         }
         new StringParameter(this, 'SSMParameterMSKBrokers', {
             description: 'OpenSearch Migration Parameter for MSK Brokers',

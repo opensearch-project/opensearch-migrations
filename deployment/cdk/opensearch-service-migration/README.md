@@ -73,47 +73,7 @@ Additional context on some of these options, can also be found in the Domain con
 
 **It should be noted that limited testing has been conducted solely in the us-east-1 region, and some items like instance-type examples might be biased**
 
-A template `cdk.context.json` to be used to fill in these values is below:
-```
-{
-  "engineVersion": "",
-  "domainName": "",
-  "dataNodeType": "",
-  "dataNodeCount": "",
-  "dedicatedManagerNodeType": "",
-  "dedicatedManagerNodeCount": "",
-  "warmNodeType": "",
-  "warmNodeCount": "",
-  "accessPolicies": "",
-  "useUnsignedBasicAuth": "",
-  "fineGrainedManagerUserARN": "",
-  "fineGrainedManagerUserName": "",
-  "fineGrainedManagerUserSecretManagerKeyARN": "",
-  "enableDemoAdmin": "",
-  "enforceHTTPS": "",
-  "tlsSecurityPolicy": "",
-  "ebsEnabled": "",
-  "ebsIops": "",
-  "ebsVolumeSize": "",
-  "ebsVolumeType": "",
-  "encryptionAtRestEnabled": "",
-  "encryptionAtRestKmsKeyARN": "",
-  "loggingAppLogEnabled": "",
-  "loggingAppLogGroupARN": "",
-  "nodeToNodeEncryptionEnabled": "",
-  "vpcEnabled": "",
-  "vpcId": "",
-  "vpcSubnetIds": "",
-  "vpcSecurityGroupIds": "",
-  "availabilityZoneCount": "",
-  "openAccessPolicyEnabled": "",
-  "domainRemovalPolicy": "",
-  "mskARN": "",
-  "mskEnablePublicEndpoints": "",
-  "mskBrokerNodeCount": ""
-}
 
-```
 Some configuration options available in other solutions (listed below) which enable/disable specific features do not exist in the current native CDK Domain construct. These options are inferred based on the presence or absence of related fields (i.e. if dedicatedMasterNodeCount is set to 1 it is inferred that dedicated master nodes should be enabled). These options are normally disabled by default, allowing for this inference.
 ```
 "dedicatedMasterNodeEnabled": "X",

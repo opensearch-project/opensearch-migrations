@@ -14,7 +14,8 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly addOnMigrationId?: string,
     readonly customTargetEndpoint?: string,
     readonly customKafkaGroupId?: string,
-    readonly extraArgs?: string
+    readonly extraArgs?: string,
+    readonly enableComparatorLink?: boolean
 
 }
 
@@ -30,10 +31,11 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         ]
 
         const volumeName = "sharedReplayerOutputVolume"
+        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/replayerOutputEFSId`)
         const replayerOutputEFSVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {
-                fileSystemId: StringParameter.valueForStringParameter(this, `/migration/${props.stage}/replayerOutputEFSId`),
+                fileSystemId: volumeId,
                 transitEncryption: "ENABLED"
             }
         };
@@ -42,6 +44,15 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             readOnly: false,
             sourceVolume: volumeName
         }
+        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${props.env?.region}:${props.env?.account}:file-system/${volumeId}`
+        const replayerOutputMountPolicy = new PolicyStatement( {
+            effect: Effect.ALLOW,
+            resources: [replayerOutputEFSArn],
+            actions: [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite"
+            ]
+        })
 
         const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterARN`);
         const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterName`);
@@ -80,8 +91,8 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         })
 
         // TODO make these values dynamic for multiple replayers
-        const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint :
-            StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osClusterEndpoint`)
+        const cdkDomainEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osClusterEndpoint`)
+        const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint : `https://${cdkDomainEndpoint}:443`
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskBrokers`);
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : "logging-group-default"
         //const extraArgs = `--auth-header-user-and-secret ${osUserAndSecret}`
@@ -91,6 +102,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
         }
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
+        replayerCommand = props.enableComparatorLink ? replayerCommand.concat(" | nc traffic-comparator 9220") : replayerCommand
         this.createService({
             serviceName: "traffic-replayer",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
@@ -98,7 +110,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
-            taskRolePolicies: [mskClusterConnectPolicy, mskTopicConsumerPolicy, mskConsumerGroupPolicy, secretAccessPolicy],
+            taskRolePolicies: [mskClusterConnectPolicy, mskTopicConsumerPolicy, mskConsumerGroupPolicy, replayerOutputMountPolicy, secretAccessPolicy],
             environment: {
                 "TUPLE_DIR_PATH": "/shared-replayer-output/traffic-replayer-default"
             },

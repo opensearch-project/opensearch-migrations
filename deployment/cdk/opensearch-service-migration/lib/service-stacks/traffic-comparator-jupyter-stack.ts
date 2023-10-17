@@ -5,6 +5,7 @@ import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 
 
 export interface TrafficComparatorJupyterProps extends StackPropsExt {
@@ -25,10 +26,11 @@ export class TrafficComparatorJupyterStack extends MigrationServiceCore {
         ]
 
         const volumeName = "sharedComparatorSQLVolume"
+        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLVolumeEFSId`)
         const comparatorSQLVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {
-                fileSystemId: StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLVolumeEFSId`),
+                fileSystemId: volumeId,
                 transitEncryption: "ENABLED"
             }
         };
@@ -37,6 +39,15 @@ export class TrafficComparatorJupyterStack extends MigrationServiceCore {
             readOnly: false,
             sourceVolume: volumeName
         }
+        const comparatorEFSArn = `arn:aws:elasticfilesystem:${props.env?.region}:${props.env?.account}:file-system/${volumeId}`
+        const comparatorEFSMountPolicy = new PolicyStatement( {
+            effect: Effect.ALLOW,
+            resources: [comparatorEFSArn],
+            actions: [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite"
+            ]
+        })
 
         this.createService({
             serviceName: "traffic-comparator-jupyter",
@@ -45,6 +56,7 @@ export class TrafficComparatorJupyterStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             volumes: [comparatorSQLVolume],
             mountPoints: [comparatorSQLMountPoint],
+            taskRolePolicies: [comparatorEFSMountPolicy],
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
             ...props

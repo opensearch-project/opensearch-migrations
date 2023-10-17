@@ -273,6 +273,7 @@ export class StackComposer {
                 customTargetEndpoint: trafficReplayerTargetEndpoint,
                 customKafkaGroupId: trafficReplayerGroupId,
                 extraArgs: trafficReplayerExtraArgs,
+                enableComparatorLink: trafficComparatorServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,

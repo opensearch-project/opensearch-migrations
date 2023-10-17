@@ -8,6 +8,7 @@ import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
@@ -25,21 +26,31 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/replayerAccessSecurityGroupId`))
         ]
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osClusterEndpoint`)
+        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskBrokers`);
 
         const volumeName = "sharedReplayerOutputVolume"
+        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/replayerOutputEFSId`)
         const replayerOutputEFSVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {
-                fileSystemId: StringParameter.valueForStringParameter(this, `/migration/${props.stage}/replayerOutputEFSId`),
+                fileSystemId: volumeId,
                 transitEncryption: "ENABLED"
             }
         };
-
         const replayerOutputMountPoint: MountPoint = {
             containerPath: "/shared-replayer-output",
             readOnly: false,
             sourceVolume: volumeName
         }
+        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${props.env?.region}:${props.env?.account}:file-system/${volumeId}`
+        const replayerOutputMountPolicy = new PolicyStatement( {
+            effect: Effect.ALLOW,
+            resources: [replayerOutputEFSArn],
+            actions: [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite"
+            ]
+        })
 
         this.createService({
             serviceName: "migration-console",
@@ -48,8 +59,10 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: {
-                "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint
+                "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
+                "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
             },
+            taskRolePolicies: [replayerOutputMountPolicy],
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 1024,
             ...props

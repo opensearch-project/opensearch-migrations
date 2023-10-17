@@ -6,6 +6,7 @@ import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
+import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 
 
 export interface TrafficComparatorProps extends StackPropsExt {
@@ -34,10 +35,11 @@ export class TrafficComparatorStack extends MigrationServiceCore {
         }
 
         const volumeName = "sharedComparatorSQLVolume"
+        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLVolumeEFSId`)
         const comparatorSQLVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {
-                fileSystemId: StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLVolumeEFSId`),
+                fileSystemId: volumeId,
                 transitEncryption: "ENABLED"
             }
         };
@@ -46,6 +48,15 @@ export class TrafficComparatorStack extends MigrationServiceCore {
             readOnly: false,
             sourceVolume: volumeName
         }
+        const comparatorEFSArn = `arn:aws:elasticfilesystem:${props.env?.region}:${props.env?.account}:file-system/${volumeId}`
+        const comparatorEFSMountPolicy = new PolicyStatement( {
+            effect: Effect.ALLOW,
+            resources: [comparatorEFSArn],
+            actions: [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite"
+            ]
+        })
 
         this.createService({
             serviceName: "traffic-comparator",
@@ -55,6 +66,7 @@ export class TrafficComparatorStack extends MigrationServiceCore {
             volumes: [comparatorSQLVolume],
             mountPoints: [comparatorSQLMountPoint],
             portMappings: [servicePort],
+            taskRolePolicies: [comparatorEFSMountPolicy],
             serviceConnectServices: [serviceConnectService],
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
