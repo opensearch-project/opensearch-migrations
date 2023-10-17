@@ -25,8 +25,8 @@ export class HistoricalCaptureStack extends Stack {
 
         // ECS Task Definition
         const historicalCaptureFargateTask = new FargateTaskDefinition(this, "historicalCaptureFargateTask", {
-            memoryLimitMiB: 2048,
-            cpu: 512
+            memoryLimitMiB: 4096,
+            cpu: 1024
         });
 
         // Create Historical Capture Container
