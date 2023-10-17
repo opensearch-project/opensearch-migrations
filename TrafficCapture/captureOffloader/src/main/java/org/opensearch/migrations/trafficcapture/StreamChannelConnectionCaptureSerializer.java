@@ -342,7 +342,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         }
         // Write data field
         writeByteBufferToCurrentStream(dataFieldNumber, byteBuffer);
-        if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
+        if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER ||
+                captureFieldNumber == TrafficObservation.READSEGMENT_FIELD_NUMBER) {
             this.readObservationsAreWaitingForEom = true;
         }
     }
