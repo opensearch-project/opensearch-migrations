@@ -51,7 +51,7 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpc
         })
 
-        const serviceTaskRole = new Role(this, 'ServiceTaskRole', {
+        const serviceTaskRole = new Role(this, `${props.serviceName}-TaskRole`, {
             assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
             description: 'ECS Service Task Role'
         });

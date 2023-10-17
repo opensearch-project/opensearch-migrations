@@ -43,6 +43,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         }
 
         const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterARN`);
+        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterName`);
         const mskClusterConnectPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterARN],
@@ -50,11 +51,10 @@ export class CaptureProxyESStack extends MigrationServiceCore {
                 "kafka-cluster:Connect"
             ]
         })
-        // Ideally we should have something like this, but this is actually working on a token value:
-        // let mskClusterAllTopicArn = mskClusterARN.replace(":cluster", ":topic").concat("/*")
+        const mskClusterAllTopicArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:topic/${mskClusterName}/*`
         const mskTopicProducerPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: ["*"],
+            resources: [mskClusterAllTopicArn],
             actions: [
                 "kafka-cluster:CreateTopic",
                 "kafka-cluster:DescribeTopic",

@@ -11,6 +11,7 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly customSourceClusterEndpoint?: string
 }
 
 export class CaptureProxyStack extends MigrationServiceCore {
@@ -35,6 +36,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
         }
 
         const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterARN`);
+        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterName`);
         const mskClusterConnectPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterARN],
@@ -42,11 +44,10 @@ export class CaptureProxyStack extends MigrationServiceCore {
                 "kafka-cluster:Connect"
             ]
         })
-        // Ideally we should have something like this, but this is actually working on a token value:
-        // let mskClusterAllTopicArn = mskClusterARN.replace(":cluster", ":topic").concat("/*")
+        const mskClusterAllTopicArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:topic/${mskClusterName}/*`
         const mskTopicProducerPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: ["*"],
+            resources: [mskClusterAllTopicArn],
             actions: [
                 "kafka-cluster:CreateTopic",
                 "kafka-cluster:DescribeTopic",
@@ -55,10 +56,11 @@ export class CaptureProxyStack extends MigrationServiceCore {
         })
 
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskBrokers`);
+        const sourceClusterEndpoint = props.customSourceClusterEndpoint ? props.customSourceClusterEndpoint : "https://elasticsearch:9200"
         this.createService({
             serviceName: "capture-proxy",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer/Dockerfile"),
-            dockerImageCommand: ['/bin/sh', '-c', `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri https://elasticsearch:9200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`],
+            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
+            dockerImageCommand: ['/bin/sh', '-c', `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`],
             securityGroups: securityGroups,
             taskRolePolicies: [mskClusterConnectPolicy, mskTopicProducerPolicy],
             portMappings: [servicePort],

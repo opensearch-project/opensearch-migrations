@@ -101,6 +101,11 @@ export class MigrationAssistanceStack extends Stack {
             parameterName: `/migration/${props.stage}/mskClusterARN`,
             stringValue: mskCluster.attrArn
         });
+        new StringParameter(this, 'SSMParameterMSKClusterName', {
+            description: 'OpenSearch Migration Parameter for MSK cluster name',
+            parameterName: `/migration/${props.stage}/mskClusterName`,
+            stringValue: mskCluster.clusterName
+        });
 
         const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
             vpc: props.vpc,
@@ -170,11 +175,6 @@ export class MigrationAssistanceStack extends Stack {
             useForServiceConnect: true,
             vpc: props.vpc
         })
-        new StringParameter(this, 'SSMParameterECSClusterARN', {
-            description: 'OpenSearch migration parameter for ECS cluster ARN',
-            parameterName: `/migration/${props.stage}/ecsClusterARN`,
-            stringValue: ecsCluster.clusterArn
-        });
 
     }
 }

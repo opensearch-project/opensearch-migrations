@@ -10,6 +10,12 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly enableClusterFGACAuth: boolean,
+    readonly addOnMigrationId?: string,
+    readonly customTargetEndpoint?: string,
+    readonly customKafkaGroupId?: string,
+    readonly extraArgs?: string
+
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -38,6 +44,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         }
 
         const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterARN`);
+        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterName`);
         const mskClusterConnectPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterARN],
@@ -45,19 +52,19 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "kafka-cluster:Connect"
             ]
         })
-        // Ideally we should have something like this, but this is actually working on a token value:
-        // let mskClusterAllTopicArn = mskClusterARN.replace(":cluster", ":topic").concat("/*")
+        const mskClusterAllTopicArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:topic/${mskClusterName}/*`
         const mskTopicConsumerPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: ["*"],
+            resources: [mskClusterAllTopicArn],
             actions: [
                 "kafka-cluster:DescribeTopic",
                 "kafka-cluster:ReadData"
             ]
         })
+        const mskClusterAllGroupArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:group/${mskClusterName}/*`
         const mskConsumerGroupPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: ["*"],
+            resources: [mskClusterAllGroupArn],
             actions: [
                 "kafka-cluster:AlterGroup",
                 "kafka-cluster:DescribeGroup"
@@ -73,15 +80,20 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         })
 
         // TODO make these values dynamic for multiple replayers
-        const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osClusterEndpoint`)
+        const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint :
+            StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskBrokers`);
-        const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osUserAndSecretArn`);
-        const groupId = "logging-group-default"
-        const extraArgs = `--auth-header-user-and-secret ${osUserAndSecret}`
-        const replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth ${extraArgs}`
+        const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : "logging-group-default"
+        //const extraArgs = `--auth-header-user-and-secret ${osUserAndSecret}`
+        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth`
+        if (props.enableClusterFGACAuth) {
+            const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osUserAndSecretArn`);
+            replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
+        }
+        replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
         this.createService({
             serviceName: "traffic-replayer",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer/Dockerfile"),
+            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
             dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],

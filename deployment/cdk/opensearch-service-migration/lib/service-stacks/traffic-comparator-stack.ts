@@ -49,7 +49,7 @@ export class TrafficComparatorStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "traffic-comparator",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficComparator/Dockerfile"),
+            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficComparator"),
             dockerImageCommand: ['/bin/sh', '-c', 'cd containerTC && pip3 install --editable . && nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -vv stream | trafficcomparator dump-to-sqlite --db /shared/comparisons.db'],
             securityGroups: securityGroups,
             volumes: [comparatorSQLVolume],

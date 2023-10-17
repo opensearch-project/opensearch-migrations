@@ -11,7 +11,10 @@ export interface TrafficComparatorJupyterProps extends StackPropsExt {
     readonly vpc: IVpc,
 }
 
-// TODO add support for ui service
+/**
+ * TODO: Add public
+ * This Service is still pending additional setup for a public endpoint
+ */
 export class TrafficComparatorJupyterStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: TrafficComparatorJupyterProps) {
@@ -37,7 +40,7 @@ export class TrafficComparatorJupyterStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "traffic-comparator-jupyter",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/jupyterNotebook/Dockerfile"),
+            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/jupyterNotebook"),
             dockerImageCommand: ['/bin/sh', '-c', 'cd containerTC && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'],
             securityGroups: securityGroups,
             volumes: [comparatorSQLVolume],
