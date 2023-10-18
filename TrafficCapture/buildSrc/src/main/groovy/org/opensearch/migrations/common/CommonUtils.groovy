@@ -54,10 +54,9 @@ class CommonUtils {
                 runCommand("yum -y install nmap-ncat")
             } else {
                 from 'openjdk:11-jre'
-                runCommand("wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.86.0/otelcol-contrib_0.86.0_linux_amd64.deb && dpkg -i otelcol-contrib_0.86.0_linux_amd64.deb")
                 runCommand("apt-get update && apt-get install -y netcat")
             }
-
+            copyFile("../../../src/main/docker/otelcol/otelcontribcol_linux_arm64", "otelcontribcol")
             copyFile("jars", "/jars")
             // can't set the environment variable from the runtimeClasspath because the Dockerfile is
             // constructed in the configuration phase and the classpath won't be realized until the

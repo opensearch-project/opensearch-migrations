@@ -13,6 +13,8 @@ receivers:
       process:
       processes:
       paging:
+  filelog:
+    include: [ /logs/metrics.log ]
 
 processors:
   memory_limiter:
@@ -24,27 +26,37 @@ processors:
   #       - "service.name"
   #       - "span.kind"
 
-exporters:
-  elasticsearch:
-    endpoints: ["https://opensearchanalytics:9200"]
-    logs_index: "logs"
-    traces_index: "traces"
-    user: "admin"
-    password: "admin"
-  logging:
-
 extensions:
+  basicauth/client:
+    client_auth: 
+      username: "admin"
+      password: "admin"
   pprof:
     endpoint: "localhost:1777"
 
+exporters:
+  opensearch:
+    http:
+      endpoint: "https://opensearchanalytics:9200"
+      auth:
+        authenticator: basicauth/client
+      tls:
+        insecure_skip_verify: true
+    # index: "logs"
+  logging:
+
 service:
-  extensions: [pprof]
+  extensions: [pprof, basicauth/client]
   pipelines:
-    traces:
-      receivers: [otlp]
+    logs:
+      receivers: [filelog]
       processors: [batch]
-      exporters: [elasticsearch]
+      exporters: [opensearch]
     metrics:
       receivers: [hostmetrics]
+      processors: []
+      exporters: [logging]
+    logs/2:
+      receivers: [filelog]
       processors: []
       exporters: [logging]

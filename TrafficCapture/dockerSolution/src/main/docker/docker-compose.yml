@@ -113,35 +113,41 @@ services:
     volumes:
       - ./opensearchDashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
     depends_on:
-      - opensearchtarget
-      - capture-proxy-es
+      - opensearchanalytics
 
-  trafficcomparator:
-    image: 'migrations/traffic_comparator:latest'
+  otel-test-box:
+    build: ./otelcol/
+    image: migrations/otelcol:latest
+    container_name: otel-test-box
     networks:
       - migrations
-    ports:
-      - "9220:9220"
-    healthcheck:
-      test: "lsof -i -P -n"
-    volumes:
-      - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
-      - sharedComparatorSqlResults:/shared
-    command: /bin/sh -c "cd trafficComparator && pip3 install --editable . && nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -vv stream | trafficcomparator dump-to-sqlite --db /shared/comparisons.db"
 
-  jupyter-notebook:
-    image: 'migrations/jupyter_notebook:latest'
-    networks:
-      - migrations
-    ports:
-      - "8888:8888"
-    volumes:
-      - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
-      - sharedComparatorSqlResults:/shared
-    environment:
-      # this needs to match the output db that traffic_comparator writes to
-      - COMPARISONS_DB_LOCATION=/shared/comparisons.db
-    command: /bin/sh -c 'cd trafficComparator && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'
+  # trafficcomparator:
+  #   image: 'migrations/traffic_comparator:latest'
+  #   networks:
+  #     - migrations
+  #   ports:
+  #     - "9220:9220"
+  #   healthcheck:
+  #     test: "lsof -i -P -n"
+  #   volumes:
+  #     - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
+  #     - sharedComparatorSqlResults:/shared
+  #   command: /bin/sh -c "cd trafficComparator && pip3 install --editable . && nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -vv stream | trafficcomparator dump-to-sqlite --db /shared/comparisons.db"
+
+  # jupyter-notebook:
+  #   image: 'migrations/jupyter_notebook:latest'
+  #   networks:
+  #     - migrations
+  #   ports:
+  #     - "8888:8888"
+  #   volumes:
+  #     - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
+  #     - sharedComparatorSqlResults:/shared
+  #   environment:
+  #     # this needs to match the output db that traffic_comparator writes to
+  #     - COMPARISONS_DB_LOCATION=/shared/comparisons.db
+  #   command: /bin/sh -c 'cd trafficComparator && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'
 
   migration-console:
     image: 'migrations/migration_console:latest'
