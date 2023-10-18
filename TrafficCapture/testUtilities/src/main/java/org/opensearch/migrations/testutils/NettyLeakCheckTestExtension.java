@@ -10,11 +10,16 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 public class NettyLeakCheckTestExtension implements InvocationInterceptor {
-    public NettyLeakCheckTestExtension() {}
+    private final boolean allLeakChecksAreDisabled;
+    public NettyLeakCheckTestExtension() {
+        allLeakChecksAreDisabled =
+                System.getProperty("disableMemoryLeakTests", "").toLowerCase().equals("true");
+        }
 
     private void wrapWithLeakChecks(ExtensionContext extensionContext, Callable repeatCall, Callable finalCall)
             throws Throwable {
-        if (getAnnotation(extensionContext).map(a -> a.disableLeakChecks()).orElse(false)) {
+        if (allLeakChecksAreDisabled ||
+                getAnnotation(extensionContext).map(a -> a.disableLeakChecks()).orElse(false)) {
             finalCall.call();
             return;
         } else {

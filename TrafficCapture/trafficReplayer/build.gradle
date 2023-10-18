@@ -67,6 +67,7 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.20.127'
 
     testImplementation project(':testUtilities')
+    testImplementation project(':captureOffloader')
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
 
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.0'
@@ -107,5 +108,20 @@ jar {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    systemProperty 'disableMemoryLeakTests', 'true'
+    useJUnitPlatform {
+        excludeTags 'longTest'
+    }
+}
+
+task longTest(type: Test) {
+    systemProperty 'disableMemoryLeakTests', 'false'
+    useJUnitPlatform {
+        includeTags 'longTest'
+    }
+    mustRunAfter test
+}
+
+task allTests {
+    dependsOn test, longTest
 }
