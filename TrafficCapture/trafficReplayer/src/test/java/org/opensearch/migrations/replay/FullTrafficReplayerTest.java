@@ -25,7 +25,7 @@ public class FullTrafficReplayerTest {
 
         try (var os = new NullOutputStream();
              var bos = new BufferedOutputStream(os);
-             var trafficSource = new V0_1TrafficCaptureSource("/Users/schohn/migrationLogs/kafkaOutput_09_23.proto.gz");
+             var trafficSource = new V0_1TrafficCaptureSource("migrationLogs/kafkaOutput_09_23.proto.gz");
              var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
             tr.runReplayWithIOStreams(Duration.ofSeconds(70), blockingTrafficSource, bos,
                     new TimeShifter(10*1000));
