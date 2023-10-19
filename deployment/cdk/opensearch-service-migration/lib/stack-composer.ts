@@ -7,7 +7,7 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
-import {HistoricalCaptureStack} from "./historical-capture-stack";
+import {FetchMigrationStack} from "./fetch-migration-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
@@ -93,8 +93,7 @@ export class StackComposer {
         const elasticsearchServiceEnabled = getContextForType('elasticsearchServiceEnabled', 'boolean')
         const kafkaBrokerServiceEnabled = getContextForType('kafkaBrokerServiceEnabled', 'boolean')
         const kafkaZookeeperServiceEnabled = getContextForType('kafkaZookeeperServiceEnabled', 'boolean')
-        const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
-        const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
+        const fetchMigrationEnabled = getContextForType('fetchMigrationEnabled', 'boolean')
         const dpPipelineTemplatePath = getContextForType('dpPipelineTemplatePath', 'string')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
 
@@ -213,6 +212,7 @@ export class StackComposer {
         if (migrationAssistanceEnabled && networkStack) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
                 vpc: networkStack.vpc,
+                trafficComparatorEnabled: trafficComparatorServiceEnabled,
                 mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 mskBrokerNodeCount: mskBrokerNodeCount,
@@ -239,6 +239,26 @@ export class StackComposer {
             this.stacks.push(mskUtilityStack)
         }
 
+        // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
+        // TODO: Future work to provide orchestration between fetch migration and migration assistance
+        let fetchMigrationStack
+        if (fetchMigrationEnabled && networkStack && openSearchStack && migrationStack) {
+            fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
+                vpc: networkStack.vpc,
+                dpPipelineTemplatePath: dpPipelineTemplatePath,
+                sourceEndpoint: sourceClusterEndpoint,
+                stackName: `OSMigrations-${stage}-${region}-FetchMigration`,
+                description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            fetchMigrationStack.addDependency(networkStack)
+            fetchMigrationStack.addDependency(openSearchStack)
+            fetchMigrationStack.addDependency(migrationStack)
+            this.stacks.push(fetchMigrationStack)
+        }
+
         let captureProxyESStack
         if (captureProxyESServiceEnabled && networkStack && migrationStack && mskUtilityStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
@@ -259,6 +279,7 @@ export class StackComposer {
         if (migrationConsoleServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
+                fetchMigrationEnabled: fetchMigrationEnabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
@@ -268,6 +289,7 @@ export class StackComposer {
             // To enable the Migration Console to make requests to the Capture Proxy with Service Connect,
             // it should be deployed after the Capture Proxy
             if (captureProxyESStack) migrationConsoleStack.addDependency(captureProxyESStack)
+            if (fetchMigrationStack) migrationConsoleStack.addDependency(fetchMigrationStack)
             migrationConsoleStack.addDependency(mskUtilityStack)
             migrationConsoleStack.addDependency(migrationStack)
             migrationConsoleStack.addDependency(openSearchStack)
@@ -314,7 +336,7 @@ export class StackComposer {
         }
 
         let trafficComparatorJupyterStack
-        if (trafficComparatorJupyterServiceEnabled && networkStack && migrationStack) {
+        if (trafficComparatorJupyterServiceEnabled && networkStack && migrationStack && trafficComparatorStack) {
             trafficComparatorJupyterStack = new TrafficComparatorJupyterStack(scope, "traffic-comparator-jupyter", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-TrafficComparatorJupyter`,
@@ -389,27 +411,6 @@ export class StackComposer {
             kafkaZookeeperStack.addDependency(networkStack)
             this.stacks.push(kafkaZookeeperStack)
         }
-
-        // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited
-        // TODO: Future work to provide orchestration between historical capture and migration assistance
-        if (historicalCaptureEnabled && networkStack && migrationAssistanceEnabled) {
-            const historicalCaptureStack = new HistoricalCaptureStack(scope, "historicalCaptureStack", {
-                vpc: networkStack.vpc,
-                dpPipelineTemplatePath: dpPipelineTemplatePath,
-                sourceEndpoint: sourceClusterEndpoint,
-                targetEndpoint: process.env.MIGRATION_DOMAIN_ENDPOINT!,
-                stackName: `OSMigrations-${stage}-${region}-HistoricalCapture`,
-                description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            historicalCaptureStack.addDependency(networkStack)
-            // TODO is this valid dependency?
-            historicalCaptureStack.addDependency(openSearchStack)
-            this.stacks.push(historicalCaptureStack)
-        }
-
 
         function getContextForType(optionName: string, expectedType: string): any {
             const option = contextJSON[optionName]

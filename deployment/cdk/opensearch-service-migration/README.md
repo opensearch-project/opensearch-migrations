@@ -105,7 +105,7 @@ cdk destroy migration-console --c contextId=demo-deploy
 Note that the default retention policy for the OpenSearch Domain is to RETAIN this resource when the stack is deleted, and in order to delete the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `DESTROY`. Otherwise, the Domain can be manually deleted through the AWS console or through other means such as the AWS CLI.
 
 ## How to run multiple Replayer scenarios
-
+WIP
 
 ## Appendix
 

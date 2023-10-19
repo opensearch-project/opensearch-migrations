@@ -5,6 +5,7 @@
   "enforceHTTPS": true,
   "nodeToNodeEncryptionEnabled": true,
   "encryptionAtRestEnabled": true,
+  "vpcEnabled": true,
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
   "captureProxyESServiceEnabled": true,

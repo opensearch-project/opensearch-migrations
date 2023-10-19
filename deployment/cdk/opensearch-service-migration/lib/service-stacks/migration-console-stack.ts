@@ -1,9 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {
-    MountPoint,
-    Volume
-} from "aws-cdk-lib/aws-ecs";
+import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -12,7 +9,8 @@ import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
-    readonly vpc: IVpc
+    readonly vpc: IVpc,
+    readonly fetchMigrationEnabled: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -22,6 +20,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         let securityGroups = [
             // TODO see about egress rule change here
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
         ]
@@ -52,17 +51,48 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`);
+        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`);
+        const mskClusterAdminPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [mskClusterARN],
+            actions: [
+                "kafka-cluster:*"
+            ]
+        })
+        const mskClusterAllTopicArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:topic/${mskClusterName}/*`
+        const mskTopicAdminPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [mskClusterAllTopicArn],
+            actions: [
+                "kafka-cluster:*"
+            ]
+        })
+        const mskClusterAllGroupArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:group/${mskClusterName}/*`
+        const mskConsumerGroupAdminPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [mskClusterAllGroupArn],
+            actions: [
+                "kafka-cluster:*"
+            ]
+        })
+
+        let environment: { [key: string]: string; } = {
+            "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
+            "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
+        }
+        if (props.fetchMigrationEnabled) {
+            environment["FETCH_MIGRATION_COMMAND"] = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`)
+        }
+
         this.createService({
             serviceName: "migration-console",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
-            environment: {
-                "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
-                "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
-            },
-            taskRolePolicies: [replayerOutputMountPolicy],
+            environment: environment,
+            taskRolePolicies: [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy],
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 1024,
             ...props
