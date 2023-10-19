@@ -8,5 +8,6 @@
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
   "captureProxyESServiceEnabled": true,
-  "trafficReplayerServiceEnabled": true
+  "trafficReplayerServiceEnabled": true,
+  "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
 }

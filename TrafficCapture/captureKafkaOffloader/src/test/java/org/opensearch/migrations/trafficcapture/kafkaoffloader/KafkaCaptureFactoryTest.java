@@ -141,56 +141,6 @@ public class KafkaCaptureFactoryTest {
         mockProducer.close();
     }
 
-    @Test
-    public void testOngoingFuturesAreAggregated() throws IOException {
-        KafkaCaptureFactory kafkaCaptureFactory =
-                new KafkaCaptureFactory(TEST_NODE_ID_STRING, mockProducer, 1024*1024);
-        IChannelConnectionCaptureSerializer offloader = kafkaCaptureFactory.createOffloader(connectionId);
-
-        List<Callback> recordSentCallbacks = new ArrayList<>(3);
-        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
-            Callback recordSentCallback = (Callback) args[1];
-            recordSentCallbacks.add(recordSentCallback);
-            return null;
-        });
-
-        Instant ts = Instant.now();
-        byte[] fakeDataBytes = "FakeData".getBytes(StandardCharsets.UTF_8);
-        var bb = Unpooled.wrappedBuffer(fakeDataBytes);
-        offloader.addReadEvent(ts, bb);
-        CompletableFuture cf1 = offloader.flushCommitAndResetStream(false);
-        offloader.addReadEvent(ts, bb);
-        CompletableFuture cf2 = offloader.flushCommitAndResetStream(false);
-        offloader.addReadEvent(ts, bb);
-        CompletableFuture cf3 = offloader.flushCommitAndResetStream(false);
-        bb.release();
-
-        Assertions.assertEquals(false, cf1.isDone());
-        Assertions.assertEquals(false, cf2.isDone());
-        Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(2).onCompletion(generateRecordMetadata(topic, 1), null);
-
-        // Assert that even though particular final producer record has finished sending, its predecessors are incomplete
-        // and thus this wrapper cf is also incomplete
-        Assertions.assertEquals(false, cf1.isDone());
-        Assertions.assertEquals(false, cf2.isDone());
-        Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(1).onCompletion(generateRecordMetadata(topic, 2), null);
-
-        Assertions.assertEquals(false, cf1.isDone());
-        Assertions.assertEquals(false, cf2.isDone());
-        Assertions.assertEquals(false, cf3.isDone());
-        recordSentCallbacks.get(0).onCompletion(generateRecordMetadata(topic, 3), null);
-
-        Assertions.assertEquals(true, cf1.isDone());
-        Assertions.assertEquals(true, cf2.isDone());
-        Assertions.assertEquals(true, cf3.isDone());
-
-        mockProducer.close();
-    }
-
     private RecordMetadata generateRecordMetadata(String topicName, int partition) {
         TopicPartition topicPartition = new TopicPartition(topicName, partition);
         return new RecordMetadata(topicPartition, 0, 0, 0, 0, 0);

@@ -38,7 +38,7 @@ public class HeaderTransformerTest {
                 .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
                 .build();
         var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, null, testPacketCapture,
-                "TEST", new UniqueRequestKey("testConnectionId", 0));
+                "TEST", new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
@@ -90,7 +90,7 @@ public class HeaderTransformerTest {
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
-                httpBasicAuthTransformer, testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
+                httpBasicAuthTransformer, testPacketCapture, "TEST", new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
@@ -114,7 +114,7 @@ public class HeaderTransformerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer(
                 TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
-                null, testPacketCapture, "TEST", new UniqueRequestKey("testConnectionId", 0));
+                null, testPacketCapture, "TEST", new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)

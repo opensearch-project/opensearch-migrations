@@ -1,0 +1,18 @@
+historical-data-migration:
+  source:
+    opensearch:
+      hosts:
+      - <SOURCE_CLUSTER_HOST>
+      disable_authentication: true
+      indices:
+        exclude:
+        - index_name_regex: \.*
+  sink:
+  - opensearch:
+      bulk_size: 10
+      hosts:
+      - https://<TARGET_CLUSTER_HOST>
+      index: ${getMetadata("opensearch-index")}
+      document_id: ${getMetadata("opensearch-document_id")}
+      username: user
+      password: pass

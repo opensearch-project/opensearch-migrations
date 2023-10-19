@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 
@@ -32,10 +34,12 @@ class ExpiringTrafficStreamMapSequentialTest {
         var expiredCountsPerLoop = new ArrayList<Integer>();
         for (int i=0; i<expectedExpirationCounts.length; ++i) {
             var ts = Instant.ofEpochSecond(i+1);
-            var accumulation = expiringMap.getOrCreateWithoutExpiration(TEST_NODE_ID_STRING,
-                    connectionGenerator.apply(i));
+            var tsk = new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0);
+            var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk,
+                    k->new Accumulation(new UniqueRequestKey(k, 0, 0)));
             createdAccumulations.add(accumulation);
-            expiringMap.expireOldEntries(TEST_NODE_ID_STRING, connectionGenerator.apply(i), accumulation, ts);
+            expiringMap.expireOldEntries(new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0),
+                    accumulation, ts);
             createdAccumulations.get(i).rrPair.addResponseData(ts, ("Add"+i).getBytes(StandardCharsets.UTF_8));
             expiredCountsPerLoop.add(expiredAccumulations.size());
         }

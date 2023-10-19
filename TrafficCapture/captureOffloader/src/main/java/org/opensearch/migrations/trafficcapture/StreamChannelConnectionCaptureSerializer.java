@@ -64,14 +64,17 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     private final static int MAX_ID_SIZE = 96;
 
+    private boolean readObservationsAreWaitingForEom;
+    private int eomsSoFar;
+    private int numFlushesSoFar;
+    private int firstLineByteLength = -1;
+    private int headersByteLength = -1;
+
     private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
     private final Function<CaptureSerializerResult, CompletableFuture> closeHandler;
     private final String nodeIdString;
     private final String connectionIdString;
     private CodedOutputStream currentCodedOutputStreamOrNull;
-    private int numFlushesSoFar;
-    private int firstLineByteLength = -1;
-    private int headersByteLength = -1;
 
     public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
                                                     Supplier<CodedOutputStream> codedOutputStreamSupplier,
@@ -99,6 +102,13 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             if (nodeIdString != null) {
                 // e.g. 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
                 currentCodedOutputStreamOrNull.writeString(TrafficStream.NODEID_FIELD_NUMBER, nodeIdString);
+            }
+            if (eomsSoFar > 0) {
+                currentCodedOutputStreamOrNull.writeInt32(TrafficStream.REQUESTCOUNT_FIELD_NUMBER, eomsSoFar);
+            }
+            if (readObservationsAreWaitingForEom) {
+                currentCodedOutputStreamOrNull.writeBool(TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
+                        readObservationsAreWaitingForEom);
             }
             return currentCodedOutputStreamOrNull;
         }
@@ -332,6 +342,9 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         }
         // Write data field
         writeByteBufferToCurrentStream(dataFieldNumber, byteBuffer);
+        if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
+            this.readObservationsAreWaitingForEom = true;
+        }
     }
 
     private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp,
@@ -415,6 +428,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     public void commitEndOfHttpMessageIndicator(Instant timestamp)
             throws IOException {
         writeEndOfHttpMessage(timestamp);
+        this.readObservationsAreWaitingForEom = false;
+        ++this.eomsSoFar;
         this.firstLineByteLength = -1;
         this.headersByteLength = -1;
     }

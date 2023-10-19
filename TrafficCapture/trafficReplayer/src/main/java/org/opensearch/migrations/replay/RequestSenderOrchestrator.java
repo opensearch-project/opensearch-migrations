@@ -72,7 +72,7 @@ public class RequestSenderOrchestrator {
                     scheduleOnCffr(requestKey, channelFutureAndRequestSchedule,
                             finalTunneledResponse, timestamp, "close", () -> {
                                 log.trace("Closing client connection " + requestKey);
-                                clientConnectionPool.closeConnection(requestKey.connectionId);
+                                clientConnectionPool.closeConnection(requestKey.getTrafficStreamKey().getConnectionId());
                                 finalTunneledResponse.future.complete(null);
                             });
                 });
@@ -110,7 +110,7 @@ public class RequestSenderOrchestrator {
                                             runAfterChannelSetup(channelFutureAndRequestSchedule,
                                                     finalTunneledResponse,
                                                     cffr -> {
-                                                        cffr.scheduleSequencer.add(requestKey.requestIndex,
+                                                        cffr.scheduleSequencer.add(requestKey.getReplayerRequestIndex(),
                                                                 () -> successFn.accept(channelFutureAndRequestSchedule),
                                                                 x -> x.run());
                                                         if (cffr.scheduleSequencer.hasPending()) {

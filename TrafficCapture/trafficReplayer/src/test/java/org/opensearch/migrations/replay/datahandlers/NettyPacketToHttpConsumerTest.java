@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import io.netty.buffer.Unpooled;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -12,14 +11,16 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.opensearch.migrations.replay.BufferedTimeController;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
+import org.opensearch.migrations.replay.TestTrafficStreamKey;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -128,7 +129,7 @@ class NettyPacketToHttpConsumerTest {
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
                     testServer.localhostEndpoint(), sslContext, "unitTest"+i,
-                    new UniqueRequestKey("testConnectionId", 0));
+                    new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -155,13 +156,14 @@ class NettyPacketToHttpConsumerTest {
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
                         new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
-                new TestTimeController(), timeShifter);
+                new TestFlowController(), timeShifter);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
+                var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, Instant.now(), Instant.now(),
-                        new UniqueRequestKey(connId, i),
+                        new UniqueRequestKey(trafficStreamKey, 0, i),
                         ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 log.info("requestFinishFuture="+requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();
@@ -186,7 +188,7 @@ class NettyPacketToHttpConsumerTest {
         return s.replaceAll("Date: .*", "Date: SOMETHING");
     }
 
-    private class TestTimeController implements BufferedTimeController {
+    private class TestFlowController implements BufferedFlowController {
         @Override
         public void stopReadsPast(Instant pointInTime) {}
 

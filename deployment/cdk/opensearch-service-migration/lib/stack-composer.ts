@@ -95,7 +95,8 @@ export class StackComposer {
         const kafkaZookeeperServiceEnabled = getContextForType('kafkaZookeeperServiceEnabled', 'boolean')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
         const historicalCaptureEnabled = getContextForType('historicalCaptureEnabled', 'boolean')
-        const logstashConfigFilePath = getContextForType('logstashConfigFilePath', 'string')
+        const dpPipelineTemplatePath = getContextForType('dpPipelineTemplatePath', 'string')
+        const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
 
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
@@ -390,13 +391,13 @@ export class StackComposer {
         }
 
         // Currently, placing a requirement on a VPC for a historical capture stack but this can be revisited
-        // Note: Future work to provide orchestration between historical capture and migration assistance as the current
-        // state will potentially have both stacks trying to add the same data
-        if (historicalCaptureEnabled && networkStack) {
+        // TODO: Future work to provide orchestration between historical capture and migration assistance
+        if (historicalCaptureEnabled && networkStack && migrationAssistanceEnabled) {
             const historicalCaptureStack = new HistoricalCaptureStack(scope, "historicalCaptureStack", {
                 vpc: networkStack.vpc,
-                logstashConfigFilePath: logstashConfigFilePath,
+                dpPipelineTemplatePath: dpPipelineTemplatePath,
                 sourceEndpoint: sourceClusterEndpoint,
+                targetEndpoint: process.env.MIGRATION_DOMAIN_ENDPOINT!,
                 stackName: `OSMigrations-${stage}-${region}-HistoricalCapture`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 stage: stage,
@@ -404,6 +405,7 @@ export class StackComposer {
                 ...props,
             })
             historicalCaptureStack.addDependency(networkStack)
+            // TODO is this valid dependency?
             historicalCaptureStack.addDependency(openSearchStack)
             this.stacks.push(historicalCaptureStack)
         }
