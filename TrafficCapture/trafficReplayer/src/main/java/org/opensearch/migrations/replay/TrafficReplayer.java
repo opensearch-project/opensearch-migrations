@@ -378,7 +378,7 @@ public class TrafficReplayer {
                             replayEngine.closeConnection(requestKey, timestamp);
                         });
         try {
-            pullReplayFromSourceToAccumulator(trafficChunkStream, trafficToHttpTransactionAccumulator);
+            pullCaptureFromSourceToAccumulator(trafficChunkStream, trafficToHttpTransactionAccumulator);
         } catch (Exception e) {
             log.warn("Terminating runReplay due to", e);
             throw e;
@@ -644,7 +644,7 @@ public class TrafficReplayer {
         }
     }
 
-    public void pullReplayFromSourceToAccumulator(
+    public void pullCaptureFromSourceToAccumulator(
             ITrafficCaptureSource trafficChunkStream,
             CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
         try {
