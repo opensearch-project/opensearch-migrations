@@ -2,12 +2,14 @@ package org.opensearch.migrations.replay.traffic.expiration;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Accumulation;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -18,7 +20,7 @@ import java.util.stream.Stream;
  * aware of when items have been expired.
  *
  * This doesn't use more typical out-of-the-box LRU mechanisms.  Our requirements are a little bit different.
- * First, we're fine buffering a variable number of items and secondly, this should be threadsafe an able to
+ * First, we're fine buffering a variable number of items and secondly, this should be threadsafe and able to
  * be used in highly concurrent contexts.
  *
  * TODO - there will be a race condition in the ExpiringTrafficStream maps/sets where items could be expunged from
@@ -67,18 +69,12 @@ public class ExpiringTrafficStreamMap {
     }
 
     /**
-     *
-     * @param partitionId
-     * @param connectionId
-     * @param observedTimestampMillis
-     * @param accumulation
-     * @param attempts
      * @return false if the expiration couldn't be updated because the item was already expired.
      */
-    private boolean updateExpirationTrackers(String partitionId, String connectionId,
+    private boolean updateExpirationTrackers(ITrafficStreamKey trafficStreamKey,
                                              EpochMillis observedTimestampMillis,
                                              Accumulation accumulation, int attempts) {
-        var expiringQueue = getOrCreateNodeMap(partitionId, observedTimestampMillis);
+        var expiringQueue = getOrCreateNodeMap(trafficStreamKey.getNodeId(), observedTimestampMillis);
         var latestPossibleKeyValueAtIncoming = expiringQueue.getLatestPossibleKeyValue();
         var incomingLastTimestampForAccumulation = accumulation.getNewestPacketTimestampInMillisReference().get();
         // for expiration tracking purposes, push incoming packets' timestamps to be monotonic?
@@ -86,7 +82,7 @@ public class ExpiringTrafficStreamMap {
 
         var lastPacketTimestamp = new EpochMillis(accumulation.getNewestPacketTimestampInMillisReference().get());
         if (lastPacketTimestamp.millis == ACCUMULATION_DEAD_SENTINEL) {
-            behavioralPolicy.onNewDataArrivingAfterItsAccumulationHadBeenRemoved(partitionId, connectionId);
+            behavioralPolicy.onNewDataArrivingAfterItsAccumulationHadBeenRemoved(trafficStreamKey);
             return false;
         }
         if (timestampMillis.test(lastPacketTimestamp, (newTs, lastTs) -> newTs > lastTs)) {
@@ -94,9 +90,9 @@ public class ExpiringTrafficStreamMap {
                     timestampMillis.millis);
             if (lastPacketTimestamp.millis != witnessValue) {
                 ++attempts;
-                if (behavioralPolicy.shouldRetryAfterAccumulationTimestampRaceDetected(partitionId, connectionId,
+                if (behavioralPolicy.shouldRetryAfterAccumulationTimestampRaceDetected(trafficStreamKey,
                         timestampMillis.toInstant(), accumulation, attempts)) {
-                    return updateExpirationTrackers(partitionId, connectionId, timestampMillis,
+                    return updateExpirationTrackers(trafficStreamKey, timestampMillis,
                             accumulation, attempts);
                 } else {
                     return false;
@@ -109,9 +105,9 @@ public class ExpiringTrafficStreamMap {
         if (targetBucketHashSet == null) {
             var startOfWindow = expiringQueue.firstKey().toInstant();
             assert !timestampMillis.test(startOfWindow, (ts, windowStart) -> ts < windowStart) :
-                    "Only expected to NOT find the target bucket when the incoming timestamp was before the " +
+                    "Only expected the target bucket to be missing when the incoming timestamp was before the " +
                             "expiring queue's time window";
-            behavioralPolicy.onDataArrivingBeforeTheStartOfTheCurrentProcessingWindow(partitionId, connectionId,
+            behavioralPolicy.onDataArrivingBeforeTheStartOfTheCurrentProcessingWindow(trafficStreamKey,
                     timestampMillis.toInstant(), latestPossibleKeyValueAtIncoming);
             return false;
         }
@@ -119,16 +115,16 @@ public class ExpiringTrafficStreamMap {
             var sourceBucket = getHashSetForTimestampWhileExpiringOldBuckets(expiringQueue, lastPacketTimestamp);
             if (sourceBucket != targetBucketHashSet) {
                 if (sourceBucket == null) {
-                    behavioralPolicy.onNewDataArrivingAfterItsAccumulationHasBeenExpired(partitionId, connectionId,
+                    behavioralPolicy.onNewDataArrivingAfterItsAccumulationHasBeenExpired(trafficStreamKey,
                             timestampMillis.toInstant(), lastPacketTimestamp.millis,
                             latestPossibleKeyValueAtIncoming, minimumGuaranteedLifetime);
                     return false;
                 }
                 // this will do nothing if it was already removed, such as in the previous recursive run
-                sourceBucket.remove(connectionId);
+                sourceBucket.remove(trafficStreamKey.getConnectionId());
             }
         }
-        targetBucketHashSet.put(connectionId, Boolean.TRUE);
+        targetBucketHashSet.put(trafficStreamKey.getConnectionId(), Boolean.TRUE);
         return true;
     }
 
@@ -141,28 +137,30 @@ public class ExpiringTrafficStreamMap {
         );
     }
 
-    public Accumulation get(String partitionId, String connectionId, Instant timestamp) {
-        var accumulation = connectionAccumulationMap.get(new ScopedConnectionIdKey(partitionId, connectionId));
+    public Accumulation get(ITrafficStreamKey trafficStreamKey, Instant timestamp) {
+        var accumulation = connectionAccumulationMap.get(trafficStreamKey);
         if (accumulation == null) {
             return null;
         }
-        if (!updateExpirationTrackers(partitionId, connectionId, new EpochMillis(timestamp), accumulation, 0)) {
+        if (!updateExpirationTrackers(trafficStreamKey, new EpochMillis(timestamp), accumulation, 0)) {
             return null;
         }
         return accumulation;
     }
 
-    public Accumulation getOrCreateWithoutExpiration(String partitionId, String connectionId) {
-        var key = new ScopedConnectionIdKey(partitionId, connectionId);
+    public Accumulation getOrCreateWithoutExpiration(
+            ITrafficStreamKey trafficStreamKey,
+            Function<ITrafficStreamKey, Accumulation> accumulationGenerator) {
+        var key = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
         return connectionAccumulationMap.computeIfAbsent(key, k -> {
             newConnectionCounter.incrementAndGet();
-            return new Accumulation(connectionId);
+            return accumulationGenerator.apply(trafficStreamKey);
         });
     }
 
-    public void expireOldEntries(String partitionId, String connectionId, Accumulation accumulation, Instant timestamp) {
-        var key = new ScopedConnectionIdKey(partitionId, connectionId);
-        if (!updateExpirationTrackers(partitionId, connectionId, new EpochMillis(timestamp), accumulation, 0)) {
+    public void expireOldEntries(ITrafficStreamKey trafficStreamKey, Accumulation accumulation, Instant timestamp) {
+        var key = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
+        if (!updateExpirationTrackers(trafficStreamKey, new EpochMillis(timestamp), accumulation, 0)) {
             connectionAccumulationMap.remove(key);
         }
     }

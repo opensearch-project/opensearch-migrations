@@ -31,7 +31,7 @@ public class TrafficStreamUtils {
         return ts.getConnectionId() + " (#" + getTrafficStreamIndex(ts) + ")[" + listSummaryStr + "]";
     }
 
-    private static int getTrafficStreamIndex(TrafficStream ts) {
+    public static int getTrafficStreamIndex(TrafficStream ts) {
         return ts.hasNumber() ? ts.getNumber() : ts.getNumberOfThisLastChunk();
     }
 

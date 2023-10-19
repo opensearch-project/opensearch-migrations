@@ -41,7 +41,7 @@ class RequestSenderOrchestratorTest {
         Instant lastEndTime = baseTime;
         var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
         for (int i = 0; i<NUM_REQUESTS_TO_SCHEDULE; ++i) {
-            var rKey = new UniqueRequestKey("TEST", i);
+            var rKey = new UniqueRequestKey(TestTrafficStreamKey.instance, i);
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
             var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
@@ -53,7 +53,7 @@ class RequestSenderOrchestratorTest {
             lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
         var closeFuture = senderOrchestrator.scheduleClose(
-                new UniqueRequestKey("TEST", NUM_REQUESTS_TO_SCHEDULE),
+                new UniqueRequestKey(TestTrafficStreamKey.instance, NUM_REQUESTS_TO_SCHEDULE),
                 lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());

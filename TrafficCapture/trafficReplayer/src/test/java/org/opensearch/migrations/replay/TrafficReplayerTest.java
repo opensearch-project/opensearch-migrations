@@ -5,6 +5,7 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -114,7 +115,7 @@ class TrafficReplayerTest {
                     trafficProducer.readNextTrafficStreamChunk().get().stream().forEach(ts->{
                         var i = counter.incrementAndGet();
                         var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
-                        var isEqual = ts.equals(expectedStream);
+                        var isEqual = ts.getStream().equals(expectedStream);
                         if (!isEqual) {
                             log.error("Expected trafficStream: " + expectedStream);
                             log.error("Observed trafficStream: " + ts);
@@ -163,7 +164,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
@@ -171,13 +172,14 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testCapturedReadsAfterCloseAreIgnored() throws IOException, URISyntaxException {
+    public void testCapturedReadsAfterCloseAreHandledAsNew() throws IOException, URISyntaxException {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         var remainingAccumulations = new AtomicInteger();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
-                        "update the test!",
+                        "change the minTimeout argument to the c'tor of " +
+                                "CapturedTrafficToHttpTransactionAccumulator that's being used in this unit test!",
                         (id,request) -> {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
@@ -187,8 +189,7 @@ class TrafficReplayerTest {
                             var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                         },
-                        (rk,ts) -> {},
-                        remaining -> remainingAccumulations.incrementAndGet()
+                        (rk,ts) -> {}
                 );
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {
@@ -209,41 +210,13 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
+                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
-        Assertions.assertEquals(1, byteArrays.size());
+        Assertions.assertEquals(2, byteArrays.size());
         Assertions.assertTrue(byteArrays.stream().allMatch(ba->ba.size()==2));
-        Assertions.assertEquals(1, remainingAccumulations.get());
-    }
-
-    @Test
-    public void testMissingStreamCausesWarning() throws URISyntaxException, IOException, ExecutionException, InterruptedException {
-        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
-        var gotWarning = new AtomicBoolean();
-        var gotAnythingElse = new AtomicBoolean();
-        CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
-                new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
-                        (id,request) -> { gotAnythingElse.set(true); },
-                        fullPair -> { gotAnythingElse.set(true); },
-                        (requestKey,ts) -> {},
-                        accum -> gotWarning.set(true));
-        byte[] serializedChunks;
-        try (var baos = new ByteArrayOutputStream()) {
-            // create ONLY a TrafficStream object with index=3.  Skip 1 and 2 to cause the issue that we're testing
-            makeTrafficStream(Instant.now(), 3).writeDelimitedTo(baos);
-            serializedChunks = baos.toByteArray();
-        }
-        try (var bais = new ByteArrayInputStream(serializedChunks)) {
-            try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.runReplay(trafficSource, trafficAccumulator);
-            }
-        }
-        trafficAccumulator.close();
-        Assertions.assertTrue(gotWarning.get());
-        Assertions.assertFalse(gotAnythingElse.get());
-
+        Assertions.assertEquals(0, remainingAccumulations.get());
     }
 
     private static String collectBytesToUtf8String(List<byte[]> bytesList) {

@@ -40,10 +40,6 @@ public class TimeShifter {
                 .addArgument(sourceTime).log();
     }
 
-    public boolean hasFirstTimestamp() {
-        return sourceTimeStart.get() != null;
-    }
-
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
         // realtime = systemTimeStart + rateMultiplier * (sourceTime-sourceTimeStart)
         if (sourceTimeStart.get() == null) {
@@ -52,7 +48,6 @@ public class TimeShifter {
         var rval = systemTimeStart.get()
                 .plus(Duration.ofMillis((long)
                         (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)));
-        //log.trace("Transformed real time=" + rval + " <- " + sourceTime);
         return rval;
     }
 
@@ -64,7 +59,6 @@ public class TimeShifter {
                     var rval = sourceTimeStart
                             .plus(Duration.ofMillis((long)
                                     (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier)));
-                    //log.trace("Transformed source time=" + rval + " <- " + realTime);
                     return rval;
                 });
     }

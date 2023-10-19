@@ -1,9 +1,9 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.traffic.source;
 
 import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.slf4j.event.Level;
 
 import java.io.IOException;
@@ -30,8 +30,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * to complete before another caller calls it again.
  */
 @Slf4j
-public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTimeController {
-    private final ITrafficCaptureSource underlyingSource;
+public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlowController {
+
+    private final ISimpleTrafficCaptureSource underlyingSource;
     private final AtomicReference<Instant> lastTimestampSecondsRef;
     private final AtomicReference<Instant> stopReadingAtRef;
     /**
@@ -41,7 +42,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
 
     private final Duration bufferTimeWindow;
 
-    public BlockingTrafficSource(ITrafficCaptureSource underlying, Duration bufferTimeWindow) {
+    public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying,
+                                 Duration bufferTimeWindow) {
         this.underlyingSource = underlying;
         this.stopReadingAtRef = new AtomicReference<>(Instant.EPOCH);
         this.lastTimestampSecondsRef = new AtomicReference<>(Instant.EPOCH);
@@ -67,22 +69,14 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
             readGate.release();
         } else {
             log.atTrace()
-                    .setMessage(() -> "stopReadsPast: " + pointInTime + " [ +buffer=" + prospectiveBarrier +
+                    .setMessage(() -> "stopReadsPast: " + pointInTime + " [buffer=" + prospectiveBarrier +
                             "] didn't move the cursor because the value was already at " + newValue
                     ).log();
         }
     }
 
-    public Instant lastReadTimestamp() {
-        return lastTimestampSecondsRef.get();
-    }
-
     public Duration getBufferTimeWindow() {
         return bufferTimeWindow;
-    }
-
-    public Instant unblockedReadBoundary() {
-        return lastReadTimestamp().equals(Instant.EPOCH) ? null : stopReadingAtRef.get();
     }
 
     /**
@@ -92,7 +86,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
      * @return
      */
     @Override
-    public CompletableFuture<List<TrafficStream>>
+    public CompletableFuture<List<ITrafficStreamWithKey>>
     readNextTrafficStreamChunk() {
         var trafficStreamListFuture =
                 CompletableFuture.supplyAsync(() -> {
@@ -118,13 +112,13 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedTim
             if (t != null) {
                 return;
             }
-            var maxLocallyObserved = v.stream().flatMap(ts->ts.getSubStreamList().stream())
+            var maxLocallyObservedTimestamp = v.stream().flatMap(tswk->tswk.getStream().getSubStreamList().stream())
                     .map(tso->tso.getTs())
                     .max(Comparator.comparingLong(Timestamp::getSeconds)
                             .thenComparingInt(Timestamp::getNanos))
                     .map(TrafficStreamUtils::instantFromProtoTimestamp)
                     .orElse(Instant.EPOCH);
-            Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObserved);
+            Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObservedTimestamp);
             log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
                     +lastTimestampSecondsRef.get()).log();
         });

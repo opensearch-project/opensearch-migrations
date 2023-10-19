@@ -8,7 +8,10 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.ITrafficCaptureSource;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.FileInputStream;
@@ -17,6 +20,7 @@ import java.io.InputStream;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
@@ -26,7 +30,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 @Slf4j
-public class KafkaProtobufConsumer implements ITrafficCaptureSource {
+public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
 
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
     private final Consumer<String, byte[]> kafkaConsumer;
@@ -90,11 +94,11 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
 
     @Override
     @SuppressWarnings("unchecked")
-    public CompletableFuture<List<TrafficStream>> readNextTrafficStreamChunk() {
+    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
         return CompletableFuture.supplyAsync(() -> readNextTrafficStreamSynchronously());
     }
 
-    public List<TrafficStream> readNextTrafficStreamSynchronously() {
+    public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously() {
         try {
             ConsumerRecords<String, byte[]> records;
             try {
@@ -105,7 +109,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                         "metadata refresh to try again.").addArgument(topic).log();
                 records = new ConsumerRecords<>(Collections.emptyMap());
             }
-            Stream<TrafficStream> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
+            Stream<ITrafficStreamWithKey> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
                 try {
                     TrafficStream ts = TrafficStream.parseFrom(record.value());
                     // Ensure we increment trafficStreamsRead even at a higher log level
@@ -115,7 +119,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                             .addKeyValue("topicName", this.topic)
                             .addKeyValue("sizeInBytes", ts.getSerializedSize())
                             .setMessage("Parsed traffic stream from Kafka").log();
-                    return ts;
+                    return (ITrafficStreamWithKey) new TrafficStreamWithEmbeddedKey(ts);
                 } catch (InvalidProtocolBufferException e) {
                     RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
                     metricsLogger.atError(recordError)
@@ -127,8 +131,7 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
                     return null;
                 }
             }).filter(Objects::nonNull);
-            kafkaConsumer.commitSync();
-            return trafficStream.collect(Collectors.toList());
+            return trafficStream.collect(Collectors.<ITrafficStreamWithKey>toList());
         } catch (Exception e) {
             log.error("Terminating Kafka traffic stream");
             throw e;
@@ -136,9 +139,13 @@ public class KafkaProtobufConsumer implements ITrafficCaptureSource {
     }
 
     @Override
+    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+        kafkaConsumer.commitSync(Map.of());
+    }
+
+    @Override
     public void close() throws IOException {
         kafkaConsumer.close();
         log.info("Kafka consumer closed successfully.");
     }
-
 }
