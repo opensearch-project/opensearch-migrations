@@ -1,4 +1,5 @@
 import argparse
+import base64
 import logging
 import os
 import subprocess
@@ -57,4 +58,9 @@ if __name__ == '__main__':  # pragma no cover
     )
     cli_args = arg_parser.parse_args()
     base_path = os.path.expandvars(cli_args.data_prepper_path)
-    run(base_path, cli_args.config_file_path, cli_args.data_prepper_endpoint)
+
+    if os.environ["INLINE_PIPELINE"] is not None:
+        decoded_bytes = base64.b64decode(os.environ["INLINE_PIPELINE"])
+        with open(cli_args.config_file_path, 'wb') as config_file:
+            config_file.write(decoded_bytes)
+    run(base_path, cli_args.config_file_path, cli_args.dp_endpoint)
