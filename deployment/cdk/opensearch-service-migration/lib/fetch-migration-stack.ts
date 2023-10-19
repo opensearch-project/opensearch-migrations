@@ -35,6 +35,22 @@ export class FetchMigrationStack extends Stack {
             cpu: 512
         });
 
+        new StringParameter(this, 'SSMParameterFetchMigrationTaskDefArn', {
+            description: 'OpenSearch Migration Parameter for Fetch Migration task definition ARN',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskDefArn`,
+            stringValue: fetchMigrationFargateTask.taskDefinitionArn
+        });
+        new StringParameter(this, 'SSMParameterFetchMigrationTaskRoleArn', {
+            description: 'OpenSearch Migration Parameter for Fetch Migration task role ARN',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`,
+            stringValue: fetchMigrationFargateTask.taskRole.roleArn
+        });
+        new StringParameter(this, 'SSMParameterFetchMigrationTaskExecRoleArn', {
+            description: 'OpenSearch Migration Parameter for Fetch Migration task exec role ARN',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskExecRoleArn`,
+            stringValue: fetchMigrationFargateTask.obtainExecutionRole().roleArn
+        });
+
         // Create Fetch Migration Container
         const fetchMigrationContainer = fetchMigrationFargateTask.addContainer("fetchMigrationContainer", {
             image: ContainerImage.fromAsset(join(__dirname, "../../../..", "FetchMigration")),
@@ -67,26 +83,9 @@ export class FetchMigrationStack extends Stack {
             vpc: props.vpc
         });
 
-        // // CFN outputs that will be consumed by Copilot
-        // new CfnOutput(this, 'FMTaskDefArn', {
-        //     exportName: 'FetchMigrationTaskDefinitionArn',
-        //     value: fetchMigrationFargateTask.taskDefinitionArn,
-        //     description: 'ARN of the ECS Task Definition for Fetch Migration',
-        // });
-        // new CfnOutput(this, 'FMTaskRoleArn', {
-        //     exportName: 'FetchMigrationTaskRoleArn',
-        //     value: fetchMigrationFargateTask.taskRole.roleArn,
-        //     description: 'ARN of the Task Role for Fetch Migration',
-        // });
-        // new CfnOutput(this, 'FMExecRoleArn', {
-        //     exportName: 'FetchMigrationExecutionRoleArn',
-        //     value: fetchMigrationFargateTask.obtainExecutionRole().roleArn,
-        //     description: 'ARN of the Execution Role for Fetch Migration',
-        // });
-        // Documentation - https://docs.aws.amazon.com/cli/latest/reference/ecs/run-task.html#options
         let networkConfigJson = {
             "awsvpcConfiguration": {
-                "subnets": props.vpc.publicSubnets.map(_ => _.subnetId),
+                "subnets": props.vpc.privateSubnets.map(_ => _.subnetId),
                 "securityGroups": [domainAccessGroupId, fetchMigrationSecurityGroup.securityGroupId]
             }
         }
@@ -97,7 +96,7 @@ export class FetchMigrationStack extends Stack {
         executionCommand += ` --network-configuration '${networkConfigString}'`
 
         new StringParameter(this, 'SSMParameterFetchMigrationRunTaskCommand', {
-            description: 'OpenSearch Migration Parameter CLI command to kick off the Fetch Migration ECS Task',
+            description: 'OpenSearch Migration Parameter for CLI command to kick off the Fetch Migration ECS Task',
             parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`,
             stringValue: executionCommand
         });

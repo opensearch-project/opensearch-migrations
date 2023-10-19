@@ -77,12 +77,35 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        let environment: { [key: string]: string; } = {
+        const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
         }
+        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy]
+
         if (props.fetchMigrationEnabled) {
             environment["FETCH_MIGRATION_COMMAND"] = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`)
+
+            const fetchMigrationTaskDefArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskDefArn`);
+            const fetchMigrationTaskRunPolicy = new PolicyStatement({
+                effect: Effect.ALLOW,
+                resources: [fetchMigrationTaskDefArn],
+                actions: [
+                    "ecs:RunTask"
+                ]
+            })
+            const fetchMigrationTaskRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`);
+            const fetchMigrationTaskExecRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskExecRoleArn`);
+            // Required as per https://docs.aws.amazon.com/AmazonECS/latest/userguide/task-iam-roles.html
+            const fetchMigrationPassRolePolicy = new PolicyStatement({
+                effect: Effect.ALLOW,
+                resources: [fetchMigrationTaskRoleArn, fetchMigrationTaskExecRoleArn],
+                actions: [
+                    "iam:PassRole"
+                ]
+            })
+            taskRolePolicies.push(fetchMigrationTaskRunPolicy)
+            taskRolePolicies.push(fetchMigrationPassRolePolicy)
         }
 
         this.createService({
@@ -92,7 +115,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
-            taskRolePolicies: [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy],
+            taskRolePolicies: taskRolePolicies,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 1024,
             ...props
