@@ -6,6 +6,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -31,6 +32,7 @@ class RequestSenderOrchestratorTest {
     public static final int NUM_REPEATS = 2;
 
     @Test
+    @Tag("longTest")
     public void testThatSchedulingWorks() throws Exception {
         var httpServer = SimpleHttpServer.makeServer(false,
                 r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)));

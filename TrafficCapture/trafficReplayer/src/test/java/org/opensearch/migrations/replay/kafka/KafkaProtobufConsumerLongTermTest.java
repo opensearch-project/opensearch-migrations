@@ -10,6 +10,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -87,6 +88,7 @@ public class KafkaProtobufConsumerLongTermTest {
     }
 
     @Test
+    @Tag("longTest")
     public void testTrafficCaptureSource() throws Exception {
         String testTopicName = "TEST_TOPIC";
 

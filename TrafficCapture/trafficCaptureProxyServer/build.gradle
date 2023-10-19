@@ -41,6 +41,7 @@ dependencies {
 
     testImplementation project(':captureProtobufs')
     testImplementation project(path: ':testUtilities')
+    testImplementation testFixtures(project(path: ':captureOffloader'))
 }
 
 tasks.withType(Tar){

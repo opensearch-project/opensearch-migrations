@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
@@ -13,7 +14,7 @@ import java.time.Duration;
 @Slf4j
 //@WrapWithNettyLeakDetection(repetitions = 1)
 public class FullTrafficReplayerTest {
-    //@Test
+    @Tag("longTest")
     public void fullTest() throws Exception {
 
         var httpServer = SimpleNettyHttpServer.makeServer(false, TestHttpServerContext::makeResponse);

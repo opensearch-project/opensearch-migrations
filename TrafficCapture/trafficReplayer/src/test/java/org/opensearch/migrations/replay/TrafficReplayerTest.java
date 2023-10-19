@@ -164,7 +164,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(bytes)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
+                tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
@@ -210,7 +210,7 @@ class TrafficReplayerTest {
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             try (var trafficSource = new InputStreamOfTraffic(bais)) {
-                tr.pullReplayFromSourceToAccumulator(trafficSource, trafficAccumulator);
+                tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
