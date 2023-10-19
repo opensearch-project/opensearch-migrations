@@ -21,12 +21,12 @@ export class TrafficComparatorJupyterStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: TrafficComparatorJupyterProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/serviceConnectSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "comparatorSQLAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLAccessSecurityGroupId`))
+            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "comparatorSQLAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLAccessSecurityGroupId`))
         ]
 
         const volumeName = "sharedComparatorSQLVolume"
-        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLVolumeEFSId`)
+        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLVolumeEFSId`)
         const comparatorSQLVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {

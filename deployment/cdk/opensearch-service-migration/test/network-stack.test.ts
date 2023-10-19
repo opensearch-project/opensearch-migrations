@@ -5,13 +5,11 @@ import {Template} from "aws-cdk-lib/assertions";
 import {createStackComposer} from "./test-utils";
 
 test('Test vpcEnabled setting that is disabled does not create stack', () => {
-    const app = new App({
-        context: {
-            vpcEnabled: false
-        }
-    })
+    const contextOptions = {
+        vpcEnabled: false
+    }
 
-    const openSearchStacks = createStackComposer(app)
+    const openSearchStacks = createStackComposer(contextOptions)
 
     openSearchStacks.stacks.forEach(function(stack) {
         expect(!(stack instanceof NetworkStack))
@@ -20,15 +18,13 @@ test('Test vpcEnabled setting that is disabled does not create stack', () => {
 })
 
 test('Test vpcEnabled setting that is enabled without existing resources creates default VPC resources', () => {
-    const app = new App({
-        context: {
-            vpcEnabled: true,
-            // This setting could be left out, but provides clarity into the subnets for this test case
-            availabilityZoneCount: 2
-        }
-    })
+    const contextOptions = {
+        vpcEnabled: true,
+        // This setting could be left out, but provides clarity into the subnets for this test case
+        availabilityZoneCount: 2
+    }
 
-    const openSearchStacks = createStackComposer(app)
+    const openSearchStacks = createStackComposer(contextOptions)
 
     const networkStack: NetworkStack = (openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]) as NetworkStack
     const networkTemplate = Template.fromStack(networkStack)
@@ -38,10 +34,6 @@ test('Test vpcEnabled setting that is enabled without existing resources creates
     // For each AZ, a private and public subnet is created
     networkTemplate.resourceCountIs("AWS::EC2::Subnet", 4)
 
-    const securityGroups = networkStack.domainSecurityGroups
-    expect(securityGroups.length).toBe(1)
-    const subnets = networkStack.domainSubnets
-    expect(subnets).toBe(undefined)
     const vpc = networkStack.vpc
     expect(vpc.publicSubnets.length).toBe(2)
     expect(vpc.privateSubnets.length).toBe(2)

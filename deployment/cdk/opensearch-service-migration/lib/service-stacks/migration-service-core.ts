@@ -45,7 +45,7 @@ export class MigrationServiceCore extends Stack {
         }
 
         // TODO is ecsClusterARN needed now?
-        //const ecsCluster = Cluster.fromClusterArn(this, 'ecsCluster', StringParameter.valueForStringParameter(this, `/migration/${props.stage}/ecsClusterARN`))
+        //const ecsCluster = Cluster.fromClusterArn(this, 'ecsCluster', StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/ecsClusterARN`))
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
             vpc: props.vpc
@@ -96,7 +96,7 @@ export class MigrationServiceCore extends Stack {
         const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
             retention: RetentionDays.ONE_MONTH,
             removalPolicy: RemovalPolicy.DESTROY,
-            logGroupName: `/migration/${props.stage}/${props.serviceName}`
+            logGroupName: `/migration/${props.stage}/${props.defaultDeployId}/${props.serviceName}`
         });
 
         const serviceContainer = serviceTaskDef.addContainer("ServiceContainer", {

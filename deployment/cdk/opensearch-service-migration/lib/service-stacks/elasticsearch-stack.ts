@@ -17,7 +17,7 @@ export class ElasticsearchStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: ElasticsearchProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
         ]
 
         const servicePort: PortMapping = {

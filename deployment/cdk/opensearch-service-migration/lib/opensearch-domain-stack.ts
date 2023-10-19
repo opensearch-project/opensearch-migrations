@@ -4,7 +4,7 @@ import {
   ISecurityGroup, IVpc,
   SecurityGroup,
   SubnetFilter,
-  SubnetSelection, Vpc
+  SubnetSelection
 } from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
 import {RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
@@ -55,6 +55,7 @@ export class OpenSearchDomainStack extends Stack {
   constructor(scope: Construct, id: string, props: opensearchDomainStackProps) {
     super(scope, id, props);
 
+    const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
     // Retrieve existing account resources if defined
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
@@ -67,7 +68,7 @@ export class OpenSearchDomainStack extends Stack {
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
     const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
-        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osAccessSecurityGroupId`))
+        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`))
 
     // Map objects from props
 
@@ -76,7 +77,7 @@ export class OpenSearchDomainStack extends Stack {
     if (props.enableDemoAdmin) {
       adminUserName = "admin"
       adminUserSecret = new Secret(this, "demoUserSecret", {
-        secretName: `demo-user-secret-${props.stage}-${props.env?.region}`,
+        secretName: `demo-user-secret-${props.stage}-${deployId}`,
         // This is unsafe and strictly for ease of use in a demo mode setup
         secretStringValue: SecretValue.unsafePlainText("Admin123!")
       })
@@ -148,17 +149,17 @@ export class OpenSearchDomainStack extends Stack {
 
     new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
       description: 'OpenSearch migration parameter for OpenSearch endpoint',
-      parameterName: `/migration/${props.stage}/osClusterEndpoint`,
+      parameterName: `/migration/${props.stage}/${deployId}/osClusterEndpoint`,
       stringValue: domain.domainEndpoint
     });
 
     if (domain.masterUserPassword && !adminUserSecret) {
-      console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${props.stage}/osUserAndSecret`)
+      console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${props.stage}/${deployId}/osUserAndSecret`)
     }
     else if (domain.masterUserPassword && adminUserSecret) {
       new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
         description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
-        parameterName: `/migration/${props.stage}/osUserAndSecretArn`,
+        parameterName: `/migration/${props.stage}/${deployId}/osUserAndSecretArn`,
         stringValue: `${adminUserName} ${adminUserSecret.secretArn}`
       });
     }

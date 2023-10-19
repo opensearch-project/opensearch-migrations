@@ -1,8 +1,12 @@
 {
   "engineVersion": "OS_2.7",
-  "domainName": "os-service-domain",
+  "domainName": "os-service-domain-2-7",
   "tlsSecurityPolicy": "TLS_1_2",
   "enforceHTTPS": true,
   "nodeToNodeEncryptionEnabled": true,
-  "encryptionAtRestEnabled": true
+  "encryptionAtRestEnabled": true,
+  "migrationAssistanceEnabled": true,
+  "migrationConsoleServiceEnabled": true,
+  "captureProxyESServiceEnabled": true,
+  "trafficReplayerServiceEnabled": true
 }

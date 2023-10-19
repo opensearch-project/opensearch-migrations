@@ -18,8 +18,8 @@ export class TrafficComparatorStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: TrafficComparatorProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/serviceConnectSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "comparatorSQLAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLAccessSecurityGroupId`))
+            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "comparatorSQLAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLAccessSecurityGroupId`))
         ]
 
         const servicePort: PortMapping = {
@@ -35,7 +35,7 @@ export class TrafficComparatorStack extends MigrationServiceCore {
         }
 
         const volumeName = "sharedComparatorSQLVolume"
-        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/comparatorSQLVolumeEFSId`)
+        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLVolumeEFSId`)
         const comparatorSQLVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {

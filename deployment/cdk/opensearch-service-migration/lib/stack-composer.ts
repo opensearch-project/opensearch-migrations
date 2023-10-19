@@ -20,13 +20,20 @@ import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
 
 export interface StackPropsExt extends StackProps {
-    readonly stage: string
+    readonly stage: string,
+    readonly defaultDeployId: string
+    readonly addOnMigrationDeployId?: string
 }
 
 export class StackComposer {
     public stacks: Stack[] = [];
 
     constructor(scope: Construct, props: StackProps) {
+
+        const defaultValues: { [x: string]: (any); } = defaultValuesJson
+        const account = props.env?.account
+        const region = props.env?.region
+        const defaultDeployId = 'default'
 
         const contextId = scope.node.tryGetContext("contextId")
         if (!contextId) {
@@ -36,14 +43,10 @@ export class StackComposer {
         if (!contextJSON) {
             throw new Error(`No CDK context block found for contextId '${contextId}'`)
         }
-
-        const account = props.env?.account
-        const region = props.env?.region
         const stage = getContextForType('stage', 'string')
 
         let version: EngineVersion
         let accessPolicies: PolicyStatement[]|undefined
-        const defaultValues: { [x: string]: (any); } = defaultValuesJson
         const domainName = getContextForType('domainName', 'string')
         const dataNodeType = getContextForType('dataNodeType', 'string')
         const dataNodeCount = getContextForType('dataNodeCount', 'number')
@@ -75,7 +78,7 @@ export class StackComposer {
         const mskARN = getContextForType('mskARN', 'string')
         const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
         const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
-        const addOnMigrationId = getContextForType('addOnMigrationId', 'string')
+        const addOnMigrationDeployId = getContextForType('addOnMigrationDeployId', 'string')
         const captureProxyESServiceEnabled = getContextForType('captureProxyESServiceEnabled', 'boolean')
         const migrationConsoleServiceEnabled = getContextForType('migrationConsoleServiceEnabled', 'boolean')
         const trafficReplayerServiceEnabled = getContextForType('trafficReplayerServiceEnabled', 'boolean')
@@ -142,6 +145,8 @@ export class StackComposer {
             throw new Error("Provided domainRemovalPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html")
         }
 
+        const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
+
         // If enabled re-use existing VPC and/or associated resources or create new
         let networkStack: NetworkStack|undefined
         if (vpcEnabled) {
@@ -151,12 +156,13 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             this.stacks.push(networkStack)
         }
 
-        const openSearchStack = new OpenSearchDomainStack(scope, 'openSearchDomainStack', {
+        const openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
             version: version,
             domainName: domainName,
             dataNodeInstanceType: dataNodeType,
@@ -187,9 +193,11 @@ export class StackComposer {
             vpcSecurityGroupIds: vpcSecurityGroupIds,
             availabilityZoneCount: availabilityZoneCount,
             domainRemovalPolicy: domainRemovalPolicy,
-            stackName: `OSMigrations-${stage}-${region}-OpenSearchDomain`,
+            stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
             description: "This stack contains resources to create/manage an OpenSearch Service domain",
             stage: stage,
+            defaultDeployId: defaultDeployId,
+            addOnMigrationDeployId: addOnMigrationDeployId,
             ...props,
         });
 
@@ -210,6 +218,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             migrationStack.addDependency(networkStack)
@@ -221,6 +230,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-MSKUtility`,
                 description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             mskUtilityStack.addDependency(networkStack)
@@ -235,6 +245,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             captureProxyESStack.addDependency(mskUtilityStack)
@@ -250,13 +261,12 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             // To enable the Migration Console to make requests to the Capture Proxy with Service Connect,
             // it should be deployed after the Capture Proxy
-            if (captureProxyESStack) {
-                migrationConsoleStack.addDependency(captureProxyESStack)
-            }
+            if (captureProxyESStack) migrationConsoleStack.addDependency(captureProxyESStack)
             migrationConsoleStack.addDependency(mskUtilityStack)
             migrationConsoleStack.addDependency(migrationStack)
             migrationConsoleStack.addDependency(openSearchStack)
@@ -265,22 +275,23 @@ export class StackComposer {
         }
 
         let trafficReplayerStack
-        if (trafficReplayerServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) {
-            trafficReplayerStack = new TrafficReplayerStack(scope, "traffic-replayer", {
+        if ((trafficReplayerServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) || (addOnMigrationDeployId && networkStack)) {
+            trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpc: networkStack.vpc,
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
-                addOnMigrationId: addOnMigrationId,
+                addOnMigrationDeployId: addOnMigrationDeployId,
                 customTargetEndpoint: trafficReplayerTargetEndpoint,
                 customKafkaGroupId: trafficReplayerGroupId,
                 extraArgs: trafficReplayerExtraArgs,
                 enableComparatorLink: trafficComparatorServiceEnabled,
-                stackName: `OSMigrations-${stage}-${region}-TrafficReplayer`,
+                stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
-            trafficReplayerStack.addDependency(mskUtilityStack)
-            trafficReplayerStack.addDependency(migrationStack)
+            if (mskUtilityStack) trafficReplayerStack.addDependency(mskUtilityStack)
+            if (migrationStack) trafficReplayerStack.addDependency(migrationStack)
             trafficReplayerStack.addDependency(openSearchStack)
             trafficReplayerStack.addDependency(networkStack)
             this.stacks.push(trafficReplayerStack)
@@ -293,6 +304,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-TrafficComparator`,
                 description: "This stack contains resources for the Traffic Comparator ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             trafficComparatorStack.addDependency(migrationStack)
@@ -307,6 +319,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-TrafficComparatorJupyter`,
                 description: "This stack contains resources for the Traffic Comparator Jupyter ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             trafficComparatorJupyterStack.addDependency(migrationStack)
@@ -322,6 +335,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             captureProxyStack.addDependency(mskUtilityStack)
@@ -337,6 +351,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-Elasticsearch`,
                 description: "This stack contains resources for the Elasticsearch ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             elasticsearchStack.addDependency(migrationStack)
@@ -351,6 +366,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
                 description: "This stack contains resources for the Kafka Broker ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             kafkaBrokerStack.addDependency(migrationStack)
@@ -365,6 +381,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-KafkaZookeeper`,
                 description: "This stack contains resources for the Kafka Zookeeper ECS service",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             kafkaZookeeperStack.addDependency(migrationStack)
@@ -383,6 +400,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-HistoricalCapture`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 stage: stage,
+                defaultDeployId: defaultDeployId,
                 ...props,
             })
             historicalCaptureStack.addDependency(networkStack)

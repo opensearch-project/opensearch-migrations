@@ -26,8 +26,8 @@ export class CaptureProxyESStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/serviceConnectSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskAccessSecurityGroupId`))
+            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`))
         ]
 
         const servicePort: PortMapping = {
@@ -42,8 +42,8 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             port: 9200
         }
 
-        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterARN`);
-        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskClusterName`);
+        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`);
+        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`);
         const mskClusterConnectPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterARN],
@@ -62,7 +62,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             ]
         })
 
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/mskBrokers`);
+        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
         this.createService({
             serviceName: "capture-proxy-es",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),

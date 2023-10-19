@@ -41,7 +41,7 @@ export class MigrationAssistanceStack extends Stack {
         mskSecurityGroup.addIngressRule(mskSecurityGroup, Port.allTraffic())
         new StringParameter(this, 'SSMParameterMSKAccessGroupId', {
             description: 'OpenSearch migration parameter for MSK access security group id',
-            parameterName: `/migration/${props.stage}/mskAccessSecurityGroupId`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`,
             stringValue: mskSecurityGroup.securityGroupId
         });
 
@@ -98,12 +98,12 @@ export class MigrationAssistanceStack extends Stack {
         });
         new StringParameter(this, 'SSMParameterMSKARN', {
             description: 'OpenSearch Migration Parameter for MSK ARN',
-            parameterName: `/migration/${props.stage}/mskClusterARN`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`,
             stringValue: mskCluster.attrArn
         });
         new StringParameter(this, 'SSMParameterMSKClusterName', {
             description: 'OpenSearch Migration Parameter for MSK cluster name',
-            parameterName: `/migration/${props.stage}/mskClusterName`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`,
             stringValue: mskCluster.clusterName
         });
 
@@ -114,7 +114,7 @@ export class MigrationAssistanceStack extends Stack {
         comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
         new StringParameter(this, 'SSMParameterComparatorSQLAccessGroupId', {
             description: 'OpenSearch migration parameter for Comparator SQL volume access security group id',
-            parameterName: `/migration/${props.stage}/comparatorSQLAccessSecurityGroupId`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLAccessSecurityGroupId`,
             stringValue: comparatorSQLiteSG.securityGroupId
         });
 
@@ -125,7 +125,7 @@ export class MigrationAssistanceStack extends Stack {
         });
         new StringParameter(this, 'SSMParameterComparatorSQLVolumeEFSId', {
             description: 'OpenSearch migration parameter for Comparator SQL EFS filesystem id',
-            parameterName: `/migration/${props.stage}/comparatorSQLVolumeEFSId`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLVolumeEFSId`,
             stringValue: comparatorSQLiteEFS.fileSystemId
         });
 
@@ -137,7 +137,7 @@ export class MigrationAssistanceStack extends Stack {
 
         new StringParameter(this, 'SSMParameterReplayerOutputAccessGroupId', {
             description: 'OpenSearch migration parameter for Replayer output access security group id',
-            parameterName: `/migration/${props.stage}/replayerAccessSecurityGroupId`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`,
             stringValue: replayerOutputSG.securityGroupId
         });
 
@@ -148,7 +148,7 @@ export class MigrationAssistanceStack extends Stack {
         });
         new StringParameter(this, 'SSMParameterReplayerOutputEFSId', {
             description: 'OpenSearch migration parameter for Replayer output EFS filesystem id',
-            parameterName: `/migration/${props.stage}/replayerOutputEFSId`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputEFSId`,
             stringValue: replayerOutputEFS.fileSystemId
         });
 
@@ -161,7 +161,7 @@ export class MigrationAssistanceStack extends Stack {
 
         new StringParameter(this, 'SSMParameterServiceConnectGroupId', {
             description: 'OpenSearch migration parameter for Service Connect security group id',
-            parameterName: `/migration/${props.stage}/serviceConnectSecurityGroupId`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`,
             stringValue: serviceConnectSecurityGroup.securityGroupId
         });
 

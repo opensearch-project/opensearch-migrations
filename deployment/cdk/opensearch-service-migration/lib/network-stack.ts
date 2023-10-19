@@ -1,8 +1,6 @@
 import {Stack} from "aws-cdk-lib";
 import {
-    IpAddresses, IVpc,
-    Port,
-    SecurityGroup,
+    IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
@@ -50,11 +48,6 @@ export class NetworkStack extends Stack {
                 ],
             });
         }
-        // new StringParameter(this, 'SSMParameterVpcId', {
-        //     description: 'OpenSearch migration parameter for VPC id',
-        //     parameterName: `/migration/${props.stage}/vpcId`,
-        //     stringValue: vpc.vpcId
-        // });
 
         // Create a default SG which only allows members of this SG to access the Domain endpoints
         const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
@@ -65,7 +58,7 @@ export class NetworkStack extends Stack {
 
         new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
             description: 'OpenSearch migration parameter for target OpenSearch access security group id',
-            parameterName: `/migration/${props.stage}/osAccessSecurityGroupId`,
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
             stringValue: defaultSecurityGroup.securityGroupId
         });
 

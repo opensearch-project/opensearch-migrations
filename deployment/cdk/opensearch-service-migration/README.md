@@ -1,21 +1,34 @@
-# OpenSearch Service Domain CDK
+# OpenSearch Service Migration CDK
 
-This repo contains an IaC CDK solution for deploying an OpenSearch Service Domain. Users have the ability to easily deploy their Domain using default values or provide [configuration options](#Configuration-Options) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users. Supporting this would be unrealistic, and likely conflicting at times, when considering the needs of many users. Rather this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
+This directory contains the IaC CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their Domain using default values or provide [configuration options](#Configuration-Options) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users. Supporting this would be unrealistic, and likely conflicting at times, when considering the needs of many users. Rather this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
-### Getting Started
+## Getting Started
 
-#### Project required setup
+### Install Prerequisites
+
+###### Docker
+Docker is used by CDK to build container images. If not installed, follow the steps [here](https://docs.docker.com/engine/install/) to set up. Later versions are recommended.
+###### Git
+Git is used by the opensearch-migrations repo to fetch associated repositories (such as the traffic-comparator repo) for constructing their respective Dockerfiles. Steps to set up can be found [here](https://github.com/git-guides/install-git).
+###### Java 11
+Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 11.
+
+### Project required setup
 
 1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
-2- Set the `CDK_DEPLOYMENT_STAGE` environment variable to assist in naming resources and preventing collisions. Typically, this would be set to a value such as `dev`, `gamma`, `Wave1`, `PROD` and will be used to distinguish AWS resources for a given region and deployment stage. For example the CloudFormation stack may be named like `OSServiceDomain-dev-us-east-1`. This stage environment variable should only be used for the disambiguation of user resources.
+2- Creating Dockerfiles, this project needs to build the required Dockerfiles that the CDK will use in its services. From the `TrafficCapture` directory the following command can be ran to build these files
+```shell
+./gradlew :dockerSolution:buildDockerImages
+```
+More details can be found [here](../../TrafficCapture/dockerSolution/README.md)
 
-#### First time using CDK?
+### First time using CDK in this region?
 
 If this is your first experience with CDK, follow the steps below to get started:
 
 1- Install the **CDK CLI** tool by running:
-```
+```shell
 npm install -g aws-cdk
 ```
 
@@ -29,69 +42,76 @@ cdk bootstrap
 
 Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
 
-### Deploying your CDK
-Before deploying your CDK you should fill in any desired context parameters that will dictate the composition of your OpenSearch Service Domain
+## Deploying the CDK
+This project uses CDK context parameters to configure deployments. These context values will dictate the composition of your stacks as well as which stacks get deployed.
 
-This can be accomplished by providing these options in a `cdk.context.json` file and then deploying like so:
-```
-cdk deploy "*"
+The full list of available configuration options for this project are listed [here](./options.md). Each option can be provided as an empty string `""` or simply not included, and in each of these 'empty' cases the option will use the project default value (if it exists) or CloudFormation's default value.
+
+A set of demo context values (using the `demo-deploy` label) has been set in the `cdk.context.json` located in this directory, which can be customized or used as is for a quickstart demo solution.
+
+This demo solution can be deployed with the following command:
+```shell
+cdk deploy "*" --c contextId=demo-deploy --require-approval never --concurrency 3
 ```
 
-Or by passing the context options you want to change as options in the CDK CLI
+Additionally, another context block in the `cdk.context.json` could be created with say the label `uat-deploy` with its own custom context configuration and be deployed with the command:
+```shell
+cdk deploy "*" --c contextId=uat-deploy --require-approval never --concurrency 3
 ```
-cdk deploy "*" --c domainName="os-service-domain" --c engineVersion="OS_1_3_6" --c dataNodeType="r6g.large.search" --c dataNodeCount=1
-```
-* Note that these context parameters can also be passed to `cdk synth` and `cdk bootstrap` commands to simulate similar scenarios
+**Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (Except in the multiple replay scenario stated [here](#how-to-run-multiple-replayer-scenarios)) 
 
 Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
 1. CDK CLI passed context values (highest precedence)
 2. Created `cdk.context.json` in the same directory as this README
 3. Existing `default-values.json` in the same directory as this README
 
-### Stack Breakdown
-This CDK has been structured to allow multiple stacks to be deployed out-of-the-box, which allows an easy entrance door for users to get started and add additional stacks as they need. Each of these stacks are deployed independently in CloudFormation, with only the Domain stack being required.
+## Executing Commands on a Deployed Service
 
-#### Domain Stack (OSServiceDomainCDKStack-STAGE-REGION)
-This is the core required stack of this CDK which is responsible for deploying the OpenSearch Service Domain and associated resources such as CloudWatch log groups for Domain logging.
-
-#### Network Stack (OSServiceNetworkCDKStack-STAGE-REGION)
-This optional stack will be used when the Domain is configured to be placed inside a VPC and will contain resources related to the networking of this VPC such as Security Groups and Subnets. It has a dependency on the Domain stack.
-
-#### Migration Assistance Stack (OSServiceMigrationCDKStack-STAGE-REGION)
-This optional stack is used to house the migration assistance resources which are in the process of being developed to assist in migrating to an OpenSearch domain. It has dependencies on both the Domain and Network stacks.
-
-#### Historical Capture Stack (OSServiceHistoricalCDKStack-STAGE-REGION)
-This optional exploratory stack sets up a deployable Logstash ECS cluster for historical data migration. It is experimental and should only be used for development purposes. It has dependencies on both the Domain and Network stacks.
-
-### Configuration Options
-
-The available configuration options are listed [here](./options.md). The vast majority of these options do not need to be provided, with only `domainName` and `engineVersion` being required. All non-required options can be provided as an empty string `""` or simply not included, and in each of these cases the option will be allocated with the CDK Domain default value
-
-Users are encouraged to customize the deployment by changing the CDK TypeScript as needed. The configuration-by-context option that is depicted here is primarily provided for testing/development purposes, and users may find it easier to adjust the TS here rather than say wrangling a complex JSON object through a context option
-
-Additional context on some of these options, can also be found in the Domain construct [documentation](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_opensearchservice.Domain.html)
-
-**It should be noted that limited testing has been conducted solely in the us-east-1 region, and some items like instance-type examples might be biased**
-
-
-Some configuration options available in other solutions (listed below) which enable/disable specific features do not exist in the current native CDK Domain construct. These options are inferred based on the presence or absence of related fields (i.e. if dedicatedMasterNodeCount is set to 1 it is inferred that dedicated master nodes should be enabled). These options are normally disabled by default, allowing for this inference.
-```
-"dedicatedMasterNodeEnabled": "X",
-"warmNodeEnabled": "X",
-"fineGrainedAccessControlEnabled": "X",
-"internalUserDatabaseEnabled": "X"
+Once a service has been deployed, a command shell can be opened for that service's container. If the SSM Session Manager plugin is not installed, it should be when prompted from the below exec command.
+```shell
+# ./ecsExec.sh <service-name> <stage> <region>
+./ecsExec.sh migration-console dev us-east-1
 ```
 
-### Tearing down CDK
-To remove all the CDK stack(s) which get created during deployment we can execute
+## Testing the deployed solution
+
+Once the solution is deployed, the easiest way to test the solution is to exec into the `migration-console` service container and run an opensearch-benchmark workload through to simulate incoming traffic, as the following steps illustrate
+
+```shell
+# Exec into container
+./ecsExec.sh migration-console dev us-east-1
+
+# Run opensearch-benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+./runTestBenchmarks.sh
 ```
-cdk destroy "*"
+
+After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same migration-console container to confirm
+```shell
+# Check doc counts and indices for both source and target cluster
+./catIndices.sh
 ```
-Or to remove an individual stack we can execute
+
+## Tearing down CDK
+To remove all the CDK stack(s) which get created during a deployment we can execute a command similar to below
+```shell
+# For demo context
+cdk destroy "*" --c contextId=demo-deploy
 ```
-cdk destroy opensearchDomainStack
+Or to remove an individual stack from the deployment we can execute
+```shell
+# For demo context
+cdk destroy migration-console --c contextId=demo-deploy
 ```
 Note that the default retention policy for the OpenSearch Domain is to RETAIN this resource when the stack is deleted, and in order to delete the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `DESTROY`. Otherwise, the Domain can be manually deleted through the AWS console or through other means such as the AWS CLI.
+
+## How to run multiple Replayer scenarios
+
+
+## Appendix
+
+### How is an Authorization header set for requests from the Replayer to the target cluster?
+
+See Replayer explanation [here](../../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
 
 ### Useful CDK commands
 

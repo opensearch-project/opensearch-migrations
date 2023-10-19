@@ -32,7 +32,7 @@ export class HistoricalCaptureStack extends Stack {
             cpu: 512
         });
 
-        const targetEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/osClusterEndpoint`)
+        const targetEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         let logstashConfigData: string = readFileSync(props.logstashConfigFilePath, 'utf8');
         if (props.sourceEndpoint) {
             logstashConfigData = logstashConfigData.replace("<SOURCE_CLUSTER_HOST>", props.sourceEndpoint)

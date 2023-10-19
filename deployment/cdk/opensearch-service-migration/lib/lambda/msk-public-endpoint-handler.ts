@@ -183,12 +183,14 @@ export const handler = async (event: any, context: Context): Promise<void> => {
         if (state == "ACTIVE") {
             console.log("MSK cluster is now 'Active', finishing Lambda")
             const brokerResponse = await getBootstrapBrokers()
+            const brokers = brokerResponse.BootstrapBrokerStringPublicSaslIam
+            const orderedBrokers = brokers.split(",").sort().join(",")
             const responseBody = {
                 Status: "SUCCESS",
                 Reason: "Cluster connectivity update has successfully finished",
                 // Since our wait condition only needs one occurrence this value can be any static value
                 UniqueId: "updateConnectivityID",
-                Data: `${brokerResponse.BootstrapBrokerStringPublicSaslIam}`
+                Data: orderedBrokers
             }
             // @ts-ignore
             const waitConditionResponse = await fetch(payloadData.CallbackUrl, {method: 'PUT', body: JSON.stringify(responseBody)});
