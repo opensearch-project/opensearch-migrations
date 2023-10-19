@@ -131,6 +131,8 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                     return null;
                 }
             }).filter(Objects::nonNull);
+            // This simple commit should be removed when logic is in place for using commitTrafficStream()
+            kafkaConsumer.commitSync();
             return trafficStream.collect(Collectors.<ITrafficStreamWithKey>toList());
         } catch (Exception e) {
             log.error("Terminating Kafka traffic stream");
