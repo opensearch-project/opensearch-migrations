@@ -9,12 +9,6 @@
  * GitHub history for details.
  */
 
-buildscript {
-    dependencies {
-        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
-    }
-}
-
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
 //    id "com.github.spotbugs" version "4.7.3"
@@ -53,13 +47,11 @@ dependencies {
     implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"${resilience4jVersion}"
     implementation group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"${resilience4jVersion}"
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.94.Final'
-    implementation group: 'org.json', name: 'json', version: '20230227'
-    //implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.22'
-
     implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.5.1'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+    implementation group: 'org.json', name: 'json', version: '20230227'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
     implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.9'
     implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
@@ -68,17 +60,17 @@ dependencies {
 
     testImplementation project(':testUtilities')
     testImplementation project(':captureOffloader')
-    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
+    testImplementation testFixtures(project(path: ':captureOffloader'))
 
+    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
+    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.x.x'
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.0'
     testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.0'
     testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.0'
-
-    testImplementation 'org.mockito:mockito-core:4.6.1'
-    testImplementation 'org.mockito:mockito-junit-jupiter:4.6.1'
+    testImplementation group: 'org.mockito', name:'mockito-core', version:'4.6.1'
+    testImplementation group: 'org.mockito', name:'mockito-junit-jupiter', version:'4.6.1'
+    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine', version:'5.x.x'
 }
-
-
 
 configurations.all {
     resolutionStrategy.eachDependency { DependencyResolveDetails details ->
@@ -107,11 +99,18 @@ jar {
     }
 }
 
-tasks.named('test') {
+test {
+    useJUnitPlatform()
+
     systemProperty 'disableMemoryLeakTests', 'true'
     useJUnitPlatform {
         excludeTags 'longTest'
     }
+    // remove these comments to show the test logs
+//    testLogging {
+//        events 'PASSED', 'FAILED', 'SKIPPED'
+//        showStandardStreams = true
+//    }
 }
 
 task longTest(type: Test) {

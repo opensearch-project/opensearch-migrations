@@ -1,14 +1,18 @@
 package org.opensearch.migrations.trafficcapture;
 
 import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Stream;
 
 public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFactory {
 
@@ -56,5 +60,16 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
             cf.whenComplete((v,t)->onCaptureClosedCallback.run());
             return singleAggregateCfRef[0];
         });
+    }
+
+    public Stream<TrafficStream> getRecordedTrafficStreamsStream() {
+        return recordedStreams.stream()
+                .map(rts-> {
+                    try {
+                        return TrafficStream.parseFrom(rts.data);
+                    } catch (InvalidProtocolBufferException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
     }
 }

@@ -13,27 +13,25 @@ public class Accumulation {
         // Finished scanning past initial READs.  The next request should be processed,
         // so be on the lookout for the next READ
         WAITING_FOR_NEXT_READ_CHUNK,
-        NOTHING_SENT,
-        REQUEST_SENT,
-        RESPONSE_SENT
+        ACCUMULATING_READS,
+        ACCUMULATING_WRITES
     }
 
     RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
-
-    State state = State.NOTHING_SENT;
+    State state;
     AtomicInteger numberOfResets;
 
-    public Accumulation(UniqueRequestKey nextRequestKey, boolean dropLeftoverObservations) {
-        this(nextRequestKey);
-        if (dropLeftoverObservations) {
-            this.state = State.IGNORING_LAST_REQUEST;
-        }
+    public Accumulation(UniqueRequestKey nextRequestKey) {
+        this(nextRequestKey, false);
     }
 
-    public Accumulation(UniqueRequestKey nextRequestKey) {
+    public Accumulation(UniqueRequestKey nextRequestKey, boolean dropObservationsLeftoverFromPrevious) {
         numberOfResets = new AtomicInteger();
-        this.resetForRequest(nextRequestKey);
+        this.rrPair = new RequestResponsePacketPair(nextRequestKey);
+        this.newestPacketTimestampInMillis = new AtomicLong(0);
+        this.state =
+                dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
     }
 
     public UniqueRequestKey getRequestId() {
@@ -66,11 +64,8 @@ public class Accumulation {
 
     public void resetForNextRequest() {
         numberOfResets.incrementAndGet();
-        resetForRequest(new UniqueRequestKey(getRequestId().trafficStreamKeyAndOffset, getIndexOfCurrentRequest()));
-    }
-
-    private void resetForRequest(UniqueRequestKey key) {
-        this.state = State.NOTHING_SENT;
+        this.state = State.ACCUMULATING_READS;
+        var key = new UniqueRequestKey(getRequestId().trafficStreamKeyAndOffset, getIndexOfCurrentRequest());
         this.rrPair = new RequestResponsePacketPair(key);
         this.newestPacketTimestampInMillis = new AtomicLong(0);
     }
