@@ -89,6 +89,8 @@ Unit tests can be run from the `python/` directory using:
 python -m coverage run -m unittest
 ```
 
+### Coverage
+
 _Code coverage_ metrics can be generated after a unit-test run. A report can either be printed on the command line:
 
 ```shell

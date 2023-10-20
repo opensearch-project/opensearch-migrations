@@ -61,7 +61,7 @@ This optional stack will be used when the Domain is configured to be placed insi
 This optional stack is used to house the migration assistance resources which are in the process of being developed to assist in migrating to an OpenSearch domain. It has dependencies on both the Domain and Network stacks.
 
 #### Fetch Migration Stack (OSServiceHistoricalCDKStack-STAGE-REGION)
-This optional stack sets up a ECS cluster to host/run Fetch Migration tasks for data backfill / historical data migration. It has dependencies on the Domain, Network and Migration Assistance stacks.
+This optional stack sets up an ECS cluster to host / run Fetch Migration tasks for data backfill / historical data migration. It has dependencies on the Domain, Network and Migration Assistance stacks.
 
 ### Configuration Options
 
