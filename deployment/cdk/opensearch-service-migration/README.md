@@ -21,23 +21,32 @@ Java is used by the opensearch-migrations repo and Gradle, its associated build 
 ```shell
 ./gradlew :dockerSolution:buildDockerImages
 ```
+Or if within the `opensearch-service-migration` directory:
+```shell
+cd ../../../TrafficCapture && ./gradlew :dockerSolution:buildDockerImages && cd ../deployment/cdk/opensearch-service-migration
+```
 More details can be found [here](../../TrafficCapture/dockerSolution/README.md)
+
+3- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
+
+4- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again or avoided entirely by creating the service linked role initially like seen below:
+```shell
+aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com && aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+```
 
 ### First time using CDK in this region?
 
 If this is your first experience with CDK, follow the steps below to get started:
 
-1- Install the **CDK CLI** tool by running:
+1- Install the **CDK CLI** tool, if you haven't already, by running:
 ```shell
 npm install -g aws-cdk
 ```
 
-2- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
+2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command to set up a small CloudFormation stack of resources that CDK needs to function within your account
 
-3- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command to set up a small CloudFormation stack of resources that CDK needs to function within your account
-
-```
-cdk bootstrap
+```shell
+cdk bootstrap --c contextId=demo-deploy
 ```
 
 Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
@@ -58,7 +67,7 @@ Additionally, another context block in the `cdk.context.json` could be created w
 ```shell
 cdk deploy "*" --c contextId=uat-deploy --require-approval never --concurrency 3
 ```
-**Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (Except in the multiple replay scenario stated [here](#how-to-run-multiple-replayer-scenarios)) 
+**Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (**Except** in the multiple replay scenario stated [here](#how-to-run-multiple-replayer-scenarios)) 
 
 Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
 1. CDK CLI passed context values (highest precedence)
