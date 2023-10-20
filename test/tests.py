@@ -71,7 +71,7 @@ class E2ETests(unittest.TestCase):
         delete_index(self.proxy_endpoint, self.index, self.auth)
         delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
 
-    def test_001_index(self):
+    def test_0001_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
         # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
         # proxy and that the traffic reaches the source cluster, replays said traffic to the target cluster by the
@@ -100,7 +100,7 @@ class E2ETests(unittest.TestCase):
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
-    def test_002_document(self):
+    def test_0002_document(self):
         # This test will verify that a document will be created (then deleted) on the target cluster when one is created
         # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
         # proxy and that the traffic reaches the source cluster, replays said traffic to the target cluster by the
@@ -158,13 +158,13 @@ class E2ETests(unittest.TestCase):
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
-    def test_003_jupyterAwake(self):
+    def test_0003_jupyterAwake(self):
         # Making sure that the Jupyter notebook is up and can be reached.
         response = requests.get(self.jupyter_endpoint)
         self.assertEqual(response.status_code, HTTPStatus.OK)
 
-    def test_004_negativeAuth(self):
-        # This sends negative credentials to the clusters to validate that unauthorized access is prevented.
+    def test_0004_negativeAuth_invalidCreds(self):
+        # This test sends negative credentials to the clusters to validate that unauthorized access is prevented.
         alphabet = string.ascii_letters + string.digits
         for _ in range(10):
             username = ''.join(secrets.choice(alphabet) for _ in range(8))
@@ -179,3 +179,13 @@ class E2ETests(unittest.TestCase):
             for user, pw in credentials:
                 response = requests.get(self.proxy_endpoint, auth=(user, pw), verify=False)
                 self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+
+    def test_0005_negativeAuth_missingCreds(self):
+        # This test will use no credentials at all
+        # With an empty authorization header
+        response = requests.get(self.proxy_endpoint, auth=('', ''), verify=False)
+        self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+
+        # Without an authorization header.
+        response = requests.get(self.proxy_endpoint, verify=False)
+        self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
