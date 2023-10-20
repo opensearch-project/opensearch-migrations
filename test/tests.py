@@ -1,3 +1,6 @@
+import json
+import subprocess
+
 from operations import create_index, check_index, create_document, \
     delete_document, delete_index, get_document
 from http import HTTPStatus
@@ -51,13 +54,16 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 15, d
 class E2ETests(unittest.TestCase):
     def set_common_values(self):
         self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
+        self.proxy_endpoint_2 = os.getenv('PROXY_ENDPOINT_2', 'https://localhost:9201')
         self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:19200')
+        self.source_endpoint_2 = os.getenv('SOURCE_ENDPOINT_2', 'https://localhost:19201')
         self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
         self.jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
         self.username = os.getenv('username', 'admin')
         self.password = os.getenv('password', 'admin')
         self.auth = (self.username, self.password)
         self.index = f"my_index_{uuid.uuid4()}"
+        self.index_2 = f"my_index_{uuid.uuid4()}"
         self.doc_id = '7'
 
     def setUp(self):
@@ -189,3 +195,24 @@ class E2ETests(unittest.TestCase):
         # Without an authorization header.
         response = requests.get(self.proxy_endpoint, verify=False)
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+
+    def test_0008_OSB(self):
+        cmd = "docker ps | grep 'migrations/migration_console:latest' | awk '{print $NF}'"
+        container_name = subprocess.getoutput(cmd).strip()
+
+        if container_name:
+            cmd_exec = f"docker exec {container_name} ./runTestBenchmarks.sh"
+            logger.warning(f"Running command: {cmd_exec}")
+            subprocess.run(cmd_exec, shell=True)
+        else:
+            logger.error("Migration-console container was not found, please double check that deployment was a success")
+            self.assert_(False)
+
+        source_response = requests.get(f'{self.source_endpoint}/geonames/_count', auth=self.auth, verify=False)
+        target_response = requests.get(f'{self.target_endpoint}/geonames/_count', auth=self.auth, verify=False)
+        source_data = json.loads(source_response.text)
+        source_count = source_data['count']
+        target_data = json.loads(target_response.text)
+        target_count = target_data['count']
+
+        self.assertEqual(source_count, target_count)
