@@ -8,6 +8,8 @@ import logging
 import time
 import requests
 import uuid
+import string
+import secrets
 from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
@@ -160,3 +162,22 @@ class E2ETests(unittest.TestCase):
         # Making sure that the Jupyter notebook is up and can be reached.
         response = requests.get(self.jupyter_endpoint)
         self.assertEqual(response.status_code, HTTPStatus.OK)
+
+
+    def test_004_negativeAuth(self):
+        alphabet = string.ascii_letters + string.digits
+        for _ in range(10):  # Adjust the range as needed
+            username = ''.join(secrets.choice(alphabet) for _ in range(8))
+            password = ''.join(secrets.choice(alphabet) for _ in range(8))
+
+            credentials = [
+                (username, password),
+                (self.username, password),
+                (username, self.password)
+            ]
+
+            for user, pw in credentials:
+                response = requests.get(self.proxy_endpoint, auth=(user, pw), verify=False)
+                self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+
+
