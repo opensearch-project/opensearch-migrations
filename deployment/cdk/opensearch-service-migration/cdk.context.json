@@ -9,7 +9,7 @@
     "domainRemovalPolicy": "DESTROY",
     "enableDemoAdmin": true,
     "trafficReplayerEnableClusterFGACAuth": true,
-    "fetchMigrationEnabled": false,
-    "sourceClusterEndpoint": "https://capture-proxy-es:9200"
+    "fetchMigrationEnabled": true,
+    "sourceClusterEndpoint": "https://capture-proxy-es:19200"
   }
 }
