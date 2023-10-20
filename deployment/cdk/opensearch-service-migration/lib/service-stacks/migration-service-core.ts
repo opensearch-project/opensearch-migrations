@@ -44,8 +44,6 @@ export class MigrationServiceCore extends Stack {
             throw new Error(`Exactly one option [dockerFilePath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
         }
 
-        // TODO is ecsClusterARN needed now?
-        //const ecsCluster = Cluster.fromClusterArn(this, 'ecsCluster', StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/ecsClusterARN`))
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
             vpc: props.vpc
@@ -125,7 +123,6 @@ export class MigrationServiceCore extends Stack {
             // This should be confirmed to be a requirement for Service Connect communication, otherwise be Private
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}),
             serviceConnectConfiguration: {
-                // TODO why did I need to specify this now
                 namespace: `migration.${props.stage}.local`,
                 services: props.serviceConnectServices ? props.serviceConnectServices : undefined,
                 logDriver: LogDrivers.awsLogs({

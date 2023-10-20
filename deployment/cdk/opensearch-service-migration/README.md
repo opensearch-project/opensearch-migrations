@@ -25,11 +25,11 @@ Or if within the `opensearch-service-migration` directory:
 ```shell
 cd ../../../TrafficCapture && ./gradlew :dockerSolution:buildDockerImages && cd ../deployment/cdk/opensearch-service-migration
 ```
-More details can be found [here](../../TrafficCapture/dockerSolution/README.md)
+More details can be found [here](../../../TrafficCapture/dockerSolution/README.md)
 
 3- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
 
-4- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again or avoided entirely by creating the service linked role initially like seen below:
+4- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again (for each failing role) or avoided entirely by creating the service linked role initially like seen below:
 ```shell
 aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com && aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
 ```
@@ -43,9 +43,10 @@ If this is your first experience with CDK, follow the steps below to get started
 npm install -g aws-cdk
 ```
 
-2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command to set up a small CloudFormation stack of resources that CDK needs to function within your account
+2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command from the `opensearch-service-migration` directory to set up a small CloudFormation stack of resources that CDK needs to function within your account
 
 ```shell
+# Execute from the deployment/cdk/opensearch-service-migration directory
 cdk bootstrap --c contextId=demo-deploy
 ```
 
@@ -68,6 +69,17 @@ Additionally, another context block in the `cdk.context.json` could be created w
 cdk deploy "*" --c contextId=uat-deploy --require-approval never --concurrency 3
 ```
 **Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (**Except** in the multiple replay scenario stated [here](#how-to-run-multiple-replayer-scenarios)) 
+
+Stacks can also be redeployed individually, with any required stacks also being deployed initially, e.g. the following command would deploy the migration-console stack
+```shell
+cdk deploy "migration-console" --c contextId=demo-deploy
+```
+
+To get a list of all the available stack ids that can be deployed/redeployed for a particular `contextId`:
+```shell
+cdk synth "*" --c contextId=demo-deploy
+```
+
 
 Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
 1. CDK CLI passed context values (highest precedence)
@@ -99,6 +111,27 @@ After the benchmark has been run, the indices and documents of the source and ta
 # Check doc counts and indices for both source and target cluster
 ./catIndices.sh
 ```
+
+## Kicking off Fetch Migration
+
+* First, access the Migration Console container
+
+```shell
+# ./ecsExec.sh migration-console STAGE REGION
+./ecsExec.sh migration-console dev us-east-1
+```
+
+* Execute the ECS run task command stored in the container's environment
+    * The status of the ECS Task can be monitored from the AWS Console. Once the task is in the `Running` state, logs and progress can be viewed via CloudWatch.
+```shell
+# This will print the needed ECS command
+echo $FETCH_MIGRATION_COMMAND
+
+# Paste the above printed command into the terminal to kick off
+```
+
+The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
+
 
 ## Tearing down CDK
 To remove all the CDK stack(s) which get created during a deployment we can execute a command similar to below

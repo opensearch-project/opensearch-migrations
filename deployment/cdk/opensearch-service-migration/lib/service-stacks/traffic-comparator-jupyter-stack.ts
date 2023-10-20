@@ -13,8 +13,7 @@ export interface TrafficComparatorJupyterProps extends StackPropsExt {
 }
 
 /**
- * TODO: Add public
- * This Service is still pending additional setup for a public endpoint
+ * TODO: Add additional infrastructure to setup a public endpoint for this service
  */
 export class TrafficComparatorJupyterStack extends MigrationServiceCore {
 
