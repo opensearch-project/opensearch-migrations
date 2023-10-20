@@ -163,7 +163,6 @@ class E2ETests(unittest.TestCase):
         response = requests.get(self.jupyter_endpoint)
         self.assertEqual(response.status_code, HTTPStatus.OK)
 
-
     def test_004_negativeAuth(self):
         alphabet = string.ascii_letters + string.digits
         for _ in range(10):  # Adjust the range as needed
@@ -179,5 +178,3 @@ class E2ETests(unittest.TestCase):
             for user, pw in credentials:
                 response = requests.get(self.proxy_endpoint, auth=(user, pw), verify=False)
                 self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
-
-
