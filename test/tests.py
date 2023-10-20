@@ -164,8 +164,9 @@ class E2ETests(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
 
     def test_004_negativeAuth(self):
+        # This sends negative credentials to the clusters to validate that unauthorized access is prevented.
         alphabet = string.ascii_letters + string.digits
-        for _ in range(10):  # Adjust the range as needed
+        for _ in range(10):
             username = ''.join(secrets.choice(alphabet) for _ in range(8))
             password = ''.join(secrets.choice(alphabet) for _ in range(8))
 
