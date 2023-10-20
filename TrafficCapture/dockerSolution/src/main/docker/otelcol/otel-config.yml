@@ -36,6 +36,7 @@ extensions:
 
 exporters:
   opensearch:
+    namespace: migrations
     http:
       endpoint: "https://opensearchanalytics:9200"
       auth:
@@ -60,3 +61,6 @@ service:
       receivers: [filelog]
       processors: []
       exporters: [logging]
+    logs/3:
+      receivers: [otlp]
+      exporters: [opensearch]

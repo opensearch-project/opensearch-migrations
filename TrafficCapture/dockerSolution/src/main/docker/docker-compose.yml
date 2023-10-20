@@ -121,6 +121,8 @@ services:
     container_name: otel-test-box
     networks:
       - migrations
+    depends_on:
+      - opensearchanalytics
 
   # trafficcomparator:
   #   image: 'migrations/traffic_comparator:latest'
