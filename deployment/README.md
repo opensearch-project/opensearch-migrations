@@ -1,6 +1,7 @@
 ### Deployment
 This directory is aimed at housing deployment/distribution methods for various migration related images and infrastructure. It is not specific to any given platform and should be expanded to more platforms as needed. 
 
+**Notice**: These tools are free to use, but the user is responsible for the cost of underlying infrastructure required to operate the solution. We welcome feedback and contributions to optimize costs.
 
 ### Deploying Migration solution to AWS
 

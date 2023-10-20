@@ -1,12 +1,10 @@
-# TODO Move away from snapshot version after OS source is released
-# https://github.com/opensearch-project/data-prepper/issues/1985
-FROM opensearch-data-prepper:2.5.0-SNAPSHOT
+FROM opensearchproject/data-prepper:2.5.0
 COPY python/requirements.txt .
 
 # Install dependencies to local user directory
-RUN apk update
-RUN apk add --no-cache python3 py-pip
-RUN pip install --user -r requirements.txt
+RUN apt -y update
+RUN apt -y install python3 python3-pip
+RUN pip3 install --user -r requirements.txt
 
 ENV FM_CODE_PATH /code
 WORKDIR $FM_CODE_PATH
@@ -21,4 +19,4 @@ RUN echo "ssl: false" > $DATA_PREPPER_PATH/config/data-prepper-config.yaml
 RUN echo "metricRegistries: [Prometheus]" >> $DATA_PREPPER_PATH/config/data-prepper-config.yaml
 
 # Include the -u flag to have stdout logged
-ENTRYPOINT python -u ./fetch_orchestrator.py $DATA_PREPPER_PATH $FM_CODE_PATH/input.yaml http://localhost:4900
+ENTRYPOINT python3 -u ./fetch_orchestrator.py $DATA_PREPPER_PATH $FM_CODE_PATH/input.yaml http://localhost:4900
