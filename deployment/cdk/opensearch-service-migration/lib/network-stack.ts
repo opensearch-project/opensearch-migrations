@@ -49,18 +49,20 @@ export class NetworkStack extends Stack {
             });
         }
 
-        // Create a default SG which only allows members of this SG to access the Domain endpoints
-        const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
-            vpc: this.vpc,
-            allowAllOutbound: false,
-        });
-        defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
+        if (!props.addOnMigrationDeployId) {
+            // Create a default SG which only allows members of this SG to access the Domain endpoints
+            const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
+                vpc: this.vpc,
+                allowAllOutbound: false,
+            });
+            defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
 
-        new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
-            description: 'OpenSearch migration parameter for target OpenSearch access security group id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
-            stringValue: defaultSecurityGroup.securityGroupId
-        });
+            new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
+                description: 'OpenSearch migration parameter for target OpenSearch access security group id',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
+                stringValue: defaultSecurityGroup.securityGroupId
+            });
+        }
 
     }
 }

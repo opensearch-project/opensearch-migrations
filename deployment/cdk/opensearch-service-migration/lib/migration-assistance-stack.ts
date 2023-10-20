@@ -26,7 +26,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
-            name: 'migration-msk-config',
+            name: `migration-msk-config-${props.stage}`,
             serverProperties: "auto.create.topics.enable=true"
         })
 
@@ -52,7 +52,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
-            clusterName: 'migration-msk-cluster',
+            clusterName: `migration-msk-cluster-${props.stage}`,
             kafkaVersion: '2.8.1',
             numberOfBrokerNodes: props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2,
             brokerNodeGroupInfo: {

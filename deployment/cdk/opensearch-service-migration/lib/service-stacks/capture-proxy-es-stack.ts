@@ -16,10 +16,7 @@ export interface CaptureProxyESProps extends StackPropsExt {
 /**
  * The stack for the "capture-proxy-es" service. This service will spin up a Capture Proxy instance
  * and an Elasticsearch with Search Guard instance on a single container. You will also find in this directory these two
- * items split into their own services to give more flexibility in setup. A current limitation of this joined approach
- * is that we are currently unable to expose two ports (one for the capture proxy and one for elasticsearch) to other
- * services from a limitation to only allow exposing the default path "/" to a single port, in our case we will expose
- * the Capture Proxy port. If elasticsearch needs to be accessed directly it would need to be done from this container.
+ * items split into their own services to give more flexibility in setup.
  */
 export class CaptureProxyESStack extends MigrationServiceCore {
 
@@ -40,6 +37,17 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             portMappingName: "capture-proxy-es-connect",
             dnsName: "capture-proxy-es",
             port: 9200
+        }
+        const esServicePort: PortMapping = {
+            name: "es-connect",
+            hostPort: 19200,
+            containerPort: 19200,
+            protocol: Protocol.TCP
+        }
+        const esServiceConnectService: ServiceConnectService = {
+            portMappingName: "es-connect",
+            dnsName: "capture-proxy-es",
+            port: 19200
         }
 
         const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`);
@@ -69,12 +77,12 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             dockerImageCommand: ['/bin/sh', '-c', `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1`],
             securityGroups: securityGroups,
             taskRolePolicies: [mskClusterConnectPolicy, mskTopicProducerPolicy],
-            portMappings: [servicePort],
+            portMappings: [servicePort, esServicePort],
             environment: {
                 // Set Elasticsearch port to 19200 to allow capture proxy at port 9200
                 "http.port": "19200"
             },
-            serviceConnectServices: [serviceConnectService],
+            serviceConnectServices: [serviceConnectService, esServiceConnectService],
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             ...props

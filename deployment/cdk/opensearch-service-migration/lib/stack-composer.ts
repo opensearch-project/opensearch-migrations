@@ -100,6 +100,9 @@ export class StackComposer {
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
         }
+        if (addOnMigrationDeployId && (!vpcId || !vpcEnabled)) {
+            throw new Error("Addon deployments require that the 'vpcId' of the original deployment is provided and 'vpcEnabled' is true")
+        }
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
         }
@@ -150,13 +153,14 @@ export class StackComposer {
         // If enabled re-use existing VPC and/or associated resources or create new
         let networkStack: NetworkStack|undefined
         if (vpcEnabled) {
-            networkStack = new NetworkStack(scope, 'networkStack', {
+            networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
                 availabilityZoneCount: availabilityZoneCount,
-                stackName: `OSMigrations-${stage}-${region}-NetworkInfra`,
+                stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                addOnMigrationDeployId: addOnMigrationDeployId,
                 ...props,
             })
             this.stacks.push(networkStack)
@@ -209,8 +213,8 @@ export class StackComposer {
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
         let migrationStack
         let mskUtilityStack
-        if (migrationAssistanceEnabled && networkStack) {
-            migrationStack = new MigrationAssistanceStack(scope, "migrationAssistanceStack", {
+        if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
+            migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
                 vpc: networkStack.vpc,
                 trafficComparatorEnabled: trafficComparatorServiceEnabled,
                 mskImportARN: mskARN,
