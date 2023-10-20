@@ -1,6 +1,6 @@
 # OpenSearch Service Domain CDK
 
-This repo contains an IaC CDK solution for deploying an OpenSearch Service Domain. Users have the ability to easily deploy their Domain using default values or provide [configuration options](#Configuration-Options) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users. Supporting this would be unrealistic, and likely conflicting at times, when considering the needs of many users. Rather this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
+This repo contains an IaC CDK solution for deploying an OpenSearch Service Domain. Users have the ability to easily deploy their Domain using default values or provide [configuration options](#Configuration-Options) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users - rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
 ### Getting Started
 
@@ -57,11 +57,11 @@ This is the core required stack of this CDK which is responsible for deploying t
 #### Network Stack (OSServiceNetworkCDKStack-STAGE-REGION)
 This optional stack will be used when the Domain is configured to be placed inside a VPC and will contain resources related to the networking of this VPC such as Security Groups and Subnets. It has a dependency on the Domain stack.
 
-#### Historical Capture Stack (OSServiceHistoricalCDKStack-STAGE-REGION)
-This optional stack sets up a ECS cluster to host/run Fetch Migration tasks for historical data migration. It has dependencies on both the Domain and Network stacks.
-
 #### Migration Assistance Stack (OSServiceMigrationCDKStack-STAGE-REGION)
 This optional stack is used to house the migration assistance resources which are in the process of being developed to assist in migrating to an OpenSearch domain. It has dependencies on both the Domain and Network stacks.
+
+#### Fetch Migration Stack (OSServiceHistoricalCDKStack-STAGE-REGION)
+This optional stack sets up an ECS cluster to host / run Fetch Migration tasks for data backfill / historical data migration. It has dependencies on the Domain, Network and Migration Assistance stacks.
 
 ### Configuration Options
 
@@ -113,7 +113,7 @@ Additional context on some of these options, can also be found in the Domain con
 | mskBrokerNodeCount                              | false    | number       | 2                                                                                                                                                                                                                              | The number of broker nodes to be used by the MSK cluster                                                                                                                                                                                                     |
 | historicalCaptureEnabled                        | false    | boolean      | false                                                                                                                                                                                                                          | Creates ECS resources to enable the kick off of hisotircal Fetch Migration tasks from the Migration Console                                                                                                                                                  |
 | sourceClusterEndpoint                           | false    | string       | `"https://source-cluster.elb.us-east-1.endpoint.com"`                                                                                                                                                                            | The endpoint for the source cluster from which Fetch Migration will pull data. Required if `historicalCaptureEnabled` is set to `true`                                                                                                                     |
-| dpPipelineTemplatePath                          | false    | string       | "path/to/config.yaml"                                                                                                                                                                                                          | Path to a local Data Prepper pipeline configuration YAML file that Fetch Migratino will use to derive source and target cluster endpoints and other settings. Default value is the included template file i.e. [dp_pipeline_template.yaml](dp_pipeline_template.yaml)|
+| dpPipelineTemplatePath                          | false    | string       | "path/to/config.yaml"                                                                                                                                                                                                          | Path to a local Data Prepper pipeline configuration YAML file that Fetch Migration will use to derive source and target cluster endpoints and other settings. Default value is the included template file i.e. [dp_pipeline_template.yaml](dp_pipeline_template.yaml)|
 
 
 A template `cdk.context.json` to be used to fill in these values is below:
@@ -122,38 +122,41 @@ A template `cdk.context.json` to be used to fill in these values is below:
   "engineVersion": "",
   "domainName": "",
   "dataNodeType": "",
-  "dataNodeCount": "",
+  "dataNodeCount": 2,
   "dedicatedManagerNodeType": "",
-  "dedicatedManagerNodeCount": "",
+  "dedicatedManagerNodeCount": 3,
   "warmNodeType": "",
-  "warmNodeCount": "",
+  "warmNodeCount": 3,
   "accessPolicies": "",
-  "useUnsignedBasicAuth": "",
+  "useUnsignedBasicAuth": false,
   "fineGrainedManagerUserARN": "",
   "fineGrainedManagerUserName": "",
   "fineGrainedManagerUserSecretManagerKeyARN": "",
-  "enableDemoAdmin": "",
-  "enforceHTTPS": "",
+  "enableDemoAdmin": false,
+  "enforceHTTPS": true,
   "tlsSecurityPolicy": "",
-  "ebsEnabled": "",
-  "ebsIops": "",
-  "ebsVolumeSize": "",
+  "ebsEnabled": true,
+  "ebsIops": 4000,
+  "ebsVolumeSize": 15,
   "ebsVolumeType": "",
-  "encryptionAtRestEnabled": "",
+  "encryptionAtRestEnabled": true,
   "encryptionAtRestKmsKeyARN": "",
-  "loggingAppLogEnabled": "",
+  "loggingAppLogEnabled": true,
   "loggingAppLogGroupARN": "",
-  "nodeToNodeEncryptionEnabled": "",
-  "vpcEnabled": "",
+  "nodeToNodeEncryptionEnabled": true,
+  "vpcEnabled": true,
   "vpcId": "",
   "vpcSubnetIds": "",
   "vpcSecurityGroupIds": "",
-  "availabilityZoneCount": "",
-  "openAccessPolicyEnabled": "",
+  "availabilityZoneCount": 2,
+  "openAccessPolicyEnabled": false,
   "domainRemovalPolicy": "",
   "mskARN": "",
-  "mskEnablePublicEndpoints": "",
-  "mskBrokerNodeCount": ""
+  "mskEnablePublicEndpoints": false,
+  "mskBrokerNodeCount": 2,
+  "historicalCaptureEnabled": false,
+  "sourceClusterEndpoint": "",
+  "dpPipelineTemplatePath": ""
 }
 
 ```

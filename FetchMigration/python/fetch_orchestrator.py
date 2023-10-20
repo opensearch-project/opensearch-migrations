@@ -59,8 +59,9 @@ if __name__ == '__main__':  # pragma no cover
     cli_args = arg_parser.parse_args()
     base_path = os.path.expandvars(cli_args.data_prepper_path)
 
-    if os.environ["INLINE_PIPELINE"] is not None:
-        decoded_bytes = base64.b64decode(os.environ["INLINE_PIPELINE"])
+    inline_pipeline = os.environ.get("INLINE_PIPELINE", None)
+    if inline_pipeline is not None:
+        decoded_bytes = base64.b64decode(inline_pipeline)
         with open(cli_args.config_file_path, 'wb') as config_file:
             config_file.write(decoded_bytes)
-    run(base_path, cli_args.config_file_path, cli_args.dp_endpoint)
+    run(base_path, cli_args.config_file_path, cli_args.data_prepper_endpoint)
