@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.Unpooled;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,6 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -312,43 +312,47 @@ class StreamChannelConnectionCaptureSerializerTest {
         Assertions.assertEquals(0, foundEndOfSegments);
     }
 
-    private StreamChannelConnectionCaptureSerializer
-    createSerializerWithTestHandler(ConcurrentLinkedQueue<ByteBuffer> outputBuffers, int bufferSize)
-            throws IOException {
-        var codedStreamToByteBuffersMap = new ConcurrentHashMap<CodedOutputStream, ByteBuffer>();
-        CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
-        singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
-        return new StreamChannelConnectionCaptureSerializer(TEST_NODE_ID_STRING, TEST_TRAFFIC_STREAM_ID_STRING,
-            () -> {
-                ByteBuffer bytes = ByteBuffer.allocate(bufferSize);
-                var rval = CodedOutputStream.newInstance(bytes);
-                codedStreamToByteBuffersMap.put(rval, bytes);
-                log.trace("Put COS: " + rval + " into map (keys="+ mapToKeyStrings(codedStreamToByteBuffersMap) +") with bytes=" + bytes);
-                return rval;
-            },
-            (captureSerializerResult) -> {
-            CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
-            log.trace("Getting ready to flush for " + codedOutputStream);
-            log.trace("Bytes written so far... " +
-                    StandardCharsets.UTF_8.decode(codedStreamToByteBuffersMap.get(codedOutputStream).duplicate()));
-                CompletableFuture cf = CompletableFuture.runAsync(() -> {
-                    try {
-                        codedOutputStream.flush();
-                        log.trace("Just flushed for " + codedOutputStream);
-                        var bb = codedStreamToByteBuffersMap.get(codedOutputStream);
-                        bb.position(0);
-                        var bytesWritten = codedOutputStream.getTotalBytesWritten();
-                        bb.limit(bytesWritten);
-                        log.trace("Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
-                        outputBuffers.add(bb);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-                singleAggregateCfRef[0] = CompletableFuture.allOf(singleAggregateCfRef[0], cf);
-                return singleAggregateCfRef[0];
+    @AllArgsConstructor
+    class StreamManager extends OrderedStreamLifecyleManager {
+        int bufferSize;
+        ConcurrentLinkedQueue<ByteBuffer> outputBuffers;
+
+        @Override
+        protected CodedOutputStreamHolder createStream() {
+            return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
+        }
+
+        @Override
+        protected CompletableFuture<Object> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+            if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
+                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                        outputStreamHolder);
             }
-        );
+            var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
+            log.trace("Getting ready to flush for " + osh);
+            log.trace("Bytes written so far... " + StandardCharsets.UTF_8.decode(osh.getByteBuffer().duplicate()));
+
+            return CompletableFuture.runAsync(() -> {
+                try {
+                    osh.getOutputStream().flush();
+                    log.trace("Just flushed for " + osh.getOutputStream());
+                    var bb = osh.getByteBuffer();
+                    bb.position(0);
+                    var bytesWritten = osh.getOutputStream().getTotalBytesWritten();
+                    bb.limit(bytesWritten);
+                    log.trace("Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
+                    outputBuffers.add(bb);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }).thenApply(x->null);
+        }
+    }
+
+    private StreamChannelConnectionCaptureSerializer
+    createSerializerWithTestHandler(ConcurrentLinkedQueue<ByteBuffer> outputBuffers, int bufferSize) {
+        return new StreamChannelConnectionCaptureSerializer(TEST_NODE_ID_STRING, TEST_TRAFFIC_STREAM_ID_STRING,
+            new StreamManager(bufferSize, outputBuffers));
     }
 
     private static String mapToKeyStrings(ConcurrentHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBuffersMap) {

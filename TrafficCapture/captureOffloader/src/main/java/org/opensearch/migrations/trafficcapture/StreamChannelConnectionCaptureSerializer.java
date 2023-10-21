@@ -4,6 +4,7 @@ import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
@@ -24,8 +25,6 @@ import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * At a basic level, this class aims to be a generic serializer which can receive ByteBuffer data and serialize the data
@@ -70,17 +69,14 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
 
-    private final Supplier<CodedOutputStream> codedOutputStreamSupplier;
-    private final Function<CaptureSerializerResult, CompletableFuture> closeHandler;
+    private final StreamLifecycleManager streamManager;
     private final String nodeIdString;
     private final String connectionIdString;
-    private CodedOutputStream currentCodedOutputStreamOrNull;
+    private CodedOutputStreamHolder currentCodedOutputStreamHolderOrNull;
 
     public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
-                                                    Supplier<CodedOutputStream> codedOutputStreamSupplier,
-                                                    Function<CaptureSerializerResult, CompletableFuture> closeHandler) throws IOException {
-        this.codedOutputStreamSupplier = codedOutputStreamSupplier;
-        this.closeHandler = closeHandler;
+                                                    @NonNull StreamLifecycleManager streamLifecycleManager) {
+        this.streamManager = streamLifecycleManager;
         assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId)) +
                 CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId)
                 <= MAX_ID_SIZE;
@@ -93,24 +89,25 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     }
 
     private CodedOutputStream getOrCreateCodedOutputStream() throws IOException {
-        if (currentCodedOutputStreamOrNull != null) {
-            return currentCodedOutputStreamOrNull;
+        if (currentCodedOutputStreamHolderOrNull != null) {
+            return currentCodedOutputStreamHolderOrNull.getOutputStream();
         } else {
-            currentCodedOutputStreamOrNull = codedOutputStreamSupplier.get();
+            currentCodedOutputStreamHolderOrNull = streamManager.createStream();
+            var currentCodedOutputStream = currentCodedOutputStreamHolderOrNull.getOutputStream();
             // e.g. 1: "1234ABCD"
-            currentCodedOutputStreamOrNull.writeString(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionIdString);
+            currentCodedOutputStream.writeString(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionIdString);
             if (nodeIdString != null) {
                 // e.g. 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
-                currentCodedOutputStreamOrNull.writeString(TrafficStream.NODEID_FIELD_NUMBER, nodeIdString);
+                currentCodedOutputStream.writeString(TrafficStream.NODEID_FIELD_NUMBER, nodeIdString);
             }
             if (eomsSoFar > 0) {
-                currentCodedOutputStreamOrNull.writeInt32(TrafficStream.REQUESTCOUNT_FIELD_NUMBER, eomsSoFar);
+                currentCodedOutputStream.writeInt32(TrafficStream.REQUESTCOUNT_FIELD_NUMBER, eomsSoFar);
             }
             if (readObservationsAreWaitingForEom) {
-                currentCodedOutputStreamOrNull.writeBool(TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
+                currentCodedOutputStream.writeBool(TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
                         readObservationsAreWaitingForEom);
             }
-            return currentCodedOutputStreamOrNull;
+            return currentCodedOutputStream;
         }
     }
 
@@ -177,8 +174,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
-        if (currentCodedOutputStreamOrNull == null && !isFinal) {
-            return closeHandler.apply(null);
+        if (currentCodedOutputStreamHolderOrNull == null && !isFinal) {
+            return streamManager.closeStream(null, numFlushesSoFar);
         }
         CodedOutputStream currentStream = getOrCreateCodedOutputStream();
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
@@ -186,9 +183,11 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
         log.debug("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
         currentStream.flush();
-        var future = closeHandler.apply(new CaptureSerializerResult(currentStream, numFlushesSoFar));
+        assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that " +
+                "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
+        var future = streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
         //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
-        currentCodedOutputStreamOrNull = null;
+        currentCodedOutputStreamHolderOrNull = null;
         return future;
     }
 
