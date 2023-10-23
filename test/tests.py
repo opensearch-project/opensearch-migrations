@@ -189,3 +189,14 @@ class E2ETests(unittest.TestCase):
         # Without an authorization header.
         response = requests.get(self.proxy_endpoint, verify=False)
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+
+    def test_0006_invalidIncorrectUri(self):
+        # This test will send an invalid URI
+        invalidUri = "/invalidURI"
+        response = requests.get(f'{self.proxy_endpoint}{invalidUri}', auth=self.auth, verify=False)
+        self.assertEqual(response.status_code, HTTPStatus.NOT_FOUND)
+
+        # This test will send an incorrect URI
+        incorrectUri = "/_cluster/incorrectUri"
+        response = requests.get(f'{self.proxy_endpoint}{incorrectUri}', auth=self.auth, verify=False)
+        self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
