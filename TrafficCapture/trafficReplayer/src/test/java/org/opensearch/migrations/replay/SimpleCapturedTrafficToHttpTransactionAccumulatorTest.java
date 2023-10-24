@@ -9,6 +9,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
+import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
@@ -22,8 +23,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -162,19 +167,41 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, requestsReceived, expectedSizes);
     }
 
-    static void accumulateTrafficStreamsWithNewAccumulator(Stream<TrafficStream> trafficStreams,
-                                                                   List<RequestResponsePacketPair> ongoingAggregation,
-                                                                   AtomicInteger requestsReceived) {
+    /**
+     * Returns the traffic stream indices whose contents have been fully received.
+     * @param trafficStreams
+     * @param aggregations
+     * @param requestsReceived
+     * @return
+     */
+    static SortedSet<Integer>
+    accumulateTrafficStreamsWithNewAccumulator(Stream<TrafficStream> trafficStreams,
+                                                           List<RequestResponsePacketPair> aggregations,
+                                                           AtomicInteger requestsReceived) {
+        var tsIndicesReceived = new TreeSet<Integer>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         (id,request) -> requestsReceived.incrementAndGet(),
-                        fullPair -> ongoingAggregation.add(fullPair),
-                        (rk,ts) -> {}
+                        fullPair -> {
+                            var sourceIdx = fullPair.requestKey.getSourceRequestIndex();
+                            fullPair.getTrafficStreamsHeld().stream()
+                                    .forEach(tsk->tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
+                            if (aggregations.size() > sourceIdx) {
+                                var oldVal = aggregations.set(sourceIdx, fullPair);
+                                if (oldVal != null) {
+                                    Assertions.assertEquals(oldVal, fullPair);
+                                }
+                            } else{
+                                aggregations.add(fullPair);
+                            }
+                        },
+                        (rk,timestamp) -> {}
                 );
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();
         trafficStreams.forEach(ts->trafficAccumulator.accept(new TrafficStreamWithEmbeddedKey(ts)));
         trafficAccumulator.close();
+        return tsIndicesReceived;
     }
 
     static void assertReconstructedTransactionsMatchExpectations(List<RequestResponsePacketPair> reconstructedTransactions,

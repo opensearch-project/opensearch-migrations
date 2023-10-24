@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import com.google.common.base.Objects;
 import io.netty.buffer.Unpooled;
 import lombok.Getter;
 import lombok.Setter;
@@ -73,11 +74,6 @@ public class HttpMessageAndTimestamp {
         return sb.toString();
     }
 
-    @Override
-    public String toString() {
-        return format(Optional.empty());
-    }
-    
     public void addSegment(byte[] data) {
         if (currentSegmentBytes == null) {
             currentSegmentBytes = new ByteArrayOutputStream();
@@ -94,4 +90,23 @@ public class HttpMessageAndTimestamp {
         this.lastPacketTimestamp = timestamp;
         currentSegmentBytes = null;
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        HttpMessageAndTimestamp that = (HttpMessageAndTimestamp) o;
+        return Objects.equal(firstPacketTimestamp, that.firstPacketTimestamp) && Objects.equal(lastPacketTimestamp, that.lastPacketTimestamp) && Objects.equal(packetBytes, that.packetBytes);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(firstPacketTimestamp, lastPacketTimestamp, packetBytes);
+    }
+
+    @Override
+    public String toString() {
+        return format(Optional.empty());
+    }
+
 }

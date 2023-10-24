@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.datatypes.TrafficStreamKeyWithRequestOffset;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -132,25 +133,19 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
         var accum = liveStreams.getOrCreateWithoutExpiration(trafficStreamAndKey.getKey(),
                 tsk->createInitialAccumulation(trafficStreamAndKey));
-        var terminated = new AtomicBoolean(false);
         var trafficStream = trafficStreamAndKey.getStream();
-        trafficStream.getSubStreamList().stream()
-                        .map(o -> {
-                            if (terminated.get()) {
-                                log.error("Got a traffic observation AFTER a Close observation for the stream " +
-                                        trafficStream);
-                                return true;
-                            }
-                            var didTerminate = CONNECTION_STATUS.CLOSED == addObservationToAccumulation(accum, o);
-                            terminated.set(didTerminate);
-                            return didTerminate;
-                        })
-                        .takeWhile(b->!b)
-                        .forEach(b->{});
-        if (terminated.get()) {
-            log.atInfo().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
-                    " from liveStreams map").log();
-            liveStreams.remove(partitionId, connectionId);
+        for (int i=0; i<trafficStream.getSubStreamCount(); ++i) {
+            if (i == trafficStream.getSubStreamCount()-1) {
+                accum.rrPair.holdTrafficStream(trafficStreamAndKey.getKey());
+            }
+            var o = trafficStream.getSubStreamList().get(i);
+            var connectionStatus = addObservationToAccumulation(accum, o);
+            if (CONNECTION_STATUS.CLOSED == connectionStatus) {
+                log.atInfo().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
+                        " from liveStreams map").log();
+                liveStreams.remove(partitionId, connectionId);
+                break;
+            }
         }
     }
 
@@ -176,8 +171,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         ALIVE, CLOSED
     }
 
-    public CONNECTION_STATUS addObservationToAccumulation(@NonNull Accumulation accum,
-                                                          TrafficObservation observation) {
+    public CONNECTION_STATUS addObservationToAccumulation(@NonNull Accumulation accum, TrafficObservation observation) {
         log.atTrace().setMessage(()->"Adding observation: "+observation).log();
         var connectionId = accum.rrPair.requestKey.getTrafficStreamKey().getConnectionId();
         var timestamp =
