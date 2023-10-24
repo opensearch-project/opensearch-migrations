@@ -79,6 +79,7 @@ class E2ETests(unittest.TestCase):
         self.auth = (self.username, self.password)
         self.index = f"my_index_{uuid.uuid4()}"
         self.doc_id = '7'
+        self.ignore_list = []
 
     def setUp(self):
         self.set_common_values()
@@ -237,12 +238,13 @@ class E2ETests(unittest.TestCase):
         target_indices = get_indices(self.target_endpoint, self.auth)
 
         for index in set(source_indices) & set(target_indices):
-            source_count = get_doc_count(self.source_endpoint, index, self.auth)
-            target_count = get_doc_count(self.target_endpoint, index, self.auth)
+            if index not in self.ignore_list:
+                source_count = get_doc_count(self.source_endpoint, index, self.auth)
+                target_count = get_doc_count(self.target_endpoint, index, self.auth)
 
-            if source_count != source_count:
-                logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
-                self.assertEqual(source_count, target_count)
-            else:
-                self.assertEqual(source_count, target_count)
-                logger.info(f'{index}: doc counts match on both source and target endpoints - {source_count}')
+                if source_count != source_count:
+                    logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
+                    self.assertEqual(source_count, target_count)
+                else:
+                    self.assertEqual(source_count, target_count)
+                    logger.info(f'{index}: doc counts match on both source and target endpoints - {source_count}')
