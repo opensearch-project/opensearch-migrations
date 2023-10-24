@@ -100,8 +100,8 @@ export class StackComposer {
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
         }
-        if (addOnMigrationDeployId && (!vpcId || !vpcEnabled)) {
-            throw new Error("Addon deployments require that the 'vpcId' of the original deployment is provided and 'vpcEnabled' is true")
+        if (addOnMigrationDeployId && vpcId) {
+            console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
@@ -152,7 +152,7 @@ export class StackComposer {
 
         // If enabled re-use existing VPC and/or associated resources or create new
         let networkStack: NetworkStack|undefined
-        if (vpcEnabled) {
+        if (vpcEnabled || addOnMigrationDeployId) {
             networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
                 availabilityZoneCount: availabilityZoneCount,

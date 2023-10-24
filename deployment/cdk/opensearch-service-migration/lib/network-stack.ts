@@ -19,8 +19,15 @@ export class NetworkStack extends Stack {
     constructor(scope: Construct, id: string, props: networkStackProps) {
         super(scope, id, props);
 
+        // Retrieve original deployment VPC for addon deployments
+        if (props.addOnMigrationDeployId) {
+            const vpcId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/vpcId`)
+            this.vpc = Vpc.fromLookup(this, 'domainVPC', {
+                vpcId: vpcId,
+            });
+        }
         // Retrieve existing VPC
-        if (props.vpcId) {
+        else if (props.vpcId) {
             this.vpc = Vpc.fromLookup(this, 'domainVPC', {
                 vpcId: props.vpcId,
             });
@@ -50,6 +57,13 @@ export class NetworkStack extends Stack {
         }
 
         if (!props.addOnMigrationDeployId) {
+
+            new StringParameter(this, 'SSMParameterVpcId', {
+                description: 'OpenSearch migration parameter for VPC id',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/vpcId`,
+                stringValue: this.vpc.vpcId
+            });
+
             // Create a default SG which only allows members of this SG to access the Domain endpoints
             const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
                 vpc: this.vpc,

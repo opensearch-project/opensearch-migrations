@@ -160,7 +160,7 @@ export class MigrationAssistanceStack extends Stack {
             // Required for retrieving ECR image at service startup
             allowAllOutbound: true,
         })
-        serviceConnectSecurityGroup.addIngressRule(replayerOutputSG, Port.allTraffic());
+        serviceConnectSecurityGroup.addIngressRule(serviceConnectSecurityGroup, Port.allTraffic());
 
         new StringParameter(this, 'SSMParameterServiceConnectGroupId', {
             description: 'OpenSearch migration parameter for Service Connect security group id',
