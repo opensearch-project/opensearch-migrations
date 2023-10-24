@@ -279,28 +279,6 @@ export class StackComposer {
             this.stacks.push(captureProxyESStack)
         }
 
-        let migrationConsoleStack
-        if (migrationConsoleServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) {
-            migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
-                vpc: networkStack.vpc,
-                fetchMigrationEnabled: fetchMigrationEnabled,
-                stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
-                description: "This stack contains resources for the Migration Console ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            // To enable the Migration Console to make requests to the Capture Proxy with Service Connect,
-            // it should be deployed after the Capture Proxy
-            if (captureProxyESStack) migrationConsoleStack.addDependency(captureProxyESStack)
-            if (fetchMigrationStack) migrationConsoleStack.addDependency(fetchMigrationStack)
-            migrationConsoleStack.addDependency(mskUtilityStack)
-            migrationConsoleStack.addDependency(migrationStack)
-            migrationConsoleStack.addDependency(openSearchStack)
-            migrationConsoleStack.addDependency(networkStack)
-            this.stacks.push(migrationConsoleStack)
-        }
-
         let trafficReplayerStack
         if ((trafficReplayerServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) || (addOnMigrationDeployId && networkStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
@@ -354,23 +332,6 @@ export class StackComposer {
             this.stacks.push(trafficComparatorJupyterStack)
         }
 
-        let captureProxyStack
-        if (captureProxyServiceEnabled && networkStack && migrationStack && mskUtilityStack) {
-            captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
-                vpc: networkStack.vpc,
-                customSourceClusterEndpoint: captureProxySourceEndpoint,
-                stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
-                description: "This stack contains resources for the Capture Proxy ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            captureProxyStack.addDependency(mskUtilityStack)
-            captureProxyStack.addDependency(migrationStack)
-            captureProxyStack.addDependency(networkStack)
-            this.stacks.push(captureProxyStack)
-        }
-
         let elasticsearchStack
         if (elasticsearchServiceEnabled && networkStack && migrationStack) {
             elasticsearchStack = new ElasticsearchStack(scope, "elasticsearch", {
@@ -384,6 +345,24 @@ export class StackComposer {
             elasticsearchStack.addDependency(migrationStack)
             elasticsearchStack.addDependency(networkStack)
             this.stacks.push(elasticsearchStack)
+        }
+
+        let captureProxyStack
+        if (captureProxyServiceEnabled && networkStack && migrationStack && mskUtilityStack) {
+            captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
+                vpc: networkStack.vpc,
+                customSourceClusterEndpoint: captureProxySourceEndpoint,
+                stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
+                description: "This stack contains resources for the Capture Proxy ECS service",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            if (elasticsearchStack) captureProxyStack.addDependency(elasticsearchStack)
+            captureProxyStack.addDependency(mskUtilityStack)
+            captureProxyStack.addDependency(migrationStack)
+            captureProxyStack.addDependency(networkStack)
+            this.stacks.push(captureProxyStack)
         }
 
         let kafkaBrokerStack
@@ -414,6 +393,30 @@ export class StackComposer {
             kafkaZookeeperStack.addDependency(migrationStack)
             kafkaZookeeperStack.addDependency(networkStack)
             this.stacks.push(kafkaZookeeperStack)
+        }
+
+        let migrationConsoleStack
+        if (migrationConsoleServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) {
+            migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
+                vpc: networkStack.vpc,
+                fetchMigrationEnabled: fetchMigrationEnabled,
+                stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
+                description: "This stack contains resources for the Migration Console ECS service",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            // To enable the Migration Console to make requests to the Capture Proxy with Service Connect,
+            // it should be deployed after the Capture Proxy
+            if (captureProxyESStack) migrationConsoleStack.addDependency(captureProxyESStack)
+            if (captureProxyStack) migrationConsoleStack.addDependency(captureProxyStack)
+            if (elasticsearchStack) migrationConsoleStack.addDependency(elasticsearchStack)
+            if (fetchMigrationStack) migrationConsoleStack.addDependency(fetchMigrationStack)
+            migrationConsoleStack.addDependency(mskUtilityStack)
+            migrationConsoleStack.addDependency(migrationStack)
+            migrationConsoleStack.addDependency(openSearchStack)
+            migrationConsoleStack.addDependency(networkStack)
+            this.stacks.push(migrationConsoleStack)
         }
 
         function getContextForType(optionName: string, expectedType: string): any {

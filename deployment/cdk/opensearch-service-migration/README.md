@@ -1,6 +1,6 @@
 # OpenSearch Service Migration CDK
 
-This directory contains the IaC CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their Domain using default values or provide [configuration options](#Configuration-Options) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
+This directory contains the IaC CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
 ## Getting Started
 
@@ -88,7 +88,7 @@ Depending on your use-case, you may choose to provide options from both the `cdk
 
 ## Executing Commands on a Deployed Service
 
-Once a service has been deployed, a command shell can be opened for that service's container. If the SSM Session Manager plugin is not installed, it should be when prompted from the below exec command.
+Once a service has been deployed, a command shell can be opened for that service's container. If the SSM Session Manager plugin is not installed, it should be installed when prompted from the below exec command.
 ```shell
 # ./ecsExec.sh <service-name> <stage> <region>
 ./ecsExec.sh migration-console dev us-east-1
@@ -146,8 +146,34 @@ cdk destroy migration-console --c contextId=demo-deploy
 ```
 Note that the default retention policy for the OpenSearch Domain is to RETAIN this resource when the stack is deleted, and in order to delete the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `DESTROY`. Otherwise, the Domain can be manually deleted through the AWS console or through other means such as the AWS CLI.
 
-## How to run multiple Replayer scenarios
-WIP
+## How to run multiple Traffic Replayer scenarios
+The project supports running distinct Replayers in parallel, with each Replayer sending traffic to a different target cluster. This functionality allows users to test replaying captured traffic to multiple different target clusters in parallel. Users are able to provide the desired configuration options to spin up a new OpenSearch Domain and Traffic Replayer while using the existing Migration infrastructure that has already been deployed.
+
+To give an example of this process, a user could decide to configure an additional Replayer and Domain for the demo setup in the `cdk.context.json` by configuring a new context block like below. **Note**: `addOnMigrationDeployId` is a required field to allow proper naming of these additional resources.
+```shell
+  "demo-addon1": {
+    "addOnMigrationDeployId": "demo-addon1",
+    "stage": "dev",
+    "engineVersion": "OS_1.3",
+    "domainName": "demo-cluster-1-3",
+    "dataNodeCount": 2,
+    "vpcId": "vpc-0249559d49365ffaf",
+    "availabilityZoneCount": 2,
+    "openAccessPolicyEnabled": true,
+    "domainRemovalPolicy": "DESTROY",
+    "enableDemoAdmin": true,
+    "trafficReplayerEnableClusterFGACAuth": true
+  }
+```
+And then deploy this additional infrastructure with the command:
+```shell
+cdk deploy "*" --c contextId=demo-addon1 --require-approval never --concurrency 3
+```
+
+Finally, the additional infrastructure can be removed with:
+```shell
+cdk destroy "*" --c contextId=demo-addon1
+```
 
 ## Appendix
 
