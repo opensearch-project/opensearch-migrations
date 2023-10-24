@@ -49,7 +49,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
     public static final int MAX_COMMANDS_IN_CONNECTION = 256;
 
-    private enum OffloaderCommandType {
+    enum OffloaderCommandType {
         Read,
         EndOfMessage,
         Write,
@@ -58,8 +58,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
     @AllArgsConstructor
     static class ObservationDirective {
-        private final OffloaderCommandType offloaderCommandType;
-        private final int size;
+        public final OffloaderCommandType offloaderCommandType;
+        public final int size;
 
         public static ObservationDirective read(int i) {
             return new ObservationDirective(OffloaderCommandType.Read, i);
