@@ -242,7 +242,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         if (observation.hasRead()) {
-            rotateAccumulationOnReadIfNecessary(connectionId, accum);
             assert accum.state == Accumulation.State.ACCUMULATING_READS;
             if (accum.rrPair.requestData == null) {
                 requestCounter.incrementAndGet();
@@ -253,7 +252,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         } else if (observation.hasEndOfMessageIndicator()) {
             handleEndOfRequest(accum);
         } else if (observation.hasReadSegment()) {
-            rotateAccumulationOnReadIfNecessary(connectionId, accum);
             assert accum.state == Accumulation.State.ACCUMULATING_READS;
             log.atTrace().setMessage(()->"Adding request segment for accum[" + connectionId + "]=" + accum).log();
             if (accum.rrPair.requestData == null) {
@@ -297,6 +295,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         } else if (observation.hasSegmentEnd()) {
             assert accum.rrPair.responseData.hasInProgressSegment();
             accum.rrPair.responseData.finalizeRequestSegments(timestamp);
+        } else if (observation.hasRead() || observation.hasReadSegment()) {
+            rotateAccumulationOnReadIfNecessary(connectionId, accum);
+            return handleObservationForReadState(accum, observation, connectionId, timestamp);
         }
         return Optional.of(CONNECTION_STATUS.ALIVE);
 

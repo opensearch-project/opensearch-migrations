@@ -28,20 +28,19 @@ public class CodedOutputStreamSizeUtil {
      * the max size needed in the CodedOutputStream to store the provided ByteBuffer data and its associated TrafficStream
      * overhead. The actual required bytes could be marginally smaller.
      */
-    public static int maxBytesNeededForASegmentedObservation(Instant timestamp, int observationFieldNumber, int dataFieldNumber,
-        int dataCountFieldNumber, int dataCount,  ByteBuffer buffer, int numberOfTrafficStreamsSoFar) {
+    public static int maxBytesNeededForASegmentedObservation(Instant timestamp, int observationFieldNumber,
+                                                             int dataFieldNumber, ByteBuffer buffer) {
         // Timestamp required bytes
         int tsContentSize = getSizeOfTimestamp(timestamp);
         int tsTagAndContentSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
 
         // Capture required bytes
         int dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, buffer);
-        int dataCountSize = dataCountFieldNumber > 0 ? CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount) : 0;
-        int captureContentSize = dataSize + dataCountSize;
-        int captureTagAndContentSize = CodedOutputStream.computeInt32Size(observationFieldNumber, captureContentSize) + captureContentSize;
+        int captureTagAndContentSize = CodedOutputStream.computeInt32Size(observationFieldNumber, dataSize) + dataSize;
 
         // Observation and closing index required bytes
-        return bytesNeededForObservationAndClosingIndex(tsTagAndContentSize + captureTagAndContentSize, numberOfTrafficStreamsSoFar);
+        return bytesNeededForObservationAndClosingIndex(tsTagAndContentSize + captureTagAndContentSize,
+                Integer.MAX_VALUE);
     }
 
     /**

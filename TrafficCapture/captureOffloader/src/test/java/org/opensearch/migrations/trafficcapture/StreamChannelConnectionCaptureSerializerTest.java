@@ -114,7 +114,6 @@ class StreamChannelConnectionCaptureSerializerTest {
             var reconstitutedTrafficStream = reconstitutedTrafficStreamsList.get(i);
             int dataSize = reconstitutedTrafficStream.getSubStream(0).getReadSegment().getData().size();
             totalSize += dataSize;
-            Assertions.assertEquals(i + 1, reconstitutedTrafficStream.getSubStream(0).getReadSegment().getCount());
             Assertions.assertEquals(i + 1, getIndexForTrafficStream(reconstitutedTrafficStream));
         }
         Assertions.assertEquals(fakeDataBytes.length, totalSize);
@@ -131,7 +130,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
         // Arbitrarily picking small buffer that can hold the overhead TrafficStream bytes as well as some
         // data bytes but not all the data bytes and require chunking
-        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 55);
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 56);
 
         var bb = Unpooled.wrappedBuffer(packetBytes);
         serializer.addWriteEvent(referenceTimestamp, bb);
@@ -145,8 +144,6 @@ class StreamChannelConnectionCaptureSerializerTest {
             observations.add(trafficStream.getSubStream(0));
         }
 
-        // Sort observations, as buffers in our close handler are written async and may not be executed in order
-        Collections.sort(observations, Comparator.comparingInt(observation -> observation.getWriteSegment().getCount()));
         String reconstructedData = "";
         for (TrafficObservation observation : observations) {
             var stringChunk = observation.getWriteSegment().getData().toStringUtf8();

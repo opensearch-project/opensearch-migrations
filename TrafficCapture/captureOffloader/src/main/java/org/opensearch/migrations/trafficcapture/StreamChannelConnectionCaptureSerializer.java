@@ -175,18 +175,17 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     @Override
     public CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
         if (currentCodedOutputStreamHolderOrNull == null && !isFinal) {
-            return streamManager.closeStream(null, numFlushesSoFar);
+            return CompletableFuture.completedFuture(null);
         }
         CodedOutputStream currentStream = getOrCreateCodedOutputStream();
         var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
         // e.g. 3: 1
         currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
-        log.debug("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
+        log.trace("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
         currentStream.flush();
         assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that " +
                 "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
         var future = streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
-        //future.whenComplete((r,t)->{}); // do more cleanup stuff here once the future is complete
         currentCodedOutputStreamHolderOrNull = null;
         return future;
     }
@@ -264,12 +263,10 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         int segmentFieldNumber,segmentCountFieldNumber,segmentDataFieldNumber;
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
             segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
-            segmentCountFieldNumber = ReadSegmentObservation.COUNT_FIELD_NUMBER;
             segmentDataFieldNumber = ReadSegmentObservation.DATA_FIELD_NUMBER;
         }
         else {
             segmentFieldNumber = TrafficObservation.WRITESEGMENT_FIELD_NUMBER;
-            segmentCountFieldNumber = WriteSegmentObservation.COUNT_FIELD_NUMBER;
             segmentDataFieldNumber = WriteSegmentObservation.DATA_FIELD_NUMBER;
         }
 
@@ -278,7 +275,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         // when considering the case of a message that does not need segments or for the case of a smaller segment created
         // from a much larger message
         int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp,
-            segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, 2, byteBuffer, numFlushesSoFar + 1);
+            segmentFieldNumber, segmentDataFieldNumber, byteBuffer);
         int trafficStreamOverhead = messageAndOverheadBytesLeft - byteBuffer.capacity();
 
         // Ensure that space for at least one data byte and overhead exists, otherwise a flush is necessary.
@@ -294,7 +291,6 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             return;
         }
 
-        int dataCount = 0;
         while(byteBuffer.position() < byteBuffer.limit()) {
             int availableCOSSpace = getOrCreateCodedOutputStream().spaceLeft();
             int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : byteBuffer.limit() - byteBuffer.position();
@@ -302,7 +298,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
             bb.limit(chunkBytes);
             bb = bb.slice();
             byteBuffer.position(byteBuffer.position() + chunkBytes);
-            addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, segmentCountFieldNumber, ++dataCount, timestamp, bb);
+            addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, timestamp, bb);
             int minExpectedSpaceAfterObservation = availableCOSSpace - chunkBytes - trafficStreamOverhead;
             observationSizeSanityCheck(minExpectedSpaceAfterObservation, segmentFieldNumber);
             // 1 to N-1 chunked messages
