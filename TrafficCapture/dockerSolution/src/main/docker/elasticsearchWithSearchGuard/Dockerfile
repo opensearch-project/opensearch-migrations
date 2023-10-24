@@ -5,8 +5,6 @@ RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install https://m
 RUN pushd /usr/share/elasticsearch/plugins/search-guard-7/tools ; chmod ugo+x ./install_demo_configuration.sh ; yes | ./install_demo_configuration.sh ; popd
 ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 ENV PROXY_TLS_CONFIG_FILE=/usr/share/elasticsearch/config/proxy_tls.yml
-# without this line, elasticsearch will complain that there aren't enough nodes
-RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
 COPY disableTlsConfig.sh enableTlsConfig.sh /root/
 RUN chmod ugo+x /root/disableTlsConfig.sh /root/enableTlsConfig.sh
 ENV PATH=${PATH}:/usr/share/elasticsearch/jdk/bin/

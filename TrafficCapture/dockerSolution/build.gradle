@@ -117,7 +117,9 @@ dockerCompose {
             environment.put(TRAFFIC_COMPARATOR_DIRECTORY_ENV, REALIZED_TRAFFIC_COMPARATOR_DIRECTORY)
             exposeAsEnvironment(this)
         }
-    useComposeFiles.add("src/main/docker/docker-compose.yml")
+    useComposeFiles = project.hasProperty('multiProxy') ?
+            ['src/main/docker/docker-compose.yml', 'src/main/docker/docker-compose-multi.yml'] :
+            ['src/main/docker/docker-compose.yml', 'src/main/docker/docker-compose-single.yml']
 }
 
 task buildDockerImages {

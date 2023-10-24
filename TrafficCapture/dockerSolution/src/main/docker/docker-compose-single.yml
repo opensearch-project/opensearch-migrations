@@ -1,0 +1,40 @@
+version: '3.7'
+services:
+
+
+  # Run combined instance of Capture Proxy and Elasticsearch
+  capture-proxy-es:
+    image: 'migrations/capture_proxy:latest'
+    networks:
+      - migrations
+    ports:
+      - "9200:9200"
+      - "19200:19200"
+    environment:
+      - http.port=19200
+      - discovery.type=single-node
+    # Run processes for elasticsearch and capture proxy, and exit if either one ends
+    command: /bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection kafka:9092 --destinationUri  https://localhost:19200  --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1'
+    depends_on:
+      - kafka
+
+# Run separate instances of Capture Proxy and Elasticsearch
+#  capture-proxy:
+#    image: 'migrations/capture_proxy:latest'
+#    networks:
+#      - migrations
+#    ports:
+#      - "9200:9200"
+#    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection kafka:9092 --destinationUri  https://elasticsearch:9200  --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
+#    depends_on:
+#      - kafka
+#      - elasticsearch
+#
+#  elasticsearch:
+#    image: 'migrations/elasticsearch_searchguard:latest'
+#    networks:
+#      - migrations
+#    environment:
+#      - discovery.type=single-node
+#    ports:
+#      - '19200:9200'

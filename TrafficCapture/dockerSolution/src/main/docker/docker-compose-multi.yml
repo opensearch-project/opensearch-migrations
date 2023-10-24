@@ -1,0 +1,38 @@
+version: '3.7'
+services:
+
+  capture-proxy-es1:
+     image: 'migrations/capture_proxy:latest'
+     networks:
+      - migrations
+     ports:
+      - "9200:9200"
+      - "19200:19200"
+     environment:
+      - http.port=19200
+      - node.name=capture-proxy-es1
+      - cluster.name=es-cluster
+      - discovery.seed_hosts=capture-proxy-es2
+      - cluster.initial_master_nodes=capture-proxy-es1,capture-proxy-es2
+      # Run processes for elasticsearch and capture proxy, and exit if either one ends
+     command: /bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --kafkaConnection kafka:9092 --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1'
+     depends_on:
+      - kafka
+
+  capture-proxy-es2:
+    image: 'migrations/capture_proxy:latest'
+    networks:
+      - migrations
+    ports:
+      - "9201:9201"
+      - "19201:19201"
+    environment:
+      - http.port=19201
+      - node.name=capture-proxy-es2
+      - cluster.name=es-cluster
+      - discovery.seed_hosts=capture-proxy-es1
+      - cluster.initial_master_nodes=capture-proxy-es1,capture-proxy-es2
+      # Run processes for elasticsearch and capture proxy, and exit if either one ends
+    command: /bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.Main --kafkaConnection kafka:9092 --destinationUri https://localhost:19201 --insecureDestination --listenPort 9201 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1'
+    depends_on:
+      - kafka
