@@ -147,7 +147,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         if (accum.hasRrPair()) {
             accum.getRrPair().holdTrafficStream(tsk);
         } else {
-            assert trafficStream.getSubStreamCount() == 0 ||
+            assert accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK ||
+                    trafficStream.getSubStreamCount() == 0 ||
                     trafficStream.getSubStream(trafficStream.getSubStreamCount()-1).hasClose();
         }
     }
@@ -245,7 +246,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         var connectionId = trafficStreamKey.getConnectionId();
         if (observation.hasRead()) {
-            assert accum.state == Accumulation.State.ACCUMULATING_READS;
             if (!accum.hasRrPair()) {
                 requestCounter.incrementAndGet();
             }
@@ -386,6 +386,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 case ACCUMULATING_WRITES:
                     handleEndOfResponse(accumulation, status);
                     break;
+                case WAITING_FOR_NEXT_READ_CHUNK:
                 case IGNORING_LAST_REQUEST:
                     break;
                 default:
