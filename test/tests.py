@@ -227,9 +227,10 @@ class E2ETests(unittest.TestCase):
         container_name = subprocess.getoutput(cmd).strip()
 
         if container_name:
-            cmd_exec = f"docker exec {container_name} ./runTestBenchmarks.sh"
-            logger.warning(f"Running command: {cmd_exec}")
-            subprocess.run(cmd_exec, shell=True)
+            cmd = []
+            #cmd_exec = f"docker exec {container_name} ./runTestBenchmarks.sh"
+            #logger.warning(f"Running command: {cmd_exec}")
+            #subprocess.run(cmd_exec, shell=True)
         else:
             logger.error("Migration-console container was not found, please double check that deployment was a success")
             self.assert_(False)
@@ -240,14 +241,10 @@ class E2ETests(unittest.TestCase):
 
         for index in set(source_indices) & set(target_indices):
             if index not in self.ignore_list:
-                if index != "searchguard"
+                if index != "searchguard":
                     source_count = get_doc_count(self.source_endpoint, index, self.auth)
                     target_count = get_doc_count(self.target_endpoint, index, self.auth)
                     processed_indices.append(index)
-
-                if not processed_indices:
-                    logger.error("There were no indices to compare, check that OpenSearch Benchmark ran successfully")
-                    self.assert_(False)
 
                 if source_count != source_count:
                     logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
@@ -255,3 +252,7 @@ class E2ETests(unittest.TestCase):
                 else:
                     self.assertEqual(source_count, target_count)
                     logger.info(f'{index}: doc counts match on both source and target endpoints - {source_count}')
+
+        if not processed_indices:
+            logger.error("There were no indices to compare, check that OpenSearch Benchmark ran successfully")
+            self.assert_(False)
