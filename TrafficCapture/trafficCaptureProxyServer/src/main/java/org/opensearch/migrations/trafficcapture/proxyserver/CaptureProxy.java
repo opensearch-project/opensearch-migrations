@@ -168,12 +168,12 @@ public class CaptureProxy {
         return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId,
                 new StreamLifecycleManager() {
                     @Override
-                    protected CodedOutputStreamHolder createStream() {
+                    public CodedOutputStreamHolder createStream() {
                         return () -> CodedOutputStream.newInstance(NullOutputStream.getInstance());
                     }
 
                     @Override
-                    protected CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder,
+                    public CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder,
                                                                     int index) {
                         return CompletableFuture.completedFuture(null);
                     }

@@ -37,7 +37,7 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     @AllArgsConstructor
     class StreamManager extends OrderedStreamLifecyleManager {
         @Override
-        protected CodedOutputStreamHolder createStream() {
+        public CodedOutputStreamHolder createStream() {
             return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
         }
 

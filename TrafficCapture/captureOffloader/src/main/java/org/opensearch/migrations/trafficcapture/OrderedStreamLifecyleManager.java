@@ -2,12 +2,12 @@ package org.opensearch.migrations.trafficcapture;
 
 import java.util.concurrent.CompletableFuture;
 
-public abstract class OrderedStreamLifecyleManager extends StreamLifecycleManager {
+public abstract class OrderedStreamLifecyleManager implements StreamLifecycleManager {
     CompletableFuture<Object> futureForLastClose = CompletableFuture.completedFuture(null);
 
-    protected abstract CodedOutputStreamHolder createStream();
+    public abstract CodedOutputStreamHolder createStream();
 
-    protected CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+    public CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder, int index) {
         futureForLastClose = futureForLastClose.thenCompose(v -> kickoffCloseStream(outputStreamHolder, index));
         return futureForLastClose;
     }
