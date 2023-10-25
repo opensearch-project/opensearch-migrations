@@ -16,9 +16,11 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
@@ -163,9 +165,19 @@ public class CaptureProxy {
 
     private static IConnectionCaptureFactory getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
-        return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId, () ->
-                CodedOutputStream.newInstance(NullOutputStream.getInstance()),
-                captureSerializerResult -> CompletableFuture.completedFuture(null));
+        return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId,
+                new StreamLifecycleManager() {
+                    @Override
+                    public CodedOutputStreamHolder createStream() {
+                        return () -> CodedOutputStream.newInstance(NullOutputStream.getInstance());
+                    }
+
+                    @Override
+                    public CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder,
+                                                                    int index) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                });
     }
 
     private static String getNodeId() {

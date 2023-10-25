@@ -20,7 +20,6 @@ message ReadObservation {
   bytes data = 1;
 }
 message ReadSegmentObservation {
-  int32 count = 1;
   bytes data = 2;
 }
 message ProxyFinishesForwardingRequestObservation {
@@ -30,7 +29,6 @@ message WriteObservation {
   bytes data = 1;
 }
 message WriteSegmentObservation {
-  int32 count = 1;
   bytes data = 2;
 }
 message CloseObservation {}
@@ -69,7 +67,7 @@ message TrafficObservation {
 message TrafficStream {
   string connectionId = 1; // persistent identifier for all stream objects within a single connection
   string nodeId = 5; // unique namespace such as a nodeId or computer mac address
-  optional int32 requestCount = 6;
+  optional int32 priorRequestsReceived = 6;
   optional bool lastObservationWasUnterminatedRead = 7; // there were previous Read observations encountered that
                                                         // have yet to have EOM observations after them
   repeated TrafficObservation subStream = 2;

@@ -35,12 +35,12 @@ class ExpiringTrafficStreamMapSequentialTest {
         for (int i=0; i<expectedExpirationCounts.length; ++i) {
             var ts = Instant.ofEpochSecond(i+1);
             var tsk = new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0);
-            var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk,
-                    k->new Accumulation(new UniqueRequestKey(k, 0, 0)));
+            var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk, k->new Accumulation(0));
             createdAccumulations.add(accumulation);
             expiringMap.expireOldEntries(new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0),
                     accumulation, ts);
-            createdAccumulations.get(i).rrPair.addResponseData(ts, ("Add"+i).getBytes(StandardCharsets.UTF_8));
+            var rrPair = createdAccumulations.get(i).getOrCreateTransactionPair(tsk);
+            rrPair.addResponseData(ts, ("Add"+i).getBytes(StandardCharsets.UTF_8));
             expiredCountsPerLoop.add(expiredAccumulations.size());
         }
         Assertions.assertEquals(

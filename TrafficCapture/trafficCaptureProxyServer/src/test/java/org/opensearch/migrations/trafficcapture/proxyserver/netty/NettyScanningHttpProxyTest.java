@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -98,16 +97,8 @@ class NettyScanningHttpProxyTest {
         interactionsCapturedCountdown.await();
         var recordedStreams = captureFactory.getRecordedStreams();
         Assertions.assertEquals(1, recordedStreams.size());
-        var recordedTrafficStreams =
-                recordedStreams.stream()
-                        .map(rts-> {
-                            try {
-                                return TrafficStream.parseFrom(rts.data);
-                            } catch (InvalidProtocolBufferException e) {
-                                throw new RuntimeException(e);
-                            }
-                        })
-                        .toArray(TrafficStream[]::new);
+        var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream()
+                .toArray(TrafficStream[]::new);
         Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
         log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
         var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
