@@ -16,10 +16,17 @@ import java.util.Optional;
 @Slf4j
 public class RequestResponsePacketPair {
 
+    enum ReconstructionStatus {
+        Complete,
+        ExpiredPrematurely,
+        ClosedPrematurely
+    }
+
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     public final UniqueRequestKey requestKey;
+    ReconstructionStatus completionStatus;
 
     public RequestResponsePacketPair(UniqueRequestKey requestKey) {
         this.requestKey = requestKey;

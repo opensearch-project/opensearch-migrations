@@ -164,7 +164,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
         accumulateTrafficStreamsWithNewAccumulator(trafficStreams, reconstructedTransactions, requestsReceived);
-        assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, requestsReceived, expectedSizes);
+        assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, expectedSizes);
+        Assertions.assertEquals(requestsReceived.get(), reconstructedTransactions.size());
     }
 
     /**
@@ -184,8 +185,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                         (id,request) -> requestsReceived.incrementAndGet(),
                         fullPair -> {
                             var sourceIdx = fullPair.requestKey.getSourceRequestIndex();
+                            if (fullPair.completionStatus ==
+                                    RequestResponsePacketPair.ReconstructionStatus.ClosedPrematurely) {
+                                return;
+                            }
                             fullPair.getTrafficStreamsHeld().stream()
-                                    .forEach(tsk->tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
+                                    .forEach(tsk -> tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
                             if (aggregations.size() > sourceIdx) {
                                 var oldVal = aggregations.set(sourceIdx, fullPair);
                                 if (oldVal != null) {
@@ -205,7 +210,6 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     }
 
     static void assertReconstructedTransactionsMatchExpectations(List<RequestResponsePacketPair> reconstructedTransactions,
-                                                                  AtomicInteger requestsReceived,
                                                                   List<Integer> expectedSizes) {
         log.error("reconstructedTransactions="+ reconstructedTransactions);
         var expectedCount = expectedSizes.size()/2;
@@ -216,6 +220,5 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
             Assertions.assertEquals((long) expectedSizes.get(i*2+1),
                     calculateAggregateSizeOfPacketBytes(reconstructedTransactions.get(i).responseData.packetBytes));
         }
-        Assertions.assertEquals(requestsReceived.get(), reconstructedTransactions.size());
     }
 }

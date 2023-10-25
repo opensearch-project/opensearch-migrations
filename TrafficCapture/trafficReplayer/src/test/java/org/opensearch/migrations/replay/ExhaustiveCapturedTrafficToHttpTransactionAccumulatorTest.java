@@ -27,7 +27,7 @@ import java.util.stream.Stream;
 @Slf4j
 public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
 
-    private static final int SHIFT = 255;
+    private static final int CLASSIFY_COMPONENT_INT_SHIFT = 255;
 
     public static final int MAX_COMMANDS_IN_CONNECTION = 8;
     public static final int MIN_BUFFER_SIZE = 100;
@@ -71,16 +71,16 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
      * a bit more work to fully implement.  For now, the count parameter is ignored.
      */
     private static int makeClassificationValue(ObservationType ot1, ObservationType ot2, Integer count) {
-        return (((0 * SHIFT) + ot1.intValue) * SHIFT) + ot2.intValue;
+        return (((0 * CLASSIFY_COMPONENT_INT_SHIFT) + ot1.intValue) * CLASSIFY_COMPONENT_INT_SHIFT) + ot2.intValue;
     }
 
     private static String classificationToString(int c) {
         int left = c;
-        int end = c % SHIFT;
-        left = left / SHIFT;
-        int start = left % SHIFT;
-        left = left / SHIFT;
-        int size = left % SHIFT;
+        int end = c % CLASSIFY_COMPONENT_INT_SHIFT;
+        left = left / CLASSIFY_COMPONENT_INT_SHIFT;
+        int start = left % CLASSIFY_COMPONENT_INT_SHIFT;
+        left = left / CLASSIFY_COMPONENT_INT_SHIFT;
+        int size = left % CLASSIFY_COMPONENT_INT_SHIFT;
         return start + "," + end + "," + size;
     }
 
@@ -209,13 +209,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
                         " left=" + possibilitiesLeftToTest.size());
                 seedsThatOfferUniqueTestCases.add(rSeed);
 
-                /*
-                 * TODO.  I don't have cutPoints > 0 working yet.  I'm actively working on that.
-                 */
-                for (int i = 0;
-                     i<1;
-                    //i < trafficStreams.length;
-                     ++i) {
+                for (int i = 0; i < trafficStreams.length; ++i) {
                     testArgs.add(Arguments.of("seed=" + rSeed, i, trafficStreams, sizes));
                 }
             }
@@ -231,10 +225,10 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
         var rand = new Random(1);
         return generateAllTestsAndConfirmComplete(
 //                IntStream.generate(()->rand.nextInt())
-//        List.of(-1155869325,892128508,155629808,1429008869,-1465154083,-1242363800,26273138,1705850753,
-//                -1956122223,-193570837,1558626465,1248685248,-1292756720,-3507139,929459541,474550272,-957816454,
-//                -1418261474,431108934,1601212083,1788602357,1722788072,1421653156).stream().mapToInt(i->i)
-                List.of(892128508).stream().mapToInt(i->i)
+                List.of(-1155869325,892128508,155629808,1429008869,-1465154083,-1242363800,26273138,
+                        1705850753, -1956122223,-193570837,1558626465,1248685248,-1292756720,-3507139,929459541,
+                        474550272,-957816454, -1418261474,431108934,1601212083,1788602357,1722788072,1421653156)
+                        .stream().mapToInt(i->i)
         );
     }
 
@@ -265,8 +259,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
         var indicesProcessedPass1 =
                 SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(
                         Arrays.stream(trafficStreams).limit(cutPoint), reconstructedTransactions, requestsReceived);
-        // TrafficStream indices start at 1.  Shift since the array & the collaring starts at 0.
-        cutPoint = indicesProcessedPass1.isEmpty() ? cutPoint : indicesProcessedPass1.last()-1;
+        cutPoint = indicesProcessedPass1.isEmpty() ? 0 : indicesProcessedPass1.last();
         var indicesProcessedPass2 =
             SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(
                     Arrays.stream(trafficStreams).skip(cutPoint), reconstructedTransactions, requestsReceived);
@@ -282,7 +275,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
                 unionSet.last());
 
         SimpleCapturedTrafficToHttpTransactionAccumulatorTest.assertReconstructedTransactionsMatchExpectations(
-                reconstructedTransactions, requestsReceived, expectedSizes);
+                reconstructedTransactions, expectedSizes);
     }
 
     private static Optional<ObservationType> getTypeFromObservation(TrafficObservation trafficObservation) {

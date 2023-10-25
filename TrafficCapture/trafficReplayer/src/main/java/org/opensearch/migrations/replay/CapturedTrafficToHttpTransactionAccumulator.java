@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKeyWithRequestOffset;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -16,7 +15,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.StringJoiner;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -93,7 +91,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         log.atTrace().setMessage(()->"firing accumulation for accum=["
                                 + accumulation.getRequestId() + "]=" + accumulation)
                                 .log();
-                        fireAccumulationsCallbacksAndClose(accumulation);
+                        fireAccumulationsCallbacksAndClose(accumulation,
+                                RequestResponsePacketPair.ReconstructionStatus.ExpiredPrematurely);
                     }
                 });
         this.requestHandler = requestReceivedHandler;
@@ -154,16 +153,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var key = streamWithKey.getKey();
 
         if (key.getTrafficStreamIndex() == 0 &&
-                (stream.getRequestCount() > 0 || stream.getLastObservationWasUnterminatedRead())) {
+                (stream.getPriorRequestsReceived() > 0 || stream.getLastObservationWasUnterminatedRead())) {
             log.atWarn().setMessage(()->"Encountered a TrafficStream object with inconsistent values between " +
-                    "the prior request count (" + stream.getRequestCount() + ", " +
+                    "the prior request count (" + stream.getPriorRequestsReceived() + ", " +
                     "lastObservationWasUnterminatedRead (" + stream.getLastObservationWasUnterminatedRead() +
                     ") and the index (" + key.getTrafficStreamIndex() +
                     ").  Traffic Observations will be ignored until Reads after the next EndOfMessage" +
                     " are encountered.   Full stream object=" + stream).log();
         }
 
-        var requestKey = new UniqueRequestKey(key, stream.getRequestCount(), 0);
+        var requestKey = new UniqueRequestKey(key, stream.getPriorRequestsReceived(),
+                stream.getPriorRequestsReceived()+(stream.hasLastObservationWasUnterminatedRead()?1:0));
         return new Accumulation(requestKey, stream.getLastObservationWasUnterminatedRead());
     }
 
@@ -305,7 +305,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         // We only need to worry about this if we have yet to send the RESPONSE.
         if (accum.state == Accumulation.State.ACCUMULATING_WRITES) {
             log.atDebug().setMessage(()->"Resetting accum[" + connectionId + "]=" + accum).log();
-            handleEndOfResponse(accum);
+            handleEndOfResponse(accum, RequestResponsePacketPair.ReconstructionStatus.Complete);
             return true;
         }
         return false;
@@ -342,12 +342,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
     }
 
-    private void handleEndOfResponse(Accumulation accumulation) {
+    private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", accumulation.getRequestId())
                 .addKeyValue("connectionId", accumulation.getRequestId().getTrafficStreamKey().getConnectionId())
                 .setMessage("Full captured source response was accumulated").log();
+        accumulation.rrPair.completionStatus = status;
         fullDataHandler.accept(accumulation.rrPair);
         accumulation.resetForNextRequest();
     }
@@ -355,12 +356,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public void close() {
         liveStreams.values().forEach(accum -> {
             requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
-            fireAccumulationsCallbacksAndClose(accum);
+            fireAccumulationsCallbacksAndClose(accum, RequestResponsePacketPair.ReconstructionStatus.ClosedPrematurely);
         });
         liveStreams.clear();
     }
 
-    private void fireAccumulationsCallbacksAndClose(Accumulation accumulation) {
+    private void fireAccumulationsCallbacksAndClose(Accumulation accumulation,
+                                                    RequestResponsePacketPair.ReconstructionStatus status) {
         try {
             switch (accumulation.state) {
                 case ACCUMULATING_READS:
@@ -369,7 +371,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     }
                     // fall through
                 case ACCUMULATING_WRITES:
-                    handleEndOfResponse(accumulation);
+                    handleEndOfResponse(accumulation, status);
                     break;
                 case IGNORING_LAST_REQUEST:
                     break;

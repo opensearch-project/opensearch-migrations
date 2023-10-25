@@ -101,7 +101,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
                 currentCodedOutputStream.writeString(TrafficStream.NODEID_FIELD_NUMBER, nodeIdString);
             }
             if (eomsSoFar > 0) {
-                currentCodedOutputStream.writeInt32(TrafficStream.REQUESTCOUNT_FIELD_NUMBER, eomsSoFar);
+                currentCodedOutputStream.writeInt32(TrafficStream.PRIORREQUESTSRECEIVED_FIELD_NUMBER, eomsSoFar);
             }
             if (readObservationsAreWaitingForEom) {
                 currentCodedOutputStream.writeBool(TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
