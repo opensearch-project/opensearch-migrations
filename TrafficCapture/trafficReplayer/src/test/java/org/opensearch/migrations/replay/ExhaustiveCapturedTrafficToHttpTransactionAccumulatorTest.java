@@ -209,7 +209,9 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
                         " left=" + possibilitiesLeftToTest.size());
                 seedsThatOfferUniqueTestCases.add(rSeed);
 
-                for (int i = 0; i < trafficStreams.length; ++i) {
+                for (int i = 0; i < trafficStreams.length; ++i)
+                //int i = 0;
+                {
                     testArgs.add(Arguments.of("seed=" + rSeed, i, trafficStreams, sizes));
                 }
             }
@@ -227,7 +229,8 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
 //                IntStream.generate(()->rand.nextInt())
                 List.of(-1155869325,892128508,155629808,1429008869,-1465154083,-1242363800,26273138,
                         1705850753, -1956122223,-193570837,1558626465,1248685248,-1292756720,-3507139,929459541,
-                        474550272,-957816454, -1418261474,431108934,1601212083,1788602357,1722788072,1421653156)
+                        474550272,-957816454,-1418261474,431108934,1601212083,1788602357,1722788072,1421653156)
+//                List.of(1705850753)
                         .stream().mapToInt(i->i)
         );
     }
