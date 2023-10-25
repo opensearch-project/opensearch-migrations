@@ -314,6 +314,16 @@ class TestMetadataMigration(unittest.TestCase):
         test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH)
         self.assertRaises(ValueError, metadata_migration.run, test_input)
 
+    @patch('index_operations.fetch_all_indices')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_no_indices_in_source(self, mock_fetch_indices: MagicMock):
+        mock_fetch_indices.return_value = {}
+        test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, "dummy")
+        test_result = metadata_migration.run(test_input)
+        mock_fetch_indices.assert_called_once()
+        self.assertEqual(0, test_result.target_doc_count)
+        self.assertEqual(0, len(test_result.created_indices))
+
 
 if __name__ == '__main__':
     unittest.main()

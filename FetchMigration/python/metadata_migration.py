@@ -163,8 +163,12 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     # We expect the Data Prepper pipeline to only have a single top-level value
     pipeline_config = next(iter(dp_config.values()))
     validate_pipeline_config(pipeline_config)
+    result = MetadataMigrationResult()
     # Fetch EndpointInfo and indices
     source_endpoint_info, source_indices = compute_endpoint_and_fetch_indices(pipeline_config, SOURCE_KEY)
+    # If source indices is empty, return immediately
+    if len(source_indices.keys()) == 0:
+        return result
     target_endpoint_info, target_indices = compute_endpoint_and_fetch_indices(pipeline_config, SINK_KEY)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)

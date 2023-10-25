@@ -14,7 +14,17 @@ class TestSearchEndpoint(unittest.TestCase):
     @responses.activate
     def test_fetch_all_indices(self):
         # Set up GET response
-        responses.get(test_constants.SOURCE_ENDPOINT + "*", json=test_constants.BASE_INDICES_DATA)
+        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        # Add system index
+        test_data[".system-index"] = {
+            test_constants.SETTINGS_KEY: {
+                test_constants.INDEX_KEY: {
+                    test_constants.NUM_SHARDS_SETTING: 1,
+                    test_constants.NUM_REPLICAS_SETTING: 1
+                }
+            }
+        }
+        responses.get(test_constants.SOURCE_ENDPOINT + "*", json=test_data)
         # Now send request
         index_data = index_operations.fetch_all_indices(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(3, len(index_data.keys()))
