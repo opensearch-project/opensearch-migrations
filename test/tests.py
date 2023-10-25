@@ -227,10 +227,9 @@ class E2ETests(unittest.TestCase):
         container_name = subprocess.getoutput(cmd).strip()
 
         if container_name:
-            cmd = []
-            #cmd_exec = f"docker exec {container_name} ./runTestBenchmarks.sh"
-            #logger.warning(f"Running command: {cmd_exec}")
-            #subprocess.run(cmd_exec, shell=True)
+            cmd_exec = f"docker exec {container_name} ./runTestBenchmarks.sh"
+            logger.warning(f"Running command: {cmd_exec}")
+            subprocess.run(cmd_exec, shell=True)
         else:
             logger.error("Migration-console container was not found, please double check that deployment was a success")
             self.assert_(False)
