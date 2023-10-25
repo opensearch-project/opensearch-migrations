@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -162,8 +163,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     " are encountered.   Full stream object=" + stream).log();
         }
 
-        var requestKey = new UniqueRequestKey(key, stream.getPriorRequestsReceived(),
-                stream.getPriorRequestsReceived()+(stream.hasLastObservationWasUnterminatedRead()?1:0));
+        var requestKey = new UniqueRequestKey(key,
+                stream.getPriorRequestsReceived()+(stream.hasLastObservationWasUnterminatedRead()?1:0),
+                0);
         return new Accumulation(requestKey, stream.getLastObservationWasUnterminatedRead());
     }
 
@@ -173,13 +175,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public CONNECTION_STATUS addObservationToAccumulation(@NonNull Accumulation accum, TrafficObservation observation) {
         log.atTrace().setMessage(()->"Adding observation: "+observation).log();
-        var connectionId = accum.rrPair.requestKey.getTrafficStreamKey().getConnectionId();
+        var requestKey = accum.rrPair.requestKey;
+        var tsk = requestKey.getTrafficStreamKey();
+        var connectionId = requestKey.getTrafficStreamKey().getConnectionId();
         var timestamp =
                 Optional.of(observation.getTs()).map(t-> TrafficStreamUtils.instantFromProtoTimestamp(t)).get();
         liveStreams.expireOldEntries(accum.rrPair.requestKey.getTrafficStreamKey(), accum, timestamp);
 
         return handleObservationForSkipState(accum, observation)
-                .or(() -> handleCloseObservationThatAffectEveryState(accum, observation, connectionId, timestamp))
+                .or(() -> handleCloseObservationThatAffectEveryState(accum, observation, tsk, timestamp))
                 .or(() -> handleObservationForReadState(accum, observation, connectionId, timestamp))
                 .or(() -> handleObservationForWriteState(accum, observation, connectionId, timestamp))
                 .orElseGet(() -> {
@@ -208,19 +212,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     private Optional<CONNECTION_STATUS> handleCloseObservationThatAffectEveryState(Accumulation accum,
                                                                                    TrafficObservation observation,
-                                                                                   String connectionId,
+                                                                                   ITrafficStreamKey trafficStreamKey,
                                                                                    Instant timestamp) {
         if (observation.hasClose()) {
-            rotateAccumulationIfNecessary(connectionId, accum);
+            accum.rrPair.holdTrafficStream(trafficStreamKey);
+            rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             closedConnectionCounter.incrementAndGet();
             connectionCloseListener.accept(accum.getRequestId(), timestamp);
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
-            rotateAccumulationIfNecessary(connectionId, accum);
+            rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             exceptionConnectionCounter.incrementAndGet();
             accum.resetForNextRequest();
             log.atDebug().setMessage(()->"Removing accumulated traffic pair due to " +
-                    "recorded connection exception event for " + connectionId).log();
+                    "recorded connection exception event for " + trafficStreamKey.getConnectionId()).log();
             log.atTrace().setMessage(()->"Accumulated object: " + accum).log();
             return Optional.of(CONNECTION_STATUS.ALIVE);
         }
