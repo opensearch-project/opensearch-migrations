@@ -1,7 +1,13 @@
 import {Stack, SecretValue} from "aws-cdk-lib";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {IVpc} from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
-import {Cluster, ContainerImage, FargateTaskDefinition, LogDrivers, Secret as ECSSecret} from "aws-cdk-lib/aws-ecs";
+import {
+    Cluster,
+    ContainerImage,
+    FargateTaskDefinition,
+    LogDrivers,
+    Secret as ECSSecret
+} from "aws-cdk-lib/aws-ecs";
 import {Secret as SMSecret} from "aws-cdk-lib/aws-secretsmanager";
 import {join} from "path";
 import {readFileSync} from "fs"
@@ -21,13 +27,14 @@ export class FetchMigrationStack extends Stack {
 
         // Import required values
         const targetClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
+        const domainAccessGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)
+        // This SG allows outbound access for ECR access as well as communication with other services in the cluster
+        const serviceConnectGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)
 
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
             vpc: props.vpc
         })
-
-        const domainAccessGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)
 
         // ECS Task Definition
         const fetchMigrationFargateTask = new FargateTaskDefinition(this, "fetchMigrationFargateTask", {
@@ -76,17 +83,10 @@ export class FetchMigrationStack extends Stack {
             ECSSecret.fromSecretsManager(dpPipelineConfigSecret)
         );
 
-        // The Migration Domain SG disallows all outgoing, but this prevents the ECS run task
-        // command from pulling the Docker image from ECR. Thus, create an SG to allow this.
-        // TODO - Limit outbound to only ECR endpoints somehow
-        const fetchMigrationSecurityGroup = new SecurityGroup(this, 'fetchMigrationECRAccessSG', {
-            vpc: props.vpc
-        });
-
         let networkConfigJson = {
             "awsvpcConfiguration": {
                 "subnets": props.vpc.privateSubnets.map(_ => _.subnetId),
-                "securityGroups": [domainAccessGroupId, fetchMigrationSecurityGroup.securityGroupId]
+                "securityGroups": [domainAccessGroupId, serviceConnectGroupId]
             }
         }
         let networkConfigString = JSON.stringify(networkConfigJson)

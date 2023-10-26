@@ -1,6 +1,6 @@
 # OpenSearch Service Migration CDK
 
-This directory contains the IaC CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
+This directory contains the infrastructure-as-code CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
 ## Getting Started
 
@@ -27,9 +27,11 @@ cd ../../../TrafficCapture && ./gradlew :dockerSolution:buildDockerImages && cd 
 ```
 More details can be found [here](../../../TrafficCapture/dockerSolution/README.md)
 
-3- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
+3- Fetch Migration Setup, in order to make use of Fetch Migration for historical data capture, a user should make any modifications necessary to the `dp_pipeline_template.yaml` file located in the same directory as this README before deploying. Further steps on starting Fetch Migration after deployment can be found [here](#kicking-off-fetch-migration)
 
-4- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again (for each failing role) or avoided entirely by creating the service linked role initially like seen below:
+4- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
+
+5- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again (for each failing role) or avoided entirely by creating the service linked role initially like seen below:
 ```shell
 aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com && aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
 ```
@@ -157,7 +159,6 @@ To give an example of this process, a user could decide to configure an addition
     "engineVersion": "OS_1.3",
     "domainName": "demo-cluster-1-3",
     "dataNodeCount": 2,
-    "vpcId": "vpc-0249559d49365ffaf",
     "availabilityZoneCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",

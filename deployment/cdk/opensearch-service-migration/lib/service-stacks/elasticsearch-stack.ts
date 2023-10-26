@@ -4,7 +4,7 @@ import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
-import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
+import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 
@@ -38,6 +38,8 @@ export class ElasticsearchStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
+            serviceDiscoveryEnabled: true,
+            serviceDiscoveryPort: 9200,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
             ...props

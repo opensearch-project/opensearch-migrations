@@ -178,6 +178,13 @@ export class MigrationAssistanceStack extends Stack {
             useForServiceConnect: true,
             vpc: props.vpc
         })
+        const cloudMapNamespaceId = ecsCluster.defaultCloudMapNamespace!.namespaceId
+        new StringParameter(this, 'SSMParameterCloudMapNamespaceId', {
+            description: 'OpenSearch migration parameter for Service Discovery CloudMap Namespace Id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/cloudMapNamespaceId`,
+            stringValue: cloudMapNamespaceId
+        });
+
 
     }
 }

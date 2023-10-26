@@ -1,6 +1,7 @@
 import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
+    CfnService as FargateCfnService,
     Cluster,
     ContainerImage,
     FargateService,
@@ -14,7 +15,9 @@ import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
-import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
+import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
+import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -32,6 +35,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
         [key: string]: string;
     },
     readonly serviceConnectServices?: ServiceConnectService[],
+    readonly serviceDiscoveryEnabled?: boolean,
+    readonly serviceDiscoveryPort?: number,
     readonly taskCpuUnits?: number
     readonly taskMemoryLimitMiB?: number
     readonly taskInstanceCount?: number
@@ -112,7 +117,21 @@ export class MigrationServiceCore extends Stack {
             serviceContainer.addMountPoints(...props.mountPoints)
         }
 
-        new FargateService(this, "ServiceFargateService", {
+        let cloudMapOptions: CloudMapOptions|undefined = undefined
+        if (props.serviceDiscoveryEnabled) {
+            const namespaceId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/cloudMapNamespaceId`)
+            const namespace = PrivateDnsNamespace.fromPrivateDnsNamespaceAttributes(this, "PrivateDNSNamespace", {
+                namespaceName: `migration.${props.stage}.local`,
+                namespaceId: namespaceId,
+                namespaceArn: `arn:aws:servicediscovery:${props.env?.region}:${props.env?.account}:namespace/${namespaceId}`
+            })
+            cloudMapOptions = {
+                name: props.serviceName,
+                cloudMapNamespace: namespace,
+            }
+        }
+
+        const fargateService = new FargateService(this, "ServiceFargateService", {
             serviceName: `migration-${props.stage}-${props.serviceName}`,
             cluster: ecsCluster,
             taskDefinition: serviceTaskDef,
@@ -130,7 +149,32 @@ export class MigrationServiceCore extends Stack {
                     logGroup: serviceLogGroup
                 })
             },
+            cloudMapOptions: cloudMapOptions
         });
+        // Use CDK escape hatch to modify the underlying CFN for the generated AWS::ServiceDiscovery::Service to allow
+        // multiple DnsRecords. GitHub issue can be found here: https://github.com/aws/aws-cdk/issues/18894
+        if (props.serviceDiscoveryEnabled) {
+            const multipleDnsRecords = {
+                DnsRecords: [
+                    {
+                        TTL: 10,
+                        Type: "A"
+                    },
+                    {
+                        TTL: 10,
+                        Type: "SRV"
+                    }
+                ]
+            }
+            const cloudMapCfn = fargateService.node.findChild("CloudmapService")
+            const cloudMapServiceCfn = cloudMapCfn.node.defaultChild as DiscoveryCfnService
+            cloudMapServiceCfn.addPropertyOverride("DnsConfig", multipleDnsRecords)
+
+            if (props.serviceDiscoveryPort) {
+                const fargateCfn = fargateService.node.defaultChild as FargateCfnService
+                fargateCfn.addPropertyOverride("ServiceRegistries.0.Port", props.serviceDiscoveryPort)
+            }
+        }
     }
 
 }

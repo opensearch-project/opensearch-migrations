@@ -10,6 +10,6 @@
     "enableDemoAdmin": true,
     "trafficReplayerEnableClusterFGACAuth": true,
     "fetchMigrationEnabled": true,
-    "sourceClusterEndpoint": "https://capture-proxy-es:19200"
+    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:19200"
   }
 }

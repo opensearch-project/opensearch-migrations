@@ -83,6 +83,8 @@ export class CaptureProxyESStack extends MigrationServiceCore {
                 "http.port": "19200"
             },
             serviceConnectServices: [serviceConnectService, esServiceConnectService],
+            serviceDiscoveryEnabled: true,
+            serviceDiscoveryPort: 19200,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             ...props
