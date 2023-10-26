@@ -4,9 +4,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
-import org.opensearch.migrations.replay.TestTrafficStreamKey;
+import org.opensearch.migrations.replay.TestRequestKey;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -28,7 +27,7 @@ class HttpJsonTransformingConsumerTest {
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(JsonJoltTransformer.newBuilder().build(),
                         null, testPacketCapture, "TEST",
-                        new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
+                        TestRequestKey.getTestConnectionRequestId(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -51,7 +50,7 @@ class HttpJsonTransformingConsumerTest {
                                 .addHostSwitchOperation("test.domain")
                                 .build(),
                         null, testPacketCapture, "TEST",
-                        new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
+                        TestRequestKey.getTestConnectionRequestId(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -78,7 +77,8 @@ class HttpJsonTransformingConsumerTest {
                                 .addHostSwitchOperation("test.domain")
                                 .build(),
                         RemovingAuthTransformerFactory.instance,
-                        testPacketCapture, "TEST", new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
+                        testPacketCapture, "TEST",
+                        TestRequestKey.getTestConnectionRequestId(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/get_withAuthHeader.txt")) {
@@ -117,7 +117,7 @@ class HttpJsonTransformingConsumerTest {
         });
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(complexTransformer, null,
-                        testPacketCapture, "TEST", new UniqueRequestKey(TestTrafficStreamKey.instance, 0));
+                        testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestId(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {

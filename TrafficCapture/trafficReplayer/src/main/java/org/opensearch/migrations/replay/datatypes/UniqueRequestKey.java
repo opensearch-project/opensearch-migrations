@@ -1,20 +1,18 @@
 package org.opensearch.migrations.replay.datatypes;
 
 public class UniqueRequestKey {
-    public final TrafficStreamKeyWithRequestOffset trafficStreamKeyAndOffset;
+    public final ITrafficStreamKey trafficStreamKey;
+    public final int sourceRequestIndexOffsetAtFirstObservation;
     public final int replayerRequestIndex;
 
     public UniqueRequestKey(ITrafficStreamKey streamKey, int sourceOffset, int replayerIndex) {
-        this(new TrafficStreamKeyWithRequestOffset(streamKey, sourceOffset), replayerIndex);
-    }
-
-    public UniqueRequestKey(TrafficStreamKeyWithRequestOffset keyWithRequestOffset, int replayerIndex) {
-        this.trafficStreamKeyAndOffset = keyWithRequestOffset;
+        this.trafficStreamKey = streamKey;
+        this.sourceRequestIndexOffsetAtFirstObservation = sourceOffset;
         this.replayerRequestIndex = replayerIndex;
     }
 
     public int getSourceRequestIndex() {
-        return replayerRequestIndex + trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation();
+        return replayerRequestIndex + sourceRequestIndexOffsetAtFirstObservation;
     }
 
     public int getReplayerRequestIndex() {
@@ -23,12 +21,12 @@ public class UniqueRequestKey {
 
     @Override
     public String toString() {
-        return trafficStreamKeyAndOffset.getTrafficStreamKey() + "." + getSourceRequestIndex() +
-                (trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation() == 0 ? "" :
-                        "(offset: "+trafficStreamKeyAndOffset.getRequestIndexOffsetAtFirstObservation()+")");
+        return trafficStreamKey + "." + getSourceRequestIndex() +
+                (sourceRequestIndexOffsetAtFirstObservation == 0 ? "" :
+                        "(offset: "+sourceRequestIndexOffsetAtFirstObservation+")");
     }
 
     public ITrafficStreamKey getTrafficStreamKey() {
-        return trafficStreamKeyAndOffset.getTrafficStreamKey();
+        return trafficStreamKey;
     }
 }
