@@ -147,6 +147,8 @@ def monitor_local(args: MigrationMonitorParams, dp_process: Popen, poll_interval
         if dp_process.returncode is None:
             # Workaround for https://github.com/opensearch-project/data-prepper/issues/3141
             return shutdown_process(dp_process)
+        else:
+            return dp_process.returncode
 
 
 def run(args: MigrationMonitorParams, poll_interval_seconds: int = 30) -> None:
