@@ -223,11 +223,11 @@ class E2ETests(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
 
     def test_0007_OSB(self):
-        cmd = "docker ps | grep 'migrations/migration_console:latest' | awk '{print $NF}'"
-        container_name = subprocess.getoutput(cmd).strip()
+        cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name=migration']
+        container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
 
-        if container_name:
-            cmd_exec = f"docker exec {container_name} ./runTestBenchmarks.sh"
+        if container_id:
+            cmd_exec = f"docker exec {container_id} ./runTestBenchmarks.sh"
             logger.warning(f"Running command: {cmd_exec}")
             subprocess.run(cmd_exec, shell=True)
         else:
