@@ -9,8 +9,6 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -23,15 +21,10 @@ import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.BufferedOutputStream;
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Properties;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -89,7 +82,16 @@ public class FullTrafficReplayerTest {
             previouslyCompletelyHandledItems.put(keyString, t);
         };
 
-        try (var originalTrafficSource = new V0_1TrafficCaptureSource("migrationLogs/kafkaOutput_09_23.proto.gz")) {
+        var testCases = TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes()
+                .toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
+        runTrafficReplayer(kafkaConsumer, httpServer, tupleReceiver);
+        //Assertions.assertEquals();
+        log.error("done");
+    }
+
+    private void loadStreamsToKafkaFromCapturedFile(String filename,
+                                                    KafkaConsumer<String, byte[]> kafkaConsumer) throws Exception {
+        try (var originalTrafficSource = new V0_1TrafficCaptureSource(filename)) {
             new Thread(()->loadKafkaData(originalTrafficSource, TEST_RECORD_COUNT)).start();
             var startTime = Instant.now();
             while (!kafkaConsumer.listTopics().isEmpty()) {
@@ -97,9 +99,6 @@ public class FullTrafficReplayerTest {
                 Assertions.assertTrue(Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0);
             }
         }
-        runTrafficReplayer(kafkaConsumer, httpServer, tupleReceiver);
-        //Assertions.assertEquals();
-        log.error("done");
     }
 
     private static void runTrafficReplayer(KafkaConsumer<String, byte[]> kafkaConsumer,
