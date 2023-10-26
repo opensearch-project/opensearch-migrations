@@ -24,14 +24,11 @@ def run(dp_base_path: str, dp_config_file: str, dp_endpoint: str):
         # Kick off a subprocess for Data Prepper
         logging.info("Running Data Prepper...\n")
         proc = subprocess.Popen(dp_exec_path)
-        # Data Prepper started successfully, run the migration monitor
+        # Run the migration monitor next
         migration_monitor_params = MigrationMonitorParams(metadata_migration_result.target_doc_count, dp_endpoint)
         logging.info("Starting migration monitor...\n")
-        migration_monitor.run(migration_monitor_params)
-        # Migration ended, the following is a workaround for
-        # https://github.com/opensearch-project/data-prepper/issues/3141
-        if proc.returncode is None:
-            proc.terminate()
+        migration_monitor.monitor_local(migration_monitor_params, proc)
+        # TODO - return process return code
 
 
 if __name__ == '__main__':  # pragma no cover
