@@ -14,7 +14,11 @@ export interface mskUtilityStackProps extends StackPropsExt {
     readonly mskEnablePublicEndpoints?: boolean
 }
 
-
+/**
+ * This stack exists to provide additional needed functionality to the L1 MSK Construct. This functionality includes
+ * enabling public endpoints on a created MSK cluster. As well as retrieving public and private broker endpoints in
+ * a consistent ORDERED fashion.
+ */
 export class MSKUtilityStack extends Stack {
 
     constructor(scope: Construct, id: string, props: mskUtilityStackProps) {
@@ -22,6 +26,8 @@ export class MSKUtilityStack extends Stack {
 
         const mskARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`)
         let brokerEndpoints
+        // If the public endpoints setting is enabled we will launch a Lambda custom resource to enable public endpoints and then wait for these
+        // endpoints to become created before we return the endpoints and stop the process
         if (props.mskEnablePublicEndpoints) {
             const lambdaInvokeStatement = new PolicyStatement({
                 effect: Effect.ALLOW,
@@ -95,6 +101,7 @@ export class MSKUtilityStack extends Stack {
             waitCondition.node.addDependency(customResource);
             brokerEndpoints = waitCondition.attrData.toString()
         }
+        // If public endpoints are not enabled we will launch a simple Lambda custom resource to retrieve the private broker endpoints
         else {
             const mskUpdateConnectivityStatement = new PolicyStatement({
                 effect: Effect.ALLOW,
@@ -135,6 +142,7 @@ export class MSKUtilityStack extends Stack {
             const customResource = new CustomResource(this, "mskGetBrokersCustomResource", {
                 serviceToken: customResourceProvider.serviceToken
             })
+            // Access BROKER_ENDPOINTS from the Lambda return value
             brokerEndpoints = customResource.getAttString("BROKER_ENDPOINTS")
         }
         new StringParameter(this, 'SSMParameterMSKBrokers', {

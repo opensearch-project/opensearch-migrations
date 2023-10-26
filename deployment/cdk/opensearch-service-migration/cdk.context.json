@@ -1,8 +1,8 @@
 {
   "demo-deploy": {
     "stage": "dev",
-    "engineVersion": "OS_2.7",
-    "domainName": "demo-opensearch-cluster-2-7",
+    "engineVersion": "OS_2.9",
+    "domainName": "demo-opensearch-cluster",
     "dataNodeCount": 2,
     "availabilityZoneCount": 2,
     "openAccessPolicyEnabled": true,

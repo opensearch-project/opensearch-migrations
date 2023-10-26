@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Example usage: ./ecsExec.sh migration-console dev us-east-1
+# Example usage: ./accessContainer.sh migration-console dev us-east-1
 
 service_name=$1
 stage=$2

@@ -238,7 +238,6 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            mskUtilityStack.addDependency(networkStack)
             mskUtilityStack.addDependency(migrationStack)
             this.stacks.push(mskUtilityStack)
         }
@@ -257,14 +256,13 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            fetchMigrationStack.addDependency(networkStack)
             fetchMigrationStack.addDependency(openSearchStack)
             fetchMigrationStack.addDependency(migrationStack)
             this.stacks.push(fetchMigrationStack)
         }
 
         let captureProxyESStack
-        if (captureProxyESServiceEnabled && networkStack && migrationStack && mskUtilityStack) {
+        if (captureProxyESServiceEnabled && networkStack && mskUtilityStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
@@ -274,8 +272,6 @@ export class StackComposer {
                 ...props,
             })
             captureProxyESStack.addDependency(mskUtilityStack)
-            captureProxyESStack.addDependency(migrationStack)
-            captureProxyESStack.addDependency(networkStack)
             this.stacks.push(captureProxyESStack)
         }
 
@@ -313,22 +309,20 @@ export class StackComposer {
                 ...props,
             })
             trafficComparatorStack.addDependency(migrationStack)
-            trafficComparatorStack.addDependency(networkStack)
             this.stacks.push(trafficComparatorStack)
         }
 
         let trafficComparatorJupyterStack
-        if (trafficComparatorJupyterServiceEnabled && networkStack && migrationStack && trafficComparatorStack) {
+        if (trafficComparatorJupyterServiceEnabled && networkStack && trafficComparatorStack) {
             trafficComparatorJupyterStack = new TrafficComparatorJupyterStack(scope, "traffic-comparator-jupyter", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-TrafficComparatorJupyter`,
-                description: "This stack contains resources for the Traffic Comparator Jupyter ECS service",
+                description: "This stack contains resources for creating a Jupyter Notebook to perform analysis on Traffic Comparator output as an ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            trafficComparatorJupyterStack.addDependency(migrationStack)
-            trafficComparatorJupyterStack.addDependency(networkStack)
+            trafficComparatorJupyterStack.addDependency(trafficComparatorStack)
             this.stacks.push(trafficComparatorJupyterStack)
         }
 
@@ -337,18 +331,17 @@ export class StackComposer {
             elasticsearchStack = new ElasticsearchStack(scope, "elasticsearch", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-Elasticsearch`,
-                description: "This stack contains resources for the Elasticsearch ECS service",
+                description: "This stack contains resources for a testing mock Elasticsearch single node cluster ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
             elasticsearchStack.addDependency(migrationStack)
-            elasticsearchStack.addDependency(networkStack)
             this.stacks.push(elasticsearchStack)
         }
 
         let captureProxyStack
-        if (captureProxyServiceEnabled && networkStack && migrationStack && mskUtilityStack) {
+        if (captureProxyServiceEnabled && networkStack && mskUtilityStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
                 customSourceClusterEndpoint: captureProxySourceEndpoint,
@@ -360,8 +353,6 @@ export class StackComposer {
             })
             if (elasticsearchStack) captureProxyStack.addDependency(elasticsearchStack)
             captureProxyStack.addDependency(mskUtilityStack)
-            captureProxyStack.addDependency(migrationStack)
-            captureProxyStack.addDependency(networkStack)
             this.stacks.push(captureProxyStack)
         }
 
@@ -376,7 +367,6 @@ export class StackComposer {
                 ...props,
             })
             kafkaBrokerStack.addDependency(migrationStack)
-            kafkaBrokerStack.addDependency(networkStack)
             this.stacks.push(kafkaBrokerStack)
         }
 
@@ -391,12 +381,11 @@ export class StackComposer {
                 ...props,
             })
             kafkaZookeeperStack.addDependency(migrationStack)
-            kafkaZookeeperStack.addDependency(networkStack)
             this.stacks.push(kafkaZookeeperStack)
         }
 
         let migrationConsoleStack
-        if (migrationConsoleServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) {
+        if (migrationConsoleServiceEnabled && networkStack && openSearchStack && mskUtilityStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
                 fetchMigrationEnabled: fetchMigrationEnabled,
@@ -406,16 +395,14 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            // To enable the Migration Console to make requests to the Capture Proxy with Service Connect,
-            // it should be deployed after the Capture Proxy
+            // To enable the Migration Console to make requests to other service endpoints with Service Connect,
+            // it must be deployed after these services
             if (captureProxyESStack) migrationConsoleStack.addDependency(captureProxyESStack)
             if (captureProxyStack) migrationConsoleStack.addDependency(captureProxyStack)
             if (elasticsearchStack) migrationConsoleStack.addDependency(elasticsearchStack)
             if (fetchMigrationStack) migrationConsoleStack.addDependency(fetchMigrationStack)
             migrationConsoleStack.addDependency(mskUtilityStack)
-            migrationConsoleStack.addDependency(migrationStack)
             migrationConsoleStack.addDependency(openSearchStack)
-            migrationConsoleStack.addDependency(networkStack)
             this.stacks.push(migrationConsoleStack)
         }
 

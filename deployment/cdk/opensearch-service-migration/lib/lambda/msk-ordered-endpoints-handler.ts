@@ -16,7 +16,7 @@ async function getBootstrapBrokers(): Promise<any> {
                 result = data
             },
             (error) => {
-                console.log("Get brokers error: " + JSON.stringify(error))
+                console.error("Get brokers error: " + JSON.stringify(error))
             }
         );
     } catch (e) {
@@ -34,6 +34,9 @@ export const handler = async (event: any, context: Context) => {
     }
 
     const brokerResponse = await getBootstrapBrokers()
+    if (!brokerResponse) {
+        throw Error('Unable to retrieve MSK Bootstrap Brokers from getBootstrapBrokers AWS call, terminating now')
+    }
     const brokers = brokerResponse.BootstrapBrokerStringSaslIam
     const orderedBrokers = brokers.split(",").sort().join(",")
     console.log(`Retrieved brokers: ${orderedBrokers}`)

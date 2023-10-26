@@ -1,6 +1,6 @@
 {
-  "engineVersion": "OS_2.7",
-  "domainName": "os-service-domain-2-7",
+  "engineVersion": "OS_2.9",
+  "domainName": "os-service-domain",
   "tlsSecurityPolicy": "TLS_1_2",
   "enforceHTTPS": true,
   "nodeToNodeEncryptionEnabled": true,

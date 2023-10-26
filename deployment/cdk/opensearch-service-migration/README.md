@@ -92,17 +92,17 @@ Depending on your use-case, you may choose to provide options from both the `cdk
 
 Once a service has been deployed, a command shell can be opened for that service's container. If the SSM Session Manager plugin is not installed, it should be installed when prompted from the below exec command.
 ```shell
-# ./ecsExec.sh <service-name> <stage> <region>
-./ecsExec.sh migration-console dev us-east-1
+# ./accessContainer.sh <service-name> <stage> <region>
+./accessContainer.sh migration-console dev us-east-1
 ```
 
 ## Testing the deployed solution
 
-Once the solution is deployed, the easiest way to test the solution is to exec into the `migration-console` service container and run an opensearch-benchmark workload through to simulate incoming traffic, as the following steps illustrate
+Once the solution is deployed, the easiest way to test the solution is to access the `migration-console` service container and run an opensearch-benchmark workload through to simulate incoming traffic, as the following steps illustrate
 
 ```shell
 # Exec into container
-./ecsExec.sh migration-console dev us-east-1
+./accessContainer.sh migration-console dev us-east-1
 
 # Run opensearch-benchmark workload (i.e. geonames, nyc_taxis, http_logs)
 ./runTestBenchmarks.sh
@@ -119,8 +119,8 @@ After the benchmark has been run, the indices and documents of the source and ta
 * First, access the Migration Console container
 
 ```shell
-# ./ecsExec.sh migration-console STAGE REGION
-./ecsExec.sh migration-console dev us-east-1
+# ./accessContainer.sh migration-console STAGE REGION
+./accessContainer.sh migration-console dev us-east-1
 ```
 
 * Execute the ECS run task command stored in the container's environment

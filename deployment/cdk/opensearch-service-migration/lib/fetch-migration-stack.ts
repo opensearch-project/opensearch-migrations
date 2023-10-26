@@ -61,7 +61,6 @@ export class FetchMigrationStack extends Stack {
         // Create Fetch Migration Container
         const fetchMigrationContainer = fetchMigrationFargateTask.addContainer("fetchMigrationContainer", {
             image: ContainerImage.fromAsset(join(__dirname, "../../../..", "FetchMigration")),
-            // Add in region and stage
             containerName: "fetch-migration",
             logging: LogDrivers.awsLogs({ streamPrefix: 'fetch-migration-lg', logRetention: 30 })
         });
@@ -75,7 +74,7 @@ export class FetchMigrationStack extends Stack {
 
         // Create secret using Secrets Manager
         const dpPipelineConfigSecret = new SMSecret(this, "dpPipelineConfigSecret", {
-            secretName: `${fetchMigrationFargateTask.family}-${fetchMigrationContainer.containerName}-${props.stage}-pipelineConfig`,
+            secretName: `${props.stage}-${props.defaultDeployId}-${fetchMigrationContainer.containerName}-pipelineConfig`,
             secretStringValue: SecretValue.unsafePlainText(encodedPipeline)
         });
         // Add secret to container
