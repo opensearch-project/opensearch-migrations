@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.StringJoiner;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -192,35 +194,51 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
         return possibilities;
     }
 
-    public static Arguments[] generateAllTestsAndConfirmComplete(IntStream seedStream) {
-        var possibilitiesLeftToTest = getPossibleTests();
-        List<Integer> seedsThatOfferUniqueTestCases = new ArrayList<>();
-        var numTries = new AtomicInteger();
-        var testArgs = new ArrayList<Arguments>();
+    @AllArgsConstructor
+    public static class RandomTrafficStreamAndTransactionSizes {
+        public final int randomSeedUsed;
+        public final TrafficStream[] trafficStreams;
+        public final int[] requestByteSizes;
+        public final int[] responseByteSizes;
+    }
 
-        seedStream.takeWhile(i->!possibilitiesLeftToTest.isEmpty()).forEach(rSeed->{
+    public static Stream<RandomTrafficStreamAndTransactionSizes>
+    generateAllIndicativeRandomTrafficStreamsAndSizes(IntStream seedStream) {
+        return seedStream.mapToObj(rSeed->{
             var commands = new ArrayList<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective>();
             var sizes = new ArrayList<Integer>();
             var trafficStreams = fillCommandsAndSizesForSeed(rSeed, commands, sizes);
-            var numNew = classifyTrafficStream(possibilitiesLeftToTest, trafficStreams);
-            if (numNew > 0) {
-                var n = numTries.getAndIncrement();
-                log.info("Found new cases to test with seed=" + rSeed + " tries=" + n +
-                        " left=" + possibilitiesLeftToTest.size());
-                seedsThatOfferUniqueTestCases.add(rSeed);
 
-                for (int i = 0; i < trafficStreams.length; ++i)
-                //int i = 0;
-                {
-                    testArgs.add(Arguments.of("seed=" + rSeed, i, trafficStreams, sizes));
-                }
-            }
-        });
+            var splitSizes = SimpleCapturedTrafficToHttpTransactionAccumulatorTest.unzipRequestResponseSizes(sizes);
+            return new RandomTrafficStreamAndTransactionSizes(rSeed, trafficStreams,
+                    splitSizes._1, splitSizes._2);
+        }).filter(o->o!=null);
+    }
+
+    public static Arguments[] generateAllTestsAndConfirmComplete(IntStream seedStream) {
+        var possibilitiesLeftToTest = getPossibleTests();
+        var numTries = new AtomicInteger();
+        StringJoiner seedsThatOfferUniqueTestCases = new StringJoiner(",");
+        var argsArray = generateAllIndicativeRandomTrafficStreamsAndSizes(seedStream)
+                .takeWhile(c->!possibilitiesLeftToTest.isEmpty())
+                .filter(c->classifyTrafficStream(possibilitiesLeftToTest, c.trafficStreams) > 0)
+                .flatMap(c-> {
+                    seedsThatOfferUniqueTestCases.add(c.randomSeedUsed + "");
+                    var n = numTries.getAndIncrement();
+                    log.info("Found new cases to test with seed=" + c.randomSeedUsed + " tries=" + n +
+                            " left=" + possibilitiesLeftToTest.size());
+
+                    return IntStream.range(0, c.trafficStreams.length)
+                            .mapToObj(i -> Arguments.of("seed=" + c.randomSeedUsed,
+                                    i, c.trafficStreams, c.requestByteSizes, c.responseByteSizes));
+                })
+                .toArray(Arguments[]::new);
+
         //Assertions.assertTrue(possibilitiesLeftToTest.isEmpty());
         log.atInfo().setMessage(()->"Sufficient random seeds to generate a full cover of tests:{}")
-                .addArgument(seedsThatOfferUniqueTestCases.stream().map(i->""+i).collect(Collectors.joining(",")))
+                .addArgument(seedsThatOfferUniqueTestCases.toString())
                 .log();
-        return testArgs.toArray(Arguments[]::new);
+        return argsArray;
     }
 
     static Arguments[] generateTestCombinations() throws Exception {
@@ -245,12 +263,14 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
     @ParameterizedTest(name="{0}.{1}")
     @MethodSource("generateTestCombinations")
     public void testAccumulatedSplit(String testName, int cutPoint,
-                                     TrafficStream[] trafficStreams, List<Integer> expectedSizes) {
-        accumulateWithAccumulatorPairAtPoint(trafficStreams, cutPoint, expectedSizes);
+                                     TrafficStream[] trafficStreams,
+                                     int[] expectedRequestSizes,
+                                     int[] expectedResponseSizes) {
+        accumulateWithAccumulatorPairAtPoint(trafficStreams, cutPoint, expectedRequestSizes, expectedResponseSizes);
     }
 
     void accumulateWithAccumulatorPairAtPoint(TrafficStream[] trafficStreams, int cutPoint,
-                                              List<Integer> expectedSizes) {
+                                              int[] expectedRequestSizes, int[] expectedResponseSizes) {
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
         // some of the messages up to the cutPoint may not have been able to be fully committed (when the
@@ -278,7 +298,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
                 unionSet.last());
 
         SimpleCapturedTrafficToHttpTransactionAccumulatorTest.assertReconstructedTransactionsMatchExpectations(
-                reconstructedTransactions, expectedSizes);
+                reconstructedTransactions, expectedRequestSizes, expectedResponseSizes);
     }
 
     private static Optional<ObservationType> getTypeFromObservation(TrafficObservation trafficObservation) {

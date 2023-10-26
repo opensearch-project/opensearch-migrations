@@ -81,9 +81,13 @@ public class FullTrafficReplayerTest {
         kafkaConsumerProps.setProperty("max.poll.interval.ms", "10000");
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
 
-        //ConcurrentHashMap<UniqueRequestKey, >
+        var previouslyCompletelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
         var httpServer = SimpleNettyHttpServer.makeServer(false, TestHttpServerContext::makeResponse);
-        Consumer<SourceTargetCaptureTuple> tupleReceiver = t -> {};//t.sourcePair.requestKey;
+        Consumer<SourceTargetCaptureTuple> tupleReceiver = t -> {
+            var key = t.sourcePair.requestKey;
+            var keyString = key.trafficStreamKey + "_" + key.getSourceRequestIndex();
+            previouslyCompletelyHandledItems.put(keyString, t);
+        };
 
         try (var originalTrafficSource = new V0_1TrafficCaptureSource("migrationLogs/kafkaOutput_09_23.proto.gz")) {
             new Thread(()->loadKafkaData(originalTrafficSource, TEST_RECORD_COUNT)).start();
@@ -92,8 +96,9 @@ public class FullTrafficReplayerTest {
                 Thread.sleep(10);
                 Assertions.assertTrue(Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0);
             }
-            runTrafficReplayer(kafkaConsumer, httpServer, tupleReceiver);
         }
+        runTrafficReplayer(kafkaConsumer, httpServer, tupleReceiver);
+        //Assertions.assertEquals();
         log.error("done");
     }
 
