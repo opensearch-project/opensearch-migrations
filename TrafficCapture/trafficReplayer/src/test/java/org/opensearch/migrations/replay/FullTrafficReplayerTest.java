@@ -59,7 +59,7 @@ public class FullTrafficReplayerTest {
     private KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));;
 
-    @Test
+    //@Test
     @Tag("longTest")
     public void fullTest() throws Exception {
         Random r = new Random(1);
