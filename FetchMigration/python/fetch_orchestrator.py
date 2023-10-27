@@ -66,4 +66,6 @@ if __name__ == '__main__':  # pragma no cover
         sys.exit(0)
     else:
         logging.error("Process exited with non-zero return code: " + str(return_code))
-        sys.exit(1)
+        if return_code is None:
+            return_code = 1
+        sys.exit(return_code)

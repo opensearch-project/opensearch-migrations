@@ -1,10 +1,10 @@
 import argparse
-import yaml
 from typing import Optional
+
+import yaml
 
 import index_operations
 import utils
-
 # Constants
 from endpoint_info import EndpointInfo
 from metadata_migration_params import MetadataMigrationParams
@@ -174,7 +174,6 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     diff = get_index_differences(source_indices, target_indices)
     # The first element in the tuple is the set of indices to create
     indices_to_create = diff[0]
-    result = MetadataMigrationResult()
     if indices_to_create:
         result.created_indices = indices_to_create
         result.target_doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)

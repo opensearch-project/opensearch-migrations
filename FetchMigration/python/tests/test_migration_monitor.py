@@ -9,11 +9,9 @@ from prometheus_client.parser import text_string_to_metric_families
 
 import migration_monitor
 from endpoint_info import EndpointInfo
-
-# Constants
-from migration_monitor_counters import MigrationMonitorCounters
 from migration_monitor_params import MigrationMonitorParams
 
+# Constants
 TEST_ENDPOINT = "test"
 TEST_AUTH = ("user", "pass")
 TEST_FLAG = False
@@ -168,8 +166,7 @@ class TestMigrationMonitor(unittest.TestCase):
                                          mock_shut_proc: MagicMock):
         # The param values don't matter since we've mocked the check method
         test_input = MigrationMonitorParams(1, "test")
-        dummy = MigrationMonitorCounters()
-        mock_check.side_effect = [(False, dummy), (True, dummy)]
+        mock_check.side_effect = [(False, 1), (True, 2)]
         mock_subprocess = MagicMock()
         # set subprocess returncode to None to simulate a zombie Data Prepper process
         mock_subprocess.returncode = None
@@ -195,7 +192,7 @@ class TestMigrationMonitor(unittest.TestCase):
         proc.wait.side_effect = [subprocess.TimeoutExpired("test", 1), None]
         result = migration_monitor.shutdown_process(proc)
         proc.terminate.assert_called_once()
-        self.assertEqual(2, proc.wait.call_count)
+        proc.wait.assert_called_once()
         proc.kill.assert_called_once()
         self.assertIsNone(result)
 
