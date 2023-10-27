@@ -1,5 +1,9 @@
 package org.opensearch.migrations.replay;
 
+import lombok.Getter;
+import lombok.NonNull;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.TrafficStreamKeyWithRequestOffset;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,27 +17,43 @@ public class Accumulation {
         // Finished scanning past initial READs.  The next request should be processed,
         // so be on the lookout for the next READ
         WAITING_FOR_NEXT_READ_CHUNK,
-        NOTHING_SENT,
-        REQUEST_SENT,
-        RESPONSE_SENT
+        ACCUMULATING_READS,
+        ACCUMULATING_WRITES
     }
 
-    RequestResponsePacketPair rrPair;
+    private RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
-
-    State state = State.NOTHING_SENT;
+    State state;
     AtomicInteger numberOfResets;
+    final int startingSourceRequestIndex;
 
-    public Accumulation(UniqueRequestKey nextRequestKey, boolean dropLeftoverObservations) {
-        this(nextRequestKey);
-        if (dropLeftoverObservations) {
-            this.state = State.IGNORING_LAST_REQUEST;
-        }
+    public Accumulation(int startingSourceRequestIndex) {
+        this(startingSourceRequestIndex, false);
     }
 
-    public Accumulation(UniqueRequestKey nextRequestKey) {
+    public Accumulation(int startingSourceRequestIndex, boolean dropObservationsLeftoverFromPrevious) {
         numberOfResets = new AtomicInteger();
-        this.resetForRequest(nextRequestKey);
+        this.newestPacketTimestampInMillis = new AtomicLong(0);
+        this.startingSourceRequestIndex = startingSourceRequestIndex;
+        this.state =
+                dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
+    }
+
+    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey trafficStreamKey) {
+        if (rrPair != null) {
+            return rrPair;
+        }
+        var tskWithOffset = new TrafficStreamKeyWithRequestOffset(trafficStreamKey, startingSourceRequestIndex);
+        return rrPair = new RequestResponsePacketPair(new UniqueRequestKey(tskWithOffset, getIndexOfCurrentRequest()));
+    }
+
+    public boolean hasRrPair() {
+        return rrPair != null;
+    }
+
+    public @NonNull RequestResponsePacketPair getRrPair() {
+        assert rrPair != null;
+        return rrPair;
     }
 
     public UniqueRequestKey getRequestId() {
@@ -66,12 +86,8 @@ public class Accumulation {
 
     public void resetForNextRequest() {
         numberOfResets.incrementAndGet();
-        resetForRequest(new UniqueRequestKey(getRequestId().trafficStreamKeyAndOffset, getIndexOfCurrentRequest()));
-    }
-
-    private void resetForRequest(UniqueRequestKey key) {
-        this.state = State.NOTHING_SENT;
-        this.rrPair = new RequestResponsePacketPair(key);
+        this.state = State.ACCUMULATING_READS;
+        this.rrPair = null;
         this.newestPacketTimestampInMillis = new AtomicLong(0);
     }
 }

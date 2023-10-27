@@ -83,7 +83,7 @@ public class V0_1TrafficCaptureSource implements ISimpleTrafficCaptureSource {
             connectionProgressMap.put(incoming.getConnectionId(), progress);
         }
         outgoingBuilder.setLastObservationWasUnterminatedRead(progress.lastWasRead);
-        outgoingBuilder.setRequestCount(progress.requestCount);
+        outgoingBuilder.setPriorRequestsReceived(progress.requestCount);
         outgoingBuilder.addAllSubStream(incoming.getSubStreamList());
         progress.add(incoming);
         if (incoming.hasNumberOfThisLastChunk()) {

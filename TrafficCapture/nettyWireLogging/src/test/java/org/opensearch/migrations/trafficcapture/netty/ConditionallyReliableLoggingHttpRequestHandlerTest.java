@@ -3,16 +3,21 @@ package org.opensearch.migrations.trafficcapture.netty;
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWrapper;
+import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
+import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.ByteBuffer;
@@ -28,23 +33,43 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
+    @AllArgsConstructor
+    static class StreamManager extends OrderedStreamLifecyleManager {
+        AtomicReference<ByteBuffer> byteBufferAtomicReference;
+        AtomicInteger flushCount = new AtomicInteger();
+
+        @Override
+        public CodedOutputStreamAndByteBufferWrapper createStream() {
+            return new CodedOutputStreamAndByteBufferWrapper(1024*1024);
+        }
+
+        @Override
+        public CompletableFuture<Object>
+        kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+            if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
+                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                        outputStreamHolder);
+            }
+            var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
+            CodedOutputStream cos = osh.getOutputStream();
+            try {
+                cos.flush();
+                byteBufferAtomicReference.set(osh.getByteBuffer().flip().asReadOnlyBuffer());
+                log.error("byteBufferAtomicReference.get="+byteBufferAtomicReference.get());
+            } catch (IOException e) {
+                throw new RuntimeException();
+            }
+            return CompletableFuture.completedFuture(flushCount.incrementAndGet());
+        }
+    }
+
+
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter)
             throws IOException {
         AtomicReference<ByteBuffer> outputByteBuffer = new AtomicReference<>();
-        byte[] scratchBytes = new byte[1024*1024];
         AtomicInteger flushCount = new AtomicInteger();
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection",
-                () -> CodedOutputStream.newInstance(scratchBytes),
-                captureSerializerResult -> {
-                    CodedOutputStream cos = captureSerializerResult.getCodedOutputStream();
-                    outputByteBuffer.set(ByteBuffer.wrap(scratchBytes, 0, cos.getTotalBytesWritten()));
-                    try {
-                        cos.flush();
-                    } catch (IOException e) {
-                        throw new RuntimeException();
-                    }
-                    return CompletableFuture.completedFuture(flushCount.incrementAndGet());
-                });
+                new StreamManager(outputByteBuffer, flushCount));
 
         EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpRequestHandler(offloader, x->true)); // true: block every request

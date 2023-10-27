@@ -1,19 +1,21 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import com.google.protobuf.CodedOutputStream;
+import lombok.AllArgsConstructor;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 
 
@@ -45,51 +47,66 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         this(nodeId, producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, messageSize);
     }
 
-    @Override
-    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
-        // This array is only an indirection to work around Java's constraint that lambda values are final
-        CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
-        singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
-        WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteStreamMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId,
-            () -> {
-                ByteBuffer bb = ByteBuffer.allocate(bufferSize);
-                var cos = CodedOutputStream.newInstance(bb);
-                codedStreamToByteStreamMap.put(cos, bb);
-                return cos;
-            },
-            (captureSerializerResult) -> {
-                // Structured context for MetricsLogger
-                try {
-                    CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
-                    ByteBuffer byteBuffer = codedStreamToByteStreamMap.get(codedOutputStream);
-                    codedStreamToByteStreamMap.remove(codedOutputStream);
-                    String recordId = String.format("%s.%d", connectionId, captureSerializerResult.getTrafficStreamIndex());
-                    ProducerRecord<String, byte[]> record = new ProducerRecord<>(topicNameForTraffic, recordId,
+    @AllArgsConstructor
+    static class CodedOutputStreamWrapper implements CodedOutputStreamHolder {
+        private final CodedOutputStream codedOutputStream;
+        private final ByteBuffer byteBuffer;
+        @Override
+        public @NonNull CodedOutputStream getOutputStream() {
+            return codedOutputStream;
+        }
+    }
+
+    @AllArgsConstructor
+    class StreamManager extends OrderedStreamLifecyleManager {
+        String connectionId;
+
+        @Override
+        public CodedOutputStreamWrapper createStream() {
+            ByteBuffer bb = ByteBuffer.allocate(bufferSize);
+            return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb);
+        }
+
+        @Override
+        public CompletableFuture<Object>
+        kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+            if (!(outputStreamHolder instanceof CodedOutputStreamWrapper)) {
+                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                        outputStreamHolder);
+            }
+            var osh = (CodedOutputStreamWrapper) outputStreamHolder;
+
+            // Structured context for MetricsLogger
+            try {
+                String recordId = String.format("%s.%d", connectionId, index);
+                var byteBuffer = osh.byteBuffer;
+                ProducerRecord<String, byte[]> record = new ProducerRecord<>(topicNameForTraffic, recordId,
                         Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
-                    // Used to essentially wrap Future returned by Producer to CompletableFuture
-                    CompletableFuture cf = new CompletableFuture<>();
-                    log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
-                    // Async request to Kafka cluster
-                    singleAggregateCfRef[0].whenComplete((v,t)->
-                            producer.send(record, handleProducerRecordSent(cf, recordId)));
-                    metricsLogger.atSuccess()
-                            .addKeyValue("channelId", connectionId)
-                            .addKeyValue("topicName", topicNameForTraffic)
-                            .addKeyValue("sizeInBytes", record.value().length)
-                            .addKeyValue("diagnosticId", recordId)
-                            .setMessage("Sent message to Kafka").log();
-                    // A more desirable way to cut off our tree of cf aggregation may need to be investigated
-                    singleAggregateCfRef[0] = cf;
-                    return singleAggregateCfRef[0];
-                } catch (Exception e) {
-                    metricsLogger.atError(e)
-                            .addKeyValue("channelId", connectionId)
-                            .addKeyValue("topicName", topicNameForTraffic)
-                            .setMessage("Sending message to Kafka failed.").log();
-                    throw new RuntimeException(e);
-                }
-            });
+                // Used to essentially wrap Future returned by Producer to CompletableFuture
+                CompletableFuture cf = new CompletableFuture<>();
+                log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
+                // Async request to Kafka cluster
+                producer.send(record, handleProducerRecordSent(cf, recordId));
+                metricsLogger.atSuccess()
+                        .addKeyValue("channelId", connectionId)
+                        .addKeyValue("topicName", topicNameForTraffic)
+                        .addKeyValue("sizeInBytes", record.value().length)
+                        .addKeyValue("diagnosticId", recordId)
+                        .setMessage("Sent message to Kafka").log();
+                return cf;
+            } catch (Exception e) {
+                metricsLogger.atError(e)
+                        .addKeyValue("channelId", connectionId)
+                        .addKeyValue("topicName", topicNameForTraffic)
+                        .setMessage("Sending message to Kafka failed.").log();
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @Override
+    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) {
+        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, new StreamManager(connectionId));
     }
 
     /**
