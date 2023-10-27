@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import com.google.common.collect.Streams;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -9,10 +10,13 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
-import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -23,9 +27,17 @@ import org.testcontainers.utility.DockerImageName;
 import java.io.BufferedOutputStream;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Properties;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Testcontainers
@@ -47,6 +59,73 @@ public class FullTrafficReplayerTest {
     private KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));;
 
+    @Test
+    @Tag("longTest")
+    public void fullTest() throws Exception {
+        Random r = new Random(1);
+        var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
+                TEST_GROUP_CONSUMER_ID, false,  null);
+        kafkaConsumerProps.setProperty("max.poll.interval.ms", "300000");
+        var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
+
+        var previouslyCompletelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
+        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+                TestHttpServerContext::makeResponse);
+        Consumer<SourceTargetCaptureTuple> tupleReceiver = t -> {
+            var key = t.sourcePair.requestKey;
+            var keyString = key.trafficStreamKey + "_" + key.getSourceRequestIndex();
+            previouslyCompletelyHandledItems.put(keyString, t);
+        };
+
+        var testCases = TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes()
+                .toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
+        loadStreamsToKafka(kafkaConsumer,
+                randomlyIterleaveStreams(r, Arrays.stream(testCases).map(c-> Arrays.stream(c.trafficStreams))));
+        runTrafficReplayer(kafkaConsumer, httpServer, tupleReceiver);
+        //Assertions.assertEquals();
+        log.error("done");
+    }
+
+    private <R extends AutoCloseable> void
+    loadStreamsAsynchronouslyWithResource(KafkaConsumer<String, byte[]> kafkaConsumer, R resource, Consumer<R> loader)
+            throws Exception {
+        try {
+            new Thread(()->loader.accept(resource)).start();
+            var startTime = Instant.now();
+            while (!kafkaConsumer.listTopics().isEmpty()) {
+                Thread.sleep(10);
+                Assertions.assertTrue(Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0);
+            }
+        } finally {
+            resource.close();
+        }
+    }
+
+    public static <T> Stream<T> randomlyIterleaveStreams(Random r, Stream<Stream<T>> orderedItemStreams) {
+        List<Iterator<T>> iteratorList = orderedItemStreams
+                .map(Stream::iterator)
+                .filter(it->it.hasNext())
+                .collect(Collectors.toCollection(()->new ArrayList<>()));
+        return Streams.stream(new Iterator<T>() {
+            @Override
+            public boolean hasNext() {
+                return !iteratorList.isEmpty();
+            }
+            @Override
+            public T next() {
+                var slotIdx = r.nextInt(iteratorList.size());
+                var collectionIterator = iteratorList.get(slotIdx);
+                var nextItem = collectionIterator.next();
+                if (!collectionIterator.hasNext()) {
+                    var lastIdx = iteratorList.size()-1;
+                    iteratorList.set(slotIdx, iteratorList.get(lastIdx));
+                    iteratorList.remove(lastIdx);
+                }
+                return nextItem;
+            }
+        });
+    }
+
     Producer<String, byte[]> buildKafkaProducer() {
         var kafkaProps = new Properties();
         kafkaProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
@@ -66,39 +145,42 @@ public class FullTrafficReplayerTest {
         }
     }
 
-    //@Test
-    @Tag("longTest")
-    public void fullTest() throws Exception {
-        var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
-                TEST_GROUP_CONSUMER_ID, false,  null);
-        kafkaConsumerProps.setProperty("max.poll.interval.ms", "10000");
-        var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
-
-        var previouslyCompletelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
-        var httpServer = SimpleNettyHttpServer.makeServer(false, TestHttpServerContext::makeResponse);
-        Consumer<SourceTargetCaptureTuple> tupleReceiver = t -> {
-            var key = t.sourcePair.requestKey;
-            var keyString = key.trafficStreamKey + "_" + key.getSourceRequestIndex();
-            previouslyCompletelyHandledItems.put(keyString, t);
-        };
-
-        var testCases = TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes()
-                .toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
-        runTrafficReplayer(kafkaConsumer, httpServer, tupleReceiver);
-        //Assertions.assertEquals();
-        log.error("done");
+    private void loadStreamsToKafka(KafkaConsumer<String, byte[]> kafkaConsumer,
+                                    Stream<TrafficStream> streams) throws Exception {
+        var kafkaProducer = buildKafkaProducer();
+        var counter = new AtomicInteger();
+        loadStreamsAsynchronouslyWithResource(kafkaConsumer, streams, s->s.forEach(trafficStream ->
+            writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(trafficStream),
+                    "KEY_" + counter.incrementAndGet())));
     }
 
-    private void loadStreamsToKafkaFromCapturedFile(String filename,
-                                                    KafkaConsumer<String, byte[]> kafkaConsumer) throws Exception {
-        try (var originalTrafficSource = new V0_1TrafficCaptureSource(filename)) {
-            new Thread(()->loadKafkaData(originalTrafficSource, TEST_RECORD_COUNT)).start();
-            var startTime = Instant.now();
-            while (!kafkaConsumer.listTopics().isEmpty()) {
-                Thread.sleep(10);
-                Assertions.assertTrue(Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0);
-            }
-        }
+    private void loadStreamsToKafkaFromCompressedFile(KafkaConsumer<String, byte[]> kafkaConsumer,
+                                                     String filename, int recordCount) throws Exception {
+        var kafkaProducer = buildKafkaProducer();
+        loadStreamsAsynchronouslyWithResource(kafkaConsumer, new V0_1TrafficCaptureSource(filename),
+                originalTrafficSource -> {
+                    try {
+                        for (int i = 0; i < recordCount; ++i) {
+                            List<ITrafficStreamWithKey> chunks = null;
+                            chunks = originalTrafficSource.readNextTrafficStreamChunk().get();
+                            for (int j = 0; j < chunks.size(); ++j) {
+                                writeTrafficStreamRecord(kafkaProducer, chunks.get(j), "KEY_" + i + "_" + j);
+                            }
+                        }
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
+    @SneakyThrows
+    private static void writeTrafficStreamRecord(Producer<String, byte[]> kafkaProducer,
+                                                 ITrafficStreamWithKey trafficStream,
+                                                 String recordId) {
+        var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStream.getStream().toByteArray());
+        var sendFuture = kafkaProducer.send(record, (metadata, exception) -> {});
+        sendFuture.get();
+        Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
     }
 
     private static void runTrafficReplayer(KafkaConsumer<String, byte[]> kafkaConsumer,
@@ -118,22 +200,6 @@ public class FullTrafficReplayerTest {
         } catch (Exception e) {
             log.atError().setCause(e).setMessage(() -> "eating exception to check for memory leaks.").log();
             throw e;
-        }
-    }
-
-    @SneakyThrows
-    private void loadKafkaData(ISimpleTrafficCaptureSource originalTrafficSource, int recordCount) {
-        var kafkaProducer = buildKafkaProducer();
-
-        for (int i = 0; i < recordCount; ++i) {
-            var chunks = originalTrafficSource.readNextTrafficStreamChunk().get();
-            for (int j = 0; j < chunks.size(); ++j) {
-                var record = new ProducerRecord(TEST_TOPIC_NAME, "KEY_" + i + "_" + j,
-                        chunks.get(j).getStream().toByteArray());
-                var sendFuture = kafkaProducer.send(record, (metadata, exception) -> {});
-                sendFuture.get();
-                Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
-            }
         }
     }
 }
