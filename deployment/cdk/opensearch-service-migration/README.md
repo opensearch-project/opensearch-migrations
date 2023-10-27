@@ -79,7 +79,7 @@ cdk deploy "migration-console" --c contextId=demo-deploy
 
 To get a list of all the available stack ids that can be deployed/redeployed for a particular `contextId`:
 ```shell
-cdk synth "*" --c contextId=demo-deploy
+cdk ls --c contextId=demo-deploy
 ```
 
 
