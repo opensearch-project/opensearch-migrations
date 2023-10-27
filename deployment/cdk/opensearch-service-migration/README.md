@@ -1,183 +1,186 @@
-# OpenSearch Service Domain CDK
+# OpenSearch Service Migration CDK
 
-This repo contains an IaC CDK solution for deploying an OpenSearch Service Domain. Users have the ability to easily deploy their Domain using default values or provide [configuration options](#Configuration-Options) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users - rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
+This directory contains the infrastructure-as-code CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
-### Getting Started
+## Getting Started
 
-#### Project required setup
+### Install Prerequisites
+
+###### Docker
+Docker is used by CDK to build container images. If not installed, follow the steps [here](https://docs.docker.com/engine/install/) to set up. Later versions are recommended.
+###### Git
+Git is used by the opensearch-migrations repo to fetch associated repositories (such as the traffic-comparator repo) for constructing their respective Dockerfiles. Steps to set up can be found [here](https://github.com/git-guides/install-git).
+###### Java 11
+Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 11.
+
+### Project required setup
 
 1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
-2- Set the `CDK_DEPLOYMENT_STAGE` environment variable to assist in naming resources and preventing collisions. Typically, this would be set to a value such as `dev`, `gamma`, `Wave1`, `PROD` and will be used to distinguish AWS resources for a given region and deployment stage. For example the CloudFormation stack may be named like `OSServiceDomain-dev-us-east-1`. This stage environment variable should only be used for the disambiguation of user resources.
+2- Creating Dockerfiles, this project needs to build the required Dockerfiles that the CDK will use in its services. From the `TrafficCapture` directory the following command can be ran to build these files
+```shell
+./gradlew :dockerSolution:buildDockerImages
+```
+Or if within the `opensearch-service-migration` directory:
+```shell
+cd ../../../TrafficCapture && ./gradlew :dockerSolution:buildDockerImages && cd ../deployment/cdk/opensearch-service-migration
+```
+More details can be found [here](../../../TrafficCapture/dockerSolution/README.md)
 
-#### First time using CDK?
+3- Fetch Migration Setup, in order to make use of Fetch Migration for historical data capture, a user should make any modifications necessary to the `dp_pipeline_template.yaml` file located in the same directory as this README before deploying. Further steps on starting Fetch Migration after deployment can be found [here](#kicking-off-fetch-migration)
+
+4- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
+
+5- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again (for each failing role) or avoided entirely by creating the service linked role initially like seen below:
+```shell
+aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com && aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+```
+
+### First time using CDK in this region?
 
 If this is your first experience with CDK, follow the steps below to get started:
 
-1- Install the **CDK CLI** tool by running:
-```
+1- Install the **CDK CLI** tool, if you haven't already, by running:
+```shell
 npm install -g aws-cdk
 ```
 
-2- Configure the desired **[AWS credentials](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_prerequisites)**, as these will dictate the region and account used for deployment.
+2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command from the `opensearch-service-migration` directory to set up a small CloudFormation stack of resources that CDK needs to function within your account
 
-3- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command to set up a small CloudFormation stack of resources that CDK needs to function within your account
-
-```
-cdk bootstrap
+```shell
+# Execute from the deployment/cdk/opensearch-service-migration directory
+cdk bootstrap --c contextId=demo-deploy
 ```
 
 Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
 
-### Deploying your CDK
-Before deploying your CDK you should fill in any desired context parameters that will dictate the composition of your OpenSearch Service Domain
+## Deploying the CDK
+This project uses CDK context parameters to configure deployments. These context values will dictate the composition of your stacks as well as which stacks get deployed.
 
-This can be accomplished by providing these options in a `cdk.context.json` file and then deploying like so:
-```
-cdk deploy "*"
+The full list of available configuration options for this project are listed [here](./options.md). Each option can be provided as an empty string `""` or simply not included, and in each of these 'empty' cases the option will use the project default value (if it exists) or CloudFormation's default value.
+
+A set of demo context values (using the `demo-deploy` label) has been set in the `cdk.context.json` located in this directory, which can be customized or used as is for a quickstart demo solution.
+
+This demo solution can be deployed with the following command:
+```shell
+cdk deploy "*" --c contextId=demo-deploy --require-approval never --concurrency 3
 ```
 
-Or by passing the context options you want to change as options in the CDK CLI
+Additionally, another context block in the `cdk.context.json` could be created with say the label `uat-deploy` with its own custom context configuration and be deployed with the command:
+```shell
+cdk deploy "*" --c contextId=uat-deploy --require-approval never --concurrency 3
 ```
-cdk deploy "*" --c domainName="os-service-domain" --c engineVersion="OS_1_3_6" --c dataNodeType="r6g.large.search" --c dataNodeCount=1
+**Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (**Except** in the multiple replay scenario stated [here](#how-to-run-multiple-replayer-scenarios)) 
+
+Stacks can also be redeployed individually, with any required stacks also being deployed initially, e.g. the following command would deploy the migration-console stack
+```shell
+cdk deploy "migration-console" --c contextId=demo-deploy
 ```
-* Note that these context parameters can also be passed to `cdk synth` and `cdk bootstrap` commands to simulate similar scenarios
+
+To get a list of all the available stack ids that can be deployed/redeployed for a particular `contextId`:
+```shell
+cdk ls --c contextId=demo-deploy
+```
+
 
 Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
 1. CDK CLI passed context values (highest precedence)
 2. Created `cdk.context.json` in the same directory as this README
 3. Existing `default-values.json` in the same directory as this README
 
-### Stack Breakdown
-This CDK has been structured to allow multiple stacks to be deployed out-of-the-box, which allows an easy entrance door for users to get started and add additional stacks as they need. Each of these stacks are deployed independently in CloudFormation, with only the Domain stack being required.
+## Executing Commands on a Deployed Service
 
-#### Domain Stack (OSServiceDomainCDKStack-STAGE-REGION)
-This is the core required stack of this CDK which is responsible for deploying the OpenSearch Service Domain and associated resources such as CloudWatch log groups for Domain logging.
-
-#### Network Stack (OSServiceNetworkCDKStack-STAGE-REGION)
-This optional stack will be used when the Domain is configured to be placed inside a VPC and will contain resources related to the networking of this VPC such as Security Groups and Subnets. It has a dependency on the Domain stack.
-
-#### Migration Assistance Stack (OSServiceMigrationCDKStack-STAGE-REGION)
-This optional stack is used to house the migration assistance resources which are in the process of being developed to assist in migrating to an OpenSearch domain. It has dependencies on both the Domain and Network stacks.
-
-#### Fetch Migration Stack (OSServiceHistoricalCDKStack-STAGE-REGION)
-This optional stack sets up an ECS cluster to host / run Fetch Migration tasks for data backfill / historical data migration. It has dependencies on the Domain, Network and Migration Assistance stacks.
-
-### Configuration Options
-
-The available configuration options are listed below. The vast majority of these options do not need to be provided, with only `domainName` and `engineVersion` being required. All non-required options can be provided as an empty string `""` or simply not included, and in each of these cases the option will be allocated with the CDK Domain default value
-
-Users are encouraged to customize the deployment by changing the CDK TypeScript as needed. The configuration-by-context option that is depicted here is primarily provided for testing/development purposes, and users may find it easier to adjust the TS here rather than say wrangling a complex JSON object through a context option
-
-Additional context on some of these options, can also be found in the Domain construct [documentation](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_opensearchservice.Domain.html)
-
-**It should be noted that limited testing has been conducted solely in the us-east-1 region, and some items like instance-type examples might be biased**
-
-| Name                                            | Required | Type         | Example                                                                                                                                                                                                                        | Description                                                                                                                                                                                                                                                  |
-|-------------------------------------------------|----------|--------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| engineVersion                                   | true     | string       | "OS_1.3"                                                                                                                                                                                                                       | The Elasticsearch/OpenSearch version that your domain will leverage. In the format of `OS_x.y` or `ES_x.y`                                                                                                                                                   |
-| domainName                                      | true     | string       | "os-service-domain"                                                                                                                                                                                                            | Name to use for the OpenSearch Service Domain                                                                                                                                                                                                                |
-| dataNodeType                                    | false    | string       | "r6g.large.search"                                                                                                                                                                                                             | The instance type for your data nodes. Supported values can be found [here](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/supported-instance-types.html)                                                                              |
-| dataNodeCount                                   | false    | number       | 1                                                                                                                                                                                                                              | The number of data nodes to use in the OpenSearch Service Domain                                                                                                                                                                                             |
-| dedicatedManagerNodeType                        | false    | string       | "r6g.large.search"                                                                                                                                                                                                             | The instance type for your manager nodes. Supported values can be found [here](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/supported-instance-types.html)                                                                           |
-| dedicatedManagerNodeCount                       | false    | number       | 3                                                                                                                                                                                                                              | The number of manager nodes to use in the OpenSearch Service Domain                                                                                                                                                                                          |
-| warmNodeType                                    | false    | string       | "ultrawarm1.medium.search"                                                                                                                                                                                                     | The instance type for your warm nodes. Supported values can be found [here](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/limits.html#limits-ultrawarm)                                                                               |
-| warmNodeCount                                   | false    | number       | 3                                                                                                                                                                                                                              | The number of warm nodes to use in the OpenSearch Service Domain                                                                                                                                                                                             |
-| accessPolicies                                  | false    | JSON         | `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::12345678912:user/test-user"},"Action":"es:ESHttp*","Resource":"arn:aws:es:us-east-1:12345678912:domain/cdk-os-service-domain/*"}]}` | Domain access policies                                                                                                                                                                                                                                         |
-| useUnsignedBasicAuth                            | false    | boolean      | false                                                                                                                                                                                                                          | Configures the domain so that unsigned basic auth is enabled                                                                                                                                                                                                 |
-| fineGrainedManagerUserARN                       | false    | string       | `"arn:aws:iam::12345678912:user/test-user"`                                                                                                                                                                                   | The IAM User ARN of the manager user. <br/>Fine grained access control also requires nodeToNodeEncryptionEnabled and encryptionAtRestEnabled to be enabled. <br/> Either fineGrainedMasterUserARN or fineGrainedMasterUserName can be enabled, but not both.  |
-| fineGrainedManagerUserName                      | false    | string       | "admin"                                                                                                                                                                                                                        | Username for the manager user. Not needed if providing fineGrainedManagerUserARN                                                                                                                                                                             |
-| fineGrainedManagerUser<br />SecretManagerKeyARN | false    | string       | `"arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"`                                                                                                                                            | Password for the manager user, in the form of an AWS Secrets Manager key                                                                                                                                                                                      |
-| enableDemoAdmin                                 | false    | boolean      | false                                                                                                                                                                                                                          | Demo mode setting that creates a basic manager user with username: admin and password: Admin123! . **NOTE**: This should not be used in a production environment and is not compatible with previous fineGrained settings                                    |
-| enforceHTTPS                                    | false    | boolean      | true                                                                                                                                                                                                                           | Require that all traffic to the domain arrive over HTTPS                                                                                                                                                                                                     |
-| tlsSecurityPolicy                               | false    | string       | "TLS_1_2"                                                                                                                                                                                                                      | The minimum TLS version required for traffic to the domain                                                                                                                                                                                                   |
-| ebsEnabled                                      | false    | boolean      | true                                                                                                                                                                                                                           | Specify whether Amazon EBS volumes are attached to data nodes. Some instance types (i.e. r6gd) require that EBS be disabled                                                                                                                                  |
-| ebsIops                                         | false    | number       | 4000                                                                                                                                                                                                                           | The number of I/O operations per second (IOPS) that the volume supports                                                                                                                                                                                      |
-| ebsVolumeSize                                   | false    | number       | 15                                                                                                                                                                                                                             | The size (in GiB) of the EBS volume for each data node                                                                                                                                                                                                       |
-| ebsVolumeType                                   | false    | string       | "GP3"                                                                                                                                                                                                                          | The EBS volume type to use with the Amazon OpenSearch Service domain. Supported values can be found [here](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html)                                                         |
-| encryptionAtRestEnabled                         | false    | boolean      | true                                                                                                                                                                                                                           | Enable Domain to encrypt data at rest                                                                                                                                                                                                                        |
-| encryptionAtRestKmsKeyARN                       | false    | string       | `"arn:aws:kms:us-east-1:12345678912:key/abc123de-4888-4fa7-a508-3811e2d49fc3"`                                                                                                                                                | Supply the KMS key to use for encryption at rest. If encryptionAtRestEnabled is enabled and this value is not provided, the default KMS key for OpenSearch Service will be used                                                                               |
-| loggingAppLogEnabled                            | false    | boolean      | true                                                                                                                                                                                                                           | Specify if Amazon OpenSearch Service application logging should be set up                                                                                                                                                                                    |
-| loggingAppLogGroupARN                           | false    | string       | `"arn:aws:logs:us-east-1:12345678912:log-group:test-log-group:*"`                                                                                                                                                             | Supply the CloudWatch log group to use for application logging. If not provided and application logs are enabled, a CloudWatch log group will be created                                                                                                      |
-| nodeToNodeEncryptionEnabled                     | false    | boolean      | true                                                                                                                                                                                                                           | Specify if node to node encryption should be enabled                                                                                                                                                                                                         |
-| vpcEnabled                                      | false    | boolean      | true                                                                                                                                                                                                                           | Enable Domain to be placed inside of a VPC. If a `vpcId` is not provided a new VPC will be created                                                                                                                                                           |
-| vpcId                                           | false    | string       | "vpc-123456789abcdefgh"                                                                                                                                                                                                        | Specify an existing VPC to place the domain inside of                                                                                                                                                                                                        |
-| vpcSubnetIds                                    | false    | string array | ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"]                                                                                                                                                                       | Specify the subnet IDs of an existing VPC to place the Domain in. Requires `vpcId` to be specified                                                                                                                                                           |
-| vpcSecurityGroupIds                             | false    | string array | ["sg-123456789abcdefgh", "sg-223456789abcdefgh"]                                                                                                                                                                               | Specify the Security Groups that will be associated with the VPC endpoints for the Domain. Requires `vpcId` to be specified                                                                                                                                  |
-| availabilityZoneCount                           | false    | number       | 1                                                                                                                                                                                                                              | The number of Availability Zones for the Domain to use. If not specified a single AZ is used. If specified the Domain CDK construct requires at least 2 AZs                                                                                                  |
-| openAccessPolicyEnabled                         | false    | boolean      | false                                                                                                                                                                                                                          | Applies an open access policy to the Domain. **NOTE**: This setting should only be used for Domains placed within a VPC, and is applicable to many use cases where access controlled by Security Groups on the VPC is sufficient.                            |
-| domainRemovalPolicy                             | false    | string       | "RETAIN"                                                                                                                                                                                                                       | Policy to apply when the domain is removed from the CloudFormation stack                                                                                                                                                                                     |
-| migrationAssistanceEnabled                      | false    | boolean      | false                                                                                                                                                                                                                          | Enable/disable creation of auxiliary resources (such as an MSK cluster) that are useful for the migration                                                                                                                                                    |
-| mskARN (Not currently available)                | false    | string       | `"arn:aws:kafka:us-east-2:12345678912:cluster/msk-cluster-test/81fbae45-5d25-44bb-aff0-108e71cc079b-7"`                                                                                                                       | Supply an existing MSK cluster ARN to use. **NOTE** As MSK is using an L1 construct this is not currently available for use                                                                                                                                   |
-| mskEnablePublicEndpoints                        | false    | boolean      | true                                                                                                                                                                                                                           | Specify if public endpoints should be enabled on the MSK cluster                                                                                                                                                                                             |
-| mskBrokerNodeCount                              | false    | number       | 2                                                                                                                                                                                                                              | The number of broker nodes to be used by the MSK cluster                                                                                                                                                                                                     |
-| historicalCaptureEnabled                        | false    | boolean      | false                                                                                                                                                                                                                          | Creates ECS resources to enable the kick off of hisotircal Fetch Migration tasks from the Migration Console                                                                                                                                                  |
-| sourceClusterEndpoint                           | false    | string       | `"https://source-cluster.elb.us-east-1.endpoint.com"`                                                                                                                                                                            | The endpoint for the source cluster from which Fetch Migration will pull data. Required if `historicalCaptureEnabled` is set to `true`                                                                                                                     |
-| dpPipelineTemplatePath                          | false    | string       | "path/to/config.yaml"                                                                                                                                                                                                          | Path to a local Data Prepper pipeline configuration YAML file that Fetch Migration will use to derive source and target cluster endpoints and other settings. Default value is the included template file i.e. [dp_pipeline_template.yaml](dp_pipeline_template.yaml)|
-
-
-A template `cdk.context.json` to be used to fill in these values is below:
-```
-{
-  "engineVersion": "",
-  "domainName": "",
-  "dataNodeType": "",
-  "dataNodeCount": 2,
-  "dedicatedManagerNodeType": "",
-  "dedicatedManagerNodeCount": 3,
-  "warmNodeType": "",
-  "warmNodeCount": 3,
-  "accessPolicies": "",
-  "useUnsignedBasicAuth": false,
-  "fineGrainedManagerUserARN": "",
-  "fineGrainedManagerUserName": "",
-  "fineGrainedManagerUserSecretManagerKeyARN": "",
-  "enableDemoAdmin": false,
-  "enforceHTTPS": true,
-  "tlsSecurityPolicy": "",
-  "ebsEnabled": true,
-  "ebsIops": 4000,
-  "ebsVolumeSize": 15,
-  "ebsVolumeType": "",
-  "encryptionAtRestEnabled": true,
-  "encryptionAtRestKmsKeyARN": "",
-  "loggingAppLogEnabled": true,
-  "loggingAppLogGroupARN": "",
-  "nodeToNodeEncryptionEnabled": true,
-  "vpcEnabled": true,
-  "vpcId": "",
-  "vpcSubnetIds": "",
-  "vpcSecurityGroupIds": "",
-  "availabilityZoneCount": 2,
-  "openAccessPolicyEnabled": false,
-  "domainRemovalPolicy": "",
-  "mskARN": "",
-  "mskEnablePublicEndpoints": false,
-  "mskBrokerNodeCount": 2,
-  "historicalCaptureEnabled": false,
-  "sourceClusterEndpoint": "",
-  "dpPipelineTemplatePath": ""
-}
-
-```
-Some configuration options available in other solutions (listed below) which enable/disable specific features do not exist in the current native CDK Domain construct. These options are inferred based on the presence or absence of related fields (i.e. if dedicatedMasterNodeCount is set to 1 it is inferred that dedicated master nodes should be enabled). These options are normally disabled by default, allowing for this inference.
-```
-"dedicatedMasterNodeEnabled": "X",
-"warmNodeEnabled": "X",
-"fineGrainedAccessControlEnabled": "X",
-"internalUserDatabaseEnabled": "X"
+Once a service has been deployed, a command shell can be opened for that service's container. If the SSM Session Manager plugin is not installed, it should be installed when prompted from the below exec command.
+```shell
+# ./accessContainer.sh <service-name> <stage> <region>
+./accessContainer.sh migration-console dev us-east-1
 ```
 
-### Tearing down CDK
-To remove all the CDK stack(s) which get created during deployment we can execute
+## Testing the deployed solution
+
+Once the solution is deployed, the easiest way to test the solution is to access the `migration-console` service container and run an opensearch-benchmark workload through to simulate incoming traffic, as the following steps illustrate
+
+```shell
+# Exec into container
+./accessContainer.sh migration-console dev us-east-1
+
+# Run opensearch-benchmark workload (i.e. geonames, nyc_taxis, http_logs)
+./runTestBenchmarks.sh
 ```
-cdk destroy "*"
+
+After the benchmark has been run, the indices and documents of the source and target clusters can be checked from the same migration-console container to confirm
+```shell
+# Check doc counts and indices for both source and target cluster
+./catIndices.sh
 ```
-Or to remove an individual stack we can execute
+
+## Kicking off Fetch Migration
+
+* First, access the Migration Console container
+
+```shell
+# ./accessContainer.sh migration-console STAGE REGION
+./accessContainer.sh migration-console dev us-east-1
 ```
-cdk destroy opensearchDomainStack
+
+* Execute the ECS run task command stored in the container's environment
+    * The status of the ECS Task can be monitored from the AWS Console. Once the task is in the `Running` state, logs and progress can be viewed via CloudWatch.
+```shell
+# This will print the needed ECS command
+echo $FETCH_MIGRATION_COMMAND
+
+# Paste the above printed command into the terminal to kick off
+```
+
+The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
+
+
+## Tearing down CDK
+To remove all the CDK stack(s) which get created during a deployment we can execute a command similar to below
+```shell
+# For demo context
+cdk destroy "*" --c contextId=demo-deploy
+```
+Or to remove an individual stack from the deployment we can execute
+```shell
+# For demo context
+cdk destroy migration-console --c contextId=demo-deploy
 ```
 Note that the default retention policy for the OpenSearch Domain is to RETAIN this resource when the stack is deleted, and in order to delete the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `DESTROY`. Otherwise, the Domain can be manually deleted through the AWS console or through other means such as the AWS CLI.
+
+## How to run multiple Traffic Replayer scenarios
+The project supports running distinct Replayers in parallel, with each Replayer sending traffic to a different target cluster. This functionality allows users to test replaying captured traffic to multiple different target clusters in parallel. Users are able to provide the desired configuration options to spin up a new OpenSearch Domain and Traffic Replayer while using the existing Migration infrastructure that has already been deployed.
+
+To give an example of this process, a user could decide to configure an additional Replayer and Domain for the demo setup in the `cdk.context.json` by configuring a new context block like below. **Note**: `addOnMigrationDeployId` is a required field to allow proper naming of these additional resources.
+```shell
+  "demo-addon1": {
+    "addOnMigrationDeployId": "demo-addon1",
+    "stage": "dev",
+    "engineVersion": "OS_1.3",
+    "domainName": "demo-cluster-1-3",
+    "dataNodeCount": 2,
+    "availabilityZoneCount": 2,
+    "openAccessPolicyEnabled": true,
+    "domainRemovalPolicy": "DESTROY",
+    "enableDemoAdmin": true,
+    "trafficReplayerEnableClusterFGACAuth": true
+  }
+```
+And then deploy this additional infrastructure with the command:
+```shell
+cdk deploy "*" --c contextId=demo-addon1 --require-approval never --concurrency 3
+```
+
+Finally, the additional infrastructure can be removed with:
+```shell
+cdk destroy "*" --c contextId=demo-addon1
+```
+
+## Appendix
+
+### How is an Authorization header set for requests from the Replayer to the target cluster?
+
+See Replayer explanation [here](../../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
 
 ### Useful CDK commands
 

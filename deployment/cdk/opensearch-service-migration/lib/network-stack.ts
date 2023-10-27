@@ -1,38 +1,33 @@
-import {CfnOutput, Stack, StackProps} from "aws-cdk-lib";
+import {Stack} from "aws-cdk-lib";
 import {
-    IpAddresses,
-    ISecurityGroup,
-    IVpc,
-    Peer,
-    Port,
-    SecurityGroup,
-    SubnetFilter,
-    SubnetSelection,
+    IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface networkStackProps extends StackPropsExt {
     readonly vpcId?: string
-    readonly vpcSubnetIds?: string[]
-    readonly vpcSecurityGroupIds?: string[]
     readonly availabilityZoneCount?: number
 }
 
-
 export class NetworkStack extends Stack {
-
     public readonly vpc: IVpc;
-    public readonly domainSubnets: SubnetSelection[]|undefined;
-    public readonly domainSecurityGroups: ISecurityGroup[];
 
     constructor(scope: Construct, id: string, props: networkStackProps) {
         super(scope, id, props);
 
+        // Retrieve original deployment VPC for addon deployments
+        if (props.addOnMigrationDeployId) {
+            const vpcId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/vpcId`)
+            this.vpc = Vpc.fromLookup(this, 'domainVPC', {
+                vpcId: vpcId,
+            });
+        }
         // Retrieve existing VPC
-        if (props.vpcId) {
+        else if (props.vpcId) {
             this.vpc = Vpc.fromLookup(this, 'domainVPC', {
                 vpcId: props.vpcId,
             });
@@ -61,35 +56,27 @@ export class NetworkStack extends Stack {
             });
         }
 
-        // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
-        // to the Domain as it has existing behavior to select private subnets from a given VPC
-        if (props.vpcSubnetIds) {
-            const selectSubnets = this.vpc.selectSubnets({
-                subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]
-            })
-            this.domainSubnets = [selectSubnets]
-        }
+        if (!props.addOnMigrationDeployId) {
 
-        // Retrieve existing SGs to apply to VPC Domain endpoints
-        const securityGroups: ISecurityGroup[] = []
-        if (props.vpcSecurityGroupIds) {
-            for (let i = 0; i < props.vpcSecurityGroupIds.length; i++) {
-                securityGroups.push(SecurityGroup.fromLookupById(this, "domainSecurityGroup-" + i, props.vpcSecurityGroupIds[i]))
-            }
-        }
-        // Create a default SG which only allows members of this SG to access the Domain endpoints
-        const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
-            vpc: this.vpc,
-            allowAllOutbound: false,
-        });
-        defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
-        securityGroups.push(defaultSecurityGroup)
-        this.domainSecurityGroups = securityGroups
+            new StringParameter(this, 'SSMParameterVpcId', {
+                description: 'OpenSearch migration parameter for VPC id',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/vpcId`,
+                stringValue: this.vpc.vpcId
+            });
 
-        new CfnOutput(this, 'CopilotDomainSGExports', {
-            value: `export MIGRATION_DOMAIN_SG_ID=${defaultSecurityGroup.securityGroupId}`,
-            description: 'Domain Security Group created by CDK that is needed for Copilot container deployments',
-        });
+            // Create a default SG which only allows members of this SG to access the Domain endpoints
+            const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
+                vpc: this.vpc,
+                allowAllOutbound: false,
+            });
+            defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
+
+            new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
+                description: 'OpenSearch migration parameter for target OpenSearch access security group id',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
+                stringValue: defaultSecurityGroup.securityGroupId
+            });
+        }
 
     }
 }

@@ -1,0 +1,15 @@
+{
+  "demo-deploy": {
+    "stage": "dev",
+    "engineVersion": "OS_2.9",
+    "domainName": "demo-opensearch-cluster",
+    "dataNodeCount": 2,
+    "availabilityZoneCount": 2,
+    "openAccessPolicyEnabled": true,
+    "domainRemovalPolicy": "DESTROY",
+    "enableDemoAdmin": true,
+    "trafficReplayerEnableClusterFGACAuth": true,
+    "fetchMigrationEnabled": true,
+    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:19200"
+  }
+}

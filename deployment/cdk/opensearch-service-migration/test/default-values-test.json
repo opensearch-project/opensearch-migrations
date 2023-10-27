@@ -1,4 +1,5 @@
 {
   "engineVersion": "OS_1.0",
-  "domainName": "sample-cdk-unit-test-domain"
+  "domainName": "sample-cdk-unit-test-domain",
+  "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
 }
