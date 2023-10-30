@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -32,6 +33,7 @@ import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
@@ -155,6 +157,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         };
     }
 
+    public static Tuple2<int[],int[]> unzipRequestResponseSizes(List<Integer> collatedList) {
+        return new Tuple2
+                (IntStream.range(0,collatedList.size()).filter(i->(i%2)==0).map(i->collatedList.get(i)).toArray(),
+                IntStream.range(0,collatedList.size()).filter(i->(i%2)==1).map(i->collatedList.get(i)).toArray());
+    }
+
     @ParameterizedTest(name="{0}")
     @MethodSource("loadSimpleCombinations")
     void generateAndTest(String testName, int bufferSize, int skipCount,
@@ -164,7 +172,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
         accumulateTrafficStreamsWithNewAccumulator(trafficStreams, reconstructedTransactions, requestsReceived);
-        assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, expectedSizes);
+        var splitSizes = unzipRequestResponseSizes(expectedSizes);
+        assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, splitSizes._1, splitSizes._2);
         Assertions.assertEquals(requestsReceived.get(), reconstructedTransactions.size());
     }
 
@@ -210,14 +219,14 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     }
 
     static void assertReconstructedTransactionsMatchExpectations(List<RequestResponsePacketPair> reconstructedTransactions,
-                                                                  List<Integer> expectedSizes) {
+                                                                 int[] expectedRequestSizes,
+                                                                 int[] expectedResponseSizes) {
         log.error("reconstructedTransactions="+ reconstructedTransactions);
-        var expectedCount = expectedSizes.size()/2;
-        Assertions.assertEquals(expectedCount, reconstructedTransactions.size());
+        Assertions.assertEquals(expectedRequestSizes.length, reconstructedTransactions.size());
         for (int i = 0; i< reconstructedTransactions.size(); ++i) {
-            Assertions.assertEquals((long) expectedSizes.get(i*2),
+            Assertions.assertEquals((long) expectedRequestSizes[i],
                     calculateAggregateSizeOfPacketBytes(reconstructedTransactions.get(i).requestData.packetBytes));
-            Assertions.assertEquals((long) expectedSizes.get(i*2+1),
+            Assertions.assertEquals((long) expectedResponseSizes[i],
                     calculateAggregateSizeOfPacketBytes(reconstructedTransactions.get(i).responseData.packetBytes));
         }
     }

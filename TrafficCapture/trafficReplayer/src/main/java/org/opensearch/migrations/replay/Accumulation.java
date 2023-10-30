@@ -1,9 +1,7 @@
 package org.opensearch.migrations.replay;
 
-import lombok.Getter;
 import lombok.NonNull;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.TrafficStreamKeyWithRequestOffset;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,8 +41,8 @@ public class Accumulation {
         if (rrPair != null) {
             return rrPair;
         }
-        var tskWithOffset = new TrafficStreamKeyWithRequestOffset(trafficStreamKey, startingSourceRequestIndex);
-        return rrPair = new RequestResponsePacketPair(new UniqueRequestKey(tskWithOffset, getIndexOfCurrentRequest()));
+        var urk = new UniqueRequestKey(trafficStreamKey, startingSourceRequestIndex, getIndexOfCurrentRequest());
+        return rrPair = new RequestResponsePacketPair(urk);
     }
 
     public boolean hasRrPair() {
