@@ -16,6 +16,14 @@ allprojects {
         jvmArgs '-ea'
     }
 
+    // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
+    tasks.register('copyDependencies', Copy) {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+        from configurations.runtimeClasspath
+        into "${buildDir}/dependencies"
+    }
+
     jacocoTestReport {
         reports {
             xml.required = true
