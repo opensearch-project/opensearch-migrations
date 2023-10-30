@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
@@ -156,8 +157,12 @@ public class ReplayEngine {
         hookWorkFinishingUpdates(future, timestamp, requestKey, label);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, Void> close() {
-        return networkSendOrchestrator.clientConnectionPool.stopGroup();
+    public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
+        return networkSendOrchestrator.clientConnectionPool.closeConnectionsAndShutdown();
+    }
+
+    public Future shutdownNow() {
+        return networkSendOrchestrator.clientConnectionPool.shutdownNow();
     }
 
     public int getNumConnectionsCreated() {

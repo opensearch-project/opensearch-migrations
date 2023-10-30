@@ -239,7 +239,7 @@ public class TrafficStreamGenerator {
     }
 
     public static Stream<RandomTrafficStreamAndTransactionSizes>
-    generateAllIndicativeRandomTrafficStreamsAndSizes(IntStream seedStream) {
+    generateRandomTrafficStreamsAndSizes(IntStream seedStream) {
         return seedStream.mapToObj(rSeed->{
             var commands = new ArrayList<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective>();
             var sizes = new ArrayList<Integer>();
@@ -252,7 +252,7 @@ public class TrafficStreamGenerator {
     }
 
     public static Stream<RandomTrafficStreamAndTransactionSizes> generateAllIndicativeRandomTrafficStreamsAndSizes() {
-        return generateAllIndicativeRandomTrafficStreamsAndSizes(
+        return generateRandomTrafficStreamsAndSizes(
                 RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE.stream().mapToInt(i->i));
     }
 }

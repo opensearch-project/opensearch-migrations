@@ -9,6 +9,7 @@ import org.json.HTTP;
 import org.json.JSONObject;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -24,19 +25,22 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
-    RequestResponsePacketPair sourcePair;
+    final UniqueSourceRequestKey uniqueRequestKey;
+    final RequestResponsePacketPair sourcePair;
     final TransformedPackets targetRequestData;
     final List<byte[]> targetResponseData;
     final HttpRequestTransformationStatus transformationStatus;
     final Throwable errorCause;
     Duration targetResponseDuration;
 
-    public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
+    public SourceTargetCaptureTuple(UniqueSourceRequestKey uniqueRequestKey,
+                                    RequestResponsePacketPair sourcePair,
                                     TransformedPackets targetRequestData,
                                     List<byte[]> targetResponseData,
                                     HttpRequestTransformationStatus transformationStatus,
                                     Throwable errorCause,
                                     Duration targetResponseDuration) {
+        this.uniqueRequestKey = uniqueRequestKey;
         this.sourcePair = sourcePair;
         this.targetRequestData = targetRequestData;
         this.targetResponseData = targetResponseData;
@@ -111,7 +115,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             if (triple.targetResponseData != null && !triple.targetResponseData.isEmpty()) {
                 meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData, triple.targetResponseDuration));
             }
-            meta.put("connectionId", triple.sourcePair.requestKey);
+            meta.put("connectionId", triple.uniqueRequestKey);
             return meta;
         }
 
@@ -174,7 +178,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     public String toString() {
         return PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.TRUNCATED, () -> {
             final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
-            sb.append("\n diagnosticLabel=").append(sourcePair.requestKey);
+            sb.append("\n diagnosticLabel=").append(uniqueRequestKey);
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n targetResponseDuration=").append(targetResponseDuration);
             sb.append("\n targetRequestData=")

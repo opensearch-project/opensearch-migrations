@@ -177,7 +177,7 @@ class NettyPacketToHttpConsumerTest {
                         normalizeMessage(responseAsString));
             }
         }
-        var stopFuture = sendingFactory.close();
+        var stopFuture = sendingFactory.closeConnectionsAndShutdown();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
         Assertions.assertEquals(2, sendingFactory.getNumConnectionsCreated());
