@@ -133,11 +133,13 @@ class TestMigrationMonitor(unittest.TestCase):
         # All-docs-migrated check is invoked
         mock_progress.all_docs_migrated.assert_called_once()
 
+    @patch('migration_monitor.shutdown_process')
     @patch('migration_monitor.shutdown_pipeline')
     @patch('time.sleep')
     @patch('migration_monitor.check_and_log_progress')
     # Note that mock objects are passed bottom-up from the patch order above
-    def test_run(self, mock_check: MagicMock, mock_sleep: MagicMock, mock_shut: MagicMock):
+    def test_monitor_non_local(self, mock_check: MagicMock, mock_sleep: MagicMock, mock_shut_dp: MagicMock,
+                               mock_shut_proc: MagicMock):
         # The param values don't matter since we've mocked the check method
         test_input = MigrationMonitorParams(1, "test")
         mock_progress = MagicMock()
@@ -145,11 +147,12 @@ class TestMigrationMonitor(unittest.TestCase):
         mock_check.return_value = mock_progress
         # Run test method
         wait_time = 3
-        migration_monitor.run(test_input, wait_time)
+        migration_monitor.run(test_input, None, wait_time)
         # Test that fetch was called with the expected EndpointInfo
         expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
         mock_sleep.assert_called_with(wait_time)
-        mock_shut.assert_called_once_with(expected_endpoint_info)
+        mock_shut_dp.assert_called_once_with(expected_endpoint_info)
+        mock_shut_proc.assert_not_called()
 
     @patch('migration_monitor.shutdown_process')
     @patch('migration_monitor.shutdown_pipeline')
@@ -162,7 +165,7 @@ class TestMigrationMonitor(unittest.TestCase):
         expected_return_code: int = 1
         mock_subprocess.returncode = expected_return_code
         # Run test method
-        return_code = migration_monitor.monitor_local(test_input, mock_subprocess, 0)
+        return_code = migration_monitor.run(test_input, mock_subprocess)
         self.assertEqual(expected_return_code, return_code)
         mock_shut_dp.assert_not_called()
         mock_shut_proc.assert_not_called()
@@ -178,18 +181,18 @@ class TestMigrationMonitor(unittest.TestCase):
         test_input = MigrationMonitorParams(1, "test")
         # Simulate a successful migration
         mock_progress = MagicMock()
-        mock_progress.is_in_terminal_state.return_value = True
+        mock_progress.is_in_terminal_state.side_effect = [False, True]
         mock_progress.is_migration_complete_success.return_value = True
         mock_check.return_value = mock_progress
         # Sequence of expected return values for a process that terminates successfully
-        mock_is_alive.side_effect = [True, True, True, False]
+        mock_is_alive.side_effect = [True, True, False, False]
         mock_subprocess = MagicMock()
         expected_return_code: int = 0
         mock_subprocess.returncode = expected_return_code
         # Simulate timeout on wait
         mock_subprocess.wait.side_effect = [subprocess.TimeoutExpired("test", 1)]
         # Run test method
-        actual_return_code = migration_monitor.monitor_local(test_input, mock_subprocess, 0)
+        actual_return_code = migration_monitor.run(test_input, mock_subprocess)
         self.assertEqual(expected_return_code, actual_return_code)
         expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
         mock_check.assert_called_once_with(expected_endpoint_info, ANY)
@@ -215,7 +218,7 @@ class TestMigrationMonitor(unittest.TestCase):
         expected_return_code: int = 137
         mock_shut_proc.return_value = 137
         # Run test method
-        actual_return_code = migration_monitor.monitor_local(test_input, mock_subprocess, 0)
+        actual_return_code = migration_monitor.run(test_input, mock_subprocess)
         self.assertEqual(expected_return_code, actual_return_code)
         expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
         mock_shut_dp.assert_called_once_with(expected_endpoint_info)

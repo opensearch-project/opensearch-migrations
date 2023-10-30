@@ -91,23 +91,30 @@ def check_and_log_progress(endpoint_info: EndpointInfo, progress: ProgressMetric
     return progress
 
 
-def monitor_local(args: MigrationMonitorParams, dp_process: Popen, poll_interval_seconds: int = 30) -> Optional[int]:
+def __should_continue_monitoring(metrics: ProgressMetrics, proc: Optional[Popen] = None) -> bool:
+    return not metrics.is_in_terminal_state() and (proc is None or is_process_alive(proc))
+
+
+# Last parameter is optional, and signifies a local Data Prepper process
+def run(args: MigrationMonitorParams, dp_process: Optional[Popen] = None, poll_interval_seconds: int = 30) -> int:
     endpoint_info = EndpointInfo(args.data_prepper_endpoint)
     progress_metrics = ProgressMetrics(args.target_count, __IDLE_THRESHOLD)
     logging.info("Starting migration monitor until target doc count: " + str(progress_metrics.target_doc_count))
-    # Sets returncode. A value of None means the subprocess has not yet terminated
-    dp_process.poll()
-    while is_process_alive(dp_process) and not progress_metrics.is_in_terminal_state():
-        try:
-            dp_process.wait(timeout=poll_interval_seconds)
-        except subprocess.TimeoutExpired:
-            pass
-        if is_process_alive(dp_process):
+    while __should_continue_monitoring(progress_metrics, dp_process):
+        if dp_process is not None:
+            # Wait on local process
+            try:
+                dp_process.wait(timeout=poll_interval_seconds)
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            # Thread sleep
+            time.sleep(poll_interval_seconds)
+        if dp_process is None or is_process_alive(dp_process):
             progress_metrics = check_and_log_progress(endpoint_info, progress_metrics)
-        # Log debug metrics
-        progress_metrics.log_idle_pipeline_debug_metrics()
-    # Loop terminated, shut down the Data Prepper pipeline
+    # Loop terminated
     if not progress_metrics.is_in_terminal_state():
+        # This will only happen for a local Data Prepper process
         logging.error("Migration did not complete, process exited with code: " + str(dp_process.returncode))
         # TODO - Implement rollback
         logging.error("Please delete any partially migrated indices before retrying the migration.")
@@ -121,29 +128,14 @@ def monitor_local(args: MigrationMonitorParams, dp_process: Popen, poll_interval
             logging.warning("Migration monitor was unable to fetch migration metrics, terminating...")
         # Shut down Data Prepper pipeline via API
         shutdown_pipeline(endpoint_info)
-        if is_process_alive(dp_process):
+        if dp_process is None:
+            # No local process
+            return 0
+        elif is_process_alive(dp_process):
             # Workaround for https://github.com/opensearch-project/data-prepper/issues/3141
             return shutdown_process(dp_process)
         else:
             return dp_process.returncode
-
-
-def run(args: MigrationMonitorParams, poll_interval_seconds: int = 30) -> None:
-    endpoint_info = EndpointInfo(args.data_prepper_endpoint)
-    progress_metrics = ProgressMetrics(args.target_count, __IDLE_THRESHOLD)
-    logging.info("Starting migration monitor until target doc count: " + str(progress_metrics.target_doc_count))
-    while not progress_metrics.is_in_terminal_state():
-        time.sleep(poll_interval_seconds)
-        progress_metrics = check_and_log_progress(endpoint_info, progress_metrics)
-    # Loop terminated, shut down the Data Prepper pipeline
-    if progress_metrics.is_migration_complete_success():
-        logging.info("Migration monitor observed successful migration, shutting down...\n")
-    elif progress_metrics.is_migration_idle():
-        logging.warning("Migration monitor observed idle pipeline (migration may be incomplete), shutting down...")
-    elif progress_metrics.is_too_may_api_failures():
-        logging.warning("Migration monitor was unable to fetch migration metrics, terminating...")
-    # Shut down Data Prepper pipeline via API
-    shutdown_pipeline(endpoint_info)
 
 
 if __name__ == '__main__':  # pragma no cover

@@ -28,7 +28,7 @@ def run(dp_base_path: str, dp_config_file: str, dp_endpoint: str) -> Optional[in
         # Run the migration monitor next
         migration_monitor_params = MigrationMonitorParams(metadata_migration_result.target_doc_count, dp_endpoint)
         logging.info("Starting migration monitor...\n")
-        return migration_monitor.monitor_local(migration_monitor_params, proc)
+        return migration_monitor.run(migration_monitor_params, proc)
 
 
 if __name__ == '__main__':  # pragma no cover
