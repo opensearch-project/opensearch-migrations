@@ -3,18 +3,19 @@ import base64
 import logging
 import os
 import subprocess
+import sys
+from typing import Optional
 
-import migration_monitor
 import metadata_migration
-from migration_monitor_params import MigrationMonitorParams
+import migration_monitor
 from metadata_migration_params import MetadataMigrationParams
-
+from migration_monitor_params import MigrationMonitorParams
 
 __DP_EXECUTABLE_SUFFIX = "/bin/data-prepper"
 __PIPELINE_OUTPUT_FILE_SUFFIX = "/pipelines/pipeline.yaml"
 
 
-def run(dp_base_path: str, dp_config_file: str, dp_endpoint: str):
+def run(dp_base_path: str, dp_config_file: str, dp_endpoint: str) -> Optional[int]:
     dp_exec_path = dp_base_path + __DP_EXECUTABLE_SUFFIX
     output_file = dp_base_path + __PIPELINE_OUTPUT_FILE_SUFFIX
     metadata_migration_params = MetadataMigrationParams(dp_config_file, output_file, report=True)
@@ -24,14 +25,10 @@ def run(dp_base_path: str, dp_config_file: str, dp_endpoint: str):
         # Kick off a subprocess for Data Prepper
         logging.info("Running Data Prepper...\n")
         proc = subprocess.Popen(dp_exec_path)
-        # Data Prepper started successfully, run the migration monitor
+        # Run the migration monitor next
         migration_monitor_params = MigrationMonitorParams(metadata_migration_result.target_doc_count, dp_endpoint)
         logging.info("Starting migration monitor...\n")
-        migration_monitor.run(migration_monitor_params)
-        # Migration ended, the following is a workaround for
-        # https://github.com/opensearch-project/data-prepper/issues/3141
-        if proc.returncode is None:
-            proc.terminate()
+        return migration_monitor.monitor_local(migration_monitor_params, proc)
 
 
 if __name__ == '__main__':  # pragma no cover
@@ -64,4 +61,11 @@ if __name__ == '__main__':  # pragma no cover
         decoded_bytes = base64.b64decode(inline_pipeline)
         with open(cli_args.config_file_path, 'wb') as config_file:
             config_file.write(decoded_bytes)
-    run(base_path, cli_args.config_file_path, cli_args.data_prepper_endpoint)
+    return_code = run(base_path, cli_args.config_file_path, cli_args.data_prepper_endpoint)
+    if return_code == 0:
+        sys.exit(0)
+    else:
+        logging.error("Process exited with non-zero return code: " + str(return_code))
+        if return_code is None:
+            return_code = 1
+        sys.exit(return_code)
