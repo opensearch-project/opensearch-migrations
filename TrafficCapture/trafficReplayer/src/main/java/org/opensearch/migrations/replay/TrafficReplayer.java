@@ -296,8 +296,10 @@ public class TrafficReplayer {
                         Duration.ofSeconds(params.lookaheadTimeSeconds))) {
                     var tr = new TrafficReplayer(uri, buildAuthTransformerFactory(params),
                             params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
+                    var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
+                    var timeShifter = new TimeShifter(params.speedupFactor);
                     tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                            blockingTrafficStream, bufferedOutputStream, new TimeShifter(params.speedupFactor));
+                            blockingTrafficStream, bufferedOutputStream, timeShifter, tupleWriter);
                     log.info("reached the end of the ingestion output stream");
                 }
             }
@@ -359,20 +361,20 @@ public class TrafficReplayer {
     }
 
     void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
-                                        BlockingTrafficSource trafficChunkStream,
-                                        BufferedOutputStream bufferedOutputStream,
-                                        TimeShifter timeShifter)
+                                BlockingTrafficSource trafficChunkStream,
+                                BufferedOutputStream bufferedOutputStream,
+                                TimeShifter timeShifter,
+                                Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws InterruptedException, ExecutionException {
 
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, timeShifter);
 
-        var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         "(see " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                         getRecordedRequestReconstructCompleteHandler(replayEngine),
-                        getRecordedRequestAndResponseReconstructCompleteHandler(tupleWriter),
+                        getRecordedRequestAndResponseReconstructCompleteHandler(resultTupleConsumer),
                         (requestKey, timestamp) -> {
                             replayEngine.setFirstTimestamp(timestamp);
                             replayEngine.closeConnection(requestKey, timestamp);
@@ -441,7 +443,7 @@ public class TrafficReplayer {
     private final static Instant startTime = Instant.now();
 
     private Consumer<RequestResponsePacketPair>
-    getRecordedRequestAndResponseReconstructCompleteHandler(SourceTargetCaptureTuple.TupleToFileWriter tupleWriter) {
+    getRecordedRequestAndResponseReconstructCompleteHandler(Consumer<SourceTargetCaptureTuple> resultTupleConsumer) {
         return rrPair -> {
             log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
             var resultantCf = requestFutureMap.remove(rrPair.requestKey)
@@ -449,7 +451,7 @@ public class TrafficReplayer {
                             f.handle((summary, t) -> {
                                 TransformedTargetRequestAndResponse rval = null;
                                 try {
-                                    rval = packageAndWriteResponse(tupleWriter, rrPair, summary, t);
+                                    rval = packageAndWriteResponse(resultTupleConsumer, rrPair, summary, t);
                                     successCount.incrementAndGet();
                                     return rval;
                                 } catch (Exception e) {
@@ -534,7 +536,7 @@ public class TrafficReplayer {
     }
 
     private static TransformedTargetRequestAndResponse
-    packageAndWriteResponse(SourceTargetCaptureTuple.TupleToFileWriter tupleWriter,
+    packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
                             RequestResponsePacketPair rrPair,
                             TransformedTargetRequestAndResponse summary,
                             Throwable t) {
@@ -542,11 +544,7 @@ public class TrafficReplayer {
 
         try (var requestResponseTuple = getSourceTargetCaptureTuple(rrPair, summary, t)) {
             log.atInfo().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTuple).log();
-            tupleWriter.writeJSON(requestResponseTuple);
-        } catch (IOException e) {
-            log.error("Caught an IOException while writing triples output.");
-            e.printStackTrace();
-            throw new CompletionException(e);
+            tupleWriter.accept(requestResponseTuple);
         }
 
         if (t != null) { throw new CompletionException(t); }
@@ -669,6 +667,8 @@ public class TrafficReplayer {
             }
         } catch (InterruptedException ex) {
             log.atInfo().setCause(ex).setMessage("Interrupted.  Done reading traffic streams.").log();
+        } catch (Exception e) {
+            log.atError().setCause(e).log();
         }
     }
 }

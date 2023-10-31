@@ -57,11 +57,10 @@ public class KafkaProtobufConsumerLongTermTest {
         try {
             return new KafkaProducer(kafkaProps);
         } catch (Exception e) {
-            log.error("checkme");
+            log.atError().setCause(e).log();
             System.exit(1);
             throw e;
         }
-
     }
 
     TrafficStream makeTestTrafficStream(Instant t, int i) {

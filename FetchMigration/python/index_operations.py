@@ -15,13 +15,17 @@ __INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version",
 def fetch_all_indices(endpoint: EndpointInfo) -> dict:
     actual_endpoint = endpoint.url + __ALL_INDICES_ENDPOINT
     resp = requests.get(actual_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
-    # Remove internal settings
     result = dict(resp.json())
-    for index in result:
-        for setting in __INTERNAL_SETTINGS_KEYS:
-            index_settings = result[index][SETTINGS_KEY]
-            if __INDEX_KEY in index_settings:
-                index_settings[__INDEX_KEY].pop(setting, None)
+    for index in list(result.keys()):
+        # Remove system indices
+        if index.startswith("."):
+            del result[index]
+        # Remove internal settings
+        else:
+            for setting in __INTERNAL_SETTINGS_KEYS:
+                index_settings = result[index][SETTINGS_KEY]
+                if __INDEX_KEY in index_settings:
+                    index_settings[__INDEX_KEY].pop(setting, None)
     return result
 
 

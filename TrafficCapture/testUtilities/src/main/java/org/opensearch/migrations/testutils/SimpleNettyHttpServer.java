@@ -30,7 +30,9 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
@@ -52,14 +54,22 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     public final boolean useTls;
     public final int port;
     private Channel serverChannel;
+    private Duration timeout;
 
     public static SimpleNettyHttpServer makeServer(boolean useTls,
+                                                   Function<HttpFirstLine, SimpleHttpResponse> makeContext)
+        throws PortFinder.ExceededMaxPortAssigmentAttemptException
+    {
+        return makeServer(useTls, null, makeContext);
+    }
+
+    public static SimpleNettyHttpServer makeServer(boolean useTls, Duration readTimeout,
                                               Function<HttpFirstLine, SimpleHttpResponse> makeContext)
             throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleNettyHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                testServerRef.set(new SimpleNettyHttpServer(useTls, port.intValue(), makeContext));
+                testServerRef.set(new SimpleNettyHttpServer(useTls, port.intValue(), readTimeout, makeContext));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -124,10 +134,12 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         };
     }
 
-    SimpleNettyHttpServer(boolean useTLS, int port, Function<HttpFirstLine, SimpleHttpResponse> responseBuilder)
+    SimpleNettyHttpServer(boolean useTLS, int port, Duration timeout,
+                          Function<HttpFirstLine, SimpleHttpResponse> responseBuilder)
             throws Exception {
         this.useTls = useTLS;
         this.port = port;
+        this.timeout = timeout;
         final SSLContext javaSSLContext = useTLS ? SelfSignedSSLContextBuilder.getSSLContext() : null;
 
         var b = new ServerBootstrap();
@@ -142,7 +154,9 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                             engine.setUseClientMode(false);
                             pipeline.addFirst("SSL", new SslHandler(engine));
                         }
-                        //pipeline.addLast(new ReadTimeoutHandler(500));
+                        if (timeout != null) {
+                            pipeline.addLast(new ReadTimeoutHandler(timeout.toMillis(), TimeUnit.MILLISECONDS));
+                        }
                         pipeline.addLast(new HttpServerCodec());
                         pipeline.addLast(new HttpObjectAggregator(16*1024));
                         pipeline.addLast(makeHandlerFromResponseContext(responseBuilder));
