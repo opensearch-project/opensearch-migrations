@@ -7,7 +7,7 @@ This directory is aimed at housing deployment/distribution methods for various m
 ### Deploying Migration solution with Docker
 
 A containerized end-to-end solution (including a source and target cluster as well as the migration services) can be deployed locally using the
-[Docker Solution](TrafficCapture/dockerSolution/README.md).
+[Docker Solution](../TrafficCapture/dockerSolution/README.md).
 
 ### Deploying Migration solution to AWS
 
