@@ -22,6 +22,8 @@ plugins {
 //    id 'checkstyle'
     id 'org.owasp.dependencycheck' version '8.2.1'
     id "io.freefair.lombok" version "8.0.1"
+
+    id 'java'
 }
 
 //spotbugs {
@@ -48,6 +50,19 @@ dependencies {
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+
+//    // Log4j
+    implementation(platform("org.apache.logging.log4j:log4j-bom:2.21.1"))
+    implementation("org.apache.logging.log4j:log4j-api")
+    implementation("org.apache.logging.log4j:log4j-core")
+
+    // OpenTelemetry core
+    implementation("io.opentelemetry:opentelemetry-sdk:1.30.0")
+    implementation("io.opentelemetry:opentelemetry-exporter-otlp:1.30.0")
+    implementation("io.opentelemetry:opentelemetry-semconv:1.30.1-alpha")
+
+    // OpenTelemetry log4j appender
+    implementation("io.opentelemetry.instrumentation:opentelemetry-log4j-appender-2.17:1.30.0-alpha")
 }
 
 tasks.named('test') {
