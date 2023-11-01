@@ -13,6 +13,9 @@ export interface TrafficComparatorProps extends StackPropsExt {
     readonly vpc: IVpc,
 }
 
+/**
+ * This stack is experimental and should only be used for development
+ */
 export class TrafficComparatorStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: TrafficComparatorProps) {

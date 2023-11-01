@@ -17,13 +17,9 @@ Java is used by the opensearch-migrations repo and Gradle, its associated build 
 
 1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
-2- Creating Dockerfiles, this project needs to build the required Dockerfiles that the CDK will use in its services. From the `TrafficCapture` directory the following command can be ran to build these files
+2- Creating Dockerfiles, this project needs to build the required Dockerfiles that the CDK will use in its services. These Dockerfiles can be built by running the below script which is located in the same directory as this README
 ```shell
-./gradlew :dockerSolution:buildDockerImages
-```
-Or if within the `opensearch-service-migration` directory:
-```shell
-cd ../../../TrafficCapture && ./gradlew :dockerSolution:buildDockerImages && cd ../deployment/cdk/opensearch-service-migration
+./buildDockerImages.sh
 ```
 More details can be found [here](../../../TrafficCapture/dockerSolution/README.md)
 
@@ -70,7 +66,7 @@ Additionally, another context block in the `cdk.context.json` could be created w
 ```shell
 cdk deploy "*" --c contextId=uat-deploy --require-approval never --concurrency 3
 ```
-**Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (**Except** in the multiple replay scenario stated [here](#how-to-run-multiple-replayer-scenarios)) 
+**Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (**Except** in the multiple replay scenario stated [here](#how-to-run-multiple-traffic-replayer-scenarios)) 
 
 Stacks can also be redeployed individually, with any required stacks also being deployed initially, e.g. the following command would deploy the migration-console stack
 ```shell
@@ -94,6 +90,22 @@ Once a service has been deployed, a command shell can be opened for that service
 ```shell
 # ./accessContainer.sh <service-name> <stage> <region>
 ./accessContainer.sh migration-console dev us-east-1
+```
+To be able to execute this command the user will need to have their AWS credentials configured for their environment. It is also worth noting that the identity used should have permissions to `ecs:ExecuteCommand` on both the cluster and the given container task. The IAM policy needed could look similar to the below:
+```shell
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "ecs:ExecuteCommand",
+            "Resource": [
+                "arn:aws:ecs:*:12345678912:cluster/migration-<stage>-ecs-cluster",
+                "arn:aws:ecs:*:12345678912:task/migration-<stage>-ecs-cluster/*"
+            ]
+        }
+    ]
+}
 ```
 
 ## Testing the deployed solution
@@ -146,7 +158,7 @@ Or to remove an individual stack from the deployment we can execute
 # For demo context
 cdk destroy migration-console --c contextId=demo-deploy
 ```
-Note that the default retention policy for the OpenSearch Domain is to RETAIN this resource when the stack is deleted, and in order to delete the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `DESTROY`. Otherwise, the Domain can be manually deleted through the AWS console or through other means such as the AWS CLI.
+**Note**: The `demo-deploy`contextId has the retention policy for the OpenSearch Domain set to `DESTROY`, which will remove this resource and all its data when the stack is deleted. In order to retain the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `RETAIN`.
 
 ## How to run multiple Traffic Replayer scenarios
 The project supports running distinct Replayers in parallel, with each Replayer sending traffic to a different target cluster. This functionality allows users to test replaying captured traffic to multiple different target clusters in parallel. Users are able to provide the desired configuration options to spin up a new OpenSearch Domain and Traffic Replayer while using the existing Migration infrastructure that has already been deployed.
@@ -180,7 +192,34 @@ cdk destroy "*" --c contextId=demo-addon1
 
 ### How is an Authorization header set for requests from the Replayer to the target cluster?
 
-See Replayer explanation [here](../../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests)
+The Replayer documentation [here](../../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests) explains the reasoning the Replayer uses to determine what auth header it should use when replaying requests to the target cluster.
+
+As it relates to this CDK, the two main avenues for setting an explicit auth header for the Replayer are through the `trafficReplayerEnableClusterFGACAuth` and `trafficReplayerExtraArgs` options
+1. The `trafficReplayerEnableClusterFGACAuth` option will utilize the `--auth-header-user-and-secret` parameter of the Replayer service to create a basic auth header with a username and AWS Secrets Manager secret value. This option requires that a Fine Grained Access Control (FGAC) user be configured (see `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` CDK context options [here](./options.md)) or is running in demo mode (see `enableDemoAdmin` CDK context option).
+2. The `trafficReplayerExtraArgs` option allows a user to directly specify the Replayer parameter they want to use for setting the auth header. For example to enable SigV4 as the auth header for an OpenSearch service in us-east-1, a user could set this option to `--sigv4-auth-header-service-region es,us-east-1`
+
+### Common Deployment Errors
+
+**Problem**: 
+```
+ERROR: failed to solve: public.ecr.aws/sam/build-nodejs18.x: pulling from host public.ecr.aws failed with status code [manifests latest]: 403 Forbidden
+```
+**Resolution**: </br>
+Follow the warning steps here: https://docs.aws.amazon.com/AmazonECR/latest/public/public-registries.html#public-registry-concepts
+```
+If you've previously authenticated to Amazon ECR Public, if your auth token has expired you may receive an authentication error when attempting to do unauthenticated docker pulls from Amazon ECR Public. 
+To resolve this issue, it may be necessary to run docker logout public.ecr.aws to avoid the error. This will result in an unauthenticated pull. 
+```
+
+**Problem**:
+```
+error TS2345: Argument of type '{ clusterName: string; vpc: IVpc; }' is not assignable to parameter of type 'ClusterAttributes'.
+```
+**Resolution**: </br>
+An older version of the CDK CLI is being used which required additional ClusterAttributes. This error should resolve upon updating the CDK CLI
+```
+npm install -g aws-cdk@latest
+```
 
 ### Useful CDK commands
 

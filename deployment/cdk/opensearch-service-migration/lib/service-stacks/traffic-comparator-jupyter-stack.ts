@@ -13,6 +13,7 @@ export interface TrafficComparatorJupyterProps extends StackPropsExt {
 }
 
 /**
+ * Note: This stack is experimental and should only be used for development
  * TODO: Add additional infrastructure to setup a public endpoint for this service
  */
 export class TrafficComparatorJupyterStack extends MigrationServiceCore {

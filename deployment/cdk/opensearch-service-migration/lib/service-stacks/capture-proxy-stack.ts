@@ -14,6 +14,11 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly customSourceClusterEndpoint?: string
 }
 
+/**
+ * The stack for the "capture-proxy" service. This service will spin up a Capture Proxy instance, and will be partially
+ * duplicated by the "capture-proxy-es" service which contains a Capture Proxy instance and an Elasticsearch with
+ * Search Guard instance.
+ */
 export class CaptureProxyStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: CaptureProxyProps) {

@@ -291,8 +291,12 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            if (mskUtilityStack) trafficReplayerStack.addDependency(mskUtilityStack)
-            if (migrationStack) trafficReplayerStack.addDependency(migrationStack)
+            if (mskUtilityStack) {
+                trafficReplayerStack.addDependency(mskUtilityStack)
+            }
+            if (migrationStack) {
+                trafficReplayerStack.addDependency(migrationStack)
+            }
             trafficReplayerStack.addDependency(openSearchStack)
             trafficReplayerStack.addDependency(networkStack)
             this.stacks.push(trafficReplayerStack)
@@ -351,7 +355,9 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            if (elasticsearchStack) captureProxyStack.addDependency(elasticsearchStack)
+            if (elasticsearchStack) {
+                captureProxyStack.addDependency(elasticsearchStack)
+            }
             captureProxyStack.addDependency(mskUtilityStack)
             this.stacks.push(captureProxyStack)
         }
@@ -397,10 +403,18 @@ export class StackComposer {
             })
             // To enable the Migration Console to make requests to other service endpoints with Service Connect,
             // it must be deployed after these services
-            if (captureProxyESStack) migrationConsoleStack.addDependency(captureProxyESStack)
-            if (captureProxyStack) migrationConsoleStack.addDependency(captureProxyStack)
-            if (elasticsearchStack) migrationConsoleStack.addDependency(elasticsearchStack)
-            if (fetchMigrationStack) migrationConsoleStack.addDependency(fetchMigrationStack)
+            if (captureProxyESStack) {
+                migrationConsoleStack.addDependency(captureProxyESStack)
+            }
+            if (captureProxyStack) {
+                migrationConsoleStack.addDependency(captureProxyStack)
+            }
+            if (elasticsearchStack) {
+                migrationConsoleStack.addDependency(elasticsearchStack)
+            }
+            if (fetchMigrationStack) {
+                migrationConsoleStack.addDependency(fetchMigrationStack)
+            }
             migrationConsoleStack.addDependency(mskUtilityStack)
             migrationConsoleStack.addDependency(openSearchStack)
             this.stacks.push(migrationConsoleStack)
