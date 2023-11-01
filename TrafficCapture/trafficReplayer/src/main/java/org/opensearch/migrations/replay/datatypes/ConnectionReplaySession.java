@@ -31,7 +31,7 @@ public class ConnectionReplaySession {
 
     @Getter
     @Setter
-    private UniqueRequestKey currentConnectionId;
+    private UniqueReplayerRequestKey currentConnectionId;
 
     public ConnectionReplaySession(EventLoop eventLoop) {
         this.eventLoop = eventLoop;

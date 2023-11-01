@@ -1,11 +1,11 @@
 package org.opensearch.migrations.replay.datatypes;
 
-public class UniqueRequestKey extends UniqueSourceRequestKey {
+public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     public final ITrafficStreamKey trafficStreamKey;
     public final int sourceRequestIndexOffsetAtFirstObservation;
     public final int replayerRequestIndex;
 
-    public UniqueRequestKey(ITrafficStreamKey streamKey, int sourceOffset, int replayerIndex) {
+    public UniqueReplayerRequestKey(ITrafficStreamKey streamKey, int sourceOffset, int replayerIndex) {
         this.trafficStreamKey = streamKey;
         this.sourceRequestIndexOffsetAtFirstObservation = sourceOffset;
         this.replayerRequestIndex = replayerIndex;

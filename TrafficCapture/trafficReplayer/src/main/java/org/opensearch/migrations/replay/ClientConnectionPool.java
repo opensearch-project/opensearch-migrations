@@ -15,7 +15,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
@@ -132,7 +132,7 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualChannelGet(UniqueRequestKey requestKey, boolean ignoreIfNotPresent) {
+    submitEventualChannelGet(UniqueReplayerRequestKey requestKey, boolean ignoreIfNotPresent) {
         ConnectionReplaySession channelFutureAndSchedule =
                 getCachedSession(requestKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
@@ -151,7 +151,7 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(UniqueRequestKey requestKey, boolean dontCreate) {
+    public ConnectionReplaySession getCachedSession(UniqueReplayerRequestKey requestKey, boolean dontCreate) {
         var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.getTrafficStreamKey().getConnectionId()) :
                 connectionId2ChannelCache.get(requestKey.getTrafficStreamKey().getConnectionId());
         if (crs != null) {

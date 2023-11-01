@@ -14,7 +14,7 @@ import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -76,9 +76,9 @@ public class TrafficReplayer {
     private final TrafficStreamLimiter liveTrafficStreamLimiter;
     private final AtomicInteger successfulRequestCount;
     private final AtomicInteger exceptionRequestCount;
-    private ConcurrentHashMap<UniqueRequestKey,
+    private ConcurrentHashMap<UniqueReplayerRequestKey,
             DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap;
-    private ConcurrentHashMap<UniqueRequestKey,
+    private ConcurrentHashMap<UniqueReplayerRequestKey,
             DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestToFinalWorkFuturesMap;
 
     private AtomicBoolean stopReadingRef;
@@ -478,7 +478,7 @@ public class TrafficReplayer {
         }
     }
 
-    ConcurrentHashMap<UniqueRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
+    ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
 
 
     @AllArgsConstructor
@@ -487,7 +487,7 @@ public class TrafficReplayer {
         private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
 
         @Override
-        public void onRequestReceived(UniqueRequestKey requestKey, HttpMessageAndTimestamp request) {
+        public void onRequestReceived(UniqueReplayerRequestKey requestKey, HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             liveTrafficStreamLimiter.addWork(1);
@@ -505,7 +505,7 @@ public class TrafficReplayer {
 
 
         @Override
-        public void onFullDataReceived(UniqueRequestKey requestKey, RequestResponsePacketPair rrPair) {
+        public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair) {
             log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
             var resultantCf = requestFutureMap.remove(requestKey)
                     .map(f ->
@@ -563,7 +563,7 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onConnectionClose(UniqueRequestKey requestKey, Instant timestamp) {
+        public void onConnectionClose(UniqueReplayerRequestKey requestKey, Instant timestamp) {
             replayEngine.setFirstTimestamp(timestamp);
             replayEngine.closeConnection(requestKey, timestamp);
         }
@@ -573,7 +573,7 @@ public class TrafficReplayer {
                                       @NonNull Duration timeout,
                                       ReplayEngine replayEngine)
             throws ExecutionException, InterruptedException, TimeoutException {
-        Map.Entry<UniqueRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
+        Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
                 allRemainingWorkArray = requestToFinalWorkFuturesMap.entrySet().toArray(Map.Entry[]::new);
         log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
         if (log.isInfoEnabled()) {
@@ -655,7 +655,7 @@ public class TrafficReplayer {
 
     private TransformedTargetRequestAndResponse
     packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
-                            UniqueRequestKey requestKey,
+                            UniqueReplayerRequestKey requestKey,
                             RequestResponsePacketPair rrPair,
                             TransformedTargetRequestAndResponse summary,
                             Exception t) {
@@ -681,7 +681,7 @@ public class TrafficReplayer {
         return summary;
     }
 
-    private static SourceTargetCaptureTuple getSourceTargetCaptureTuple(UniqueRequestKey uniqueRequestKey,
+    private static SourceTargetCaptureTuple getSourceTargetCaptureTuple(UniqueReplayerRequestKey uniqueRequestKey,
                                                                         RequestResponsePacketPair rrPair,
                                                                         TransformedTargetRequestAndResponse summary,
                                                                         Exception t) {
@@ -705,7 +705,7 @@ public class TrafficReplayer {
     }
 
     private DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
-    transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request, UniqueRequestKey requestKey) {
+    transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request, UniqueReplayerRequestKey requestKey) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
                 ()->request.packetBytes.stream());
@@ -715,7 +715,7 @@ public class TrafficReplayer {
     transformAndSendRequest(PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
                             ReplayEngine replayEngine,
                             @NonNull Instant start, @NonNull Instant end,
-                            UniqueRequestKey requestKey,
+                            UniqueReplayerRequestKey requestKey,
                             Supplier<Stream<byte[]>> packetsSupplier)
     {
         try {

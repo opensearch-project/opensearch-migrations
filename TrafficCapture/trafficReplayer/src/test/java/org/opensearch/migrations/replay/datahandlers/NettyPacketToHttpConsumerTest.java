@@ -19,7 +19,7 @@ import org.opensearch.migrations.replay.TestRequestKey;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
@@ -163,7 +163,7 @@ class NettyPacketToHttpConsumerTest {
                 var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, Instant.now(), Instant.now(),
-                        new UniqueRequestKey(trafficStreamKey, 0, i),
+                        new UniqueReplayerRequestKey(trafficStreamKey, 0, i),
                         ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 log.info("requestFinishFuture="+requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();

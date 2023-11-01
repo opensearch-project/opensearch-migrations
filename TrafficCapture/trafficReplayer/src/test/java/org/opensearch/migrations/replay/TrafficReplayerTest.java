@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
@@ -153,14 +153,14 @@ class TrafficReplayerTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueRequestKey id, HttpMessageAndTimestamp request) {
+                            public void onRequestReceived(UniqueReplayerRequestKey id, HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueRequestKey key, RequestResponsePacketPair fullPair) {
+                            public void onFullDataReceived(UniqueReplayerRequestKey key, RequestResponsePacketPair fullPair) {
                                 var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                             }
@@ -170,7 +170,7 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueRequestKey key, Instant when) {}
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -194,14 +194,14 @@ class TrafficReplayerTest {
                                 "CapturedTrafficToHttpTransactionAccumulator that's being used in this unit test!",
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueRequestKey id, HttpMessageAndTimestamp request) {
+                            public void onRequestReceived(UniqueReplayerRequestKey id, HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueRequestKey key, RequestResponsePacketPair fullPair) {
+                            public void onFullDataReceived(UniqueReplayerRequestKey key, RequestResponsePacketPair fullPair) {
                                 var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                             }
@@ -211,7 +211,7 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueRequestKey key, Instant when) {}
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
                         }
                 );
         byte[] serializedChunks;

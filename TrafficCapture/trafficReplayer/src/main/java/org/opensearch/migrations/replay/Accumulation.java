@@ -2,13 +2,11 @@ package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 
 import java.time.Instant;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class Accumulation {
 
@@ -50,8 +48,8 @@ public class Accumulation {
         return rrPair = new RequestResponsePacketPair();
     }
 
-    public UniqueRequestKey getRequestKey() {
-        return new UniqueRequestKey(trafficStreamKey, startingSourceRequestIndex, getIndexOfCurrentRequest());
+    public UniqueReplayerRequestKey getRequestKey() {
+        return new UniqueReplayerRequestKey(trafficStreamKey, startingSourceRequestIndex, getIndexOfCurrentRequest());
     }
 
     public boolean hasSignaledRequests() {
