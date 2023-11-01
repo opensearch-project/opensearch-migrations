@@ -1,18 +1,36 @@
+# Name of the Data Prepper pipeline
 historical-data-migration:
+  # Source cluster configuration
   source:
     opensearch:
+      # DO NOT CHANGE the hosts value - this will be updated by the CDK
       hosts:
       - <SOURCE_CLUSTER_HOST>
+      # Uncomment the following line to disable TLS
+      #insecure: true
+      # Example configuration on how to disable authentication (default: false)
       disable_authentication: true
       indices:
+        # Indices to exclude - exclude system indices by default
         exclude:
         - index_name_regex: \.*
+  # Target cluster configuration
   sink:
   - opensearch:
-      bulk_size: 10
+      # DO NOT CHANGE the hosts value - this will be updated by the CDK
+      # But adjust the protocol (http or https) as appropriate
       hosts:
       - https://<TARGET_CLUSTER_HOST>
+      # Derive index name from record metadata
       index: ${getMetadata("opensearch-index")}
+      # Use the same document ID as the source cluster document
       document_id: ${getMetadata("opensearch-document_id")}
+      # Example configuration for basic auth
       username: user
       password: pass
+      #disable_authentication: true
+  # Additional pipeline options/optimizations
+  # For maximum throughput, match workers to number of vCPUs (default: 1)
+  workers: 1
+  # delay is how often the worker threads should process data (default: 3000 ms)
+  delay: 0
