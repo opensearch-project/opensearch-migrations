@@ -1,0 +1,66 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+  hostmetrics:
+    scrapers:
+      cpu:
+      disk:
+      filesystem:
+      load:
+      memory:
+      network:
+      process:
+      processes:
+      paging:
+
+processors:
+  memory_limiter:
+    limit_mib: 300
+  batch:
+  attributes:
+    actions:
+      - key: event
+        from_attribute: log4j.context_data.event
+        action: insert
+      - key: log4j.context_data.event
+        action: delete
+      - key: channel_id
+        from_attribute: log4j.context_data.channel_id
+        action: insert
+      - key: log4j.context_data.channel_id
+        action: delete
+
+extensions:
+  basicauth/client:
+    client_auth: 
+      username: "admin"
+      password: "admin"
+  pprof:
+    endpoint: "localhost:1777"
+  health_check:
+
+exporters:
+  opensearch:
+    namespace: migrations
+    http:
+      endpoint: "https://opensearchanalytics:9200"
+      auth:
+        authenticator: basicauth/client
+      tls:
+        insecure_skip_verify: true
+    # index: "logs"
+  logging:
+    verbosity: detailed
+  debug:
+
+service:
+  extensions: [health_check, pprof, basicauth/client]
+  telemetry:
+    logs:
+      level: "debug"
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [attributes]
+      exporters: [logging, debug, opensearch]
