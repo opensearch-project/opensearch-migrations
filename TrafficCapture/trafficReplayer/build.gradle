@@ -58,9 +58,10 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 'auth', version: '2.20.102'
     implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.20.127'
 
-    testImplementation project(':testUtilities')
+
     testImplementation project(':captureOffloader')
     testImplementation testFixtures(project(path: ':captureOffloader'))
+    testImplementation testFixtures(project(path: ':testUtilities'))
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.x.x'

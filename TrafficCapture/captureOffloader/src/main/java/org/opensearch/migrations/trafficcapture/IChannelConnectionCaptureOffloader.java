@@ -1,4 +1,4 @@
 package org.opensearch.migrations.trafficcapture;
 
-public interface IChannelConnectionCaptureOffloader extends IChannelConnectionCaptureListener {
+public interface IChannelConnectionCaptureOffloader<T> extends IChannelConnectionCaptureListener<T> {
 }

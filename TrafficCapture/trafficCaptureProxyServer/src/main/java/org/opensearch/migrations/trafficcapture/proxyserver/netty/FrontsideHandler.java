@@ -70,7 +70,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        cause.printStackTrace();
+        log.atError().setCause(cause).setMessage("Caught error").log();
         ctx.close();
     }
 

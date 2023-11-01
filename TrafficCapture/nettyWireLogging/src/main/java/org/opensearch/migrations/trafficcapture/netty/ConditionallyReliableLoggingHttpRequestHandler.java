@@ -9,10 +9,10 @@ import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSeriali
 import java.util.function.Predicate;
 
 @Slf4j
-public class ConditionallyReliableLoggingHttpRequestHandler extends LoggingHttpRequestHandler {
+public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHttpRequestHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpRequestHandler(IChannelConnectionCaptureSerializer trafficOffloader,
+    public ConditionallyReliableLoggingHttpRequestHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader,
                                                           Predicate<HttpRequest> headerPredicateForWhenToBlock) {
         super(trafficOffloader);
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;

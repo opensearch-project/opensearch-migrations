@@ -194,8 +194,8 @@ public class CaptureProxy {
         kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
 
         if (params.kafkaPropertiesFile != null) {
-            try {
-                kafkaProps.load(new FileReader(params.kafkaPropertiesFile));
+            try (var fileReader = new FileReader(params.kafkaPropertiesFile)) {
+                kafkaProps.load(fileReader);
             } catch (IOException e) {
                 log.error("Unable to locate provided Kafka producer properties file path: " + params.kafkaPropertiesFile);
                 throw e;
@@ -294,8 +294,7 @@ public class CaptureProxy {
                         }
                     }).orElse(null), getConnectionCaptureFactory(params));
         } catch (Exception e) {
-            System.err.println(e);
-            e.printStackTrace();
+            log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -310,12 +309,6 @@ public class CaptureProxy {
         }));
         // This loop just gives the main() function something to do while the netty event loops
         // work in the background.
-        while (true) {
-            // TODO: The kill signal will cause the sleep to throw an InterruptedException,
-            // which may not be what we want to do - it seems like returning an exit code of 0
-            // might make more sense.  This is something to research - e.g. by seeing if there's
-            // specific behavior that POSIX recommends/requires.
-            Thread.sleep(60*1000);
-        }
+        proxy.waitForClose();
     }
 }

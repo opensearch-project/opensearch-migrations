@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -47,6 +48,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         this(nodeId, producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, messageSize);
     }
 
+    @Override
+    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) {
+        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, new StreamManager(connectionId));
+    }
+
     @AllArgsConstructor
     static class CodedOutputStreamWrapper implements CodedOutputStreamHolder {
         private final CodedOutputStream codedOutputStream;
@@ -58,7 +64,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     }
 
     @AllArgsConstructor
-    class StreamManager extends OrderedStreamLifecyleManager {
+    class StreamManager extends OrderedStreamLifecyleManager<RecordMetadata> {
         String connectionId;
 
         @Override
@@ -68,10 +74,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
         }
 
         @Override
-        public CompletableFuture<Object>
+        public CompletableFuture<RecordMetadata>
         kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
             if (!(outputStreamHolder instanceof CodedOutputStreamWrapper)) {
-                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                throw new IllegalArgumentException("Unknown outputStreamHolder sent back to StreamManager: " +
                         outputStreamHolder);
             }
             var osh = (CodedOutputStreamWrapper) outputStreamHolder;
@@ -80,17 +86,17 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
             try {
                 String recordId = String.format("%s.%d", connectionId, index);
                 var byteBuffer = osh.byteBuffer;
-                ProducerRecord<String, byte[]> record = new ProducerRecord<>(topicNameForTraffic, recordId,
+                ProducerRecord<String, byte[]> kafkaRecord = new ProducerRecord<>(topicNameForTraffic, recordId,
                         Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
                 // Used to essentially wrap Future returned by Producer to CompletableFuture
-                CompletableFuture cf = new CompletableFuture<>();
+                var cf = new CompletableFuture<RecordMetadata>();
                 log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
                 // Async request to Kafka cluster
-                producer.send(record, handleProducerRecordSent(cf, recordId));
+                producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId));
                 metricsLogger.atSuccess()
                         .addKeyValue("channelId", connectionId)
                         .addKeyValue("topicName", topicNameForTraffic)
-                        .addKeyValue("sizeInBytes", record.value().length)
+                        .addKeyValue("sizeInBytes", kafkaRecord.value().length)
                         .addKeyValue("diagnosticId", recordId)
                         .setMessage("Sent message to Kafka").log();
                 return cf;
@@ -99,38 +105,32 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
                         .addKeyValue("channelId", connectionId)
                         .addKeyValue("topicName", topicNameForTraffic)
                         .setMessage("Sending message to Kafka failed.").log();
-                throw new RuntimeException(e);
+                throw e;
             }
         }
-    }
 
-    @Override
-    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) {
-        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, new StreamManager(connectionId));
-    }
-
-    /**
-     *  The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
-     *  documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
-     *  "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
-     *  and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
-     *
-     *  Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
-     *  retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
-     *  as well as basic retry backoff
-     */
-    private Callback handleProducerRecordSent(CompletableFuture cf, String recordId) {
-        return (metadata, exception) -> {
-            if (exception != null) {
-                log.error("Error sending producer record: {}", recordId, exception);
-                cf.completeExceptionally(exception);
-            }
-            else {
-                log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
-                    recordId, metadata.topic(), metadata.partition());
-                cf.complete(metadata);
-            }
-        };
+        /**
+         * The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
+         * documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
+         * "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
+         * and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
+         * <p>
+         * Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
+         * retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
+         * as well as basic retry backoff
+         */
+        private Callback handleProducerRecordSent(CompletableFuture<RecordMetadata> cf, String recordId) {
+            return (metadata, exception) -> {
+                if (exception != null) {
+                    log.error("Error sending producer record: {}", recordId, exception);
+                    cf.completeExceptionally(exception);
+                } else {
+                    log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
+                            recordId, metadata.topic(), metadata.partition());
+                    cf.complete(metadata);
+                }
+            };
+        }
     }
 
 }

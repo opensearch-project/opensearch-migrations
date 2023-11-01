@@ -14,7 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Stream;
 
-public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFactory {
+public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFactory<Void> {
 
     private final int bufferSize;
     private final String nodeId;
@@ -35,16 +35,16 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     }
 
     @AllArgsConstructor
-    class StreamManager extends OrderedStreamLifecyleManager {
+    class StreamManager extends OrderedStreamLifecyleManager<Void> {
         @Override
         public CodedOutputStreamHolder createStream() {
             return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
         }
 
         @Override
-        protected CompletableFuture<Object> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+        protected CompletableFuture<Void> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
             if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
-                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                throw new IllegalArgumentException("Unknown outputStreamHolder sent back to StreamManager: " +
                         outputStreamHolder);
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
@@ -59,9 +59,9 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
+    public IChannelConnectionCaptureSerializer<Void> createOffloader(String connectionId) throws IOException {
         // This array is only an indirection to work around Java's constraint that lambda values are final
-        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, new StreamManager());
+        return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager());
     }
 
     public Stream<TrafficStream> getRecordedTrafficStreamsStream() {
