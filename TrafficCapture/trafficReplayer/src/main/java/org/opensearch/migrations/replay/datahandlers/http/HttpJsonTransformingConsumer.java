@@ -9,7 +9,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
@@ -48,7 +48,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     private final EmbeddedChannel channel;
     private static final MetricsLogger metricsLogger = new MetricsLogger("HttpJsonTransformingConsumer");
     private String diagnosticLabel;
-    private UniqueRequestKey requestKeyForMetricsLogging;
+    private UniqueReplayerRequestKey requestKeyForMetricsLogging;
 
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
@@ -66,7 +66,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                         IAuthTransformerFactory authTransformerFactory,
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
                                         String diagnosticLabel,
-                                        UniqueRequestKey requestKeyForMetricsLogging) {
+                                        UniqueReplayerRequestKey requestKeyForMetricsLogging) {
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);

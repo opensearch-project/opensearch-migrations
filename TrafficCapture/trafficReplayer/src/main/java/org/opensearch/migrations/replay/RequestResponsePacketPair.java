@@ -3,12 +3,10 @@ package org.opensearch.migrations.replay;
 import com.google.common.base.Objects;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -16,7 +14,7 @@ import java.util.Optional;
 @Slf4j
 public class RequestResponsePacketPair {
 
-    enum ReconstructionStatus {
+    public enum ReconstructionStatus {
         Complete,
         ExpiredPrematurely,
         ClosedPrematurely
@@ -25,12 +23,7 @@ public class RequestResponsePacketPair {
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
-    public final UniqueRequestKey requestKey;
     ReconstructionStatus completionStatus;
-
-    public RequestResponsePacketPair(UniqueRequestKey requestKey) {
-        this.requestKey = requestKey;
-    }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {
@@ -80,13 +73,12 @@ public class RequestResponsePacketPair {
         RequestResponsePacketPair that = (RequestResponsePacketPair) o;
         return Objects.equal(requestData, that.requestData)
                 && Objects.equal(responseData, that.responseData)
-                && Objects.equal(requestKey, that.requestKey)
                 && Objects.equal(trafficStreamKeysBeingHeld, that.trafficStreamKeysBeingHeld);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(requestData, responseData, requestKey, trafficStreamKeysBeingHeld);
+        return Objects.hashCode(requestData, responseData, trafficStreamKeysBeingHeld);
     }
 
     @Override

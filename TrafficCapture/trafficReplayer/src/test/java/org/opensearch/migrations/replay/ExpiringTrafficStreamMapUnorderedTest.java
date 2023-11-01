@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -38,11 +37,11 @@ class ExpiringTrafficStreamMapUnorderedTest {
         for (int i=0; i<expectedExpirationCounts.length; ++i) {
             var ts = Instant.ofEpochSecond(timestamps[i]);
             var tsk = new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0);
-            var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk, k->new Accumulation(0));
+            var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk, k->new Accumulation(tsk, 0));
             expiringMap.expireOldEntries(new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0), accumulation, ts);
             createdAccumulations.add(accumulation);
             if (accumulation != null) {
-                var rrPair = accumulation.getOrCreateTransactionPair(tsk);
+                var rrPair = accumulation.getOrCreateTransactionPair();
                 rrPair.addResponseData(ts, ("Add" + i).getBytes(StandardCharsets.UTF_8));
             }
             expiredCountsPerLoop.add(expiredAccumulations.size());

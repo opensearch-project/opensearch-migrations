@@ -9,12 +9,12 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.IOException;
@@ -22,16 +22,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Random;
-import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -95,10 +89,11 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         return bb;
     }
 
+    static AtomicInteger uniqueIdCounter = new AtomicInteger();
     static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset,
                                              List<ObservationDirective> directives) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
-        var offloader = connectionFactory.createOffloader("TEST_CONNECTION_ID");
+        var offloader = connectionFactory.createOffloader("TEST_"+uniqueIdCounter.incrementAndGet());
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);
         }
@@ -191,26 +186,38 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         var tsIndicesReceived = new TreeSet<Integer>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
-                        (id,request) -> requestsReceived.incrementAndGet(),
-                        fullPair -> {
-                            var sourceIdx = fullPair.requestKey.getSourceRequestIndex();
-                            if (fullPair.completionStatus ==
-                                    RequestResponsePacketPair.ReconstructionStatus.ClosedPrematurely) {
-                                return;
+                        new AccumulationCallbacks() {
+                            @Override
+                            public void onRequestReceived(UniqueReplayerRequestKey key, HttpMessageAndTimestamp request) {
+                                requestsReceived.incrementAndGet();
                             }
-                            fullPair.getTrafficStreamsHeld().stream()
-                                    .forEach(tsk -> tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
-                            if (aggregations.size() > sourceIdx) {
-                                var oldVal = aggregations.set(sourceIdx, fullPair);
-                                if (oldVal != null) {
-                                    Assertions.assertEquals(oldVal, fullPair);
+
+                            @Override
+                            public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair fullPair) {
+                                var sourceIdx = requestKey.getSourceRequestIndex();
+                                if (fullPair.completionStatus ==
+                                        RequestResponsePacketPair.ReconstructionStatus.ClosedPrematurely) {
+                                    return;
                                 }
-                            } else{
-                                aggregations.add(fullPair);
+                                fullPair.getTrafficStreamsHeld().stream()
+                                        .forEach(tsk -> tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
+                                if (aggregations.size() > sourceIdx) {
+                                    var oldVal = aggregations.set(sourceIdx, fullPair);
+                                    if (oldVal != null) {
+                                        Assertions.assertEquals(oldVal, fullPair);
+                                    }
+                                } else{
+                                    aggregations.add(fullPair);
+                                }
                             }
-                        },
-                        (rk,timestamp) -> {}
-                );
+
+                            @Override
+                            public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
+                                                                List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
+
+                            @Override
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                        });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();
         trafficStreams.forEach(ts->trafficAccumulator.accept(new TrafficStreamWithEmbeddedKey(ts)));

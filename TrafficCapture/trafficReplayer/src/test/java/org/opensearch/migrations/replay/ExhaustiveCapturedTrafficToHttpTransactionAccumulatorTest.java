@@ -33,7 +33,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
         var possibilitiesLeftToTest = TrafficStreamGenerator.getPossibleTests();
         var numTries = new AtomicInteger();
         StringJoiner seedsThatOfferUniqueTestCases = new StringJoiner(",");
-        var argsArray = TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes(seedStream)
+        var argsArray = TrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(seedStream)
                 .takeWhile(c->!possibilitiesLeftToTest.isEmpty())
                 .filter(c->TrafficStreamGenerator.classifyTrafficStream(possibilitiesLeftToTest, c.trafficStreams) > 0)
                 .flatMap(c-> {

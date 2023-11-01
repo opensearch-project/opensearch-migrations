@@ -4,7 +4,6 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -14,11 +13,10 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  * This class consumes TrafficObservation objects, which will be predominated by reads and writes that
@@ -51,9 +49,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
     private final ExpiringTrafficStreamMap liveStreams;
-    private final BiConsumer<UniqueRequestKey, HttpMessageAndTimestamp> requestHandler;
-    private final Consumer<RequestResponsePacketPair> fullDataHandler;
-    private final BiConsumer<UniqueRequestKey,Instant> connectionCloseListener;
+    private final AccumulationCallbacks listener;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -75,9 +71,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final static MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
-                                                       BiConsumer<UniqueRequestKey,HttpMessageAndTimestamp> requestReceivedHandler,
-                                                       Consumer<RequestResponsePacketPair> fullDataHandler,
-                                                       BiConsumer<UniqueRequestKey,Instant> connectionCloseListener)
+                                                       AccumulationCallbacks accumulationCallbacks)
     {
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY,
                 new BehavioralPolicy() {
@@ -90,15 +84,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     public void onExpireAccumulation(String partitionId, Accumulation accumulation) {
                         connectionsExpiredCounter.incrementAndGet();
                         log.atTrace().setMessage(()->"firing accumulation for accum=["
-                                + accumulation.getRequestId() + "]=" + accumulation)
+                                + accumulation.getRequestKey() + "]=" + accumulation)
                                 .log();
                         fireAccumulationsCallbacksAndClose(accumulation,
                                 RequestResponsePacketPair.ReconstructionStatus.ExpiredPrematurely);
                     }
                 });
-        this.requestHandler = requestReceivedHandler;
-        this.fullDataHandler = fullDataHandler;
-        this.connectionCloseListener = connectionCloseListener;
+        this.listener = accumulationCallbacks;
     }
 
     public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
@@ -169,7 +161,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         var startingSourceRequestOffset =
                 stream.getPriorRequestsReceived()+(stream.hasLastObservationWasUnterminatedRead()?1:0);
-        return new Accumulation(startingSourceRequestOffset, stream.getLastObservationWasUnterminatedRead());
+        return new Accumulation(streamWithKey.getKey(),
+                startingSourceRequestOffset, stream.getLastObservationWasUnterminatedRead());
     }
 
     private static enum CONNECTION_STATUS {
@@ -218,13 +211,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                @NonNull ITrafficStreamKey trafficStreamKey,
                                                Instant timestamp) {
         if (observation.hasClose()) {
-            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey);
-            rrPair.holdTrafficStream(trafficStreamKey);
+            accum.getOrCreateTransactionPair().holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             closedConnectionCounter.incrementAndGet();
-            connectionCloseListener.accept(rrPair.requestKey, timestamp);
+            listener.onConnectionClose(accum.getRequestKey(), timestamp);
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
+            accum.getOrCreateTransactionPair().holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             exceptionConnectionCounter.incrementAndGet();
             accum.resetForNextRequest();
@@ -249,7 +242,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (!accum.hasRrPair()) {
                 requestCounter.incrementAndGet();
             }
-            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey);
+            var rrPair = accum.getOrCreateTransactionPair();
             log.atTrace().setMessage(() -> "Adding request data for accum[" + connectionId + "]=" + accum).log();
             rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             log.atTrace().setMessage(() -> "Added request data for accum[" + connectionId + "]=" + accum).log();
@@ -258,7 +251,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             handleEndOfRequest(accum);
         } else if (observation.hasReadSegment()) {
             log.atTrace().setMessage(()->"Adding request segment for accum[" + connectionId + "]=" + accum).log();
-            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey);
+            var rrPair = accum.getOrCreateTransactionPair();
             if (rrPair.requestData == null) {
                 rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
                 requestCounter.incrementAndGet();
@@ -338,31 +331,26 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
         var requestPacketBytes = accumulation.getRrPair().requestData;
         metricsLogger.atSuccess()
-                .addKeyValue("requestId", accumulation.getRequestId())
-                .addKeyValue("connectionId", accumulation.getRequestId().getTrafficStreamKey().getConnectionId())
+                .addKeyValue("requestId", accumulation.getRequestKey())
+                .addKeyValue("connectionId", accumulation.getRequestKey().getTrafficStreamKey().getConnectionId())
                 .setMessage("Full captured source request was accumulated").log();
-        if (requestPacketBytes != null) {
-            requestHandler.accept(accumulation.getRequestId(), requestPacketBytes);
-            accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
-            return true;
-        } else {
-            log.warn("Received EOM w/out an accumulated value, assuming an empty server interaction and " +
-                    "NOT reproducing this to the target cluster (TODO - do something better?)");
-            accumulation.resetForNextRequest();
-            return false;
-        }
+        assert (requestPacketBytes != null);
+        assert (!requestPacketBytes.hasInProgressSegment());
+        listener.onRequestReceived(accumulation.getRequestKey(), requestPacketBytes);
+        accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
+        return true;
     }
 
     private void handleEndOfResponse(Accumulation accumulation,
                                      RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         metricsLogger.atSuccess()
-                .addKeyValue("requestId", accumulation.getRequestId())
-                .addKeyValue("connectionId", accumulation.getRequestId().getTrafficStreamKey().getConnectionId())
+                .addKeyValue("requestId", accumulation.getRequestKey())
+                .addKeyValue("connectionId", accumulation.getRequestKey().getTrafficStreamKey().getConnectionId())
                 .setMessage("Full captured source response was accumulated").log();
         var rrPair = accumulation.getRrPair();
         rrPair.completionStatus = status;
-        fullDataHandler.accept(rrPair);
+        listener.onFullDataReceived(accumulation.getRequestKey(), rrPair);
         accumulation.resetForNextRequest();
     }
 
@@ -379,10 +367,21 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         try {
             switch (accumulation.state) {
                 case ACCUMULATING_READS:
-                    if (!handleEndOfRequest(accumulation)) {
-                        return;
+                    // This is a safer bet than sending a partial response.  If we drop 1 in a million requests
+                    // where the next TrafficStream had an EOM message and that TrafficStream was dropped, we'll
+                    // NOT send many more requests that never would have made it to the source cluster because
+                    // they weren't well-formed requests in the first place.
+                    //
+                    // It might be advantageous to replicate these to provide stress to the target server, but
+                    // it's a difficult decision and one to be managed with a policy.
+                    // TODO - add Jira/github issue here.
+                    log.warn("Terminating a TrafficStream reconstruction w/out an accumulated value, " +
+                            "assuming an empty server interaction and NOT reproducing this to the target cluster.");
+                    if (accumulation.hasRrPair()) {
+                        listener.onTrafficStreamsExpired(status,
+                                Collections.unmodifiableList(accumulation.getRrPair().trafficStreamKeysBeingHeld));
                     }
-                    // fall through
+                    return;
                 case ACCUMULATING_WRITES:
                     handleEndOfResponse(accumulation, status);
                     break;
@@ -393,12 +392,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     throw new RuntimeException("Unknown enum type: "+accumulation.state);
             }
         } finally {
-            switch (accumulation.state) {
-                case ACCUMULATING_WRITES:
-                    connectionCloseListener.accept(accumulation.getRequestId(),
-                            accumulation.getRrPair().getLastTimestamp().get());
-                default:
-                    ; // nothing
+            if (accumulation.hasSignaledRequests()) {
+                listener.onConnectionClose(accumulation.getRequestKey(), accumulation.getLastTimestamp());
             }
         }
     }

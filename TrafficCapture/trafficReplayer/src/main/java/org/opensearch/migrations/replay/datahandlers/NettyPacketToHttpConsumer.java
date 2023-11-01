@@ -21,7 +21,7 @@ import io.netty.handler.ssl.SslHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -51,15 +51,15 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
     final String diagnosticLabel;
-    private UniqueRequestKey uniqueRequestKeyForMetricsLogging;
+    private UniqueReplayerRequestKey uniqueRequestKeyForMetricsLogging;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
-                                     String diagnosticLabel, UniqueRequestKey uniqueRequestKeyForMetricsLogging) {
+                                     String diagnosticLabel, UniqueReplayerRequestKey uniqueRequestKeyForMetricsLogging) {
         this(createClientConnection(eventLoopGroup, sslContext, serverUri, diagnosticLabel),
                 diagnosticLabel, uniqueRequestKeyForMetricsLogging);
     }
 
-    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, String diagnosticLabel, UniqueRequestKey uniqueRequestKeyForMetricsLogging) {
+    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, String diagnosticLabel, UniqueReplayerRequestKey uniqueRequestKeyForMetricsLogging) {
         this.diagnosticLabel = "[" + diagnosticLabel + "] ";
         this.uniqueRequestKeyForMetricsLogging = uniqueRequestKeyForMetricsLogging;
         responseBuilder = AggregatedRawResponse.builder(Instant.now());

@@ -10,7 +10,7 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -43,7 +43,7 @@ public class RequestPipelineOrchestrator<R> {
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer<R> packetReceiver;
     final String diagnosticLabel;
-    private UniqueRequestKey requestKeyForMetricsLogging;
+    private UniqueReplayerRequestKey requestKeyForMetricsLogging;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
 
@@ -51,7 +51,7 @@ public class RequestPipelineOrchestrator<R> {
                                        IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
                                        String diagnosticLabel,
-                                       UniqueRequestKey requestKeyForMetricsLogging) {
+                                       UniqueReplayerRequestKey requestKeyForMetricsLogging) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
