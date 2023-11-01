@@ -20,9 +20,9 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
-import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonTypeMappingTransformer;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -54,6 +54,8 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import static org.opensearch.migrations.coreutils.MetricsLogger.initializeOpenTelemetry;
 
 @Slf4j
 public class TrafficReplayer {
@@ -257,6 +259,13 @@ public class TrafficReplayer {
             arity=1,
             description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
         String kafkaTrafficPropertyFile;
+
+        @Parameter(required = false,
+                names = {"--otelCollectorEndpoint"},
+                arity = 1,
+                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
+                        "forwarded. The default value is http://otel-collector:4137.")
+        String otelCollectorEndpoint = "http://otel-collector:4137";
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -274,7 +283,6 @@ public class TrafficReplayer {
         }
     }
 
-
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
         var params = parseArgs(args);
         URI uri;
@@ -288,6 +296,8 @@ public class TrafficReplayer {
             System.exit(3);
             return;
         }
+
+        initializeOpenTelemetry("traffic-replayer", params.otelCollectorEndpoint);
 
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true)) {
