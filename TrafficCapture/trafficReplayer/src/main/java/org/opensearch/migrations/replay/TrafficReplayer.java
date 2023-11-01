@@ -74,8 +74,8 @@ public class TrafficReplayer {
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
     private final ClientConnectionPool clientConnectionPool;
     private final TrafficStreamLimiter liveTrafficStreamLimiter;
-    private final AtomicInteger successCount;
-    private final AtomicInteger exceptionCount;
+    private final AtomicInteger successfulRequestCount;
+    private final AtomicInteger exceptionRequestCount;
     private ConcurrentHashMap<UniqueRequestKey,
             DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap;
     private ConcurrentHashMap<UniqueRequestKey,
@@ -134,8 +134,8 @@ public class TrafficReplayer {
                 loadSslContext(serverUri, allowInsecureConnections), numSendingThreads);
         requestFutureMap = new ConcurrentHashMap<>();
         requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
-        successCount = new AtomicInteger();
-        exceptionCount = new AtomicInteger();
+        successfulRequestCount = new AtomicInteger();
+        exceptionRequestCount = new AtomicInteger();
         liveTrafficStreamLimiter = new TrafficStreamLimiter(maxConcurrentOutstandingRequests);
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
@@ -444,16 +444,16 @@ public class TrafficReplayer {
                 }
             }
             if (requestToFinalWorkFuturesMap.size() > 0 ||
-                    exceptionCount.get() > 0) {
+                    exceptionRequestCount.get() > 0) {
                 log.atWarn().setMessage("{} in-flight requests being dropped due to pending shutdown; " +
                                 "{} requests to the target threw an exception; " +
                                 "{} requests were successfully processed.")
                         .addArgument(requestToFinalWorkFuturesMap.size())
-                        .addArgument(exceptionCount.get())
-                        .addArgument(successCount.get())
+                        .addArgument(exceptionRequestCount.get())
+                        .addArgument(successfulRequestCount.get())
                         .log();
             } else {
-                log.info(successCount.get() + " requests were successfully processed.");
+                log.info(successfulRequestCount.get() + " requests were successfully processed.");
             }
             log.info("# of connections created: {}; # of requests on reused keep-alive connections: {}; " +
                             "# of expired connections: {}; # of connections closed: {}; " +
@@ -670,13 +670,13 @@ public class TrafficReplayer {
         if (summary.getError() != null) {
             log.atInfo().setCause(summary.getError()).setMessage("Exception for request {}: ")
                 .addArgument(requestKey).log();
-            exceptionCount.incrementAndGet();
+            exceptionRequestCount.incrementAndGet();
         } else if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
             log.atInfo().setCause(summary.getError()).setMessage("Unknown error transforming the request {}: ")
                     .addArgument(requestKey).log();
-            exceptionCount.incrementAndGet();
+            exceptionRequestCount.incrementAndGet();
         } else {
-            successCount.incrementAndGet();
+            successfulRequestCount.incrementAndGet();
         }
         return summary;
     }
