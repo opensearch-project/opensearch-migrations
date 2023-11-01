@@ -19,6 +19,8 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
@@ -226,24 +228,22 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     } else {
                         log.atInfo().setMessage(()->"Signaling previously returned CompletableFuture packet write had an exception : "
                                 + packetData + " hash=" + System.identityHashCode(packetData)).log();
-                        metricsLogger.atError(cause)
-                                .addKeyValue("channelId", channel.id().asLongText())
-                                .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
-                                .addKeyValue("connectionId",
-                                        uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                                .setMessage("Failed to write component of request").log();
+                        metricsLogger.atError(MetricsEvent.WRITING_REQUEST_COMPONENT_FAILED, cause)
+                                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
+                                .setAttribute(MetricsAttributeKey.REQUEST_ID, uniqueRequestKeyForMetricsLogging)
+                                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
+                                        uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId()).emit();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
                     }
                 });
         log.atTrace().setMessage(()->"Writing packet data=" + packetData +
                 ".  Created future for writing data="+completableFuture).log();
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", channel.id().asLongText())
-                .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
-                .addKeyValue("connectionId", uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                .addKeyValue("sizeInBytes", readableBytes)
-                .setMessage("Component of request written to target").log();
+        metricsLogger.atSuccess(MetricsEvent.WROTE_REQUEST_COMPONENT)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, uniqueRequestKeyForMetricsLogging)
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, readableBytes).emit();
         return completableFuture;
     }
 

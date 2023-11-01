@@ -16,6 +16,8 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 
@@ -126,11 +128,10 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
         super.channelRead(ctx, msg);
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .addKeyValue("httpMethod", httpRequest.method().toString())
-                .addKeyValue("httpEndpoint", httpRequest.uri())
-                .setMessage("Full request received").log();
+        metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_REQUEST)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
+                .setAttribute(MetricsAttributeKey.HTTP_METHOD, httpRequest.method().toString())
+                .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, httpRequest.uri()).emit();
     }
 
     @Override
@@ -140,9 +141,8 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         {
             var bb = ((ByteBuf) msg).retainedDuplicate();
             trafficOffloader.addReadEvent(timestamp, bb);
-            metricsLogger.atSuccess()
-                    .addKeyValue("channelId", ctx.channel().id().asLongText())
-                    .setMessage("Component of request received").log();
+            metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
+                    .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
 
             httpProcessedState = parseHttpMessageParts(bb); // bb is consumed/release by this method
         }

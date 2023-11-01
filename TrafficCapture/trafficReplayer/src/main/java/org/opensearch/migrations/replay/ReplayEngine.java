@@ -3,6 +3,8 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
@@ -137,12 +139,11 @@ public class ReplayEngine {
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
         logStartOfWork(requestKey, newCount, start, label);
-        metricsLogger.atSuccess()
-                .addKeyValue("requestId", requestKey.toString())
-                .addKeyValue("connectionId", requestKey.getTrafficStreamKey().getConnectionId())
-                .addKeyValue("delayFromOriginalToScheduledStartInMs", Duration.between(originalStart, start).toMillis())
-                .addKeyValue("scheduledStartTime", start.toString())
-                .setMessage("Request scheduled to be sent").log();
+        metricsLogger.atSuccess(MetricsEvent.SCHEDULED_REQUEST_TO_BE_SENT)
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKey.getTrafficStreamKey().getConnectionId())
+                .setAttribute(MetricsAttributeKey.DELAY_FROM_ORIGINAL_TO_SCHEDULED_START, Duration.between(originalStart, start).toMillis())
+                .setAttribute(MetricsAttributeKey.SCHEDULED_SEND_TIME, start.toString()).emit();
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }

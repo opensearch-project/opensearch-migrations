@@ -7,6 +7,8 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -114,17 +116,15 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                     TrafficStream ts = TrafficStream.parseFrom(record.value());
                     // Ensure we increment trafficStreamsRead even at a higher log level
                     log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
-                    metricsLogger.atSuccess()
-                            .addKeyValue("connectionId", ts.getConnectionId())
-                            .addKeyValue("topicName", this.topic)
-                            .addKeyValue("sizeInBytes", ts.getSerializedSize())
-                            .setMessage("Parsed traffic stream from Kafka").log();
+                    metricsLogger.atSuccess(MetricsEvent.PARSED_TRAFFIC_STREAM_FROM_KAFKA)
+                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, ts.getConnectionId())
+                            .setAttribute(MetricsAttributeKey.TOPIC_NAME, this.topic)
+                            .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, ts.getSerializedSize()).emit();
                     return (ITrafficStreamWithKey) new TrafficStreamWithEmbeddedKey(ts);
                 } catch (InvalidProtocolBufferException e) {
                     RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
-                    metricsLogger.atError(recordError)
-                            .addKeyValue("topicName", this.topic)
-                            .setMessage("Failed to parse traffic stream from Kafka.").log();
+                    metricsLogger.atError(MetricsEvent.PARSING_TRAFFIC_STREAM_FROM_KAFKA_FAILED, recordError)
+                            .setAttribute(MetricsAttributeKey.TOPIC_NAME, this.topic).emit();
                     if (recordError != null) {
                         throw recordError;
                     }

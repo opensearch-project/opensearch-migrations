@@ -5,6 +5,8 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
@@ -52,12 +54,11 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
                     .append(" ")
                     .append(request.protocolVersion().text())
                     .toString());
-            metricsLogger.atSuccess()
-                    .addKeyValue("requestId", requestKeyForMetricsLogging)
-                    .addKeyValue("connectionId", requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                    .addKeyValue("httpMethod", request.method())
-                    .addKeyValue("httpEndpoint", request.uri())
-                    .setMessage("Captured request parsed to HTTP").log();
+            metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
+                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging)
+                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                    .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
+                    .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));

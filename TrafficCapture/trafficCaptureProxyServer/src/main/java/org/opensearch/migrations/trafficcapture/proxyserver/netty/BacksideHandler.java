@@ -4,6 +4,8 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 
 @Slf4j
@@ -19,16 +21,14 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
         ctx.read();
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .setMessage("BacksideHandler channel is active.").log();
+        metricsLogger.atSuccess(MetricsEvent.BACKSIDE_HANDLER_CHANNEL_ACTIVE)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .setMessage("Component of response seen").log();
+        metricsLogger.atSuccess(MetricsEvent.RECEIVED_RESPONSE_COMPONENT)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         writeBackChannel.writeAndFlush(msg);
     }
 
@@ -42,9 +42,9 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
     public void channelInactive(ChannelHandlerContext ctx) {
         log.debug("inactive channel - closing (" + ctx.channel() + ")");
         FrontsideHandler.closeAndFlush(writeBackChannel);
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .setMessage("BacksideHandler channel is closed.").log();
+        metricsLogger.atSuccess(MetricsEvent.BACKSIDE_HANDLER_CHANNEL_CLOSED)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
+//                .setMessage("BacksideHandler channel is closed.").log();
     }
 
     @Override
@@ -52,8 +52,8 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
         cause.printStackTrace();
         String channelId = ctx.channel().id().asLongText();
         FrontsideHandler.closeAndFlush(ctx.channel());
-        metricsLogger.atError(cause)
-                .addKeyValue("channelId", channelId)
-                .setMessage("Exception caught by BacksideChannel").log();
+        metricsLogger.atError(MetricsEvent.BACKSIDE_HANDLER_EXCEPTION, cause)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channelId).emit();
+//                .setMessage("Exception caught by BacksideChannel").log();
     }
 }
