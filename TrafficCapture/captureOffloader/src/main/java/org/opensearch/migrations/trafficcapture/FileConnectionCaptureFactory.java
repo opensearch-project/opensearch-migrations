@@ -1,14 +1,11 @@
 package org.opensearch.migrations.trafficcapture;
 
-import com.google.protobuf.CodedOutputStream;
 import lombok.AllArgsConstructor;
-import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
@@ -22,8 +19,8 @@ import java.util.function.BiFunction;
  * @deprecated - This class is NOT meant to be used for production.
  */
 @Slf4j
-@Deprecated
-public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
+@Deprecated(since="0.1", forRemoval = false)
+public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<Void> {
     private final BiFunction<String, Integer, FileOutputStream> outputStreamCreator;
     private String nodeId;
     private final int bufferSize;
@@ -51,7 +48,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
     }
 
     @AllArgsConstructor
-    class StreamManager extends OrderedStreamLifecyleManager {
+    class StreamManager extends OrderedStreamLifecyleManager<Void> {
         String connectionId;
         @Override
         public CodedOutputStreamAndByteBufferWrapper createStream() {
@@ -59,10 +56,10 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
         }
 
         @Override
-        public CompletableFuture<Object>
+        public CompletableFuture<Void>
         kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
             if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
-                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                throw new IllegalArgumentException("Unknown outputStreamHolder sent back to StreamManager: " +
                         outputStreamHolder);
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
@@ -74,7 +71,6 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
                     fs.write(filledBytes);
                     fs.flush();
                     log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
-                    //codedStreamToFileStreamMap.remove(stream);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -84,6 +80,6 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
 
     @Override
     public IChannelConnectionCaptureSerializer createOffloader(String connectionId) {
-        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, new StreamManager(connectionId));
+        return new StreamChannelConnectionCaptureSerializer<Void>(nodeId, connectionId, new StreamManager(connectionId));
     }
 }

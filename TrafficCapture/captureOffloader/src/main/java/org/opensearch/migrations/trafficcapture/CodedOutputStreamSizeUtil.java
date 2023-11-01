@@ -2,7 +2,6 @@ package org.opensearch.migrations.trafficcapture;
 
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
-import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -13,6 +12,11 @@ import java.time.Instant;
  * Utility functions for computing sizes of fields to be added to a CodedOutputStream
  */
 public class CodedOutputStreamSizeUtil {
+
+    /**
+     * Static class
+     */
+    private CodedOutputStreamSizeUtil() {}
 
     public static int getSizeOfTimestamp(Instant t) {
         long seconds = t.getEpochSecond();

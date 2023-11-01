@@ -7,7 +7,7 @@ import java.net.SocketAddress;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
-public interface IChannelConnectionCaptureListener {
+public interface IChannelConnectionCaptureListener<T> {
     default void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {
     }
 
@@ -75,7 +75,7 @@ public interface IChannelConnectionCaptureListener {
     default void commitEndOfHttpMessageIndicator(Instant timestamp) throws IOException {
     }
 
-    default CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
+    default CompletableFuture<T> flushCommitAndResetStream(boolean isFinal) throws IOException {
         return CompletableFuture.completedFuture(null);
     }
 }

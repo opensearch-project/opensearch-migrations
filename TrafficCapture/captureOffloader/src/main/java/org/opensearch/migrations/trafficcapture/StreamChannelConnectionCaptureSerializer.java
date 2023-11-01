@@ -59,9 +59,9 @@ import java.util.concurrent.ExecutionException;
  * 3: 1
  */
 @Slf4j
-public class StreamChannelConnectionCaptureSerializer implements IChannelConnectionCaptureSerializer, Closeable {
+public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConnectionCaptureSerializer<T> {
 
-    private final static int MAX_ID_SIZE = 96;
+    private static final int MAX_ID_SIZE = 96;
 
     private boolean readObservationsAreWaitingForEom;
     private int eomsSoFar;
@@ -69,13 +69,13 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
 
-    private final StreamLifecycleManager streamManager;
+    private final StreamLifecycleManager<T> streamManager;
     private final String nodeIdString;
     private final String connectionIdString;
     private CodedOutputStreamHolder currentCodedOutputStreamHolderOrNull;
 
     public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
-                                                    @NonNull StreamLifecycleManager streamLifecycleManager) {
+                                                    @NonNull StreamLifecycleManager<T> streamLifecycleManager) {
         this.streamManager = streamLifecycleManager;
         assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId)) +
                 CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId)
@@ -173,7 +173,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
     }
 
     @Override
-    public CompletableFuture<Object> flushCommitAndResetStream(boolean isFinal) throws IOException {
+    public CompletableFuture<T> flushCommitAndResetStream(boolean isFinal) throws IOException {
         if (currentCodedOutputStreamHolderOrNull == null && !isFinal) {
             return CompletableFuture.completedFuture(null);
         }
@@ -190,40 +190,19 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         return future;
     }
 
-    /**
-     * This call is BLOCKING.  Override the Closeable interface - not addCloseEvent.
-     *
-     * @throws IOException
-     */
-    @Override
-    public void close() throws IOException {
-        try {
-            flushCommitAndResetStream(true).get();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-
-    private TrafficObservation.Builder getTrafficObservationBuilder() {
-        return TrafficObservation.newBuilder();
-    }
-
     @Override
     public void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addConnectEvent(Instant timestamp, SocketAddress remote, SocketAddress local) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addDisconnectEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
@@ -234,11 +213,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public void addDeregisterEvent(Instant timestamp) throws IOException {
-
-    }
-
-    static abstract class BufRangeConsumer {
-        abstract void accept(byte[] buff, int offset, int len);
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     private void addStringMessage(int captureFieldNumber, int dataFieldNumber,
@@ -247,7 +222,7 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
         int lengthSize = 1;
         if (str.length() > 0) {
             dataSize = CodedOutputStream.computeStringSize(dataFieldNumber, str);
-            lengthSize = getOrCreateCodedOutputStream().computeInt32SizeNoTag(dataSize);
+            lengthSize = CodedOutputStream.computeInt32SizeNoTag(dataSize);
         }
         beginSubstreamObservation(timestamp, captureFieldNumber, dataSize + lengthSize);
         // e.g. 4 {
@@ -260,7 +235,8 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     private void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buffer) throws IOException {
         var byteBuffer = buffer.nioBuffer();
-        int segmentFieldNumber,segmentCountFieldNumber,segmentDataFieldNumber;
+        int segmentFieldNumber;
+        int segmentDataFieldNumber;
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
             segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = ReadSegmentObservation.DATA_FIELD_NUMBER;
@@ -360,47 +336,47 @@ public class StreamChannelConnectionCaptureSerializer implements IChannelConnect
 
     @Override
     public void addFlushEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelRegisteredEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelUnregisteredEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelActiveEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelInactiveEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelReadEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelReadCompleteEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addUserEventTriggeredEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelWritabilityChangedEvent(Instant timestamp) throws IOException {
-
+        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override

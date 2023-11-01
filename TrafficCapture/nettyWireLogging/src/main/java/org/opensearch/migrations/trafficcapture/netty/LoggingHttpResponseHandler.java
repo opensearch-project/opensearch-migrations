@@ -68,6 +68,12 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     }
 
     @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        flush(ctx);
+        super.handlerRemoved(ctx);
+    }
+
+    @Override
     public void flush(ChannelHandlerContext ctx) throws Exception {
         super.flush(ctx);
     }
