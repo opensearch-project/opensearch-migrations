@@ -20,6 +20,7 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
             throws Throwable {
         if (allLeakChecksAreDisabled ||
                 getAnnotation(extensionContext).map(a -> a.disableLeakChecks()).orElse(false)) {
+            CountingNettyResourceLeakDetector.deactivate();
             finalCall.call();
             return;
         } else {

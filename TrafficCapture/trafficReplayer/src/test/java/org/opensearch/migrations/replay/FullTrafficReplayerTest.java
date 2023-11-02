@@ -54,8 +54,14 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 @Slf4j
+// Turn this on to test with a live Kafka broker.  Other code changes will need to be activated too
 //@Testcontainers
-@WrapWithNettyLeakDetection(repetitions = 1)
+// It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
+// to recycle the TrafficReplayers.  Since that shutdown process optimizes for speed of teardown, rather than tidying
+// everything up as it closes the door, some leaks may be inevitable.  E.g. when work is outstanding and being sent
+// to the test server, a shutdown will stop those work threads without letting them flush through all of their work
+// (since that could take a very long time) and some of the work might have been followed by resource releases.
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class FullTrafficReplayerTest {
 
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";

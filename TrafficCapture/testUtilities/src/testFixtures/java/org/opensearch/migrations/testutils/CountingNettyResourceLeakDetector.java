@@ -28,6 +28,14 @@ public class CountingNettyResourceLeakDetector<T> extends ResourceLeakDetector<T
         numLeaksFoundAtomic.set(0);
     }
 
+    /**
+     * Do everything necessary to turn leak detection on with the highest sensitivity.
+     */
+    public static void deactivate() {
+        CountingNettyResourceLeakDetector.setLevel(Level.DISABLED);
+        numLeaksFoundAtomic.set(0);
+    }
+
     public static class MyResourceLeakDetectorFactory extends ResourceLeakDetectorFactory {
         static {
             System.setProperty("io.netty.leakDetection.targetRecords", "32");
