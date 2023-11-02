@@ -45,7 +45,8 @@ public class Accumulation {
         if (rrPair != null) {
             return rrPair;
         }
-        return rrPair = new RequestResponsePacketPair();
+        rrPair = new RequestResponsePacketPair();
+        return rrPair;
     }
 
     public UniqueReplayerRequestKey getRequestKey() {

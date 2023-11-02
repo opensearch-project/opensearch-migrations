@@ -99,13 +99,13 @@ public class RequestSenderOrchestrator {
                     finalTunneledResponse.future.complete(null);
                     return;
                 }
-                channelFutureAndRequestSchedule.channelFutureFuture
+                channelFutureAndRequestSchedule.getChannelFutureFuture()
                         .map(channelFutureGetAttemptFuture->channelFutureGetAttemptFuture
                                         .thenAccept(v->{
                                             log.atTrace().setMessage(()->requestKey.toString() +
                                                     " ChannelFuture was created with "+v).log();
                                             assert v.channel() ==
-                                                    channelFutureAndRequestSchedule.channelFutureFuture.future
+                                                    channelFutureAndRequestSchedule.getChannelFutureFuture().future
                                                             .getNow(null).channel();
                                             runAfterChannelSetup(channelFutureAndRequestSchedule,
                                                     finalTunneledResponse,

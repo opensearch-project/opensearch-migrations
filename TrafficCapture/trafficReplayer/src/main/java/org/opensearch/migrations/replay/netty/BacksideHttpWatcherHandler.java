@@ -56,9 +56,9 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
         log.atTrace().setMessage(()->"triggerResponseCallbackAndRemoveCallback, callback="+this.responseCallback).log();
         if (this.responseCallback != null) {
             // this method may be re-entrant upon calling the callback, so make sure that we don't loop
-            var responseCallback = this.responseCallback;
+            var originalResponseCallback = this.responseCallback;
             this.responseCallback = null;
-            responseCallback.accept(aggregatedRawResponseBuilder.build());
+            originalResponseCallback.accept(aggregatedRawResponseBuilder.build());
             aggregatedRawResponseBuilder = null;
         }
     }

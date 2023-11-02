@@ -34,6 +34,8 @@ import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
 import org.slf4j.spi.LoggingEventBuilder;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.arns.Arn;
+import software.amazon.awssdk.regions.Region;
 
 import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
@@ -377,9 +379,16 @@ public class TrafficReplayer {
                 throw new ParameterException(AWS_AUTH_HEADER_USER_AND_SECRET_ARG +
                         " must specify two arguments, <USERNAME> <SECRET_ARN>");
             }
-            try (AWSAuthService awsAuthService = new AWSAuthService()) {
+            var secretArnStr = params.awsAuthHeaderUserAndSecret.get(1);
+            var regionOp = Arn.fromString(secretArnStr).region();
+            if (regionOp.isEmpty()) {
+                throw new ParameterException(AWS_AUTH_HEADER_USER_AND_SECRET_ARG +
+                        " must specify two arguments, <USERNAME> <SECRET_ARN>, and SECRET_ARN must specify a region");
+            }
+            try (var credentialsProvider = DefaultCredentialsProvider.create();
+                 AWSAuthService awsAuthService = new AWSAuthService(credentialsProvider, Region.of(regionOp.get()))) {
                 authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(params.awsAuthHeaderUserAndSecret.get(0),
-                        params.awsAuthHeaderUserAndSecret.get(1));
+                        secretArnStr);
             }
         }
 
@@ -631,7 +640,7 @@ public class TrafficReplayer {
         // and were removed from the live map (hopefully)
         DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>[] allCompletableFuturesArray =
                 Arrays.stream(allRemainingWorkArray)
-                        .map(kvp->kvp.getValue()).toArray(DiagnosticTrackableCompletableFuture[]::new);
+                        .map(Map.Entry::getValue).toArray(DiagnosticTrackableCompletableFuture[]::new);
         var allWorkFuture = StringTrackableCompletableFuture.allOf(allCompletableFuturesArray,
                 () -> "TrafficReplayer.AllWorkFinished");
         try {
@@ -718,8 +727,9 @@ public class TrafficReplayer {
         return requestResponseTriple;
     }
 
-    private DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
-    transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request, UniqueReplayerRequestKey requestKey) {
+    public DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
+    transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request,
+                            UniqueReplayerRequestKey requestKey) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
                 request.packetBytes::stream);
@@ -786,10 +796,7 @@ public class TrafficReplayer {
     public void stopReadingAsync() {
         log.warn("TrafficReplayer is being signalled to stop reading new TrafficStream objects");
         stopReadingRef.set(true);
-        var nextChunkFutureRef = this.nextChunkFutureRef.get();
-        if (nextChunkFutureRef != null) {
-            nextChunkFutureRef.cancel(true);
-        }
+        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f->f.cancel(true));
     }
 
     public @NonNull CompletableFuture<Void> shutdown(Error error) {

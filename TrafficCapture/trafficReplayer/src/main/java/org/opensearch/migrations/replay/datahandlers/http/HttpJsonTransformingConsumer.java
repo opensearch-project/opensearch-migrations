@@ -168,7 +168,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     redriveWithoutTransformation(IPacketFinalizingConsumer<R> packetConsumer, Throwable reason) {
         DiagnosticTrackableCompletableFuture<String,Void> consumptionChainedFuture =
                 chunks.stream().collect(
-                        Utils.foldLeft(DiagnosticTrackableCompletableFuture.factory.
+                        Utils.foldLeft(DiagnosticTrackableCompletableFuture.Factory.
                                         completedFuture(null, ()->"Initial value"),
                                 (dcf, bb) -> dcf.thenCompose(v -> {
                                     var rval = packetConsumer.consumeBytes(bb);

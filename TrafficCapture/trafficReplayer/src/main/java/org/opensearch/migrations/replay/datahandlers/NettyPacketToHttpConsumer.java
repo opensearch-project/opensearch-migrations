@@ -191,7 +191,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 log.atWarn().setMessage(()->diagnosticLabel + "outbound channel was not set up successfully, " +
                         "NOT writing bytes hash=" + System.identityHashCode(packetData)).log();
                 channel.close();
-                return StringTrackableCompletableFuture.factory.failedFuture(channelInitException, ()->"");
+                return DiagnosticTrackableCompletableFuture.Factory.failedFuture(channelInitException, ()->"");
             }
         }, ()->"consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
         log.atTrace().setMessage(()->"Setting up write of packetData["+packetData+"] hash=" +

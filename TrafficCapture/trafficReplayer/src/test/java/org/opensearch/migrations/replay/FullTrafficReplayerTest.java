@@ -21,6 +21,7 @@ import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSour
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -54,7 +55,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 //@Testcontainers
-//@WrapWithNettyLeakDetection(repetitions = 1)
+@WrapWithNettyLeakDetection(repetitions = 1)
 public class FullTrafficReplayerTest {
 
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";

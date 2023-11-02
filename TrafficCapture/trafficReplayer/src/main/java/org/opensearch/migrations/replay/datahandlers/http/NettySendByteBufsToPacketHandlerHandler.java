@@ -35,7 +35,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         this.packetReceiver = packetReceiver;
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();
         this.diagnosticLabel = diagnosticLabel;
-        currentFuture = DiagnosticTrackableCompletableFuture.factory.completedFuture(null,
+        currentFuture = DiagnosticTrackableCompletableFuture.Factory.completedFuture(null,
                 ()->"currentFuture for NettySendByteBufsToPacketHandlerHandler initialized to the base case for " + diagnosticLabel);
     }
 
@@ -105,7 +105,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        currentFuture = DiagnosticTrackableCompletableFuture.factory.failedFuture(cause,
+        currentFuture = DiagnosticTrackableCompletableFuture.Factory.failedFuture(cause,
                 () -> "NettySendByteBufsToPacketHandlerHandler got an exception");
         super.exceptionCaught(ctx, cause);
     }
