@@ -303,8 +303,8 @@ public class CaptureProxy {
                 proxy.stop();
                 System.err.println("Done stopping the proxy.");
             } catch (InterruptedException e) {
-                System.err.println("Caught exception while shutting down: "+e);
-                throw new RuntimeException(e);
+                System.err.println("Caught InterruptedException while shutting down, resetting interrupt status: "+e);
+                Thread.currentThread().interrupt();
             }
         }));
         // This loop just gives the main() function something to do while the netty event loops

@@ -23,6 +23,7 @@ public class TrafficStreamLimiter {
             log.atDebug().setMessage(()->"Acquired liveTrafficStreamCostGate (available=" +
                     liveTrafficStreamCostGate.availablePermits()+")").log();
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
     }

@@ -73,7 +73,10 @@ class StringTrackableCompletableFutureTest {
     public static String formatCompletableFuture(DiagnosticTrackableCompletableFuture<String,?> cf) {
         try {
             return "" + cf.get();
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "EXCEPTION";
+        } catch (ExecutionException e) {
             return "EXCEPTION";
         }
     }

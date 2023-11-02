@@ -146,7 +146,7 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testReader() throws IOException, URISyntaxException {
+    public void testReader() throws Exception {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
@@ -184,7 +184,7 @@ class TrafficReplayerTest {
     }
 
     @Test
-    public void testCapturedReadsAfterCloseAreHandledAsNew() throws IOException, URISyntaxException {
+    public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
         var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         var remainingAccumulations = new AtomicInteger();

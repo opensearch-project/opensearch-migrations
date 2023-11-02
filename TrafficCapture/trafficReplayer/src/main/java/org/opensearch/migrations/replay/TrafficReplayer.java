@@ -418,6 +418,8 @@ public class TrafficReplayer {
                         new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer));
         try {
             pullCaptureFromSourceToAccumulator(trafficChunkStream, trafficToHttpTransactionAccumulator);
+        } catch (InterruptedException ex) {
+            throw ex;
         } catch (Exception e) {
             log.warn("Terminating runReplay due to", e);
             throw e;
@@ -648,7 +650,10 @@ public class TrafficReplayer {
                 return "" + ((TransformedTargetRequestAndResponse) resultValue).getTransformationStatus();
             }
             return null;
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return e.getMessage();
+        } catch (ExecutionException e) {
             return e.getMessage();
         }
     }
@@ -815,7 +820,8 @@ public class TrafficReplayer {
 
     public void pullCaptureFromSourceToAccumulator(
             ITrafficCaptureSource trafficChunkStream,
-            CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
+            CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator)
+            throws InterruptedException {
         while (true) {
             log.trace("Reading next chunk from TrafficStream supplier");
             this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk());
@@ -825,13 +831,14 @@ public class TrafficReplayer {
             }
             try {
                 trafficStreams = this.nextChunkFutureRef.get().get();
-            } catch (InterruptedException | ExecutionException | CancellationException ex) {
+            } catch (ExecutionException ex) {
                 if (ex.getCause() instanceof EOFException) {
                     log.atWarn().setCause(ex.getCause()).setMessage("Got an EOF on the stream.  " +
                             "Done reading traffic streams.").log();
                     break;
                 } else {
                     log.atWarn().setCause(ex).setMessage("Interrupted.  Done reading traffic streams.").log();
+                    Thread.currentThread().interrupt();
                     throw new RuntimeException(ex);
                 }
             }
