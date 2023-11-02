@@ -51,10 +51,14 @@ services:
     image: 'opensearchproject/opensearch:latest'
     environment:
       - discovery.type=single-node
+      - path.repo=/usr/share/opensearch/snapshots
     networks:
       - migrations
     ports:
       - "29200:9200"
+    volumes:
+      - data01:/usr/share/opensearch/data
+      - ./snapshot-repository:/usr/share/opensearch/snapshots
 
   trafficcomparator:
     image: 'migrations/traffic_comparator:latest'
@@ -100,6 +104,8 @@ volumes:
   sharedComparatorSqlResults:
     driver: local
   sharedReplayerOutput:
+    driver: local
+  data01:
     driver: local
 
 networks:
