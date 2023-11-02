@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.datahandlers;
 import io.netty.buffer.ByteBuf;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 public class TransformedPacketReceiver implements IPacketFinalizingConsumer<TransformedPackets> {
 

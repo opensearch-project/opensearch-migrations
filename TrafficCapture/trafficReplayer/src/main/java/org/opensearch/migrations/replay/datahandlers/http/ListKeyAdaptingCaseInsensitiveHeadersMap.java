@@ -1,9 +1,10 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import com.google.common.base.Objects;
+import lombok.EqualsAndHashCode;
+
 import java.util.AbstractMap;
-import java.util.AbstractSet;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -16,6 +17,7 @@ import java.util.stream.Collectors;
  * This is a kludge to provide that.  Note that this code doesn't do conversions such as joining
  * or splitting.  If more control is required, callers should use the multimap interfaces.
  */
+@EqualsAndHashCode
 public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String,Object> {
     protected final StrictCaseInsensitiveHttpHeadersMap strictHeadersMap;
 
@@ -36,11 +38,11 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
     public List<String> put(String key, Object value) {
         List<String> strList;
         if (value instanceof List) {
-            if (((List) value).stream().allMatch(item -> item instanceof String)) {
+            if (((List) value).stream().allMatch(String.class::isInstance)) {
                 strList = (List) value;
             } else {
                 strList = (List) ((List) value).stream()
-                        .map(item -> item.toString())
+                        .map(Object::toString)
                         .collect(Collectors.toCollection(ArrayList::new));
             }
         } else {

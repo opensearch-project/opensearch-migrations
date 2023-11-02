@@ -11,6 +11,7 @@ import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
@@ -22,6 +23,7 @@ import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -308,20 +310,19 @@ public class TrafficReplayer {
         }
 
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
-                new FileOutputStream(params.outputFilename, true)) {
-            try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (var blockingTrafficStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
-                        Duration.ofSeconds(params.lookaheadTimeSeconds))) {
-                    var tr = new TrafficReplayer(uri, buildAuthTransformerFactory(params),
-                            params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
-                    setupShutdownHookForReplayer(tr);
-                    var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
-                    var timeShifter = new TimeShifter(params.speedupFactor);
-                    tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                            blockingTrafficStream, bufferedOutputStream, timeShifter, tupleWriter);
-                    log.info("Done processing TrafficStreams");
-                }
-            }
+                new FileOutputStream(params.outputFilename, true);
+             var bufferedOutputStream = new BufferedOutputStream(outputStream);
+             var blockingTrafficStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
+                     Duration.ofSeconds(params.lookaheadTimeSeconds));
+             var authTransformer = buildAuthTransformerFactory(params)) {
+            var tr = new TrafficReplayer(uri, authTransformer,
+                    params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
+            setupShutdownHookForReplayer(tr);
+            var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
+            var timeShifter = new TimeShifter(params.speedupFactor);
+            tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                    blockingTrafficStream, bufferedOutputStream, timeShifter, tupleWriter);
+            log.info("Done processing TrafficStreams");
         }
     }
 
@@ -394,7 +395,16 @@ public class TrafficReplayer {
             String region = serviceAndRegion[1];
             DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
 
-            return httpMessage -> new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
+            return new IAuthTransformerFactory() {
+                @Override
+                public IAuthTransformer getAuthTransformer(IHttpMessage httpMessage) {
+                    return new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
+                }
+                @Override
+                public void close() {
+                    defaultCredentialsProvider.close();
+                }
+            };
         } else if (params.removeAuthHeader) {
             return RemovingAuthTransformerFactory.instance;
         } else {
@@ -505,7 +515,6 @@ public class TrafficReplayer {
                     ()->"logging summary");
         }
 
-
         @Override
         public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair) {
             log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
@@ -568,6 +577,34 @@ public class TrafficReplayer {
         public void onConnectionClose(UniqueReplayerRequestKey requestKey, Instant timestamp) {
             replayEngine.setFirstTimestamp(timestamp);
             replayEngine.closeConnection(requestKey, timestamp);
+        }
+
+        private TransformedTargetRequestAndResponse
+        packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
+                                UniqueReplayerRequestKey requestKey,
+                                RequestResponsePacketPair rrPair,
+                                TransformedTargetRequestAndResponse summary,
+                                Exception t) {
+            log.trace("done sending and finalizing data to the packet handler");
+
+            try (var requestResponseTuple = getSourceTargetCaptureTuple(requestKey, rrPair, summary, t)) {
+                log.atInfo().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTuple).log();
+                tupleWriter.accept(requestResponseTuple);
+            }
+
+            if (t != null) { throw new CompletionException(t); }
+            if (summary.getError() != null) {
+                log.atInfo().setCause(summary.getError()).setMessage("Exception for request {}: ")
+                        .addArgument(requestKey).log();
+                exceptionRequestCount.incrementAndGet();
+            } else if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
+                log.atInfo().setCause(summary.getError()).setMessage("Unknown error transforming the request {}: ")
+                        .addArgument(requestKey).log();
+                exceptionRequestCount.incrementAndGet();
+            } else {
+                successfulRequestCount.incrementAndGet();
+            }
+            return summary;
         }
     }
 
@@ -658,34 +695,6 @@ public class TrafficReplayer {
         }
     }
 
-    private TransformedTargetRequestAndResponse
-    packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
-                            UniqueReplayerRequestKey requestKey,
-                            RequestResponsePacketPair rrPair,
-                            TransformedTargetRequestAndResponse summary,
-                            Exception t) {
-        log.trace("done sending and finalizing data to the packet handler");
-
-        try (var requestResponseTuple = getSourceTargetCaptureTuple(requestKey, rrPair, summary, t)) {
-            log.atInfo().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTuple).log();
-            tupleWriter.accept(requestResponseTuple);
-        }
-
-        if (t != null) { throw new CompletionException(t); }
-        if (summary.getError() != null) {
-            log.atInfo().setCause(summary.getError()).setMessage("Exception for request {}: ")
-                .addArgument(requestKey).log();
-            exceptionRequestCount.incrementAndGet();
-        } else if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
-            log.atInfo().setCause(summary.getError()).setMessage("Unknown error transforming the request {}: ")
-                    .addArgument(requestKey).log();
-            exceptionRequestCount.incrementAndGet();
-        } else {
-            successfulRequestCount.incrementAndGet();
-        }
-        return summary;
-    }
-
     private static SourceTargetCaptureTuple getSourceTargetCaptureTuple(UniqueReplayerRequestKey uniqueRequestKey,
                                                                         RequestResponsePacketPair rrPair,
                                                                         TransformedTargetRequestAndResponse summary,
@@ -700,7 +709,7 @@ public class TrafficReplayer {
             requestResponseTriple = new SourceTargetCaptureTuple(uniqueRequestKey, rrPair,
                     summary.requestPackets,
                     summary.getReceiptTimeAndResponsePackets()
-                            .map(entry -> entry.getValue()).collect(Collectors.toList()),
+                            .map(Map.Entry::getValue).collect(Collectors.toList()),
                     summary.getTransformationStatus(),
                     summary.getError(),
                     summary.getResponseDuration()
@@ -713,7 +722,7 @@ public class TrafficReplayer {
     transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request, UniqueReplayerRequestKey requestKey) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
-                ()->request.packetBytes.stream());
+                request.packetBytes::stream);
     }
 
     public static DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
@@ -757,7 +766,7 @@ public class TrafficReplayer {
     transformAllData(IPacketFinalizingConsumer<R> packetHandler, Supplier<Stream<byte[]>> packetSupplier) {
         try {
             var logLabel = packetHandler.getClass().getSimpleName();
-            var packets = packetSupplier.get().map(b-> Unpooled.wrappedBuffer(b));
+            var packets = packetSupplier.get().map(Unpooled::wrappedBuffer);
             packets.forEach(packetData -> {
                 log.atDebug().setMessage(() -> logLabel + " sending " + packetData.readableBytes() +
                         " bytes to the packetHandler").log();
@@ -849,7 +858,7 @@ public class TrafficReplayer {
                         .filter(s -> !s.isEmpty())
                         .ifPresent(s -> log.atInfo().log("TrafficStream Summary: {" + s + "}"));
             }
-            trafficStreams.forEach(ts->trafficToHttpTransactionAccumulator.accept(ts));
+            trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
         }
     }
 }

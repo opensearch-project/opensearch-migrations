@@ -125,7 +125,7 @@ public class CaptureProxy {
         String destinationConnectionPoolTimeout = "PT30S";
     }
 
-    public static Parameters parseArgs(String[] args) {
+    public static @NonNull Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
         try {

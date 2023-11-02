@@ -1,5 +1,8 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import com.google.common.base.Objects;
+import lombok.EqualsAndHashCode;
+
 import java.util.AbstractMap;
 import java.util.AbstractSet;
 import java.util.Iterator;
@@ -13,6 +16,7 @@ import java.util.Set;
  * so that we can maintain that original order.  However, we add an extra ability to keep key values
  * (or header names) case insensitive.
  */
+@EqualsAndHashCode
 public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List<String>> {
     protected LinkedHashMap<String, SimpleEntry<String, List<String>>> lowerCaseToUpperCaseAndValueMap;
 
@@ -32,7 +36,7 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List
         var normalizedKey = incomingKey.toLowerCase();
         SimpleEntry<String,List<String>> oldEntry =
                 lowerCaseToUpperCaseAndValueMap.get(normalizedKey);
-        var newValue = new SimpleEntry(oldEntry == null ? incomingKey : oldEntry.getKey(), value);
+        var newValue = new SimpleEntry<>(oldEntry == null ? incomingKey : oldEntry.getKey(), value);
         lowerCaseToUpperCaseAndValueMap.put(normalizedKey, newValue);
         return oldEntry == null ? null : oldEntry.getValue();
     }
@@ -45,7 +49,7 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List
 
     @Override
     public Set<Entry<String, List<String>>> entrySet() {
-        return new AbstractSet() {
+        return new AbstractSet<>() {
             @Override
             public Iterator<Entry<String, List<String>>> iterator() {
                 return new Iterator<Entry<String, List<String>>>() {

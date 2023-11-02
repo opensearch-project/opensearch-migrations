@@ -26,8 +26,8 @@ import java.util.stream.Stream;
 
 public class PrettyPrinter {
 
-    private static final ThreadLocal<PacketPrintFormat> printStyle =
-            ThreadLocal.withInitial(() -> PacketPrintFormat.TRUNCATED);
+    private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle =
+            ThreadLocal.withInitial(() -> Optional.empty());
 
     public enum PacketPrintFormat {
         TRUNCATED, FULL_BYTES, PARSED_HTTP
@@ -35,11 +35,15 @@ public class PrettyPrinter {
 
     public static <T> T setPrintStyleForCallable(PacketPrintFormat packetPrintFormat, Callable<T> r) throws Exception {
         var oldStyle = printStyle.get();
-        printStyle.set(packetPrintFormat);
+        printStyle.set(Optional.of(packetPrintFormat));
         try {
             return r.call();
         } finally {
-            printStyle.set(oldStyle);
+            if (oldStyle.isPresent()) {
+                printStyle.set(oldStyle);
+            } else {
+                printStyle.remove();;
+            }
         }
     }
 
@@ -80,7 +84,7 @@ public class PrettyPrinter {
     }
 
     public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
-        switch (printStyle.get()) {
+        switch (printStyle.get().orElse(PacketPrintFormat.TRUNCATED)) {
             case TRUNCATED:
                 return httpPacketBufsToString(byteBufStream, Utils.MAX_BYTES_SHOWN_FOR_TO_STRING);
             case FULL_BYTES:

@@ -15,9 +15,6 @@ import java.util.Map;
 public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter {
     public static final int NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING = 1024;
 
-    public NettyJsonBodySerializeHandler() {
-    }
-
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
@@ -26,7 +23,7 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
             jsonMessage.setPayloadFaultMap(null);
             var payloadContents = (Map<String, Object>) payload.get(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY);
             ctx.fireChannelRead(msg);
-            if (payload != null && payloadContents != null) {
+            if (payloadContents != null) {
                 serializePayload(ctx, payloadContents);
             }
         } else {

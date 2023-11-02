@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
@@ -18,6 +19,7 @@ import java.util.Set;
  * the paylaod (unzip, parse, etc).  If a transform DOES require the payload to be present, get()
  *
  */
+@EqualsAndHashCode
 @Slf4j
 public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
