@@ -10,6 +10,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class ReplayUtils {
+    private ReplayUtils() {}
+
     public static SequenceInputStream byteArraysToInputStream(List<byte[]> data) {
         return byteArraysToInputStream(data.stream());
     }
@@ -24,6 +26,6 @@ public class ReplayUtils {
 
     public static SequenceInputStream byteArraysToInputStream(Stream<byte[]> data) {
         return new SequenceInputStream(Collections.enumeration(
-                data.map(b -> new ByteArrayInputStream(b)).collect(Collectors.toList())));
+                data.map(ByteArrayInputStream::new).collect(Collectors.toList())));
     }
 }

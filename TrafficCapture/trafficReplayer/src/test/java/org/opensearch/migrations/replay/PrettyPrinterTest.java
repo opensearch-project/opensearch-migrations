@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -94,7 +93,7 @@ public class PrettyPrinterTest {
         }
         String outputString =
                 PrettyPrinter.setPrintStyleFor(format, ()->
-                        prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.Request, bufferType));
+                        prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.REQUEST, bufferType));
         Assertions.assertEquals(getExpectedResult(format, contentDirective), outputString);
     }
 
@@ -110,7 +109,7 @@ public class PrettyPrinterTest {
             }
             String outputString =
                     PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.PARSED_HTTP, ()->
-                            prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.Request, BufferType.POOLED_BYTEBUF));
+                            prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.REQUEST, BufferType.POOLED_BYTEBUF));
             Assertions.assertEquals(new String(fullTrafficBytes, StandardCharsets.UTF_8), outputString);
         }
     }

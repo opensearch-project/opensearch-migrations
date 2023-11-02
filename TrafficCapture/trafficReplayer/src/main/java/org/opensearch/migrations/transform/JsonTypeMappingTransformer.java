@@ -15,13 +15,13 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
      * This is used to match a URI of the form /INDEX/TYPE/foo... so that it can be
      * transformed into /INDEX/foo...
      */
-    final static Pattern TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES =
+    static final Pattern TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES =
             Pattern.compile("^(\\/[^\\/]*)\\/[^\\/]*(\\/[^\\/]*)$");
 
     /**
      * This is used to match a URI of the form /foo...
      */
-    final static Pattern SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE =
+    static final Pattern SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE =
             Pattern.compile("^(\\/[^\\/]*)$");
     public static final String SEARCH_URI_COMPONENT = "/_search";
     public static final String DOC_URI_COMPONENT = "/_doc";
@@ -81,8 +81,6 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
 
     private void exciseMappingsType(Map<String, Object> mappingsParent, Map<String, Object> mappingsValue) {
         var firstMappingOp = mappingsValue.entrySet().stream().findFirst();
-        firstMappingOp.ifPresent(firstMapping -> {
-            mappingsParent.put(MAPPINGS_KEYNAME, firstMapping.getValue());
-        });
+        firstMappingOp.ifPresent(firstMapping -> mappingsParent.put(MAPPINGS_KEYNAME, firstMapping.getValue()));
     }
 }

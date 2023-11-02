@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers;
 
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 /**
  * This class consumes arrays of bytes or ByteBufs, potentially asynchronously,

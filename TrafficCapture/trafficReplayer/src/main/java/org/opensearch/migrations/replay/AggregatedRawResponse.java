@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.AbstractMap;
@@ -14,7 +13,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 @Slf4j
-public class AggregatedRawResponse implements Serializable {
+public class AggregatedRawResponse {
 
     @Getter
     protected final int responseSizeInBytes;

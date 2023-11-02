@@ -577,7 +577,7 @@ public class TrafficReplayer {
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                             List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            if (status == RequestResponsePacketPair.ReconstructionStatus.ExpiredPrematurely) {
+            if (status == RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY) {
                 // eventually fill this in to commit the message
             }
         }

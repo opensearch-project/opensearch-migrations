@@ -45,22 +45,18 @@ public class TimeShifter {
         if (sourceTimeStart.get() == null) {
             throw new RuntimeException("setFirstTimestamp has not yet been called");
         }
-        var rval = systemTimeStart.get()
+        return systemTimeStart.get()
                 .plus(Duration.ofMillis((long)
                         (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)));
-        return rval;
     }
 
     Optional<Instant> transformRealTimeToSourceTime(Instant realTime) {
         return Optional.ofNullable(sourceTimeStart.get())
-                .map(sourceTimeStart->{
+                .map(start ->
                     // sourceTime = realTime - systemTimeStart + sourceTimeStart
                     // sourceTime = sourceTimeStart + (realTime-systemTimeStart) / rateMultiplier
-                    var rval = sourceTimeStart
-                            .plus(Duration.ofMillis((long)
-                                    (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier)));
-                    return rval;
-                });
+                    start.plus(Duration.ofMillis((long)
+                            (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier))));
     }
 
     public double maxRateMultiplier() {

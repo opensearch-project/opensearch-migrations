@@ -27,7 +27,7 @@ public class PacketToTransformingHttpHandlerFactory implements
     public IPacketFinalizingConsumer<TransformedOutputAndResult<TransformedPackets>>
     create(UniqueReplayerRequestKey requestKey) {
         log.trace("creating HttpJsonTransformingConsumer");
-        return new HttpJsonTransformingConsumer(jsonTransformer, authTransformerFactory,
+        return new HttpJsonTransformingConsumer<>(jsonTransformer, authTransformerFactory,
                 new TransformedPacketReceiver(), requestKey.toString(), requestKey);
     }
 }

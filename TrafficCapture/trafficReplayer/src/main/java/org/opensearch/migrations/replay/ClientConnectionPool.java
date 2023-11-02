@@ -93,7 +93,7 @@ public class ClientConnectionPool {
 
     public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
         StringTrackableCompletableFuture<Void> eventLoopFuture =
-                new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(), () -> "all channels closed");
+                new StringTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "all channels closed");
         this.eventLoopGroup.submit(() -> {
             try {
                 var channelClosedFuturesArray =
@@ -163,7 +163,7 @@ public class ClientConnectionPool {
     private DiagnosticTrackableCompletableFuture<String, Channel>
     closeClientConnectionChannel(ConnectionReplaySession channelAndFutureWork) {
         var channelClosedFuture =
-                new StringTrackableCompletableFuture<>(new CompletableFuture<Channel>(),
+                new StringTrackableCompletableFuture<Channel>(new CompletableFuture<>(),
                         ()->"Waiting for closeFuture() on channel");
 
         numConnectionsClosed.incrementAndGet();
