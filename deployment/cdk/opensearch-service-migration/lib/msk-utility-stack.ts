@@ -9,7 +9,7 @@ import {Provider} from "aws-cdk-lib/custom-resources";
 import * as path from "path";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
-export interface mskUtilityStackProps extends StackPropsExt {
+export interface MskUtilityStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly mskEnablePublicEndpoints?: boolean
 }
@@ -21,7 +21,7 @@ export interface mskUtilityStackProps extends StackPropsExt {
  */
 export class MSKUtilityStack extends Stack {
 
-    constructor(scope: Construct, id: string, props: mskUtilityStackProps) {
+    constructor(scope: Construct, id: string, props: MskUtilityStackProps) {
         super(scope, id, props);
 
         const mskARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`)

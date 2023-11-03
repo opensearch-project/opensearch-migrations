@@ -456,8 +456,8 @@ export class StackComposer {
             }
             // Access policies can provide a single Statement block or an array of Statement blocks
             if (Array.isArray(statements)) {
-                for (let i = 0; i < statements.length; i++) {
-                    const statement = PolicyStatement.fromJson(statements[i])
+                for (let statementBlock of statements) {
+                    const statement = PolicyStatement.fromJson(statementBlock)
                     accessPolicies.push(statement)
                 }
             }

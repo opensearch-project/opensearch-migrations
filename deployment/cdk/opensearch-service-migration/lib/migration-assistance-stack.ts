@@ -1,5 +1,5 @@
 import {Stack} from "aws-cdk-lib";
-import {IVpc, Peer, Port, SecurityGroup, SubnetType, Vpc} from "aws-cdk-lib/aws-ec2";
+import {IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -9,7 +9,7 @@ import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
-export interface migrationStackProps extends StackPropsExt {
+export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly trafficComparatorEnabled: boolean,
     // Future support needed to allow importing an existing MSK cluster
@@ -21,7 +21,7 @@ export interface migrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
 
-    constructor(scope: Construct, id: string, props: migrationStackProps) {
+    constructor(scope: Construct, id: string, props: MigrationStackProps) {
         super(scope, id, props);
 
         // Create MSK cluster config
