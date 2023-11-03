@@ -14,6 +14,7 @@ services:
       - cluster.name=es-cluster
       - discovery.seed_hosts=capture-proxy-es2
       - cluster.initial_master_nodes=capture-proxy-es1,capture-proxy-es2
+      # "multi-node" didn't yet exist as a discovery.type in ES 7.10.2, "zen" was used instead to discover additional nodes. This can be updated depending on ES version being used.
       - discovery.type=zen
       # Run processes for elasticsearch and capture proxy, and exit if either one ends
      command: /bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --kafkaConnection kafka:9092 --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1'
@@ -33,6 +34,7 @@ services:
       - cluster.name=es-cluster
       - discovery.seed_hosts=capture-proxy-es1
       - cluster.initial_master_nodes=capture-proxy-es1,capture-proxy-es2
+      # "multi-node" didn't yet exist as a discovery.type in ES 7.10.2, "zen" was used instead to discover additional nodes. This can be updated depending on ES version being used.
       - discovery.type=zen
       # Run processes for elasticsearch and capture proxy, and exit if either one ends
     command: /bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --kafkaConnection kafka:9092 --destinationUri https://localhost:19201 --insecureDestination --listenPort 9201 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml & wait -n 1'
