@@ -6,6 +6,7 @@ import javax.management.MBeanServer;
 import java.lang.management.ManagementFactory;
 
 public class HeapDumper {
+    private HeapDumper() {}
     /**
      * Utility method to create an hmap file to show all of the objects within the JVM.
      *

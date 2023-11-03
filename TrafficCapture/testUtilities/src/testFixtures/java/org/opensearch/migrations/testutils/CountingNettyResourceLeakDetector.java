@@ -24,7 +24,7 @@ public class CountingNettyResourceLeakDetector<T> extends ResourceLeakDetector<T
      */
     public static void activate() {
         ResourceLeakDetectorFactory.setResourceLeakDetectorFactory(new CountingNettyResourceLeakDetector.MyResourceLeakDetectorFactory());
-        CountingNettyResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
+        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
         numLeaksFoundAtomic.set(0);
     }
 
@@ -32,7 +32,7 @@ public class CountingNettyResourceLeakDetector<T> extends ResourceLeakDetector<T
      * Do everything necessary to turn leak detection on with the highest sensitivity.
      */
     public static void deactivate() {
-        CountingNettyResourceLeakDetector.setLevel(Level.DISABLED);
+        ResourceLeakDetector.setLevel(Level.DISABLED);
         numLeaksFoundAtomic.set(0);
     }
 

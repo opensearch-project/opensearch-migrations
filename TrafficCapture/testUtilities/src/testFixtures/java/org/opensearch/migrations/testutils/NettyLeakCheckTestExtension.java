@@ -13,11 +13,11 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
     private final boolean allLeakChecksAreDisabled;
     public NettyLeakCheckTestExtension() {
         allLeakChecksAreDisabled =
-                System.getProperty("disableMemoryLeakTests", "").toLowerCase().equals("true");
+                System.getProperty("disableMemoryLeakTests", "").equalsIgnoreCase("true");
         }
 
-    private void wrapWithLeakChecks(ExtensionContext extensionContext, Callable repeatCall, Callable finalCall)
-            throws Throwable {
+    private <T> void wrapWithLeakChecks(ExtensionContext extensionContext,
+                                        Callable<T> repeatCall, Callable<T> finalCall) throws Throwable {
         if (allLeakChecksAreDisabled ||
                 getAnnotation(extensionContext).map(a -> a.disableLeakChecks()).orElse(false)) {
             CountingNettyResourceLeakDetector.deactivate();
