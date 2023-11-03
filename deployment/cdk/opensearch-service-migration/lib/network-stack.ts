@@ -65,7 +65,7 @@ export class NetworkStack extends Stack {
             });
 
             // Create a default SG which only allows members of this SG to access the Domain endpoints
-            const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
+            const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
                 vpc: this.vpc,
                 allowAllOutbound: false,
             });

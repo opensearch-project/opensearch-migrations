@@ -32,7 +32,7 @@ export class MSKUtilityStack extends Stack {
             const lambdaInvokeStatement = new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: ["lambda:InvokeFunction"],
-                resources: ["*"]
+                resources: [`arn:aws:lambda:${props.env?.region}:${props.env?.account}:function:OSMigrations*`]
             })
             // Updating connectivity for an MSK cluster requires some VPC permissions
             // (https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonmanagedstreamingforapachekafka.html#amazonmanagedstreamingforapachekafka-cluster)

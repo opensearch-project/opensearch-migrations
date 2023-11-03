@@ -1,5 +1,5 @@
 import {Stack} from "aws-cdk-lib";
-import {IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -14,15 +14,36 @@ export interface MigrationStackProps extends StackPropsExt {
     readonly trafficComparatorEnabled: boolean,
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
-    readonly mskEnablePublicEndpoints?: boolean
+    readonly mskEnablePublicEndpoints?: boolean,
+    readonly mskRestrictPublicAccessTo?: string,
+    readonly mskRestrictPublicAccessType?: string,
     readonly mskBrokerNodeCount?: number
 }
 
 
 export class MigrationAssistanceStack extends Stack {
 
+    getPublicEndpointAccess(restrictPublicAccessTo: string, restrictPublicAccessType: string): IPeer {
+        switch (restrictPublicAccessType) {
+            case 'ipv4':
+                return Peer.ipv4(restrictPublicAccessTo);
+            case 'ipv6':
+                return Peer.ipv6(restrictPublicAccessTo);
+            case 'prefixList':
+                return Peer.prefixList(restrictPublicAccessTo);
+            case 'securityGroupId':
+                return Peer.securityGroupId(restrictPublicAccessTo);
+            default:
+                throw new Error('mskRestrictPublicAccessType should be one of the below values: ipv4, ipv6, prefixList or securityGroupId');
+        }
+    }
+
     constructor(scope: Construct, id: string, props: MigrationStackProps) {
         super(scope, id, props);
+
+        if (props.mskEnablePublicEndpoints && (!props.mskRestrictPublicAccessTo || !props.mskRestrictPublicAccessType)) {
+            throw new Error("The 'mskEnablePublicEndpoints' option requires both 'mskRestrictPublicAccessTo' and 'mskRestrictPublicAccessType' options to be provided")
+        }
 
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
@@ -34,10 +55,8 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc,
             allowAllOutbound: false
         });
-        // This will allow all ip access for all TCP ports by default when public access is enabled,
-        // it should be updated if further restriction is desired
-        if (props.mskEnablePublicEndpoints) {
-            mskSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.allTcp())
+        if (props.mskEnablePublicEndpoints && props.mskRestrictPublicAccessTo && props.mskRestrictPublicAccessType) {
+            mskSecurityGroup.addIngressRule(this.getPublicEndpointAccess(props.mskRestrictPublicAccessTo, props.mskRestrictPublicAccessType), Port.allTcp())
         }
         mskSecurityGroup.addIngressRule(mskSecurityGroup, Port.allTraffic())
         new StringParameter(this, 'SSMParameterMSKAccessGroupId', {

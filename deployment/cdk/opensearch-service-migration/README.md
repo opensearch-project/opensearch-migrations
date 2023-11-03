@@ -29,7 +29,7 @@ More details can be found [here](../../../TrafficCapture/dockerSolution/README.m
 
 5- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again (for each failing role) or avoided entirely by creating the service linked role initially like seen below:
 ```shell
-aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com && aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com; aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
 ```
 
 ### First time using CDK in this region?
@@ -41,7 +41,7 @@ If this is your first experience with CDK, follow the steps below to get started
 npm install -g aws-cdk
 ```
 
-2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command from the `opensearch-service-migration` directory to set up a small CloudFormation stack of resources that CDK needs to function within your account
+2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command from the same directory as this README to set up a small CloudFormation stack of resources that CDK needs to function within your account
 
 ```shell
 # Execute from the deployment/cdk/opensearch-service-migration directory
@@ -125,6 +125,18 @@ After the benchmark has been run, the indices and documents of the source and ta
 # Check doc counts and indices for both source and target cluster
 ./catIndices.sh
 ```
+
+## Configuring SigV4 access
+This solution, when deployed, will attempt to configure needed IAM permissions on its applicable Migration services (Traffic Replayer and Migration Console) to allow SigV4 communication between the service and the AWS OpenSearch Service or OpenSearch Serverless target cluster. On the flip side, the target cluster must be configured to allow these resources as well, which the following subsections will discuss. 
+
+There is also an assumption here that security groups are in place that allow communication between these Migration services and the target cluster. If the OpenSearch Service is created with this CDK, the relevant security group will be created and configured automatically. Otherwise, imported target clusters will need to add the `osClusterAccessSG` security group (created after deployment) to their target cluster or modify their existing security groups to allow communication.
+
+#### OpenSearch Service
+If an open access policy is in place for the Domain, either configured manually or with the `openAccessPolicyEnabled` [option](./options.md) for Domains created with this CDK, this should be sufficient and no changes should be needed on this front. If a custom access policy is in place it must allow the IAM task roles for the applicable Migration services (Traffic Replayer and Migration Console) to access.
+
+#### OpenSearch Serverless
+When using an existing OpenSearch Serverless Collection, some additional configuration is needed for the data access policies to allow the Traffic Replayer and Migration Console services to communicate with the Serverless cluster. Mainly, the IAM task roles for these Migration services should be added to a data access policy that allows them permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection. This will allow the Replayer to create, modify, and delete indexes as it mirrors incoming traffic. This can also be focused down to specific indexes or operations for sensitive cases, but should be monitored as this could prevent some requests from being replayed. 
+
 
 ## Kicking off Fetch Migration
 
