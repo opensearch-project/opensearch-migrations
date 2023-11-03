@@ -88,26 +88,26 @@ class TestMetadataMigration(unittest.TestCase):
         # Simple base case
         test_config = create_plugin_config([host_input])
         result = metadata_migration.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result.url)
-        self.assertIsNone(result.auth)
-        self.assertTrue(result.verify_ssl)
+        self.assertEqual(expected_endpoint, result.get_url())
+        self.assertIsNone(result.get_auth())
+        self.assertTrue(result.is_verify_ssl())
         # Invalid auth config
         test_config = create_plugin_config([host_input], test_user)
         result = metadata_migration.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result.url)
-        self.assertIsNone(result.auth)
+        self.assertEqual(expected_endpoint, result.get_url())
+        self.assertIsNone(result.get_auth())
         # Valid auth config
         test_config = create_plugin_config([host_input], user=test_user, password=test_password)
         result = metadata_migration.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result.url)
-        self.assertEqual(test_user, result.auth[0])
-        self.assertEqual(test_password, result.auth[1])
+        self.assertEqual(expected_endpoint, result.get_url())
+        self.assertEqual(test_user, result.get_auth()[0])
+        self.assertEqual(test_password, result.get_auth()[1])
         # Array of hosts uses the first entry
         test_config = create_plugin_config([host_input, "other_host"], test_user, test_password)
         result = metadata_migration.get_endpoint_info(test_config)
-        self.assertEqual(expected_endpoint, result.url)
-        self.assertEqual(test_user, result.auth[0])
-        self.assertEqual(test_password, result.auth[1])
+        self.assertEqual(expected_endpoint, result.get_url())
+        self.assertEqual(test_user, result.get_auth()[0])
+        self.assertEqual(test_password, result.get_auth()[1])
 
     def test_get_index_differences_empty(self):
         # Base case should return an empty list
