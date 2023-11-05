@@ -18,13 +18,11 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 
 /**
  * At a basic level, this class aims to be a generic serializer which can receive ByteBuffer data and serialize the data
@@ -68,6 +66,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     private int numFlushesSoFar;
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
+    private boolean streamHasBeenClosed;
 
     private final StreamLifecycleManager<T> streamManager;
     private final String nodeIdString;
@@ -89,6 +88,18 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private CodedOutputStream getOrCreateCodedOutputStream() throws IOException {
+        if (streamHasBeenClosed) {
+            // In an abundance of caution, flip the state back to basically act like a whole new
+            // stream is being setup
+            log.error("This serializer was already marked as closed previously.  State is being reset to match " +
+                    "a new serializer, but this signals a serious issue in the usage of this serializer.");
+            readObservationsAreWaitingForEom = false;
+            eomsSoFar = 0;
+            numFlushesSoFar = 0;
+            firstLineByteLength = -1;
+            headersByteLength = -1;
+            streamHasBeenClosed = false;
+        }
         if (currentCodedOutputStreamHolderOrNull != null) {
             return currentCodedOutputStreamHolderOrNull.getOutputStream();
         } else {
@@ -174,7 +185,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     @Override
     public CompletableFuture<T> flushCommitAndResetStream(boolean isFinal) throws IOException {
-        if (currentCodedOutputStreamHolderOrNull == null && !isFinal) {
+        if (streamHasBeenClosed || (currentCodedOutputStreamHolderOrNull == null && !isFinal)) {
             return CompletableFuture.completedFuture(null);
         }
         CodedOutputStream currentStream = getOrCreateCodedOutputStream();
@@ -187,6 +198,9 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                 "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
         var future = streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
         currentCodedOutputStreamHolderOrNull = null;
+        if (isFinal) {
+            streamHasBeenClosed = true;
+        }
         return future;
     }
 

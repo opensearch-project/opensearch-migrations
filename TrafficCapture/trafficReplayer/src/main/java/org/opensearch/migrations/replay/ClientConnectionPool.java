@@ -141,10 +141,10 @@ public class ClientConnectionPool {
             return rval;
         }
         return channelFutureAndSchedule.eventLoop.submit(() -> {
-            if (channelFutureAndSchedule.channelFutureFuture == null) {
-                channelFutureAndSchedule.channelFutureFuture =
+            if (channelFutureAndSchedule.getChannelFutureFuture() == null) {
+                channelFutureAndSchedule.setChannelFutureFuture(
                         getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop,
-                                requestKey.getTrafficStreamKey().getConnectionId());
+                                requestKey.getTrafficStreamKey().getConnectionId()));
             }
             return channelFutureAndSchedule;
         });
@@ -167,7 +167,7 @@ public class ClientConnectionPool {
                         ()->"Waiting for closeFuture() on channel");
 
         numConnectionsClosed.incrementAndGet();
-        channelAndFutureWork.channelFutureFuture.map(cff->cff
+        channelAndFutureWork.getChannelFutureFuture().map(cff->cff
                         .thenAccept(cf-> {
                             cf.channel().close()
                                     .addListener(closeFuture -> {

@@ -25,17 +25,17 @@ import java.util.concurrent.atomic.AtomicReference;
 public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHandlerAdapter {
     final IPacketFinalizingConsumer<R> packetReceiver;
     // final Boolean value indicates if the handler received a LastHttpContent or EndOfInput message
-    // TODO - make this threadsafe.  calls may come in on different threads
     DiagnosticTrackableCompletableFuture<String, Boolean> currentFuture;
     private AtomicReference<DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>>
             packetReceiverCompletionFutureRef;
     String diagnosticLabel;
 
-    public NettySendByteBufsToPacketHandlerHandler(IPacketFinalizingConsumer packetReceiver, String diagnosticLabel) {
+    public NettySendByteBufsToPacketHandlerHandler(IPacketFinalizingConsumer<R> packetReceiver,
+                                                   String diagnosticLabel) {
         this.packetReceiver = packetReceiver;
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();
         this.diagnosticLabel = diagnosticLabel;
-        currentFuture = DiagnosticTrackableCompletableFuture.factory.completedFuture(null,
+        currentFuture = DiagnosticTrackableCompletableFuture.Factory.completedFuture(null,
                 ()->"currentFuture for NettySendByteBufsToPacketHandlerHandler initialized to the base case for " + diagnosticLabel);
     }
 
@@ -75,7 +75,8 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
                                             ()->"fixed failure from packetReceiver.finalizeRequest()");
                                 } else {
                                     return StringTrackableCompletableFuture.completedFuture(Optional.ofNullable(v2)
-                                                    .map(r->new TransformedOutputAndResult(r,  transformationStatus, null))
+                                                    .map(r-> new TransformedOutputAndResult<R>(r,  transformationStatus,
+                                                            null))
                                                     .orElse(null),
                                             ()->"fixed value from packetReceiver.finalizeRequest()"
                                             );
@@ -104,7 +105,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        currentFuture = DiagnosticTrackableCompletableFuture.factory.failedFuture(cause,
+        currentFuture = DiagnosticTrackableCompletableFuture.Factory.failedFuture(cause,
                 () -> "NettySendByteBufsToPacketHandlerHandler got an exception");
         super.exceptionCaught(ctx, cause);
     }
@@ -121,24 +122,26 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
             final var preexistingFutureForCapture = currentFuture;
             var numBytesToSend = bb.readableBytes();
             currentFuture = currentFuture.getDeferredFutureThroughHandle((v,t)-> {
-                if (t != null) {
-                    bb.release();
-                    log.atInfo().setCause(t).setMessage(()->"got exception from a previous future that will prohibit " +
-                            "sending any more data to the packetReceiver").log();
-                    return StringTrackableCompletableFuture.failedFuture(t, ()->"failed previous future");
-                } else {
-                    log.atTrace().setMessage(()->"chaining consumingBytes with " + msg +
-                            " lastFuture=" + preexistingFutureForCapture).log();
-                    var rval = packetReceiver.consumeBytes(bb);
-                    bb.release();
-                    log.atTrace().setMessage(()->"packetReceiver.consumeBytes()=" + rval + " bb.refCnt=" + bb.refCnt())
-                            .log();
-                    return rval.map(cf -> cf.thenApply(ignore -> false),
-                            () -> "NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is going " +
-                                    "to return a completedValue of false to indicate that more packets may " +
-                                    "need to be sent");
-                }
-            },
+                        try {
+                            if (t != null) {
+                                log.atInfo().setCause(t).setMessage(() -> "got exception from a previous future that " +
+                                        "will prohibit sending any more data to the packetReceiver").log();
+                                return StringTrackableCompletableFuture.failedFuture(t, () -> "failed previous future");
+                            } else {
+                                log.atTrace().setMessage(() -> "chaining consumingBytes with " + msg +
+                                        " lastFuture=" + preexistingFutureForCapture).log();
+                                var rval = packetReceiver.consumeBytes(bb);
+                                log.atTrace().setMessage(() -> "packetReceiver.consumeBytes()=" + rval +
+                                        " bb.refCnt=" + bb.refCnt()).log();
+                                return rval.map(cf -> cf.thenApply(ignore -> false),
+                                        () -> "NettySendByteBufsToPacketHandlerHandler.channelRead()'s future is " +
+                                                "going to return a completedValue of false to indicate that more " +
+                                                "packets may need to be sent");
+                            }
+                        } finally {
+                            bb.release();
+                        }
+                    },
                     ()->"NettySendByteBufsToPacketHandlerHandler.channelRead waits for the previous future " +
                             "to finish before writing the next set of " + numBytesToSend + " bytes ");
             log.trace("CR: new currentFuture="+currentFuture);

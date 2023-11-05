@@ -35,6 +35,7 @@ public class TestHttpServerContext {
         try {
             Thread.sleep(responseWaitTime.toMillis());
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
         String body = SERVER_RESPONSE_BODY_PREFIX + r.path();

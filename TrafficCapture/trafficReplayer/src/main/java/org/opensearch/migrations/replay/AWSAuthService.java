@@ -1,6 +1,8 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
 import java.nio.charset.Charset;
@@ -15,8 +17,8 @@ public class AWSAuthService implements AutoCloseable {
         this.secretsManagerClient = secretsManagerClient;
     }
 
-    public AWSAuthService() {
-        this(SecretsManagerClient.builder().build());
+    public AWSAuthService(AwsCredentialsProvider credentialsProvider, Region region) {
+        this(SecretsManagerClient.builder().credentialsProvider(credentialsProvider).region(region).build());
     }
 
     // SecretId here can be either the unique name of the secret or the secret ARN

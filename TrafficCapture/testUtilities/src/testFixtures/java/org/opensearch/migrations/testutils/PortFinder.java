@@ -3,6 +3,7 @@ package org.opensearch.migrations.testutils;
 
 import java.util.Random;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 /**
  * Helper class to keep retrying ports against a Consumer until the
@@ -10,17 +11,19 @@ import java.util.function.Consumer;
  */
 public class PortFinder {
 
+    private PortFinder() {}
+
     private static final int MAX_PORT_TRIES = 100;
     private static final Random random = new Random();
 
     public static class ExceededMaxPortAssigmentAttemptException extends Exception {}
 
-    public static int retryWithNewPortUntilNoThrow(Consumer<Integer> r)
+    public static int retryWithNewPortUntilNoThrow(IntConsumer r)
             throws ExceededMaxPortAssigmentAttemptException {
         int numTries = 0;
         while (true) {
             try {
-                int port = (Math.abs(random.nextInt()) % (2 ^ 16 - 1025)) + 1025;
+                int port = random.nextInt((2 << 15) - 1025) + 1025;
                 r.accept(Integer.valueOf(port));
                 return port;
             } catch (Exception e) {

@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import com.google.common.base.Objects;
 import io.netty.buffer.Unpooled;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 @Slf4j
+@EqualsAndHashCode(exclude = "currentSegmentBytes")
 public class HttpMessageAndTimestamp {
 
     public static class Request extends HttpMessageAndTimestamp {
@@ -89,19 +91,6 @@ public class HttpMessageAndTimestamp {
         packetBytes.add(currentSegmentBytes.toByteArray());
         this.lastPacketTimestamp = timestamp;
         currentSegmentBytes = null;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        HttpMessageAndTimestamp that = (HttpMessageAndTimestamp) o;
-        return Objects.equal(firstPacketTimestamp, that.firstPacketTimestamp) && Objects.equal(lastPacketTimestamp, that.lastPacketTimestamp) && Objects.equal(packetBytes, that.packetBytes);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(firstPacketTimestamp, lastPacketTimestamp, packetBytes);
     }
 
     @Override
