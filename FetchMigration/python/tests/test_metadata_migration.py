@@ -15,78 +15,6 @@ class TestMetadataMigration(unittest.TestCase):
         with open(test_constants.PIPELINE_CONFIG_PICKLE_FILE_PATH, "rb") as f:
             self.loaded_pipeline_config = pickle.load(f)
 
-    def test_get_index_differences_empty(self):
-        # Base case should return an empty list
-        result_tuple = metadata_migration.get_index_differences(dict(), dict())
-        # Invariant
-        self.assertEqual(3, len(result_tuple))
-        # All diffs should be empty
-        self.assertEqual(set(), result_tuple[0])
-        self.assertEqual(set(), result_tuple[1])
-        self.assertEqual(set(), result_tuple[2])
-
-    def test_get_index_differences_empty_target(self):
-        result_tuple = metadata_migration.get_index_differences(test_constants.BASE_INDICES_DATA, dict())
-        # Invariant
-        self.assertEqual(3, len(result_tuple))
-        # No conflicts or identical indices
-        self.assertEqual(set(), result_tuple[1])
-        self.assertEqual(set(), result_tuple[2])
-        # Indices-to-create
-        self.assertEqual(3, len(result_tuple[0]))
-        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[0])
-        self.assertTrue(test_constants.INDEX2_NAME in result_tuple[0])
-        self.assertTrue(test_constants.INDEX3_NAME in result_tuple[0])
-
-    def test_get_index_differences_identical_index(self):
-        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
-        del test_data[test_constants.INDEX2_NAME]
-        del test_data[test_constants.INDEX3_NAME]
-        result_tuple = metadata_migration.get_index_differences(test_data, test_data)
-        # Invariant
-        self.assertEqual(3, len(result_tuple))
-        # No indices to move, or conflicts
-        self.assertEqual(set(), result_tuple[0])
-        self.assertEqual(set(), result_tuple[2])
-        # Identical indices
-        self.assertEqual(1, len(result_tuple[1]))
-        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[1])
-
-    def test_get_index_differences_settings_conflict(self):
-        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
-        # Set up conflict in settings
-        index_settings = test_data[test_constants.INDEX2_NAME][test_constants.SETTINGS_KEY]
-        index_settings[test_constants.INDEX_KEY][test_constants.NUM_REPLICAS_SETTING] += 1
-        result_tuple = metadata_migration.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
-        # Invariant
-        self.assertEqual(3, len(result_tuple))
-        # No indices to move
-        self.assertEqual(set(), result_tuple[0])
-        # Identical indices
-        self.assertEqual(2, len(result_tuple[1]))
-        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[1])
-        self.assertTrue(test_constants.INDEX3_NAME in result_tuple[1])
-        # Conflicting indices
-        self.assertEqual(1, len(result_tuple[2]))
-        self.assertTrue(test_constants.INDEX2_NAME in result_tuple[2])
-
-    def test_get_index_differences_mappings_conflict(self):
-        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
-        # Set up conflict in mappings
-        test_data[test_constants.INDEX3_NAME][test_constants.MAPPINGS_KEY] = {}
-        result_tuple = metadata_migration.get_index_differences(test_constants.BASE_INDICES_DATA, test_data)
-        # Invariant
-        self.assertEqual(3, len(result_tuple))
-        # No indices to move
-        self.assertEqual(set(), result_tuple[0])
-        # Identical indices
-        self.assertEqual(2, len(result_tuple[1]))
-        self.assertTrue(test_constants.INDEX1_NAME in result_tuple[1])
-        self.assertTrue(test_constants.INDEX2_NAME in result_tuple[1])
-        # Conflicting indices
-        self.assertEqual(1, len(result_tuple[2]))
-        self.assertTrue(test_constants.INDEX3_NAME in result_tuple[2])
-
     @patch('index_operations.doc_count')
     @patch('metadata_migration.write_output')
     @patch('metadata_migration.print_report')
@@ -98,12 +26,8 @@ class TestMetadataMigration(unittest.TestCase):
         mock_doc_count.return_value = IndexDocCount(1, dict())
         index_to_create = test_constants.INDEX3_NAME
         index_with_conflict = test_constants.INDEX2_NAME
-        index_exact_match = test_constants.INDEX1_NAME
         # Set up expected arguments to mocks so we can verify
         expected_create_payload = {index_to_create: test_constants.BASE_INDICES_DATA[index_to_create]}
-        # Print report accepts a tuple. The elements of the tuple
-        # are in the order: to-create, exact-match, conflicts
-        expected_diff = {index_to_create}, {index_exact_match}, {index_with_conflict}
         # Create mock data for indices on target
         target_indices_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
         del target_indices_data[index_to_create]
@@ -116,7 +40,7 @@ class TestMetadataMigration(unittest.TestCase):
         metadata_migration.run(test_input)
         mock_create_indices.assert_called_once_with(expected_create_payload, ANY)
         mock_doc_count.assert_called()
-        mock_print_report.assert_called_once_with(expected_diff, 1)
+        mock_print_report.assert_called_once_with(ANY, 1)
         mock_write_output.assert_not_called()
 
     @patch('index_operations.doc_count')
@@ -126,8 +50,35 @@ class TestMetadataMigration(unittest.TestCase):
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
                         mock_print_report: MagicMock, mock_doc_count: MagicMock):
+        index_to_migrate = test_constants.INDEX1_NAME
+        expected_output_path = "dummy"
+        test_doc_counts = {test_constants.INDEX2_NAME: 2, test_constants.INDEX3_NAME: 3}
+        # Doc counts are first fetched for the target cluster,
+        # then then source cluster is queried only for identical, empty indices
+        mock_doc_count.side_effect = [IndexDocCount(5, test_doc_counts),
+                                      IndexDocCount(1, {index_to_migrate: 1})]
+        mock_fetch_indices.return_value = test_constants.BASE_INDICES_DATA
+        test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, expected_output_path,
+                                             dryrun=True)
+        test_result = metadata_migration.run(test_input)
+        self.assertEqual(1, test_result.target_doc_count)
+        self.assertEqual({index_to_migrate}, test_result.migration_indices)
+        mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_migrate}, expected_output_path)
+        mock_doc_count.assert_called()
+        # Report should not be printed
+        mock_print_report.assert_not_called()
+
+    @patch('index_operations.doc_count')
+    @patch('metadata_migration.print_report')
+    @patch('metadata_migration.write_output')
+    @patch('index_operations.fetch_all_indices')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_identical_empty_index(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
+                                   mock_print_report: MagicMock, mock_doc_count: MagicMock):
+        test_index_doc_counts = {test_constants.INDEX2_NAME: 2,
+                                 test_constants.INDEX3_NAME: 3}
+        mock_doc_count.return_value = IndexDocCount(1, test_index_doc_counts)
         index_to_create = test_constants.INDEX1_NAME
-        mock_doc_count.return_value = IndexDocCount(1, dict())
         expected_output_path = "dummy"
         # Create mock data for indices on target
         target_indices_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
@@ -138,7 +89,7 @@ class TestMetadataMigration(unittest.TestCase):
                                              dryrun=True)
         test_result = metadata_migration.run(test_input)
         self.assertEqual(mock_doc_count.return_value.total, test_result.target_doc_count)
-        self.assertEqual({index_to_create}, test_result.created_indices)
+        self.assertEqual({index_to_create}, test_result.migration_indices)
         mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
         mock_doc_count.assert_called()
         # Report should not be printed
@@ -183,7 +134,7 @@ class TestMetadataMigration(unittest.TestCase):
         test_result = metadata_migration.run(test_input)
         mock_fetch_indices.assert_called_once()
         self.assertEqual(0, test_result.target_doc_count)
-        self.assertEqual(0, len(test_result.created_indices))
+        self.assertEqual(0, len(test_result.migration_indices))
 
 
 if __name__ == '__main__':
