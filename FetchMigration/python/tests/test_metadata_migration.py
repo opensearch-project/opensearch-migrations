@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch, MagicMock, ANY
 
 import metadata_migration
+from index_doc_count import IndexDocCount
 from metadata_migration_params import MetadataMigrationParams
 from tests import test_constants
 
@@ -94,7 +95,7 @@ class TestMetadataMigration(unittest.TestCase):
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_report(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock,
                         mock_print_report: MagicMock, mock_write_output: MagicMock, mock_doc_count: MagicMock):
-        mock_doc_count.return_value = 1
+        mock_doc_count.return_value = IndexDocCount(1, dict())
         index_to_create = test_constants.INDEX3_NAME
         index_with_conflict = test_constants.INDEX2_NAME
         index_exact_match = test_constants.INDEX1_NAME
@@ -126,7 +127,7 @@ class TestMetadataMigration(unittest.TestCase):
     def test_run_dryrun(self, mock_fetch_indices: MagicMock, mock_write_output: MagicMock,
                         mock_print_report: MagicMock, mock_doc_count: MagicMock):
         index_to_create = test_constants.INDEX1_NAME
-        mock_doc_count.return_value = 1
+        mock_doc_count.return_value = IndexDocCount(1, dict())
         expected_output_path = "dummy"
         # Create mock data for indices on target
         target_indices_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
@@ -136,7 +137,7 @@ class TestMetadataMigration(unittest.TestCase):
         test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, expected_output_path,
                                              dryrun=True)
         test_result = metadata_migration.run(test_input)
-        self.assertEqual(mock_doc_count.return_value, test_result.target_doc_count)
+        self.assertEqual(mock_doc_count.return_value.total, test_result.target_doc_count)
         self.assertEqual({index_to_create}, test_result.created_indices)
         mock_write_output.assert_called_once_with(self.loaded_pipeline_config, {index_to_create}, expected_output_path)
         mock_doc_count.assert_called()

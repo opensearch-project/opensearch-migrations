@@ -88,9 +88,10 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     indices_to_create = diff[0]
     if indices_to_create:
         result.created_indices = indices_to_create
-        result.target_doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)
+        doc_count_result = index_operations.doc_count(indices_to_create, source_endpoint_info)
+        result.target_doc_count = doc_count_result.total
     if args.report:
-        print_report(diff, result.target_doc_count)
+        print_report(diff, doc_count_result.total)
     if indices_to_create:
         # Write output YAML
         if len(args.output_file) > 0:
