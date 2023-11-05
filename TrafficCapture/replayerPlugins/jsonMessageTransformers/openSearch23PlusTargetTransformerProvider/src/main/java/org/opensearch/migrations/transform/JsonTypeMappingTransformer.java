@@ -1,7 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -37,7 +35,7 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
     }
 
     private Object transformHttpMessage(Map<String, Object> httpMsg) {
-        var incomingMethod = httpMsg.get(HttpJsonMessageWithFaultingPayload.METHOD_KEY);
+        var incomingMethod = httpMsg.get(JsonKeysForHttpMessage.METHOD_KEY);
         if ("GET".equals(incomingMethod)) {
             processGet(httpMsg);
         } else if ("PUT".equals(incomingMethod)) {
@@ -47,31 +45,31 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
     }
 
     private void processGet(Map<String, Object> httpMsg) {
-        var incomingUri = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI_KEY);
+        var incomingUri = (String) httpMsg.get(JsonKeysForHttpMessage.URI_KEY);
         var matchedUri = TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES.matcher(incomingUri);
         if (matchedUri.matches()) {
             var operationStr = matchedUri.group(2);
             if (operationStr.equals(SEARCH_URI_COMPONENT)) {
-                httpMsg.put(HttpJsonMessageWithFaultingPayload.URI_KEY, matchedUri.group(1) + operationStr);
+                httpMsg.put(JsonKeysForHttpMessage.URI_KEY, matchedUri.group(1) + operationStr);
             }
         }
     }
 
     private void processPut(Map<String, Object> httpMsg) {
-        final var uriStr = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI_KEY);
+        final var uriStr = (String) httpMsg.get(JsonKeysForHttpMessage.URI_KEY);
         var matchedTriple = TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES.matcher(uriStr);
         if (matchedTriple.matches()) {
             // TODO: Add support for multiple type mappings per index (something possible with
             // versions before ES7)
-            httpMsg.put(HttpJsonMessageWithFaultingPayload.URI_KEY,
+            httpMsg.put(JsonKeysForHttpMessage.URI_KEY,
                     matchedTriple.group(1) + DOC_URI_COMPONENT + matchedTriple.group(2));
             return;
         }
         var matchedSingle = SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE.matcher(uriStr);
         if (matchedSingle.matches()) {
             var topPayloadElement =
-                    (Map<String, Object>) ((Map<String, Object>) httpMsg.get(HttpJsonMessageWithFaultingPayload.PAYLOAD_KEY))
-                            .get(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY);
+                    (Map<String, Object>) ((Map<String, Object>) httpMsg.get(JsonKeysForHttpMessage.PAYLOAD_KEY))
+                            .get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY);
             var mappingsValue = (Map<String, Object>) topPayloadElement.get(MAPPINGS_KEYNAME);
             if (mappingsValue != null) {
                 exciseMappingsType(topPayloadElement, mappingsValue);

@@ -1,0 +1,8 @@
+plugins {
+    id "io.freefair.lombok" version "8.0.1"
+}
+
+dependencies {
+    implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
+}
