@@ -127,7 +127,7 @@ After the benchmark has been run, the indices and documents of the source and ta
 ```
 
 ## Configuring SigV4 access
-This solution, when deployed, will attempt to configure needed IAM permissions on its applicable Migration services (Traffic Replayer and Migration Console) to allow SigV4 communication between the service and the AWS OpenSearch Service or OpenSearch Serverless target cluster. On the flip side, the target cluster must be configured to allow these resources as well, which the following subsections will discuss. 
+When this solution is deployed, it will attempt to configure needed IAM permissions on its applicable Migration services (Traffic Replayer and Migration Console) to allow SigV4 communication between the service and the AWS OpenSearch Service or OpenSearch Serverless target cluster. In addition to this, the target cluster must be configured to allow these resources as well, which the following subsections will discuss. 
 
 There is also an assumption here that security groups are in place that allow communication between these Migration services and the target cluster. If the OpenSearch Service is created with this CDK, the relevant security group will be created and configured automatically. Otherwise, imported target clusters will need to add the `osClusterAccessSG` security group (created after deployment) to their target cluster or modify their existing security groups to allow communication.
 
