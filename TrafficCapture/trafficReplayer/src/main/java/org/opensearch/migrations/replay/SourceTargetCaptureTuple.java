@@ -182,9 +182,9 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n targetResponseDuration=").append(targetResponseDuration);
             sb.append("\n targetRequestData=")
-                    .append(PrettyPrinter.httpPacketBufsToString(PrettyPrinter.HttpMessageType.Request, targetRequestData.streamUnretained()));
+                    .append(PrettyPrinter.httpPacketBufsToString(PrettyPrinter.HttpMessageType.REQUEST, targetRequestData.streamUnretained()));
             sb.append("\n targetResponseData=")
-                    .append(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.Response, targetResponseData));
+                    .append(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.RESPONSE, targetResponseData));
             sb.append("\n transformStatus=").append(transformationStatus);
             sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
             sb.append('}');

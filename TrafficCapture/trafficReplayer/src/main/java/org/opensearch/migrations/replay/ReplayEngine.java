@@ -136,7 +136,7 @@ public class ReplayEngine {
         final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
-        var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
+        var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1L) : Duration.ZERO;
         logStartOfWork(requestKey, newCount, start, label);
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", requestKey.toString())

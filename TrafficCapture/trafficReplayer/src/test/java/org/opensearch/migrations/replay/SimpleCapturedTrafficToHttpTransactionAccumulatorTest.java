@@ -196,7 +196,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                             public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair fullPair) {
                                 var sourceIdx = requestKey.getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
-                                        RequestResponsePacketPair.ReconstructionStatus.ClosedPrematurely) {
+                                        RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
                                     return;
                                 }
                                 fullPair.getTrafficStreamsHeld().stream()

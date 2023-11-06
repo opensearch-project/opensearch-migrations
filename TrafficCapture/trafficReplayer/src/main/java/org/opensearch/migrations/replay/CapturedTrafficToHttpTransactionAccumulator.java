@@ -68,7 +68,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .toString();
     }
 
-    private final static MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
+    private static final MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
                                                        AccumulationCallbacks accumulationCallbacks)
@@ -87,7 +87,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                 + accumulation.getRequestKey() + "]=" + accumulation)
                                 .log();
                         fireAccumulationsCallbacksAndClose(accumulation,
-                                RequestResponsePacketPair.ReconstructionStatus.ExpiredPrematurely);
+                                RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY);
                     }
                 });
         this.listener = accumulationCallbacks;
@@ -113,7 +113,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .append(" firstTimestamp: ")
                 .append(ts.getSubStreamList().stream().findFirst()
                         .map(tso -> tso.getTs()).map(TrafficStreamUtils::instantFromProtoTimestamp)
-                        .map(instant->instant.toString())
+                        .map(Object::toString)
                         .orElse("[None]"))
                 .toString();
     }
@@ -165,7 +165,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 startingSourceRequestOffset, stream.getLastObservationWasUnterminatedRead());
     }
 
-    private static enum CONNECTION_STATUS {
+    private enum CONNECTION_STATUS {
         ALIVE, CLOSED
     }
 
@@ -174,7 +174,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                           TrafficObservation observation) {
         log.atTrace().setMessage(()->"Adding observation: "+observation).log();
         var timestamp =
-                Optional.of(observation.getTs()).map(t-> TrafficStreamUtils.instantFromProtoTimestamp(t)).get();
+                Optional.of(observation.getTs()).map(TrafficStreamUtils::instantFromProtoTimestamp).get();
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
 
         return handleObservationForSkipState(accum, observation)
@@ -276,7 +276,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         var connectionId = trafficStreamKey.getConnectionId();
         if (observation.hasWrite()) {
-            assert accum != null && accum.state == Accumulation.State.ACCUMULATING_WRITES;
             var rrPair = accum.getRrPair();
             log.atTrace().setMessage(() -> "Adding response data for accum[" + connectionId + "]=" + accum).log();
             rrPair.addResponseData(timestamp, observation.getWrite().getData().toByteArray());
@@ -309,7 +308,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         // We only need to worry about this if we have yet to send the RESPONSE.
         if (accum.state == Accumulation.State.ACCUMULATING_WRITES) {
             log.atDebug().setMessage(()->"Resetting accum[" + connectionId + "]=" + accum).log();
-            handleEndOfResponse(accum, RequestResponsePacketPair.ReconstructionStatus.Complete);
+            handleEndOfResponse(accum, RequestResponsePacketPair.ReconstructionStatus.COMPLETE);
             return true;
         }
         return false;
@@ -357,7 +356,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public void close() {
         liveStreams.values().forEach(accum -> {
             requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
-            fireAccumulationsCallbacksAndClose(accum, RequestResponsePacketPair.ReconstructionStatus.ClosedPrematurely);
+            fireAccumulationsCallbacksAndClose(accum, RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY);
         });
         liveStreams.clear();
     }

@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import com.google.common.base.Objects;
 import io.netty.buffer.Unpooled;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -24,7 +23,7 @@ public class HttpMessageAndTimestamp {
         }
         @Override
         public String toString() {
-            return super.format(Optional.of(PrettyPrinter.HttpMessageType.Request));
+            return super.format(Optional.of(PrettyPrinter.HttpMessageType.REQUEST));
         }
     }
 
@@ -34,7 +33,7 @@ public class HttpMessageAndTimestamp {
         }
         @Override
         public String toString() {
-            return super.format(Optional.of(PrettyPrinter.HttpMessageType.Request));
+            return super.format(Optional.of(PrettyPrinter.HttpMessageType.REQUEST));
         }
     }
 
@@ -66,7 +65,7 @@ public class HttpMessageAndTimestamp {
 
     public String format(Optional<PrettyPrinter.HttpMessageType> messageTypeOp) {
         var packetBytesAsStr = messageTypeOp.map(mt-> PrettyPrinter.httpPacketBytesToString(mt, packetBytes))
-                .orElseGet(()-> PrettyPrinter.httpPacketBufsToString(packetBytes.stream().map(b-> Unpooled.wrappedBuffer(b)),
+                .orElseGet(()-> PrettyPrinter.httpPacketBufsToString(packetBytes.stream().map(Unpooled::wrappedBuffer),
                         Utils.MAX_PAYLOAD_SIZE_TO_PRINT));
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);

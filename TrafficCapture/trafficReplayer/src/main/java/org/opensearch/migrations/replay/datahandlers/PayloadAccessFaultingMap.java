@@ -64,7 +64,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
                             if (isJson && count == 0) {
                                 ++count;
                                 if (onlyValue != null) {
-                                    return new SimpleEntry(INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue);
+                                    return new SimpleEntry<>(INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue);
                                 } else {
                                     throw PayloadNotLoadedException.getInstance();
                                 }

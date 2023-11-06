@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import com.google.common.base.Objects;
 import lombok.EqualsAndHashCode;
 
 import java.util.AbstractMap;

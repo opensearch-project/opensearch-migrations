@@ -36,7 +36,7 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     }
 
     private void finalizeSignature(ChannelHandlerContext ctx) {
-        signer.finalize(httpMessage);
+        signer.finalizeSignature(httpMessage);
         ctx.fireChannelRead(httpMessage);
         receivedHttpContents.stream().forEach(content->{
             ctx.fireChannelRead(content);

@@ -83,7 +83,7 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
     }
 
     @Override
-    public void finalize(HttpJsonMessageWithFaultingPayload msg) {
+    public void finalizeSignature(HttpJsonMessageWithFaultingPayload msg) {
         getSignatureHeadersViaSdk(msg).forEach(kvp -> msg.headers().put(kvp.getKey(), kvp.getValue()));
     }
 

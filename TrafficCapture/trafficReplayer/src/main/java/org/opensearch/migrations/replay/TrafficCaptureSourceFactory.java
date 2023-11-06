@@ -14,6 +14,8 @@ import java.time.Duration;
 @Slf4j
 public class TrafficCaptureSourceFactory {
 
+    private TrafficCaptureSourceFactory() {}
+
     public static BlockingTrafficSource
     createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow) throws IOException {
         return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow);

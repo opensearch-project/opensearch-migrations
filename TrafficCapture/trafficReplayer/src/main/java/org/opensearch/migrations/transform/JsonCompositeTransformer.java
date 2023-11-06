@@ -11,7 +11,7 @@ public class JsonCompositeTransformer implements IJsonTransformer {
     }
 
     public Object transformJson(Object incomingJson) {
-        AtomicReference lastOutput = new AtomicReference(incomingJson);
+        var lastOutput = new AtomicReference<>(incomingJson);
         jsonTransformerList.forEach(t->lastOutput.set(t.transformJson(lastOutput.get())));
         return lastOutput.get();
     }
