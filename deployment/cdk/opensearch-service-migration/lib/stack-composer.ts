@@ -30,15 +30,15 @@ export interface StackComposerProps extends StackProps {
     readonly migrationsAppRegistryARN?: string
 }
 
-export function addStacksToAppRegistry(scope: Construct, appRegistryAppARN: string, allStacks: Stack[]) {
-    for (let stack of allStacks) {
-        const appRegistryApp = Application.fromApplicationArn(stack, 'AppRegistryApplicationImport', appRegistryAppARN)
-        appRegistryApp.associateApplicationWithStack(stack)
-    }
-}
-
 export class StackComposer {
     public stacks: Stack[] = [];
+
+    private addStacksToAppRegistry(scope: Construct, appRegistryAppARN: string, allStacks: Stack[]) {
+        for (let stack of allStacks) {
+            const appRegistryApp = Application.fromApplicationArn(stack, 'AppRegistryApplicationImport', appRegistryAppARN)
+            appRegistryApp.associateApplicationWithStack(stack)
+        }
+    }
 
     constructor(scope: Construct, props: StackComposerProps) {
 
@@ -433,7 +433,7 @@ export class StackComposer {
         }
 
         if (props.migrationsAppRegistryARN) {
-            addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
+            this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
         }
 
         function getContextForType(optionName: string, expectedType: string): any {
