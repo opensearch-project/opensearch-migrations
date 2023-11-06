@@ -34,7 +34,7 @@ public class TransformationLoader {
         }
         providers = Collections.unmodifiableList(inProgressProviders);
         log.atInfo().setMessage(()->"IJsonTransformerProviders loaded: " +
-                providers.stream().map(p->p.getClass().toString()).collect(Collectors.joining())).log();
+                providers.stream().map(p->p.getClass().toString()).collect(Collectors.joining("; "))).log();
     }
 
     List<Map<String, Object>> parseFullConfig(String fullConfig) throws JsonProcessingException {
@@ -71,7 +71,7 @@ public class TransformationLoader {
             if (className.equals(key)) {
                 var configuration = c.get(key);
                 log.atInfo().setMessage(()->"Creating a transformer with configuration="+configuration).log();
-                return p.createTransformer(Optional.of(configuration));
+                return p.createTransformer(configuration);
             }
         }
         throw new IllegalArgumentException("Could not find a provider named: " + key);
