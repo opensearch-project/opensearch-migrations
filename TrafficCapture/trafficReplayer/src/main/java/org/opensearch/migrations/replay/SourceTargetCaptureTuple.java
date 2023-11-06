@@ -67,10 +67,10 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
             String head = scanner.next();
-            int header_length = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
+            int headerLength = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
             // SequenceInputStreams cannot be reset, so it's recreated from the original data.
             SequenceInputStream bodyStream = ReplayUtils.byteArraysToInputStream(data);
-            bodyStream.skip(header_length);
+            for (int leftToSkip = headerLength; leftToSkip > 0; leftToSkip -= bodyStream.skip(leftToSkip)) {}
 
             // There are several limitations introduced by using the HTTP.toJSONObject call.
             // 1. We need to replace "\r\n" with "\n" which could mask differences in the responses.
@@ -78,7 +78,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             //    We deal with this in the code that reads these JSONs, but it's a more brittle and error-prone format
             //    than it would be otherwise.
             // TODO: Refactor how messages are converted to JSON and consider using a more sophisticated HTTP parsing strategy.
-            JSONObject message = HTTP.toJSONObject(head.replaceAll("\r\n", "\n"));
+            JSONObject message = HTTP.toJSONObject(head.replace("\r\n", "\n"));
             String base64body = Base64.getEncoder().encodeToString(bodyStream.readAllBytes());
             message.put("body", base64body);
             return message;
@@ -100,7 +100,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             return message;
         }
 
-        private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
+        private JSONObject toJSONObject(SourceTargetCaptureTuple triple) {
             // TODO: Use Netty to parse the packets as HTTP rather than json.org (we can also remove it as a dependency)
             JSONObject meta = new JSONObject();
             meta.put("sourceRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
