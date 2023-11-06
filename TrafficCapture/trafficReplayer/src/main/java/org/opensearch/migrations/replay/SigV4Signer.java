@@ -15,10 +15,9 @@ import java.util.stream.Stream;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
-import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
+import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
-import software.amazon.awssdk.auth.signer.Aws4Signer;
 import software.amazon.awssdk.auth.signer.internal.BaseAws4Signer;
 import software.amazon.awssdk.auth.signer.params.Aws4SignerParams;
 import software.amazon.awssdk.core.checksums.SdkChecksum;

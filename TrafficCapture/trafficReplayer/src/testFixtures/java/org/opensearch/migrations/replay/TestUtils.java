@@ -116,6 +116,14 @@ public class TestUtils {
             return new String(baos.toByteArray(), StandardCharsets.UTF_8);
         }
     }
+    static void runPipelineAndValidate(IAuthTransformerFactory authTransformer,
+                                       String extraHeaders,
+                                       List<String> stringParts,
+                                       DefaultHttpHeaders expectedRequestHeaders,
+                                       Function<StringBuilder, String> expectedOutputGenerator) throws Exception {
+        runPipelineAndValidate(x -> x,
+                authTransformer, extraHeaders, stringParts, expectedRequestHeaders, expectedOutputGenerator);
+    }
 
     static void runPipelineAndValidate(IJsonTransformer transformer,
                                        IAuthTransformerFactory authTransformer,

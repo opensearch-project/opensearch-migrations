@@ -147,7 +147,7 @@ class TrafficReplayerTest {
 
     @Test
     public void testReader() throws Exception {
-        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
+        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null, null, false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
@@ -185,7 +185,7 @@ class TrafficReplayerTest {
 
     @Test
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
-        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null,false);
+        var tr = new TrafficReplayer(new URI("http://localhost:9200"), null, null, false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         var remainingAccumulations = new AtomicInteger();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =

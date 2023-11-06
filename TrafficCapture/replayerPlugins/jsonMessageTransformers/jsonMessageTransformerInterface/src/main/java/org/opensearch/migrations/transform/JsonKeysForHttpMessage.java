@@ -1,6 +1,6 @@
 package org.opensearch.migrations.transform;
 
-public class JsonKeys {
+public class JsonKeysForHttpMessage {
     public static final String INLINED_JSON_BODY_DOCUMENT_KEY = "inlinedJsonBody";
 
     public static final String METHOD_KEY = "method";
