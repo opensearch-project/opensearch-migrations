@@ -4,7 +4,7 @@ import java.util.Optional;
 
 public class JsonTransformerForOpenSearch23PlusTargetTransformerProvider implements IJsonTransformerProvider {
     @Override
-    public IJsonTransformer createTransformer(Optional<String> args) {
+    public IJsonTransformer createTransformer(Object jsonConfig) {
         return new JsonTypeMappingTransformer();
     }
 }

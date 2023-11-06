@@ -109,8 +109,10 @@ public class HeaderTransformerTest {
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 12, null,
                 null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+
         var transformingHandler = new HttpJsonTransformingConsumer(
-                new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
+                new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME,
+                        "[{\"org.opensearch.migrations.transform.JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
                 null, testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestId(0));
 
         Random r = new Random(2);

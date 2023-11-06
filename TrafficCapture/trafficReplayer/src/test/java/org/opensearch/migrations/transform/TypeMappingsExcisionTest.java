@@ -13,6 +13,7 @@ import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.Map;
 
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class TypeMappingsExcisionTest {
@@ -45,16 +46,16 @@ public class TypeMappingsExcisionTest {
         transformAndVerifyResult(json, "get_query_output.txt");
     }
 
-    private static Object parseJsonFromResourceName(String resourceName) throws Exception {
+    private static Map<String,Object> parseJsonFromResourceName(String resourceName) throws Exception {
         var jsonAccumulator = new JsonAccumulator();
         try (var resourceStream = getInputStreamForTypeMappingResource(resourceName);
              var isr = new InputStreamReader(resourceStream, StandardCharsets.UTF_8)) {
             var expectedBytes = CharStreams.toString(isr).getBytes(StandardCharsets.UTF_8);
-            return jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
+            return (Map<String,Object>) jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
         }
     }
 
-    private static void transformAndVerifyResult(Object json, String expectedValueSource) throws Exception {
+    private static void transformAndVerifyResult(Map<String,Object> json, String expectedValueSource) throws Exception {
         var jsonTransformer = getJsonTransformer();
         json = jsonTransformer.transformJson(json);
         var jsonAsStr = objectMapper.writeValueAsString(json);

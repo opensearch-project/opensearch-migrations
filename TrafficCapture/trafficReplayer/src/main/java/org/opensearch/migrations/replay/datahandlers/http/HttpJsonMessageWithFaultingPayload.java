@@ -10,11 +10,15 @@ import java.util.Map;
 
 public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> implements IHttpMessage {
 
+    public static final String MESSAGE_SCHEMA_VERSION = "1.0";
+
     public HttpJsonMessageWithFaultingPayload() {
     }
 
     public HttpJsonMessageWithFaultingPayload(Map<String, ?> m) {
+
         super(m);
+        put(JsonKeysForHttpMessage.HTTP_MESSAGE_SCHEMA_VERSION_KEY, MESSAGE_SCHEMA_VERSION);
     }
 
     @Override

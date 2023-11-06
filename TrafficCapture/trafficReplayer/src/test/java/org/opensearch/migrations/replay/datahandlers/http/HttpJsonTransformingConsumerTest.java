@@ -98,7 +98,7 @@ class HttpJsonTransformingConsumerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
-            public Object transformJson(Object incomingJson) {
+            public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
                 // just walk everything - that's enough to touch the payload and throw
                 walkMaps(incomingJson);
                 return incomingJson;

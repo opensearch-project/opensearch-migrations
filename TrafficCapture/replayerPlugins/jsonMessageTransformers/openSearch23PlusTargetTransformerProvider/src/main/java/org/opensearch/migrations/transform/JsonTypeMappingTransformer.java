@@ -26,15 +26,11 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
     public static final String MAPPINGS_KEYNAME = "mappings";
 
     @Override
-    public Object transformJson(Object incomingJson) {
-        if (!(incomingJson instanceof Map)) {
-            return incomingJson;
-        } else {
-            return transformHttpMessage((Map) incomingJson);
-        }
+    public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
+        return transformHttpMessage(incomingJson);
     }
 
-    private Object transformHttpMessage(Map<String, Object> httpMsg) {
+    private Map<String,Object> transformHttpMessage(Map<String, Object> httpMsg) {
         var incomingMethod = httpMsg.get(JsonKeysForHttpMessage.METHOD_KEY);
         if ("GET".equals(incomingMethod)) {
             processGet(httpMsg);

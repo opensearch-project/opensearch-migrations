@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.IJsonTransformerProvider;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
@@ -18,6 +19,7 @@ import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+@Slf4j
 public class TransformationLoader {
     private final List<IJsonTransformerProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
@@ -27,14 +29,16 @@ public class TransformationLoader {
                 ServiceLoader.load(IJsonTransformerProvider.class);
         var inProgressProviders = new ArrayList<IJsonTransformerProvider>();
         for (var provider : transformerProviders) {
+            log.info("Adding IJsonTransfomerProvider: " + provider);
             inProgressProviders.add(provider);
         }
         providers = Collections.unmodifiableList(inProgressProviders);
+        log.atInfo().setMessage(()->"IJsonTransformerProviders loaded: " +
+                providers.stream().map(p->p.getClass().toString()).collect(Collectors.joining())).log();
     }
 
     List<Map<String, Object>> parseFullConfig(String fullConfig) throws JsonProcessingException {
-        return objMapper.readValue(fullConfig, new TypeReference<>() {
-        });
+        return objMapper.readValue(fullConfig, new TypeReference<>() {});
     }
 
     protected Stream<IJsonTransformer> getTransformerFactoryFromServiceLoader(String fullConfig)
@@ -58,17 +62,19 @@ public class TransformationLoader {
     private IJsonTransformer configureTransformerFromConfig(Map<String, Object> c) {
         var keys = c.keySet();
         if (keys.size() != 1) {
-            throw new IllegalArgumentException("Must specify the configuration list with a sequence of maps " +
-                    "with only one key each, where the key is the name of the transformer.");
+            throw new IllegalArgumentException("Must specify the top-level configuration list with a sequence of " +
+                    "maps that have only one key each, where the key is the name of the transformer to be configured.");
         }
         var key = keys.stream().findFirst().get();
-        var transformerConfigStr = objMapper.writeValueAsString(c.get(key));
         for (var p : providers) {
-            if (p.getClass().getSimpleName().equals(key)) {
-                return p.createTransformer(Optional.of(transformerConfigStr));
+            var className = p.getClass().getName();
+            if (className.equals(key)) {
+                var configuration = c.get(key);
+                log.atInfo().setMessage(()->"Creating a transformer with configuration="+configuration).log();
+                return p.createTransformer(Optional.of(configuration));
             }
         }
-        return null;
+        throw new IllegalArgumentException("Could not find a provider named: " + key);
     }
     public IJsonTransformer getTransformerFactoryLoader(String newHostName) {
         return getTransformerFactoryLoader(newHostName, null);
@@ -90,7 +96,7 @@ public class TransformationLoader {
         private final String newHostName;
 
         @Override
-        public Object transformJson(Object incomingJson) {
+        public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
             var asMap = (Map<String, Object>) incomingJson;
             var headers = (Map<String, Object>) asMap.get(JsonKeysForHttpMessage.HEADERS_KEY);
             headers.replace("host", newHostName);
