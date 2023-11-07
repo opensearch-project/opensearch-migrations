@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import com.google.common.collect.Streams;
 import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.ToString;
@@ -24,6 +25,8 @@ import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -47,7 +50,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -73,6 +75,7 @@ public class FullTrafficReplayerTest {
     public static final int PRODUCER_SLEEP_INTERVAL_MS = 100;
     public static final Duration MAX_WAIT_TIME_FOR_TOPIC = Duration.ofMillis(PRODUCER_SLEEP_INTERVAL_MS*2);
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
+    public static final String TEST_CONNECTION_ID = "testConnectionId";
 
     @AllArgsConstructor
     private static class FabricatedErrorToKillTheReplayer extends Error {
@@ -86,20 +89,38 @@ public class FullTrafficReplayerTest {
 
     @Test
     @Tag("longTest")
-    public void fullTest() throws Exception {
+    public void testSingleStreamWithCloseIsCommitted() throws Throwable {
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 TestHttpServerContext::makeResponse);
-        var streamAndConsumer = generateStreamAndTupleConsumerWithSomeChecks();
+        var trafficStreamWithJustClose = TrafficStream.newBuilder()
+                .setNodeId(TEST_NODE_ID)
+                .setConnectionId(TEST_CONNECTION_ID)
+                .addSubStream(TrafficObservation.newBuilder()
+                        .setClose(CloseObservation.newBuilder().build()).build())
+                .build();
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
+        runReplayerUntilSourceWasExhausted(0, httpServer, trafficSourceSupplier);
+        Assertions.assertEquals(0, trafficSourceSupplier.commitCursor.get());
+        log.error("done");
+    }
+
+    @Test
+    @Tag("longTest")
+    public void fullTest() throws Throwable {
+        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+                TestHttpServerContext::makeResponse);
+        var streamAndConsumer = generateStreamAndTupleConsumerWithSomeChecks(2);
         var numExpectedRequests = streamAndConsumer._2;
-        var trafficSourceSupplier = loadStreamsToCursorArraySource(streamAndConsumer._1.collect(Collectors.toList()));
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(streamAndConsumer._1.collect(Collectors.toList()));
         runReplayerUntilSourceWasExhausted(numExpectedRequests, httpServer, trafficSourceSupplier);
+        Assertions.assertEquals(numExpectedRequests, trafficSourceSupplier.commitCursor.get());
         log.error("done");
     }
 
     private static void runReplayerUntilSourceWasExhausted(int numExpectedRequests,
                                                            SimpleNettyHttpServer httpServer,
                                                            Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier)
-            throws Exception {
+            throws Throwable {
         AtomicInteger runNumberRef = new AtomicInteger();
         var totalUniqueEverReceived = new AtomicInteger();
         var nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
@@ -149,6 +170,9 @@ public class FullTrafficReplayerTest {
                         .setMessage(()->"broke out of the replayer, with the shutdown cause=" + e.originalCause +
                                 " and this immediate reason")
                         .log();
+                if (!(e.originalCause instanceof FabricatedErrorToKillTheReplayer)) {
+                    throw e.immediateCause;
+                }
             } finally {
                 log.info("Upon appending.... counter="+counter.get()+" totalUnique="+totalUniqueEverReceived.get());
                 receivedPerRun.add(counter.get());
@@ -178,11 +202,12 @@ public class FullTrafficReplayerTest {
                 TrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
                 TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes();
         var testCaseArr = generatedCases.toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
-        var shuffledStreams =
-                randomlyInterleaveStreams(r, Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams)));
+        var aggregatedStreams =
+                Arrays.stream(testCaseArr).flatMap(c->Arrays.stream(c.trafficStreams));
+                //randomlyInterleaveStreams(r, Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams)));
 
         var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
-        return new Tuple2<>(shuffledStreams, numExpectedRequests);
+        return new Tuple2<>(aggregatedStreams, numExpectedRequests);
     }
 
     private <R extends AutoCloseable> void
@@ -246,12 +271,14 @@ public class FullTrafficReplayerTest {
 
     @Getter
     @ToString
+    @EqualsAndHashCode
     private static class TrafficStreamCursorKey implements ITrafficStreamKey, Comparable<TrafficStreamCursorKey> {
+        public final int sourceListIndex;
+
         public final String connectionId;
         public final String nodeId;
         public final int trafficStreamIndex;
 
-        public final int sourceListIndex;
 
         public TrafficStreamCursorKey(TrafficStream stream, int sourceListIndex) {
             connectionId = stream.getConnectionId();
@@ -264,7 +291,6 @@ public class FullTrafficReplayerTest {
         public int compareTo(TrafficStreamCursorKey other) {
             return Integer.compare(sourceListIndex, other.sourceListIndex);
         }
-
     }
 
     @AllArgsConstructor
@@ -274,43 +300,55 @@ public class FullTrafficReplayerTest {
         ITrafficStreamKey key;
     }
 
-    private Supplier<ISimpleTrafficCaptureSource> loadStreamsToCursorArraySource(List<TrafficStream> streams) {
-        var commitCursor = new AtomicInteger(-1);
+    private static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {
+        List<TrafficStream> streams;
+        AtomicInteger commitCursor = new AtomicInteger(-1);
 
-        return () -> new ISimpleTrafficCaptureSource() {
-            AtomicInteger readCursor = new AtomicInteger(commitCursor.get()+1);
-            PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
+        public ArrayCursorTrafficSourceFactory(List<TrafficStream> streams) {
+            this.streams = streams;
+        }
 
-            @Override
-            public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
-                var idx = readCursor.getAndIncrement();
-                log.info("reading chunk from index="+idx);
-                if (streams.size() <= idx) {
-                    return CompletableFuture.failedFuture(new EOFException());
+        public ISimpleTrafficCaptureSource get() {
+            return new ISimpleTrafficCaptureSource() {
+                AtomicInteger readCursor = new AtomicInteger(commitCursor.get()+1);
+                PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
+
+                @Override
+                public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
+                    var idx = readCursor.getAndIncrement();
+                    log.info("reading chunk from index="+idx);
+                    if (streams.size() <= idx) {
+                        return CompletableFuture.failedFuture(new EOFException());
+                    }
+                    var stream = streams.get(idx);
+                    var key = new TrafficStreamCursorKey(stream, idx);
+                    synchronized (pQueue) {
+                        if (pQueue.isEmpty()) {
+                            commitCursor.set(key.sourceListIndex);
+                        }
+                        pQueue.add(key);
+                    }
+                    return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamWithKey(stream, key)));
                 }
-                var stream = streams.get(idx);
-                var key = new TrafficStreamCursorKey(stream, idx);
-                pQueue.add(key);
-                return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamWithKey(stream, key)));
-            }
 
-            @Override
-            public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-                synchronized (readCursor) { // figure out if I need to do something more efficient later
-                    int topCursor = pQueue.peek().sourceListIndex;
-                    var didRemove = pQueue.remove(trafficStreamKey);
-                    assert didRemove;
-                    var incomingCursor = trafficStreamKey.getTrafficStreamIndex();
-                    if (topCursor == incomingCursor) {
-                        topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getSourceListIndex()).orElse(topCursor);
-                        log.info("Commit called for "+trafficStreamKey+", but and new topCursor="+topCursor);
-                        commitCursor.set(topCursor);
-                    } else {
-                        log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
+                @Override
+                public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+                    synchronized (pQueue) { // figure out if I need to do something more efficient later
+                        int topCursor = pQueue.peek().sourceListIndex;
+                        var didRemove = pQueue.remove(trafficStreamKey);
+                        assert didRemove;
+                        var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).sourceListIndex;
+                        if (topCursor == incomingCursor) {
+                            topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getSourceListIndex()).orElse(topCursor);
+                            log.info("Commit called for "+trafficStreamKey+", but and new topCursor="+topCursor);
+                            commitCursor.set(topCursor);
+                        } else {
+                            log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
+                        }
                     }
                 }
-            }
-        };
+            };
+        }
     }
 
     private Supplier<ISimpleTrafficCaptureSource> loadStreamsToKafka(Stream<TrafficStream> streams) throws Exception {

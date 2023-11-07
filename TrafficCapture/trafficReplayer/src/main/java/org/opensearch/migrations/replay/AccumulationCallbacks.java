@@ -11,5 +11,6 @@ public interface AccumulationCallbacks {
     void onFullDataReceived(UniqueReplayerRequestKey key, RequestResponsePacketPair rrpp);
     void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                  List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
-    void onConnectionClose(UniqueReplayerRequestKey key, Instant when);
+    void onConnectionClose(UniqueReplayerRequestKey key, Instant when,
+                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
 }

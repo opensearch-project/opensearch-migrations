@@ -9,6 +9,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
@@ -582,14 +583,13 @@ public class TrafficReplayer {
                 // packaging it up and calling the callback.
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
-                    packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary,
-                            (Exception) t);
+                    packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
+                    commitTrafficStreams(rrPair.trafficStreamKeysBeingHeld);
                     return null;
                 } else if (t instanceof Error) {
                     throw (Error) t;
                 } else {
-                    throw new Error("Unknown throwable type passed to handle().", t) {
-                    };
+                    throw new Error("Unknown throwable type passed to handle().", t);
                 }
             } catch (Error error) {
                 log.atError()
@@ -620,13 +620,23 @@ public class TrafficReplayer {
                                             List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             if (status == RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY) {
                 // eventually fill this in to commit the message
+                commitTrafficStreams(trafficStreamKeysBeingHeld);
+            }
+        }
+
+        @SneakyThrows
+        private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+            for (var tsk : trafficStreamKeysBeingHeld) {
+                trafficCaptureSource.commitTrafficStream(tsk);
             }
         }
 
         @Override
-        public void onConnectionClose(UniqueReplayerRequestKey requestKey, Instant timestamp) {
+        public void onConnectionClose(UniqueReplayerRequestKey requestKey, Instant timestamp,
+                                      List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             replayEngine.closeConnection(requestKey, timestamp);
+            commitTrafficStreams(trafficStreamKeysBeingHeld);
         }
 
         private TransformedTargetRequestAndResponse

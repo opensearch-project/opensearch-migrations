@@ -170,7 +170,8 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when,
+                                                          List<ITrafficStreamKey> keysHeld) {}
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -211,7 +212,8 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when,
+                                                          List<ITrafficStreamKey> keysHeld) {}
                         }
                 );
         byte[] serializedChunks;

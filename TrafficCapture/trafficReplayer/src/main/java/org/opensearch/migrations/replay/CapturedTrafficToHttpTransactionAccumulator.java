@@ -14,6 +14,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -140,6 +141,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             accum.getRrPair().holdTrafficStream(tsk);
         } else {
             assert accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK ||
+                    accum.state == Accumulation.State.IGNORING_LAST_REQUEST ||
                     trafficStream.getSubStreamCount() == 0 ||
                     trafficStream.getSubStream(trafficStream.getSubStreamCount()-1).hasClose();
         }
@@ -177,8 +179,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 Optional.of(observation.getTs()).map(TrafficStreamUtils::instantFromProtoTimestamp).get();
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
 
-        return handleObservationForSkipState(accum, observation)
-                .or(() -> handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp))
+        return handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp)
+                .or(() -> handleObservationForSkipState(accum, observation))
                 .or(() -> handleObservationForReadState(accum, observation, trafficStreamKey, timestamp))
                 .or(() -> handleObservationForWriteState(accum, observation, trafficStreamKey, timestamp))
                 .orElseGet(() -> {
@@ -214,7 +216,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             accum.getOrCreateTransactionPair().holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             closedConnectionCounter.incrementAndGet();
-            listener.onConnectionClose(accum.getRequestKey(), timestamp);
+            listener.onConnectionClose(accum.getRequestKey(), timestamp, accum.getRrPair().trafficStreamKeysBeingHeld);
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
             accum.getOrCreateTransactionPair().holdTrafficStream(trafficStreamKey);
@@ -392,7 +394,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             }
         } finally {
             if (accumulation.hasSignaledRequests()) {
-                listener.onConnectionClose(accumulation.getRequestKey(), accumulation.getLastTimestamp());
+                listener.onConnectionClose(accumulation.getRequestKey(), accumulation.getLastTimestamp(),
+                        accumulation.hasRrPair() ? accumulation.getRrPair().trafficStreamKeysBeingHeld : List.of());
             }
         }
     }

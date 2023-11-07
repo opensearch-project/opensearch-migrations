@@ -216,7 +216,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when,
+                                                          List<ITrafficStreamKey> keysHeld) {}
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();
