@@ -1,74 +1,76 @@
-# "Fetch" Data Migration / Backfill
+# Fetch  Migration and Backfill
 
-Fetch Migration provides an easy-to-use tool that simplifies the process of moving indices and their data from a 
-"source" cluster (either Elasticsearch or OpenSearch) to a "target" OpenSearch cluster. It automates the process of 
-comparing indices between the two clusters and only creates index metadata (settings and mappings) that do not already 
-exist on the target cluster. Internally, the tool uses [Data Prepper](https://github.com/opensearch-project/data-prepper) 
-to migrate data for these created indices.
+The **Fetch Migration** tool simplifies the process of moving indexes and the data contained within them from a
+source cluster, such as Elasticsearch or OpenSearch, to a target OpenSearch cluster. It automates the process of 
+comparing indexes between the two clusters by creating index metadata, like settings and mappings that does not already exist on the target cluster using [Data Prepper](https://github.com/opensearch-project/data-prepper).
 
-The Fetch Migration tool is implemented in Python.
-A Docker image can be built using the included [Dockerfile](./Dockerfile).
+The Fetch Migration tool consists of a Python script. However, a Docker image can be built using the included [Dockerfile](./Dockerfile) included in this repository.
 
 ## Components
 
-The tool consists of 3 components:
-* A "metadata migration" module that handles metadata comparison between the source and target clusters. 
-This can output a human-readable report as well as a Data Prepper pipeline `yaml` file.
-* A "migration monitor" module that monitors the progress of the migration and shuts down the Data Prepper pipeline 
-once the target document count has been reached
-* An "orchestrator" module that sequences these steps as a workflow and manages the kick-off of the Data Prepper 
-process between them.
+The tool consists of three components:
 
-The orchestrator module is the Docker entrypoint for the tool, though each component can be executed separately 
-via Python. Help text for each module can be printed by supplying the `-h / --help` flag.
+* The **Metadata migration** module handles metadata comparison between the source and target clusters. This can output a human-readable report as well as a Data Prepper `pipeline.yaml` file.
+* The **Migration monitor** module monitors the progress of the migration and shuts down the Data Prepper pipeline 
+once the target document count has been reached
+* The **Orchestrator** module that sequences these steps as a workflow and manages the kick-off of the Data Prepper 
+process between them. The orchestrator module helps route the correct components when using Docker, though each component can be executed seperately using Python.
+
+Help text for each module can be printed using the `-h / --help` flag when exectuing the Python script.
 
 ## Current Limitations
 
-* Fetch Migration runs as a single instance and does not support vertical scaling or data slicing
-* The tool does not support customizing the list of indices included for migration
-* Metadata migration only supports basic auth
-* The migration does not filter out `red` indices
-* In the event that the migration fails or the process dies, the created indices on the target cluster are not rolled back
+The Fetch Migration currently has the following limitations:
 
-## Execution
+* Fetch Migration runs as a single instance and does not support vertical scaling or data slicing.
+* Fetch Migration does not support customizing the list of indices included for migration
+* Fetch migration only supports basic authentication
+* The migration does not filter out indexes whose health is `red`.
+* In the event that the migration fails or the process dies, the created indexes on the target cluster are not rolled back to the previous version.
+
+## Running Fetch Migration
+
+Use either [Python](#python) or [Docker](#Docker) to run the Fetch Migration tool.
 
 ### Python
 
-* [Clone](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) this GitHub repo
-* Install [Python](https://www.python.org/)
-* Ensure that [pip](https://pip.pypa.io/en/stable/installation/#) is installed
-* (Optional) Set up and activate a [virtual environment](https://packaging.python.org/en/latest/tutorials/installing-packages/#creating-and-using-virtual-environments)
+1. [Clone](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) the `opensearch-migrations` repo using `git clone git@github.com:opensearch-project/opensearch-migrations.git`.
+2. Install [Python](https://www.python.org/).
+3. Ensure that [pip](https://pip.pypa.io/en/stable/installation/#) by entering `pip --version`.
+4. (Optional) Set up and activate a [virtual environment](https://packaging.python.org/en/latest/tutorials/installing-packages/#creating-and-using-virtual-environments).
+5. Navigate to you cloned GitHub repo. Then, install the required Python dependencies by running the following command:
 
-Navigate to the cloned GitHub repo. Then, install the required Python dependencies by running:
+  ```shell
+  python -m pip install -r python/requirements.txt
+  ```
 
-```shell
-python -m pip install -r python/requirements.txt
-```
+6. Inside the your cloned repository, run the orchestrator module using the following command:
 
-The Fetch Migration workflow can then be kicked off via the orchestrator module:
+  ```shell
+  python python/fetch_orchestrator.py --help
+  ```
 
-```shell
-python python/fetch_orchestrator.py --help
-```
+When successful, the script returns confirmation that your indexes have been moved from the source cluster to the target cluster.
 
 ### Docker
 
-First build the Docker image from the `Dockerfile`:
+To use the Fetch Migration tool with Docker, use the following steps:
 
-```shell
-docker build -t fetch-migration .
-```
+1. From your cloned Git repository, build the `fetch-migration` Docker image using the f
 
-Then run the `fetch-migration` image.
-Replace `<pipeline_yaml_path>` in the command below with the path to your Data Prepper pipeline `yaml` file:
+   ```shell
+   docker build -t fetch-migration .
+   ```
 
-```shell
-docker run -p 4900:4900 -v <pipeline_yaml_path>:/code/input.yaml fetch-migration
-```
+2. Run the `fetch-migration` image. Replace `<pipeline_yaml_path>` in the command below with the path to your Data Prepper `pipeline.yaml` file:
+
+  ```shell
+  docker run -p 4900:4900 -v <pipeline_yaml_path>:/code/input.yaml fetch-migration
+  ```
 
 ### AWS deployment
 
-Refer to [AWS Deployment](../deployment/README.md) to deploy this solution to AWS.
+For instructions on how deploy the Fetch Migration tool using AWS, see [AWS Deployment](../deployment/README.md). 
 
 ## Development
 
