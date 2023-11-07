@@ -9,7 +9,7 @@ from metadata_migration_result import MetadataMigrationResult
 
 class TestFetchOrchestrator(unittest.TestCase):
 
-    @patch('migration_monitor.monitor_local')
+    @patch('migration_monitor.run')
     @patch('subprocess.Popen')
     @patch('metadata_migration.run')
     # Note that mock objects are passed bottom-up from the patch order above
@@ -33,7 +33,7 @@ class TestFetchOrchestrator(unittest.TestCase):
         mock_subprocess.assert_called_once_with(expected_dp_runnable)
         mock_monitor.assert_called_once_with(expected_monitor_input, mock_subprocess.return_value)
 
-    @patch('migration_monitor.monitor_local')
+    @patch('migration_monitor.run')
     @patch('subprocess.Popen')
     @patch('metadata_migration.run')
     # Note that mock objects are passed bottom-up from the patch order above
