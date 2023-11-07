@@ -1,14 +1,16 @@
 from typing import Optional
 
+from requests_aws4auth import AWS4Auth
+
 
 # Class that encapsulates endpoint information for an OpenSearch/Elasticsearch cluster
 class EndpointInfo:
     # Private member variables
     __url: str
-    __auth: Optional[tuple]
+    __auth: Optional[tuple] | AWS4Auth
     __verify_ssl: bool
 
-    def __init__(self, url: str, auth: tuple = None, verify_ssl: bool = True):
+    def __init__(self, url: str, auth: tuple | AWS4Auth = None, verify_ssl: bool = True):
         self.__url = url
         # Normalize url value to have trailing slash
         if not url.endswith("/"):
@@ -31,7 +33,7 @@ class EndpointInfo:
     def get_url(self) -> str:
         return self.__url
 
-    def get_auth(self) -> Optional[tuple]:
+    def get_auth(self) -> Optional[tuple] | AWS4Auth:
         return self.__auth
 
     def is_verify_ssl(self) -> bool:
