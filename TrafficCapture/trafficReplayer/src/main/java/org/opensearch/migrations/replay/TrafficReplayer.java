@@ -52,7 +52,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -83,7 +82,7 @@ public class TrafficReplayer {
     private ConcurrentHashMap<UniqueReplayerRequestKey,
             DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap;
     private ConcurrentHashMap<UniqueReplayerRequestKey,
-            DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestToFinalWorkFuturesMap;
+            DiagnosticTrackableCompletableFuture<String, Void>> requestToFinalWorkFuturesMap;
 
     private AtomicBoolean stopReadingRef;
     private AtomicReference<StringTrackableCompletableFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
@@ -92,15 +91,24 @@ public class TrafficReplayer {
     private AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
     private ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
 
-    public class TerminationException extends Exception {
-        public final Throwable shutdownCause;
+    public class DualException extends Exception {
+        public final Throwable originalCause;
         public final Throwable immediateCause;
-        public TerminationException(Throwable shutdownCause, Throwable immediateCause) {
-            // use one of these two so that anybody handling this as any other exception can get
-            // at least one of the root errors
-            super(Optional.ofNullable(shutdownCause).orElse(immediateCause));
-            this.shutdownCause = shutdownCause;
+        public DualException(Throwable originalCause, Throwable immediateCause) {
+            this(null, originalCause, immediateCause);
+        }
+        // use one of these two so that anybody handling this as any other exception can get
+        // at least one of the root errors
+        public DualException(String message, Throwable originalCause, Throwable immediateCause) {
+            super(message, Optional.ofNullable(originalCause).orElse(immediateCause));
+            this.originalCause = originalCause;
             this.immediateCause = immediateCause;
+        }
+    }
+
+    public class TerminationException extends DualException {
+        public TerminationException(Throwable originalCause, Throwable immediateCause) {
+            super(originalCause, immediateCause);
         }
     }
 
@@ -329,17 +337,17 @@ public class TrafficReplayer {
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true);
              var bufferedOutputStream = new BufferedOutputStream(outputStream);
-             var blockingTrafficStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
+             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
             var tr = new TrafficReplayer(uri, authTransformer,
                     params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
+            var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer(bufferedOutputStream);
             var timeShifter = new TimeShifter(params.speedupFactor);
             tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                    blockingTrafficStream, timeShifter, tupleWriter);
+                    blockingTrafficSource, timeShifter, tupleWriter);
             log.info("Done processing TrafficStreams");
         }
     }
@@ -438,20 +446,20 @@ public class TrafficReplayer {
     }
 
     void setupRunAndWaitForReplay(Duration observedPacketConnectionTimeout,
-                                  BlockingTrafficSource trafficChunkStream,
+                                  BlockingTrafficSource trafficSource,
                                   TimeShifter timeShifter,
                                   Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws InterruptedException, ExecutionException {
 
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
-        var replayEngine = new ReplayEngine(senderOrchestrator, trafficChunkStream, timeShifter);
+        var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
 
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(observedPacketConnectionTimeout,
                         "(see " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                        new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer));
+                        new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource));
         try {
-            pullCaptureFromSourceToAccumulator(trafficChunkStream, trafficToHttpTransactionAccumulator);
+            pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator);
         } catch (InterruptedException ex) {
             throw ex;
         } catch (Exception e) {
@@ -509,12 +517,12 @@ public class TrafficReplayer {
     }
 
     void setupRunAndWaitForReplayWithShutdownChecks(Duration observedPacketConnectionTimeout,
-                                                    BlockingTrafficSource trafficChunkStream,
+                                                    BlockingTrafficSource trafficSource,
                                                     TimeShifter timeShifter,
                                                     Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws TerminationException, ExecutionException, InterruptedException {
         try {
-            setupRunAndWaitForReplay(observedPacketConnectionTimeout, trafficChunkStream,
+            setupRunAndWaitForReplay(observedPacketConnectionTimeout, trafficSource,
                     timeShifter, resultTupleConsumer);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -533,6 +541,7 @@ public class TrafficReplayer {
     class TrafficReplayerAccumulationCallbacks implements AccumulationCallbacks {
         private final ReplayEngine replayEngine;
         private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
+        private ITrafficCaptureSource trafficCaptureSource;
 
         @Override
         public void onRequestReceived(UniqueReplayerRequestKey requestKey, HttpMessageAndTimestamp request) {
@@ -552,52 +561,57 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair) {
+        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair) {
             log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
             var resultantCf = requestFutureMap.remove(requestKey)
-                    .map(f ->
-                            f.handle((summary, t) -> {
-                                try {
-                                    // if this comes in with a serious Throwable (not an Exception), don't bother
-                                    // packaging it up and calling the callback.
-                                    // Escalate it up out handling stack and shutdown.
-                                    if (t == null || t instanceof Exception) {
-                                        return packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary,
-                                                (Exception) t);
-                                    } else if (t instanceof Error) {
-                                        throw (Error) t;
-                                    } else {
-                                        throw new Error("Unknown throwable type passed to handle().", t) { };
-                                    }
-                                } catch (Error error) {
-                                    log.atError()
-                                            .setCause(error)
-                                            .setMessage(()->"Caught error and initiating TrafficReplayer shutdown")
-                                            .log();
-                                    shutdown(error);
-                                    throw error;
-                                } catch (Exception e) {
-                                    log.atError()
-                                            .setMessage("Unexpected exception while sending the " +
-                                                    "aggregated response and context for {} to the callback.  " +
-                                                    "Proceeding, but the tuple receiver context may be compromised.")
-                                            .addArgument(requestKey)
-                                            .setCause(e)
-                                            .log();
-                                    throw e;
-                                } finally {
-                                    requestToFinalWorkFuturesMap.remove(requestKey);
-                                    log.trace("removed rrPair.requestData to " +
-                                            "targetTransactionInProgressMap for " +
-                                            requestKey);
-                                }
-                            }), () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
+                    .map(f -> f.handle((summary,t)->handleCompletedTransaction(requestKey, rrPair, summary, t)),
+                            () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
             if (!resultantCf.future.isDone()) {
                 log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
                 requestToFinalWorkFuturesMap.put(requestKey, resultantCf);
                 if (resultantCf.future.isDone()) {
                     requestToFinalWorkFuturesMap.remove(requestKey);
                 }
+            }
+        }
+
+        Void handleCompletedTransaction(@NonNull UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair,
+                                        TransformedTargetRequestAndResponse summary, Throwable t) {
+            try {
+                // if this comes in with a serious Throwable (not an Exception), don't bother
+                // packaging it up and calling the callback.
+                // Escalate it up out handling stack and shutdown.
+                if (t == null || t instanceof Exception) {
+                    packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary,
+                            (Exception) t);
+                    return null;
+                } else if (t instanceof Error) {
+                    throw (Error) t;
+                } else {
+                    throw new Error("Unknown throwable type passed to handle().", t) {
+                    };
+                }
+            } catch (Error error) {
+                log.atError()
+                        .setCause(error)
+                        .setMessage(() -> "Caught error and initiating TrafficReplayer shutdown")
+                        .log();
+                shutdown(error);
+                throw error;
+            } catch (Exception e) {
+                log.atError()
+                        .setMessage("Unexpected exception while sending the " +
+                                "aggregated response and context for {} to the callback.  " +
+                                "Proceeding, but the tuple receiver context may be compromised.")
+                        .addArgument(requestKey)
+                        .setCause(e)
+                        .log();
+                throw e;
+            } finally {
+                requestToFinalWorkFuturesMap.remove(requestKey);
+                log.trace("removed rrPair.requestData to " +
+                        "targetTransactionInProgressMap for " +
+                        requestKey);
             }
         }
 
@@ -617,7 +631,7 @@ public class TrafficReplayer {
 
         private TransformedTargetRequestAndResponse
         packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
-                                UniqueReplayerRequestKey requestKey,
+                                @NonNull UniqueReplayerRequestKey requestKey,
                                 RequestResponsePacketPair rrPair,
                                 TransformedTargetRequestAndResponse summary,
                                 Exception t) {
@@ -738,10 +752,12 @@ public class TrafficReplayer {
         }
     }
 
-    private static SourceTargetCaptureTuple getSourceTargetCaptureTuple(UniqueReplayerRequestKey uniqueRequestKey,
-                                                                        RequestResponsePacketPair rrPair,
-                                                                        TransformedTargetRequestAndResponse summary,
-                                                                        Exception t) {
+    private static SourceTargetCaptureTuple
+    getSourceTargetCaptureTuple(@NonNull UniqueReplayerRequestKey uniqueRequestKey,
+                                RequestResponsePacketPair rrPair,
+                                TransformedTargetRequestAndResponse summary,
+                                Exception t)
+    {
         SourceTargetCaptureTuple requestResponseTriple;
         if (t != null) {
             log.error("Got exception in CompletableFuture callback: ", t);

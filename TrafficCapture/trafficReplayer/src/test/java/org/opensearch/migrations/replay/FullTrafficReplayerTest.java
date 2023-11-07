@@ -5,6 +5,7 @@ import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -45,8 +47,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -85,66 +87,91 @@ public class FullTrafficReplayerTest {
     @Test
     @Tag("longTest")
     public void fullTest() throws Exception {
-        Random r = new Random(1);
-        var nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
-
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 TestHttpServerContext::makeResponse);
         var streamAndConsumer = generateStreamAndTupleConsumerWithSomeChecks();
-        var onNewTupleReceived = streamAndConsumer._2;
+        var numExpectedRequests = streamAndConsumer._2;
         var trafficSourceSupplier = loadStreamsToCursorArraySource(streamAndConsumer._1.collect(Collectors.toList()));
-
-        Consumer<SourceTargetCaptureTuple> tupleReceiver = t -> {
-            var stopPoint = nextStopPointRef.get();
-            if (onNewTupleReceived.applyAsInt(t) > stopPoint) {
-                var roughlyDoubled = stopPoint + new Random(stopPoint).nextInt(stopPoint+1);
-                if (nextStopPointRef.compareAndSet(stopPoint, roughlyDoubled)) {
-                    throw new FabricatedErrorToKillTheReplayer(false);
-                } else {
-                    // somebody else got to this, don't worry about it
-                }
-            }
-        };
-
-        runReplayerUntilSourceWasExhausted(httpServer, trafficSourceSupplier, tupleReceiver);
-
-        //Assertions.assertEquals();
+        runReplayerUntilSourceWasExhausted(numExpectedRequests, httpServer, trafficSourceSupplier);
         log.error("done");
     }
 
-    private static void runReplayerUntilSourceWasExhausted(SimpleNettyHttpServer httpServer,
-                                                           Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier,
-                                                           Consumer<SourceTargetCaptureTuple> tupleReceiver)
+    private static void runReplayerUntilSourceWasExhausted(int numExpectedRequests,
+                                                           SimpleNettyHttpServer httpServer,
+                                                           Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier)
             throws Exception {
-        for (AtomicInteger runNumberRef = new AtomicInteger(); true; runNumberRef.incrementAndGet()) {
+        AtomicInteger runNumberRef = new AtomicInteger();
+        var totalUniqueEverReceived = new AtomicInteger();
+        var nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
+
+        var receivedPerRun = new ArrayList<Integer>();
+        var totalUniqueEverReceivedSizeAfterEachRun = new ArrayList<Integer>();
+        var previouslyCompletelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
+
+        for (; true; runNumberRef.incrementAndGet()) {
+            var stopPoint = nextStopPointRef.get();
             int runNumber = runNumberRef.get();
+            var counter = new AtomicInteger();
             try {
                 runTrafficReplayer(trafficSourceSupplier, httpServer, (t) -> {
                     Assertions.assertEquals(runNumber, runNumberRef.get());
-                    tupleReceiver.accept(t);
+                    synchronized (nextStopPointRef) {
+                        var key = t.uniqueRequestKey;
+                        if (((TrafficStreamCursorKey)(key.getTrafficStreamKey())).sourceListIndex > stopPoint) {
+                            log.error("Stopping");
+                            var roughlyDoubled = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
+                            if (nextStopPointRef.compareAndSet(stopPoint, roughlyDoubled)) {
+                                throw new FabricatedErrorToKillTheReplayer(false);
+                            } else {
+                                // somebody else already threw to stop the loop.
+                                return;
+                            }
+                        }
+
+                        var keyString = new PojoTrafficStreamKey(key.getTrafficStreamKey()) + "_" + key.getSourceRequestIndex();
+                        var totalUnique = null != previouslyCompletelyHandledItems.put(keyString, t) ?
+                                totalUniqueEverReceived.get() :
+                                totalUniqueEverReceived.incrementAndGet();
+
+                        var c = counter.incrementAndGet();
+                        log.info("counter="+c+" totalUnique="+totalUnique+" runNum="+runNumber+" key="+key);
+                    }
                 });
                 // if this finished running without an exception, we need to stop the loop
                 break;
             } catch (TrafficReplayer.TerminationException e) {
-                log.atLevel(e.shutdownCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
-                        .setCause(e.shutdownCause)
+                log.atLevel(e.originalCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
+                        .setCause(e.originalCause)
                         .setMessage(()->"broke out of the replayer, with this shutdown reason")
                         .log();
                 log.atLevel(e.immediateCause == null ? Level.INFO : Level.ERROR)
                         .setCause(e.immediateCause)
-                        .setMessage(()->"broke out of the replayer, with the shutdown cause=" + e.shutdownCause +
+                        .setMessage(()->"broke out of the replayer, with the shutdown cause=" + e.originalCause +
                                 " and this immediate reason")
                         .log();
+            } finally {
+                log.info("Upon appending.... counter="+counter.get()+" totalUnique="+totalUniqueEverReceived.get());
+                receivedPerRun.add(counter.get());
+                totalUniqueEverReceivedSizeAfterEachRun.add(totalUniqueEverReceived.get());
             }
         }
+        var skippedPerRun = IntStream.range(0, receivedPerRun.size())
+                .map(i->totalUniqueEverReceivedSizeAfterEachRun.get(i)-receivedPerRun.get(i)).toArray();
+        var skippedPerRunDiffs = IntStream.range(0, receivedPerRun.size()-1)
+                .map(i->(skippedPerRun[i]<=skippedPerRun[i+1]) ? 1 : 0)
+                .toArray();
+        var expectedSkipArray = new int[skippedPerRunDiffs.length];
+        Arrays.fill(expectedSkipArray, 1);
+        //Assertions.assertArrayEquals(expectedSkipArray, skippedPerRunDiffs);
+        Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
     }
 
-    private Tuple2<Stream<TrafficStream>, ToIntFunction<SourceTargetCaptureTuple>>
+    private Tuple2<Stream<TrafficStream>, Integer>
     generateStreamAndTupleConsumerWithSomeChecks() {
         return generateStreamAndTupleConsumerWithSomeChecks(-1);
     }
 
-    private Tuple2<Stream<TrafficStream>, ToIntFunction<SourceTargetCaptureTuple>>
+    private Tuple2<Stream<TrafficStream>, Integer>
     generateStreamAndTupleConsumerWithSomeChecks(int count) {
         Random r = new Random(1);
         var generatedCases = count > 0 ?
@@ -154,13 +181,8 @@ public class FullTrafficReplayerTest {
         var shuffledStreams =
                 randomlyInterleaveStreams(r, Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams)));
 
-        var previouslyCompletelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
-        return new Tuple2<>(shuffledStreams, t -> {
-            var key = t.uniqueRequestKey;
-            var keyString = key.getTrafficStreamKey() + "_" + key.getSourceRequestIndex();
-            previouslyCompletelyHandledItems.put(keyString, t);
-            return previouslyCompletelyHandledItems.size();
-        });
+        var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
+        return new Tuple2<>(shuffledStreams, numExpectedRequests);
     }
 
     private <R extends AutoCloseable> void
@@ -223,6 +245,7 @@ public class FullTrafficReplayerTest {
     }
 
     @Getter
+    @ToString
     private static class TrafficStreamCursorKey implements ITrafficStreamKey, Comparable<TrafficStreamCursorKey> {
         public final String connectionId;
         public final String nodeId;
@@ -234,13 +257,14 @@ public class FullTrafficReplayerTest {
             connectionId = stream.getConnectionId();
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
-            this.sourceListIndex = this.getSourceListIndex();
+            this.sourceListIndex = sourceListIndex;
         }
 
         @Override
         public int compareTo(TrafficStreamCursorKey other) {
             return Integer.compare(sourceListIndex, other.sourceListIndex);
         }
+
     }
 
     @AllArgsConstructor
@@ -260,6 +284,7 @@ public class FullTrafficReplayerTest {
             @Override
             public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
                 var idx = readCursor.getAndIncrement();
+                log.info("reading chunk from index="+idx);
                 if (streams.size() <= idx) {
                     return CompletableFuture.failedFuture(new EOFException());
                 }
@@ -271,14 +296,17 @@ public class FullTrafficReplayerTest {
 
             @Override
             public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-                synchronized (readCursor) { // figure out if I need to do something faster later
+                synchronized (readCursor) { // figure out if I need to do something more efficient later
                     int topCursor = pQueue.peek().sourceListIndex;
                     var didRemove = pQueue.remove(trafficStreamKey);
                     assert didRemove;
                     var incomingCursor = trafficStreamKey.getTrafficStreamIndex();
                     if (topCursor == incomingCursor) {
                         topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getSourceListIndex()).orElse(topCursor);
+                        log.info("Commit called for "+trafficStreamKey+", but and new topCursor="+topCursor);
                         commitCursor.set(topCursor);
+                    } else {
+                        log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
                     }
                 }
             }

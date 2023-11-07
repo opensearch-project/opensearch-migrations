@@ -145,7 +145,8 @@ public class TrafficStreamGenerator {
     }
 
     private static void addCommands(Random r, double flushLikelihood, int numPacketCommands,
-                                    List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> outgoingCommands, List<Integer> outgoingSizes,
+                                    List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> outgoingCommands,
+                                    List<Integer> outgoingSizes,
                                     Supplier<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> directiveSupplier) {
         int aggregateBufferSize = 0;
         for (var cmdCount = new AtomicInteger(numPacketCommands); cmdCount.get()>0;) {
@@ -172,7 +173,8 @@ public class TrafficStreamGenerator {
     }
 
     private static void fillCommandsAndSizes(int bufferSize, Random r, double flushLikelihood, int bufferBound,
-                                             List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands, List<Integer> sizes) {
+                                             List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands,
+                                             List<Integer> sizes) {
         var numTransactions = r.nextInt(MAX_COMMANDS_IN_CONNECTION);
         for (int i=numTransactions; i>0; --i) {
             addCommands(r, flushLikelihood, r.nextInt(MAX_READS_IN_REQUEST)+1, commands, sizes,
