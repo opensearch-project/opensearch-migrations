@@ -91,11 +91,11 @@ def check_and_log_progress(endpoint_info: EndpointInfo, progress: ProgressMetric
     return progress
 
 
-def __should_continue_monitoring(metrics: ProgressMetrics, proc: Optional[Popen] = None) -> bool:
-    return not metrics.is_in_terminal_state() and (proc is None or is_process_alive(proc))
+def __should_continue_monitoring(progress: ProgressMetrics, proc: Optional[Popen] = None) -> bool:
+    return not progress.is_in_terminal_state() and (proc is None or is_process_alive(proc))
 
 
-# Last parameter is optional, and signifies a local Data Prepper process
+# The "dp_process" parameter is optional, and signifies a local Data Prepper process
 def run(args: MigrationMonitorParams, dp_process: Optional[Popen] = None, poll_interval_seconds: int = 30) -> int:
     endpoint_info = EndpointInfo(args.data_prepper_endpoint)
     progress_metrics = ProgressMetrics(args.target_count, __IDLE_THRESHOLD)

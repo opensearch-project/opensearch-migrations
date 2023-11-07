@@ -47,14 +47,13 @@ class ProgressMetrics:
         if key in self.current_values_map:
             # Move current value to previous
             self.prev_values_map[key] = self.current_values_map[key]
-            # Store new value
-            self.current_values_map[key] = val
             # Track idle value metrics
             idle_value_key = self.__get_idle_value_key_name(key)
             if self.prev_values_map[key] == val:
                 self.__increment_counter(idle_value_key)
             else:
                 self.__reset_counter(idle_value_key)
+        # Store new value
         self.current_values_map[key] = val
 
     def __get_current_value(self, key: str) -> Optional[int]:
@@ -129,10 +128,7 @@ class ProgressMetrics:
 
     def log_idle_pipeline_debug_metrics(self):  # pragma no cover
         if logging.getLogger().isEnabledFor(logging.DEBUG):
-            debug_msg_template: str = "Idle pipeline metrics - " + \
-                                      "Records in flight: [{0}], " + \
-                                      "No-partitions counter: [{1}]" + \
-                                      "Previous no-partition value: [{2}]"
-            logging.debug(debug_msg_template.format(self.__get_current_value(self._REC_IN_FLIGHT_KEY),
-                                                    self.__get_current_value(self._NO_PART_KEY),
-                                                    self.prev_values_map.get(self._NO_PART_KEY)))
+            logging.debug("Idle pipeline metrics - " +
+                          f"Records in flight: [{self.__get_current_value(self._REC_IN_FLIGHT_KEY)}], " +
+                          f"No-partitions counter: [{self.__get_current_value(self._NO_PART_KEY)}]" +
+                          f"Previous no-partition value: [{self.prev_values_map.get(self._NO_PART_KEY)}]")
