@@ -1,16 +1,14 @@
 package org.opensearch.migrations.trafficcapture;
 
-import com.google.protobuf.CodedOutputStream;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 
@@ -21,8 +19,8 @@ import java.util.function.BiFunction;
  * @deprecated - This class is NOT meant to be used for production.
  */
 @Slf4j
-@Deprecated
-public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
+@Deprecated(since="0.1", forRemoval = false)
+public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<Void> {
     private final BiFunction<String, Integer, FileOutputStream> outputStreamCreator;
     private String nodeId;
     private final int bufferSize;
@@ -49,40 +47,39 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory {
         this(nodeId, bufferSize, Paths.get(path));
     }
 
-    private CompletableFuture closeHandler(String connectionId, ByteBuffer byteBuffer, CodedOutputStream codedOutputStream, int callCounter) {
-        return CompletableFuture.runAsync(() -> {
-            try {
-                FileOutputStream fs = outputStreamCreator.apply(connectionId, callCounter);
-                byte[] filledBytes = Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position());
-                fs.write(filledBytes);
-                fs.flush();
-                log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
-                //codedStreamToFileStreamMap.remove(stream);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+    @AllArgsConstructor
+    class StreamManager extends OrderedStreamLifecyleManager<Void> {
+        String connectionId;
+        @Override
+        public CodedOutputStreamAndByteBufferWrapper createStream() {
+            return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
+        }
+
+        @Override
+        public CompletableFuture<Void>
+        kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+            if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
+                throw new IllegalArgumentException("Unknown outputStreamHolder sent back to StreamManager: " +
+                        outputStreamHolder);
             }
-        });
+            var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
+            return CompletableFuture.runAsync(() -> {
+                try {
+                    FileOutputStream fs = outputStreamCreator.apply(connectionId, index);
+                    var bb = osh.getByteBuffer();
+                    byte[] filledBytes = Arrays.copyOfRange(bb.array(), 0, bb.position());
+                    fs.write(filledBytes);
+                    fs.flush();
+                    log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }).thenApply(v->null);
+        }
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
-        // This array is only an indirection to work around Java's constraint that lambda values are final
-        CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
-        singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
-        WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToFileStreamMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId,
-            () -> {
-                ByteBuffer bb = ByteBuffer.allocate(bufferSize);
-                var cos = CodedOutputStream.newInstance(bb);
-                codedStreamToFileStreamMap.put(cos, bb);
-                return cos;
-            },
-            (captureSerializerResult) -> {
-                CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
-                CompletableFuture cf = closeHandler(connectionId, codedStreamToFileStreamMap.get(codedOutputStream), codedOutputStream, captureSerializerResult.getTrafficStreamIndex());
-                singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
-                return singleAggregateCfRef[0];
-            }
-        );
+    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) {
+        return new StreamChannelConnectionCaptureSerializer<Void>(nodeId, connectionId, new StreamManager(connectionId));
     }
 }

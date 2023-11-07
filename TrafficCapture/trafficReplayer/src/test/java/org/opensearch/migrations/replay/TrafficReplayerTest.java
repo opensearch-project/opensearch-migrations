@@ -5,6 +5,8 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
@@ -149,17 +151,27 @@ class TrafficReplayerTest {
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
-                        (id,request) -> {
-                            var bytesList = request.stream().collect(Collectors.toList());
-                            byteArrays.add(bytesList);
-                            Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
-                        },
-                        fullPair -> {
-                            var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
-                            Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
-                        },
-                        (rk,ts) -> {}
-                );
+                        new AccumulationCallbacks() {
+                            @Override
+                            public void onRequestReceived(UniqueReplayerRequestKey id, HttpMessageAndTimestamp request) {
+                                var bytesList = request.stream().collect(Collectors.toList());
+                                byteArrays.add(bytesList);
+                                Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
+                            }
+
+                            @Override
+                            public void onFullDataReceived(UniqueReplayerRequestKey key, RequestResponsePacketPair fullPair) {
+                                var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
+                                Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                            }
+
+                            @Override
+                            public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
+                                                                List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
+
+                            @Override
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                        });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
@@ -180,16 +192,27 @@ class TrafficReplayerTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30),
                         "change the minTimeout argument to the c'tor of " +
                                 "CapturedTrafficToHttpTransactionAccumulator that's being used in this unit test!",
-                        (id,request) -> {
-                            var bytesList = request.stream().collect(Collectors.toList());
-                            byteArrays.add(bytesList);
-                            Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
-                        },
-                        fullPair -> {
-                            var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
-                            Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
-                        },
-                        (rk,ts) -> {}
+                        new AccumulationCallbacks() {
+                            @Override
+                            public void onRequestReceived(UniqueReplayerRequestKey id, HttpMessageAndTimestamp request) {
+                                var bytesList = request.stream().collect(Collectors.toList());
+                                byteArrays.add(bytesList);
+                                Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
+                            }
+
+                            @Override
+                            public void onFullDataReceived(UniqueReplayerRequestKey key, RequestResponsePacketPair fullPair) {
+                                var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
+                                Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                            }
+
+                            @Override
+                            public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
+                                                                List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
+
+                            @Override
+                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                        }
                 );
         byte[] serializedChunks;
         try (var baos = new ByteArrayOutputStream()) {

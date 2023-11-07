@@ -4,15 +4,14 @@ import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> implements IHttpMessage {
-    public final static String METHOD = "method";
-    public final static String URI = "URI";
-    public final static String PROTOCOL = "protocol";
-    public final static String HEADERS = "headers";
-    public final static String PAYLOAD = "payload";
+    public final static String METHOD_KEY = "method";
+    public final static String URI_KEY = "URI";
+    public final static String PROTOCOL_KEY = "protocol";
+    public final static String HEADERS_KEY = "headers";
+    public final static String PAYLOAD_KEY = "payload";
 
     public HttpJsonMessageWithFaultingPayload() {
     }
@@ -23,25 +22,25 @@ public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Ob
 
     @Override
     public String method() {
-        return (String) this.get(METHOD);
+        return (String) this.get(METHOD_KEY);
     }
     public void setMethod(String value) {
-        this.put(METHOD, value);
+        this.put(METHOD_KEY, value);
     }
     @Override
     public String path() {
-        return (String) this.get(URI);
+        return (String) this.get(URI_KEY);
     }
     public void setPath(String value) {
-        this.put(URI, value);
+        this.put(URI_KEY, value);
     }
 
     @Override
     public String protocol() {
-        return (String) this.get(PROTOCOL);
+        return (String) this.get(PROTOCOL_KEY);
     }
     public void setProtocol(String value) {
-        this.put(PROTOCOL, value);
+        this.put(PROTOCOL_KEY, value);
     }
 
 
@@ -51,15 +50,15 @@ public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Ob
     }
 
     public ListKeyAdaptingCaseInsensitiveHeadersMap headers() {
-        return (ListKeyAdaptingCaseInsensitiveHeadersMap) this.get(HEADERS);
+        return (ListKeyAdaptingCaseInsensitiveHeadersMap) this.get(HEADERS_KEY);
     }
     public void setHeaders(ListKeyAdaptingCaseInsensitiveHeadersMap value) {
-        this.put(HEADERS, value);
+        this.put(HEADERS_KEY, value);
     }
     public Map<String,Object> payload() {
-        return (Map<String,Object>) this.get(PAYLOAD);
+        return (Map<String,Object>) this.get(PAYLOAD_KEY);
     }
     public void setPayloadFaultMap(PayloadAccessFaultingMap value) {
-        this.put(PAYLOAD, value);
+        this.put(PAYLOAD_KEY, value);
     }
 }

@@ -16,9 +16,11 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
@@ -171,9 +173,19 @@ public class CaptureProxy {
 
     private static IConnectionCaptureFactory getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
-        return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId, () ->
-                CodedOutputStream.newInstance(NullOutputStream.getInstance()),
-                captureSerializerResult -> CompletableFuture.completedFuture(null));
+        return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId,
+                new StreamLifecycleManager() {
+                    @Override
+                    public CodedOutputStreamHolder createStream() {
+                        return () -> CodedOutputStream.newInstance(NullOutputStream.getInstance());
+                    }
+
+                    @Override
+                    public CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder,
+                                                                    int index) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                });
     }
 
     private static String getNodeId() {
@@ -190,8 +202,8 @@ public class CaptureProxy {
         kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
 
         if (params.kafkaPropertiesFile != null) {
-            try {
-                kafkaProps.load(new FileReader(params.kafkaPropertiesFile));
+            try (var fileReader = new FileReader(params.kafkaPropertiesFile)) {
+                kafkaProps.load(fileReader);
             } catch (IOException e) {
                 log.error("Unable to locate provided Kafka producer properties file path: " + params.kafkaPropertiesFile);
                 throw e;
@@ -294,8 +306,7 @@ public class CaptureProxy {
                         }
                     }).orElse(null), getConnectionCaptureFactory(params));
         } catch (Exception e) {
-            System.err.println(e);
-            e.printStackTrace();
+            log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -310,12 +321,6 @@ public class CaptureProxy {
         }));
         // This loop just gives the main() function something to do while the netty event loops
         // work in the background.
-        while (true) {
-            // TODO: The kill signal will cause the sleep to throw an InterruptedException,
-            // which may not be what we want to do - it seems like returning an exit code of 0
-            // might make more sense.  This is something to research - e.g. by seeing if there's
-            // specific behavior that POSIX recommends/requires.
-            Thread.sleep(60*1000);
-        }
+        proxy.waitForClose();
     }
 }

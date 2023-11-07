@@ -24,7 +24,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import java.time.Instant;
 
 @Slf4j
-public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
+public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
 
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
@@ -68,13 +68,13 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    protected final IChannelConnectionCaptureSerializer trafficOffloader;
+    protected final IChannelConnectionCaptureSerializer<T> trafficOffloader;
 
     protected final EmbeddedChannel httpDecoderChannel;
     protected final SimpleHttpRequestDecoder requestDecoder;
 
 
-    public LoggingHttpRequestHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
+    public LoggingHttpRequestHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
         requestDecoder = new SimpleHttpRequestDecoder(); // as a field for easier debugging
         httpDecoderChannel = new EmbeddedChannel(
@@ -114,6 +114,21 @@ public class LoggingHttpRequestHandler extends ChannelInboundHandlerAdapter {
                 }
             }
         });
+    }
+
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
+            if (t != null) {
+                log.warn("Got error: " + t.getMessage());
+            }
+            try {
+                super.channelUnregistered(ctx);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        super.handlerRemoved(ctx);
     }
 
     @Override

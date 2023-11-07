@@ -6,7 +6,7 @@ import io.netty.channel.EventLoop;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
@@ -32,7 +32,7 @@ public class RequestSenderOrchestrator {
     }
 
     public <T> DiagnosticTrackableCompletableFuture<String, T>
-    scheduleWork(UniqueRequestKey requestKey, Instant timestamp,
+    scheduleWork(UniqueReplayerRequestKey requestKey, Instant timestamp,
                  Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
         var connectionSession = clientConnectionPool.getCachedSession(requestKey, false);
         var finalTunneledResponse =
@@ -52,7 +52,7 @@ public class RequestSenderOrchestrator {
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueRequestKey requestKey, Instant start, Duration interval, Stream<ByteBuf> packets) {
+    scheduleRequest(UniqueReplayerRequestKey requestKey, Instant start, Duration interval, Stream<ByteBuf> packets) {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for final aggregated response");
@@ -62,7 +62,7 @@ public class RequestSenderOrchestrator {
                         finalTunneledResponse, start, interval, packets));
     }
 
-    public StringTrackableCompletableFuture<Void> scheduleClose(UniqueRequestKey requestKey, Instant timestamp) {
+    public StringTrackableCompletableFuture<Void> scheduleClose(UniqueReplayerRequestKey requestKey, Instant timestamp) {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm close has finished");
@@ -80,7 +80,7 @@ public class RequestSenderOrchestrator {
     }
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
-    asynchronouslyInvokeRunnableToSetupFuture(UniqueRequestKey requestKey,
+    asynchronouslyInvokeRunnableToSetupFuture(UniqueReplayerRequestKey requestKey,
                                               boolean ignoreIfChannelNotPresent,
                                               DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
                                               Consumer<ConnectionReplaySession> successFn) {
@@ -131,7 +131,7 @@ public class RequestSenderOrchestrator {
         return finalTunneledResponse;
     }
 
-    private <T> void scheduleOnCffr(UniqueRequestKey requestKey,
+    private <T> void scheduleOnCffr(UniqueReplayerRequestKey requestKey,
                                     ConnectionReplaySession channelFutureAndRequestSchedule,
                                     StringTrackableCompletableFuture<T> signalCleanupCompleteToFuture,
                                     Instant atTime, String activityNameForLogging, Runnable task) {
@@ -176,7 +176,7 @@ public class RequestSenderOrchestrator {
                 "... " + schedule).log();
     }
 
-    private void scheduleSendOnCffr(UniqueRequestKey requestKey,
+    private void scheduleSendOnCffr(UniqueReplayerRequestKey requestKey,
                                     ConnectionReplaySession channelFutureAndRequestSchedule,
                                     StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
                                     Instant start, Duration interval, Stream<ByteBuf> packets) {
@@ -214,7 +214,7 @@ public class RequestSenderOrchestrator {
     }
 
     private static NettyPacketToHttpConsumer
-    getPacketReceiver(UniqueRequestKey requestKey, ChannelFuture channelFuture,
+    getPacketReceiver(UniqueReplayerRequestKey requestKey, ChannelFuture channelFuture,
                       AtomicReference<NettyPacketToHttpConsumer> packetReceiver) {
         if (packetReceiver.get() == null) {
             packetReceiver.set(new NettyPacketToHttpConsumer(channelFuture, requestKey.toString(), requestKey));

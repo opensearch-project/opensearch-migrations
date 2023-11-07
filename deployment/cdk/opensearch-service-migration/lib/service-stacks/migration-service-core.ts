@@ -1,0 +1,180 @@
+import {StackPropsExt} from "../stack-composer";
+import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {
+    CfnService as FargateCfnService,
+    Cluster,
+    ContainerImage,
+    FargateService,
+    FargateTaskDefinition,
+    LogDrivers,
+    MountPoint,
+    PortMapping,
+    Volume
+} from "aws-cdk-lib/aws-ecs";
+import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
+import {RemovalPolicy, Stack} from "aws-cdk-lib";
+import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
+import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
+import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
+
+
+export interface MigrationServiceCoreProps extends StackPropsExt {
+    readonly serviceName: string,
+    readonly vpc: IVpc,
+    readonly securityGroups: ISecurityGroup[],
+    readonly dockerFilePath?: string,
+    readonly dockerImageRegistryName?: string,
+    readonly dockerImageCommand?: string[],
+    readonly taskRolePolicies?: PolicyStatement[],
+    readonly mountPoints?: MountPoint[],
+    readonly volumes?: Volume[],
+    readonly portMappings?: PortMapping[],
+    readonly environment?: {
+        [key: string]: string;
+    },
+    readonly serviceConnectServices?: ServiceConnectService[],
+    readonly serviceDiscoveryEnabled?: boolean,
+    readonly serviceDiscoveryPort?: number,
+    readonly taskCpuUnits?: number
+    readonly taskMemoryLimitMiB?: number
+    readonly taskInstanceCount?: number
+}
+
+export class MigrationServiceCore extends Stack {
+
+    createService(props: MigrationServiceCoreProps) {
+        if ((!props.dockerFilePath && !props.dockerImageRegistryName) || (props.dockerFilePath && props.dockerImageRegistryName)) {
+            throw new Error(`Exactly one option [dockerFilePath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
+        }
+
+        const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
+            clusterName: `migration-${props.stage}-ecs-cluster`,
+            vpc: props.vpc
+        })
+
+        const serviceTaskRole = new Role(this, `${props.serviceName}-TaskRole`, {
+            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
+            description: 'ECS Service Task Role'
+        });
+        // Add default Task Role policy to allow exec and writing logs
+        serviceTaskRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ['*'],
+            actions: [
+                "logs:CreateLogStream",
+                "logs:DescribeLogGroups",
+                "logs:DescribeLogStreams",
+                "logs:PutLogEvents",
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel"
+            ]
+        }))
+        props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
+
+        const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
+            family: `migration-${props.stage}-${props.serviceName}`,
+            memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
+            cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
+            taskRole: serviceTaskRole
+        });
+        if (props.volumes) {
+            props.volumes.forEach(vol => serviceTaskDef.addVolume(vol))
+        }
+
+        let serviceImage
+        if (props.dockerFilePath) {
+            serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
+                directory: props.dockerFilePath
+            }))
+        }
+        else {
+            // @ts-ignore
+            serviceImage = ContainerImage.fromRegistry(props.dockerImageRegistryName)
+        }
+
+        const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
+            retention: RetentionDays.ONE_MONTH,
+            removalPolicy: RemovalPolicy.DESTROY,
+            logGroupName: `/migration/${props.stage}/${props.defaultDeployId}/${props.serviceName}`
+        });
+
+        const serviceContainer = serviceTaskDef.addContainer("ServiceContainer", {
+            image: serviceImage,
+            containerName: props.serviceName,
+            command: props.dockerImageCommand,
+            environment: props.environment,
+            portMappings: props.portMappings,
+            logging: LogDrivers.awsLogs({
+                streamPrefix: `${props.serviceName}-logs`,
+                logGroup: serviceLogGroup
+            })
+        });
+        if (props.mountPoints) {
+            serviceContainer.addMountPoints(...props.mountPoints)
+        }
+
+        let cloudMapOptions: CloudMapOptions|undefined = undefined
+        if (props.serviceDiscoveryEnabled) {
+            const namespaceId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/cloudMapNamespaceId`)
+            const namespace = PrivateDnsNamespace.fromPrivateDnsNamespaceAttributes(this, "PrivateDNSNamespace", {
+                namespaceName: `migration.${props.stage}.local`,
+                namespaceId: namespaceId,
+                namespaceArn: `arn:aws:servicediscovery:${props.env?.region}:${props.env?.account}:namespace/${namespaceId}`
+            })
+            cloudMapOptions = {
+                name: props.serviceName,
+                cloudMapNamespace: namespace,
+            }
+        }
+
+        const fargateService = new FargateService(this, "ServiceFargateService", {
+            serviceName: `migration-${props.stage}-${props.serviceName}`,
+            cluster: ecsCluster,
+            taskDefinition: serviceTaskDef,
+            assignPublicIp: true,
+            desiredCount: props.taskInstanceCount ? props.taskInstanceCount : 1,
+            enableExecuteCommand: true,
+            securityGroups: props.securityGroups,
+            // This should be confirmed to be a requirement for Service Connect communication, otherwise be Private
+            vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}),
+            serviceConnectConfiguration: {
+                namespace: `migration.${props.stage}.local`,
+                services: props.serviceConnectServices ? props.serviceConnectServices : undefined,
+                logDriver: LogDrivers.awsLogs({
+                    streamPrefix: "service-connect-logs",
+                    logGroup: serviceLogGroup
+                })
+            },
+            cloudMapOptions: cloudMapOptions
+        });
+        // Use CDK escape hatch to modify the underlying CFN for the generated AWS::ServiceDiscovery::Service to allow
+        // multiple DnsRecords. GitHub issue can be found here: https://github.com/aws/aws-cdk/issues/18894
+        if (props.serviceDiscoveryEnabled) {
+            const multipleDnsRecords = {
+                DnsRecords: [
+                    {
+                        TTL: 10,
+                        Type: "A"
+                    },
+                    {
+                        TTL: 10,
+                        Type: "SRV"
+                    }
+                ]
+            }
+            const cloudMapCfn = fargateService.node.findChild("CloudmapService")
+            const cloudMapServiceCfn = cloudMapCfn.node.defaultChild as DiscoveryCfnService
+            cloudMapServiceCfn.addPropertyOverride("DnsConfig", multipleDnsRecords)
+
+            if (props.serviceDiscoveryPort) {
+                const fargateCfn = fargateService.node.defaultChild as FargateCfnService
+                fargateCfn.addPropertyOverride("ServiceRegistries.0.Port", props.serviceDiscoveryPort)
+            }
+        }
+    }
+
+}

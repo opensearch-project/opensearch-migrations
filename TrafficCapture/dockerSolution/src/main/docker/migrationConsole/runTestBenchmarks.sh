@@ -5,6 +5,7 @@ endpoint="https://capture-proxy-es:9200"
 auth_user="admin"
 auth_pass="admin"
 no_auth=false
+no_ssl=false
 
 # Override default values with optional command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
             no_auth=true
             shift
             ;;
+        --no-ssl)
+            no_ssl=true
+            shift
+            ;;
         *)
             shift
             ;;
@@ -42,8 +47,13 @@ else
     auth_string=",basic_auth_user:${auth_user},basic_auth_password:${auth_pass}"
 fi
 
+if [ "$no_ssl" = true ]; then
+    base_options_string=""
+else
+    base_options_string="use_ssl:true,verify_certs:false"
+fi
+
 # Construct the final client options string
-base_options_string="use_ssl:true,verify_certs:false"
 client_options="${base_options_string}${auth_string}"
 
 echo "Running opensearch-benchmark workloads against ${endpoint}"

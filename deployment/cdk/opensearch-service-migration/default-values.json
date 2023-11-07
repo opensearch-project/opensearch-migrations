@@ -1,9 +1,14 @@
 {
-  "engineVersion": "OS_2.7",
+  "engineVersion": "OS_2.9",
   "domainName": "os-service-domain",
   "tlsSecurityPolicy": "TLS_1_2",
   "enforceHTTPS": true,
   "nodeToNodeEncryptionEnabled": true,
   "encryptionAtRestEnabled": true,
+  "vpcEnabled": true,
+  "migrationAssistanceEnabled": true,
+  "migrationConsoleServiceEnabled": true,
+  "captureProxyESServiceEnabled": true,
+  "trafficReplayerServiceEnabled": true,
   "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
 }

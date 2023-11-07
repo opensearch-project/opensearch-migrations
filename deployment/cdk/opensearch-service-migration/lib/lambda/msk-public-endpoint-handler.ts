@@ -35,7 +35,7 @@ async function enablePublicEndpoint(mskVersion: string) {
 
             },
             (error) => {
-                console.log("Update connectivity error: " + JSON.stringify(error))
+                console.error("Update connectivity error: " + JSON.stringify(error))
             }
         );
     } catch (e) {
@@ -58,7 +58,7 @@ async function describeClusterV2(): Promise<any> {
                 result = data
             },
             (error) => {
-                console.log("Describe cluster error: " + JSON.stringify(error))
+                console.error("Describe cluster error: " + JSON.stringify(error))
             }
         );
     } catch (e) {
@@ -82,7 +82,7 @@ async function getBootstrapBrokers(): Promise<any> {
                 result = data
             },
             (error) => {
-                console.log("Get brokers error: " + JSON.stringify(error))
+                console.error("Get brokers error: " + JSON.stringify(error))
             }
         );
     } catch (e) {
@@ -109,7 +109,7 @@ async function invokeNextLambda(payload: any, functionName: string) {
 
             },
             (error) => {
-                console.log("Invoke lambda error: " + JSON.stringify(error))
+                console.error("Invoke lambda error: " + JSON.stringify(error))
             }
         );
     } catch (e) {
@@ -183,12 +183,14 @@ export const handler = async (event: any, context: Context): Promise<void> => {
         if (state == "ACTIVE") {
             console.log("MSK cluster is now 'Active', finishing Lambda")
             const brokerResponse = await getBootstrapBrokers()
+            const brokers = brokerResponse.BootstrapBrokerStringPublicSaslIam
+            const orderedBrokers = brokers.split(",").sort().join(",")
             const responseBody = {
                 Status: "SUCCESS",
                 Reason: "Cluster connectivity update has successfully finished",
                 // Since our wait condition only needs one occurrence this value can be any static value
                 UniqueId: "updateConnectivityID",
-                Data: `export MIGRATION_KAFKA_BROKER_ENDPOINTS=${brokerResponse.BootstrapBrokerStringPublicSaslIam}`
+                Data: orderedBrokers
             }
             // @ts-ignore
             const waitConditionResponse = await fetch(payloadData.CallbackUrl, {method: 'PUT', body: JSON.stringify(responseBody)});

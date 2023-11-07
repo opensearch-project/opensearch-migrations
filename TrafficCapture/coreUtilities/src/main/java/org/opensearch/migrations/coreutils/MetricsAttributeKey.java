@@ -1,5 +1,11 @@
 package org.opensearch.migrations.coreutils;
 
+// These enum values create a discrete set of potential attributes that
+// are attached to metrics events, which allows comparison across different events (when appropriate)
+// and building reliable visualizations and dashboards off of this data. If an attribute key is changed
+// or removed, one should expect that downstream dependencies (events that are being logged & dashboards/visualizations)
+// will need to be updated as well, and may no longer be compatible with previously collected data. Adding values
+// that correspond to attributes for new event types is backwards compatible.
 public enum MetricsAttributeKey {
     EVENT("event"),
     CONNECTION_ID("connection_id"),

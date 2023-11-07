@@ -32,7 +32,7 @@ A containerized end-to-end solution can be deployed locally using the
 
 ### AWS deployment
 
-Refer to [AWS Deployment](deployment/copilot/README.md) to deploy this solution to AWS.
+Refer to [AWS Deployment](deployment/README.md) to deploy this solution to AWS.
 
 ## Developer contributions
 
@@ -45,6 +45,12 @@ Developers must run the "install_githooks.sh" script in order to add any pre-com
 The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP traffic, which can then be offloaded and replayed to other HTTP(S) server(s).
 
 More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md).
+
+### Fetch Migration
+
+The FetchMigration directory hosts tools that simplify the process of backfilling / moving data from one cluster to another.
+
+Further documentation can be found here: [Fetch Migration README](FetchMigration/README.md).
 
 ### Running Tests
 

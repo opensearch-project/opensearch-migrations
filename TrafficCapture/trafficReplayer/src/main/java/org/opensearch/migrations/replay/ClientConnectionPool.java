@@ -15,7 +15,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
@@ -86,10 +86,14 @@ public class ClientConnectionPool {
         return numConnectionsClosed.get();
     }
 
-    public DiagnosticTrackableCompletableFuture<String, Void> stopGroup() {
-        var eventLoopFuture =
-                new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
-                        () -> "all channels closed");
+    public Future shutdownNow() {
+        connectionId2ChannelCache.invalidateAll();
+        return eventLoopGroup.shutdownGracefully();
+    }
+
+    public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
+        StringTrackableCompletableFuture<Void> eventLoopFuture =
+                new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(), () -> "all channels closed");
         this.eventLoopGroup.submit(() -> {
             try {
                 var channelClosedFuturesArray =
@@ -114,10 +118,8 @@ public class ClientConnectionPool {
                 eventLoopFuture.future.completeExceptionally(e);
             }
         });
-        return eventLoopFuture.map(f -> f.whenComplete((c, t) -> {
-            connectionId2ChannelCache.invalidateAll();
-            eventLoopGroup.shutdownGracefully();
-        }), () -> "Final shutdown for " + this.getClass().getSimpleName());
+        return eventLoopFuture.map(f -> f.whenComplete((c, t) -> shutdownNow()),
+                () -> "Final shutdown for " + this.getClass().getSimpleName());
     }
 
     public void closeConnection(String connId) {
@@ -130,7 +132,7 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualChannelGet(UniqueRequestKey requestKey, boolean ignoreIfNotPresent) {
+    submitEventualChannelGet(UniqueReplayerRequestKey requestKey, boolean ignoreIfNotPresent) {
         ConnectionReplaySession channelFutureAndSchedule =
                 getCachedSession(requestKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
@@ -149,7 +151,7 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(UniqueRequestKey requestKey, boolean dontCreate) {
+    public ConnectionReplaySession getCachedSession(UniqueReplayerRequestKey requestKey, boolean dontCreate) {
         var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.getTrafficStreamKey().getConnectionId()) :
                 connectionId2ChannelCache.get(requestKey.getTrafficStreamKey().getConnectionId());
         if (crs != null) {
@@ -175,12 +177,18 @@ public class ClientConnectionPool {
                                             channelClosedFuture.future.completeExceptionally(closeFuture.cause());
                                         }
                                     });
-                            if (!channelAndFutureWork.hasWorkRemaining()) {
+                            if (channelAndFutureWork.hasWorkRemaining()) {
                                 log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
                                         "(last associated with connection=" +
                                         channelAndFutureWork.getCurrentConnectionId() +
                                         ").  " + channelAndFutureWork.calculateSizeSlowly() +
                                         " requests that were enqueued won't be run").log();
+                            }
+                            var schedule = channelAndFutureWork.schedule;
+                            while (channelAndFutureWork.hasWorkRemaining()) {
+                                var scheduledItemToKill = schedule.peekFirstItem();
+                                scheduledItemToKill.getValue();
+                                schedule.removeFirstItem();
                             }
                         })
                         .exceptionally(t->{channelClosedFuture.future.completeExceptionally(t);return null;}),

@@ -1,3 +1,5 @@
+import logging
+import subprocess
 import unittest
 from unittest.mock import patch, MagicMock, PropertyMock
 
@@ -7,10 +9,9 @@ from prometheus_client.parser import text_string_to_metric_families
 
 import migration_monitor
 from endpoint_info import EndpointInfo
-
-# Constants
 from migration_monitor_params import MigrationMonitorParams
 
+# Constants
 TEST_ENDPOINT = "test"
 TEST_AUTH = ("user", "pass")
 TEST_FLAG = False
@@ -22,6 +23,13 @@ TEST_PROMETHEUS_METRIC_STRING = "# HELP " + TEST_METRIC_NAME + " Unit Test Metri
 
 
 class TestMigrationMonitor(unittest.TestCase):
+
+    def setUp(self) -> None:
+        logging.disable(logging.CRITICAL)
+
+    def tearDown(self) -> None:
+        logging.disable(logging.NOTSET)
+
     @patch('requests.post')
     def test_shutdown(self, mock_post: MagicMock):
         expected_shutdown_url = TEST_ENDPOINT + "/shutdown"
@@ -133,6 +141,60 @@ class TestMigrationMonitor(unittest.TestCase):
         self.assertFalse(migration_monitor.check_if_complete(2, 0, 1, 0, 2))
         # Terminal state
         self.assertTrue(migration_monitor.check_if_complete(2, 0, 2, 1, 2))
+
+    @patch('migration_monitor.shutdown_process')
+    @patch('migration_monitor.shutdown_pipeline')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_migration_process_exit(self, mock_shut_dp: MagicMock, mock_shut_proc: MagicMock):
+        # The param values don't matter since we've mocked the check method
+        test_input = MigrationMonitorParams(1, "test")
+        mock_subprocess = MagicMock()
+        # set subprocess returncode to None to simulate a zombie Data Prepper process
+        mock_subprocess.returncode = 1
+        # Run test method
+        wait_time = 3
+        return_code = migration_monitor.monitor_local(test_input, mock_subprocess, wait_time)
+        self.assertEqual(1, return_code)
+        mock_shut_dp.assert_not_called()
+        mock_shut_proc.assert_not_called()
+
+    @patch('migration_monitor.shutdown_process')
+    @patch('migration_monitor.shutdown_pipeline')
+    @patch('migration_monitor.check_and_log_progress')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_process_shutdown_invocation(self, mock_check: MagicMock, mock_shut_dp: MagicMock,
+                                         mock_shut_proc: MagicMock):
+        # The param values don't matter since we've mocked the check method
+        test_input = MigrationMonitorParams(1, "test")
+        mock_check.side_effect = [(False, 1), (True, 2)]
+        mock_subprocess = MagicMock()
+        # set subprocess returncode to None to simulate a zombie Data Prepper process
+        mock_subprocess.returncode = None
+        # Run test method
+        wait_time = 3
+        migration_monitor.monitor_local(test_input, mock_subprocess, wait_time)
+        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
+        mock_shut_dp.assert_called_once_with(expected_endpoint_info)
+        mock_shut_proc.assert_called_once_with(mock_subprocess)
+
+    def test_shutdown_process_terminate_success(self):
+        proc = MagicMock()
+        proc.returncode = 1
+        result = migration_monitor.shutdown_process(proc)
+        proc.terminate.assert_called_once()
+        proc.wait.assert_called_once()
+        proc.kill.assert_not_called()
+        self.assertEqual(1, result)
+
+    def test_shutdown_process_terminate_fail(self):
+        proc = MagicMock()
+        proc.returncode = None
+        proc.wait.side_effect = [subprocess.TimeoutExpired("test", 1), None]
+        result = migration_monitor.shutdown_process(proc)
+        proc.terminate.assert_called_once()
+        proc.wait.assert_called_once()
+        proc.kill.assert_called_once()
+        self.assertIsNone(result)
 
 
 if __name__ == '__main__':

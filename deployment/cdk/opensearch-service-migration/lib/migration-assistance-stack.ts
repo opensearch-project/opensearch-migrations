@@ -1,26 +1,19 @@
-import {CfnOutput, Stack} from "aws-cdk-lib";
-import {
-    Instance,
-    InstanceClass,
-    InstanceSize,
-    InstanceType,
-    IVpc,
-    MachineImage,
-    Peer,
-    Port,
-    SecurityGroup,
-    SubnetType
-} from "aws-cdk-lib/aws-ec2";
+import {Stack} from "aws-cdk-lib";
+import {IVpc, Peer, Port, SecurityGroup, SubnetType, Vpc} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
+import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
+import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface migrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly trafficComparatorEnabled: boolean,
     // Future support needed to allow importing an existing MSK cluster
-    readonly mskARN?: string,
+    readonly mskImportARN?: string,
     readonly mskEnablePublicEndpoints?: boolean
     readonly mskBrokerNodeCount?: number
 }
@@ -28,14 +21,12 @@ export interface migrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
 
-    public readonly mskARN: string;
-
     constructor(scope: Construct, id: string, props: migrationStackProps) {
         super(scope, id, props);
 
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
-            name: 'migration-msk-config',
+            name: `migration-msk-config-${props.stage}`,
             serverProperties: "auto.create.topics.enable=true"
         })
 
@@ -49,6 +40,11 @@ export class MigrationAssistanceStack extends Stack {
             mskSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.allTcp())
         }
         mskSecurityGroup.addIngressRule(mskSecurityGroup, Port.allTraffic())
+        new StringParameter(this, 'SSMParameterMSKAccessGroupId', {
+            description: 'OpenSearch migration parameter for MSK access security group id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`,
+            stringValue: mskSecurityGroup.securityGroupId
+        });
 
         const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
             retention: RetentionDays.THREE_MONTHS
@@ -56,7 +52,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
-            clusterName: 'migration-msk-cluster',
+            clusterName: `migration-msk-cluster-${props.stage}`,
             kafkaVersion: '2.8.1',
             numberOfBrokerNodes: props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2,
             brokerNodeGroupInfo: {
@@ -101,19 +97,40 @@ export class MigrationAssistanceStack extends Stack {
                 }
             }
         });
-        this.mskARN = mskCluster.attrArn
-
-        const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
-            vpc: props.vpc,
-            allowAllOutbound: false,
+        new StringParameter(this, 'SSMParameterMSKARN', {
+            description: 'OpenSearch Migration Parameter for MSK ARN',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`,
+            stringValue: mskCluster.attrArn
         });
-        comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
-
-        // Create an EFS file system for the traffic-comparator
-        const comparatorSQLiteEFS = new FileSystem(this, 'comparatorSQLiteEFS', {
-            vpc: props.vpc,
-            securityGroup: comparatorSQLiteSG
+        new StringParameter(this, 'SSMParameterMSKClusterName', {
+            description: 'OpenSearch Migration Parameter for MSK cluster name',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`,
+            stringValue: mskCluster.clusterName
         });
+
+        if (props.trafficComparatorEnabled) {
+            const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
+                vpc: props.vpc,
+                allowAllOutbound: false,
+            });
+            comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
+            new StringParameter(this, 'SSMParameterComparatorSQLAccessGroupId', {
+                description: 'OpenSearch migration parameter for Comparator SQL volume access security group id',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLAccessSecurityGroupId`,
+                stringValue: comparatorSQLiteSG.securityGroupId
+            });
+
+            // Create an EFS file system for the traffic-comparator
+            const comparatorSQLiteEFS = new FileSystem(this, 'comparatorSQLiteEFS', {
+                vpc: props.vpc,
+                securityGroup: comparatorSQLiteSG
+            });
+            new StringParameter(this, 'SSMParameterComparatorSQLVolumeEFSId', {
+                description: 'OpenSearch migration parameter for Comparator SQL EFS filesystem id',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLVolumeEFSId`,
+                stringValue: comparatorSQLiteEFS.fileSystemId
+            });
+        }
 
         const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
             vpc: props.vpc,
@@ -121,34 +138,53 @@ export class MigrationAssistanceStack extends Stack {
         });
         replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
 
+        new StringParameter(this, 'SSMParameterReplayerOutputAccessGroupId', {
+            description: 'OpenSearch migration parameter for Replayer output access security group id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`,
+            stringValue: replayerOutputSG.securityGroupId
+        });
+
         // Create an EFS file system for Traffic Replayer output
         const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
             vpc: props.vpc,
             securityGroup: replayerOutputSG
         });
-
-        let publicSubnetString = props.vpc.publicSubnets.map(_ => _.subnetId).join(",")
-        let privateSubnetString = props.vpc.privateSubnets.map(_ => _.subnetId).join(",")
-        const exports = [
-            `export MIGRATION_VPC_ID=${props.vpc.vpcId}`,
-            `export MIGRATION_CAPTURE_MSK_SG_ID=${mskSecurityGroup.securityGroupId}`,
-            `export MIGRATION_COMPARATOR_EFS_ID=${comparatorSQLiteEFS.fileSystemId}`,
-            `export MIGRATION_COMPARATOR_EFS_SG_ID=${comparatorSQLiteSG.securityGroupId}`,
-            `export MIGRATION_REPLAYER_OUTPUT_EFS_ID=${replayerOutputEFS.fileSystemId}`,
-            `export MIGRATION_REPLAYER_OUTPUT_EFS_SG_ID=${replayerOutputSG.securityGroupId}`]
-        if (publicSubnetString) exports.push(`export MIGRATION_PUBLIC_SUBNETS=${publicSubnetString}`)
-        if (privateSubnetString) exports.push(`export MIGRATION_PRIVATE_SUBNETS=${privateSubnetString}`)
-
-        new CfnOutput(this, 'CopilotMigrationExports', {
-            value: exports.join(";"),
-            description: 'Exported migration resource values created by CDK that are needed by Copilot container deployments',
+        new StringParameter(this, 'SSMParameterReplayerOutputEFSId', {
+            description: 'OpenSearch migration parameter for Replayer output EFS filesystem id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputEFSId`,
+            stringValue: replayerOutputEFS.fileSystemId
         });
-        // Create export of MSK cluster ARN for Copilot stacks to use
-        new CfnOutput(this, 'migrationMSKClusterARN', {
-            value: mskCluster.attrArn,
-            exportName: `${props.copilotAppName}-${props.copilotEnvName}-msk-cluster-arn`,
-            description: 'Migration MSK Cluster ARN'
+
+        const serviceConnectSecurityGroup = new SecurityGroup(this, 'serviceConnectSecurityGroup', {
+            vpc: props.vpc,
+            // Required for retrieving ECR image at service startup
+            allowAllOutbound: true,
+        })
+        serviceConnectSecurityGroup.addIngressRule(serviceConnectSecurityGroup, Port.allTraffic());
+
+        new StringParameter(this, 'SSMParameterServiceConnectGroupId', {
+            description: 'OpenSearch migration parameter for Service Connect security group id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`,
+            stringValue: serviceConnectSecurityGroup.securityGroupId
         });
+
+        const ecsCluster = new Cluster(this, 'migrationECSCluster', {
+            vpc: props.vpc,
+            clusterName: `migration-${props.stage}-ecs-cluster`
+        })
+        ecsCluster.addDefaultCloudMapNamespace( {
+            name: `migration.${props.stage}.local`,
+            type: NamespaceType.DNS_PRIVATE,
+            useForServiceConnect: true,
+            vpc: props.vpc
+        })
+        const cloudMapNamespaceId = ecsCluster.defaultCloudMapNamespace!.namespaceId
+        new StringParameter(this, 'SSMParameterCloudMapNamespaceId', {
+            description: 'OpenSearch migration parameter for Service Discovery CloudMap Namespace Id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/cloudMapNamespaceId`,
+            stringValue: cloudMapNamespaceId
+        });
+
 
     }
 }
