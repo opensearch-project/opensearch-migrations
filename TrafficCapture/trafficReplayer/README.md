@@ -77,7 +77,7 @@ target URI.
 ## Transformations
 
 Transformations are performed via a simple interface defined by
-[IJsonTransformer](../TrafficCapture/replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java) ('transformer').  They are loaded dynamically and are designed to allow for easy extension
+[IJsonTransformer](../replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java) ('transformer').  They are loaded dynamically and are designed to allow for easy extension
 of the TrafficReplayer to support a diverse set of needs.
 
 The input to the transformer will be an HTTP message represented as a json-like Map<String,Object> with
@@ -91,7 +91,7 @@ a message will only be processed by one transformer at a time.
 
 Transformer implementations are loaded via [Java's ServiceLoader](https://docs.oracle.com/javase/8/docs/api/java/util/ServiceLoader.html)
 by loading a jarfile that implements the [IJsonTransformerProvider]
-(../TrafficCapture/replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformerProvider.java).
+(../replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformerProvider.java).
 That jarfile will be loaded by specifying the provider jarfile (and any of its dependencies) in the classpath.
 For the ServiceLoader to load the IJsonTransformerProvider, the provided jarfile needs
 to supply a _provider-configuration_ file (`META-INF/services/org.opensearch.migrations.transform.IJsonTransformerProvider`)
