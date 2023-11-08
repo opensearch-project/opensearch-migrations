@@ -1,14 +1,15 @@
 package org.opensearch.migrations.replay.netty;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
+@Slf4j
 public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
 
     private final AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
@@ -27,7 +28,6 @@ public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         var bb = (ByteBuf) msg;
-        var origReaderIdx = bb.markReaderIndex();
         byte[] output = new byte[bb.readableBytes()];
         bb.readBytes(output);
         aggregatedRawResponseBuilder.addResponsePacket(output);
@@ -40,7 +40,7 @@ public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        cause.printStackTrace();
+        log.atWarn().setCause(cause).setMessage("Caught exception").log();
         metricsLogger.atError(MetricsEvent.RECEIVING_RESPONSE_COMPONENT_FAILED, cause)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
     }

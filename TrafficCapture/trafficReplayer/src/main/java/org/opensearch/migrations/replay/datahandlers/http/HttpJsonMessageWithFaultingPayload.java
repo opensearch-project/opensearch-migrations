@@ -7,16 +7,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> implements IHttpMessage {
-    public final static String METHOD_KEY = "method";
-    public final static String URI_KEY = "URI";
-    public final static String PROTOCOL_KEY = "protocol";
-    public final static String HEADERS_KEY = "headers";
-    public final static String PAYLOAD_KEY = "payload";
+    public static final String METHOD_KEY = "method";
+    public static final String URI_KEY = "URI";
+    public static final String PROTOCOL_KEY = "protocol";
+    public static final String HEADERS_KEY = "headers";
+    public static final String PAYLOAD_KEY = "payload";
 
     public HttpJsonMessageWithFaultingPayload() {
     }
 
-    public HttpJsonMessageWithFaultingPayload(Map<? extends String, ?> m) {
+    public HttpJsonMessageWithFaultingPayload(Map<String, ?> m) {
         super(m);
     }
 

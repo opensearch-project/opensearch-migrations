@@ -28,7 +28,7 @@ public class SimpleHttpServer implements AutoCloseable {
         var testServerRef = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                testServerRef.set(new SimpleHttpServer(useTls, port.intValue(), makeContext));
+                testServerRef.set(new SimpleHttpServer(useTls, port, makeContext));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

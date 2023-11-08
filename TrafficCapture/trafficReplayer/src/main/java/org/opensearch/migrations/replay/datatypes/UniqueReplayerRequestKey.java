@@ -1,5 +1,8 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import lombok.EqualsAndHashCode;
+
+@EqualsAndHashCode
 public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     public final ITrafficStreamKey trafficStreamKey;
     public final int sourceRequestIndexOffsetAtFirstObservation;

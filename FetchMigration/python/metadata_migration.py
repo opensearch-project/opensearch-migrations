@@ -183,7 +183,7 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
         # Write output YAML
         if len(args.output_file) > 0:
             write_output(dp_config, indices_to_create, args.output_file)
-            if args.report:
+            if args.report:  # pragma no cover
                 print("Wrote output YAML pipeline to: " + args.output_file)
         if not args.dryrun:
             index_data = dict()

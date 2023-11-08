@@ -11,6 +11,7 @@ import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
@@ -22,6 +23,7 @@ import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
@@ -32,6 +34,8 @@ import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
 import org.slf4j.spi.LoggingEventBuilder;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.arns.Arn;
+import software.amazon.awssdk.regions.Region;
 
 import javax.net.ssl.SSLException;
 import java.io.BufferedOutputStream;
@@ -88,6 +92,19 @@ public class TrafficReplayer {
     private AtomicReference<Error> shutdownReasonRef;
     private AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
     private AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
+    private ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
+
+    public class TerminationException extends Exception {
+        public final Throwable shutdownCause;
+        public final Throwable immediateCause;
+        public TerminationException(Throwable shutdownCause, Throwable immediateCause) {
+            // use one of these two so that anybody handling this as any other exception can get
+            // at least one of the root errors
+            super(Optional.ofNullable(shutdownCause).orElse(immediateCause));
+            this.shutdownCause = shutdownCause;
+            this.immediateCause = immediateCause;
+        }
+    }
 
     public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
         var joltJsonTransformerBuilder = JsonJoltTransformer.newBuilder()
@@ -301,7 +318,9 @@ public class TrafficReplayer {
         }
     }
 
-    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
+    public static void main(String[] args)
+            throws IOException, InterruptedException, ExecutionException, TerminationException
+    {
         var params = parseArgs(args);
         URI uri;
         System.err.println("Starting Traffic Replayer");
@@ -318,20 +337,20 @@ public class TrafficReplayer {
         initializeOpenTelemetry("traffic-replayer", params.otelCollectorEndpoint);
 
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
-                new FileOutputStream(params.outputFilename, true)) {
-            try (var bufferedOutputStream = new BufferedOutputStream(outputStream)) {
-                try (var blockingTrafficStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
-                        Duration.ofSeconds(params.lookaheadTimeSeconds))) {
-                    var tr = new TrafficReplayer(uri, buildAuthTransformerFactory(params),
-                            params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
-                    setupShutdownHookForReplayer(tr);
-                    var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
-                    var timeShifter = new TimeShifter(params.speedupFactor);
-                    tr.runReplayWithIOStreams(Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                            blockingTrafficStream, bufferedOutputStream, timeShifter, tupleWriter);
-                    log.info("Done processing TrafficStreams");
-                }
-            }
+                new FileOutputStream(params.outputFilename, true);
+             var bufferedOutputStream = new BufferedOutputStream(outputStream);
+             var blockingTrafficStream = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
+                     Duration.ofSeconds(params.lookaheadTimeSeconds));
+             var authTransformer = buildAuthTransformerFactory(params))
+        {
+            var tr = new TrafficReplayer(uri, authTransformer,
+                    params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
+            setupShutdownHookForReplayer(tr);
+            var tupleWriter = new SourceTargetCaptureTuple.TupleToFileWriter(bufferedOutputStream);
+            var timeShifter = new TimeShifter(params.speedupFactor);
+            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                    blockingTrafficStream, timeShifter, tupleWriter);
+            log.info("Done processing TrafficStreams");
         }
     }
 
@@ -386,9 +405,16 @@ public class TrafficReplayer {
                 throw new ParameterException(AWS_AUTH_HEADER_USER_AND_SECRET_ARG +
                         " must specify two arguments, <USERNAME> <SECRET_ARN>");
             }
-            try (AWSAuthService awsAuthService = new AWSAuthService()) {
+            var secretArnStr = params.awsAuthHeaderUserAndSecret.get(1);
+            var regionOp = Arn.fromString(secretArnStr).region();
+            if (regionOp.isEmpty()) {
+                throw new ParameterException(AWS_AUTH_HEADER_USER_AND_SECRET_ARG +
+                        " must specify two arguments, <USERNAME> <SECRET_ARN>, and SECRET_ARN must specify a region");
+            }
+            try (var credentialsProvider = DefaultCredentialsProvider.create();
+                 AWSAuthService awsAuthService = new AWSAuthService(credentialsProvider, Region.of(regionOp.get()))) {
                 authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(params.awsAuthHeaderUserAndSecret.get(0),
-                        params.awsAuthHeaderUserAndSecret.get(1));
+                        secretArnStr);
             }
         }
 
@@ -402,9 +428,18 @@ public class TrafficReplayer {
             }
             String serviceName = serviceAndRegion[0];
             String region = serviceAndRegion[1];
-            DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
 
-            return httpMessage -> new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
+            return new IAuthTransformerFactory() {
+                DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
+                @Override
+                public IAuthTransformer getAuthTransformer(IHttpMessage httpMessage) {
+                    return new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
+                }
+                @Override
+                public void close() {
+                    defaultCredentialsProvider.close();
+                }
+            };
         } else if (params.removeAuthHeader) {
             return RemovingAuthTransformerFactory.instance;
         } else {
@@ -412,11 +447,10 @@ public class TrafficReplayer {
         }
     }
 
-    void runReplayWithIOStreams(Duration observedPacketConnectionTimeout,
-                                BlockingTrafficSource trafficChunkStream,
-                                BufferedOutputStream bufferedOutputStream,
-                                TimeShifter timeShifter,
-                                Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
+    void setupRunAndWaitForReplay(Duration observedPacketConnectionTimeout,
+                                  BlockingTrafficSource trafficChunkStream,
+                                  TimeShifter timeShifter,
+                                  Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws InterruptedException, ExecutionException {
 
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
@@ -428,68 +462,82 @@ public class TrafficReplayer {
                         new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer));
         try {
             pullCaptureFromSourceToAccumulator(trafficChunkStream, trafficToHttpTransactionAccumulator);
+        } catch (InterruptedException ex) {
+            throw ex;
         } catch (Exception e) {
             log.warn("Terminating runReplay due to", e);
             throw e;
         } finally {
             trafficToHttpTransactionAccumulator.close();
-            var PRIMARY_LOG_LEVEL = Level.INFO;
-            var SECONDARY_LOG_LEVEL = Level.WARN;
-            var logLevel = PRIMARY_LOG_LEVEL;
-            for (var timeout = Duration.ofSeconds(60); ; timeout = timeout.multipliedBy(2)) {
-                if (shutdownFutureRef.get() != null) {
-                    log.warn("Not waiting for work because the TrafficReplayer is shutting down.");
-                    break;
-                }
-                try {
-                    waitForRemainingWork(logLevel, timeout, replayEngine);
-                    break;
-                } catch (TimeoutException e) {
-                    log.atLevel(logLevel).log("Timed out while waiting for the remaining " +
-                            "requests to be finalized...");
-                    logLevel = SECONDARY_LOG_LEVEL;
-                } finally {
-                    shutdown(null).get();
-                    log.error("Done waiting for TrafficReplayer (" + this + ") to shut down");
-                }
-            }
-            if (requestToFinalWorkFuturesMap.size() > 0 ||
-                    exceptionRequestCount.get() > 0) {
-                log.atWarn().setMessage("{} in-flight requests being dropped due to pending shutdown; " +
-                                "{} requests to the target threw an exception; " +
-                                "{} requests were successfully processed.")
-                        .addArgument(requestToFinalWorkFuturesMap.size())
-                        .addArgument(exceptionRequestCount.get())
-                        .addArgument(successfulRequestCount.get())
-                        .log();
-            } else {
-                log.info(successfulRequestCount.get() + " requests were successfully processed.");
-            }
-            log.info("# of connections created: {}; # of requests on reused keep-alive connections: {}; " +
-                            "# of expired connections: {}; # of connections closed: {}; " +
-                            "# of connections terminated upon accumulator termination: {}",
-                    trafficToHttpTransactionAccumulator.numberOfConnectionsCreated(),
-                    trafficToHttpTransactionAccumulator.numberOfRequestsOnReusedConnections(),
-                    trafficToHttpTransactionAccumulator.numberOfConnectionsExpired(),
-                    trafficToHttpTransactionAccumulator.numberOfConnectionsClosed(),
-                    trafficToHttpTransactionAccumulator.numberOfRequestsTerminatedUponAccumulatorClose()
-            );
+            wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
             if (shutdownFutureRef.get() == null) {
                 assert requestToFinalWorkFuturesMap.size() == 0 :
                         "expected to wait for all the in flight requests to fully flush and self destruct themselves";
-            } else {
-                var e = shutdownReasonRef.get();
-                if (e != null) {
-                    throw e; // shutdown due to an error, preserve what the error was for any observers
-                } else {
-                    // this was a shutdown due to a signal, so there's nothing to report or handle.
-                }
             }
         }
     }
 
-    ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
+    private void wrapUpWorkAndEmitSummary(ReplayEngine replayEngine, CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) throws ExecutionException, InterruptedException {
+        final var primaryLogLevel = Level.INFO;
+        final var secondaryLogLevel = Level.WARN;
+        var logLevel = primaryLogLevel;
+        for (var timeout = Duration.ofSeconds(60); ; timeout = timeout.multipliedBy(2)) {
+            if (shutdownFutureRef.get() != null) {
+                log.warn("Not waiting for work because the TrafficReplayer is shutting down.");
+                break;
+            }
+            try {
+                waitForRemainingWork(logLevel, timeout, replayEngine);
+                break;
+            } catch (TimeoutException e) {
+                log.atLevel(logLevel).log("Timed out while waiting for the remaining " +
+                        "requests to be finalized...");
+                logLevel = secondaryLogLevel;
+            }
+        }
+        if (requestToFinalWorkFuturesMap.size() > 0 ||
+                exceptionRequestCount.get() > 0) {
+            log.atWarn().setMessage("{} in-flight requests being dropped due to pending shutdown; " +
+                            "{} requests to the target threw an exception; " +
+                            "{} requests were successfully processed.")
+                    .addArgument(requestToFinalWorkFuturesMap.size())
+                    .addArgument(exceptionRequestCount.get())
+                    .addArgument(successfulRequestCount.get())
+                    .log();
+        } else {
+            log.info(successfulRequestCount.get() + " requests were successfully processed.");
+        }
+        log.info("# of connections created: {}; # of requests on reused keep-alive connections: {}; " +
+                        "# of expired connections: {}; # of connections closed: {}; " +
+                        "# of connections terminated upon accumulator termination: {}",
+                trafficToHttpTransactionAccumulator.numberOfConnectionsCreated(),
+                trafficToHttpTransactionAccumulator.numberOfRequestsOnReusedConnections(),
+                trafficToHttpTransactionAccumulator.numberOfConnectionsExpired(),
+                trafficToHttpTransactionAccumulator.numberOfConnectionsClosed(),
+                trafficToHttpTransactionAccumulator.numberOfRequestsTerminatedUponAccumulatorClose()
+        );
+    }
 
+    void setupRunAndWaitForReplayWithShutdownChecks(Duration observedPacketConnectionTimeout,
+                                                    BlockingTrafficSource trafficChunkStream,
+                                                    TimeShifter timeShifter,
+                                                    Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
+            throws TerminationException, ExecutionException, InterruptedException {
+        try {
+            setupRunAndWaitForReplay(observedPacketConnectionTimeout, trafficChunkStream,
+                    timeShifter, resultTupleConsumer);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new TerminationException(shutdownReasonRef.get(), e);
+        } catch (Throwable t) {
+            throw new TerminationException(shutdownReasonRef.get(), t);
+        }
+        if (shutdownReasonRef.get() != null) {
+            throw new TerminationException(shutdownReasonRef.get(), null);
+        }
+        // if nobody has run shutdown yet, do so now so that we can tear down the netty resources
+        shutdown(null).get(); // if somebody already HAD run shutdown, it will return the future already created
+    }
 
     @AllArgsConstructor
     class TrafficReplayerAccumulationCallbacks implements AccumulationCallbacks {
@@ -512,7 +560,6 @@ public class TrafficReplayer {
                     }),
                     ()->"logging summary");
         }
-
 
         @Override
         public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair) {
@@ -567,7 +614,7 @@ public class TrafficReplayer {
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                             List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            if (status == RequestResponsePacketPair.ReconstructionStatus.ExpiredPrematurely) {
+            if (status == RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY) {
                 // eventually fill this in to commit the message
             }
         }
@@ -577,6 +624,34 @@ public class TrafficReplayer {
             replayEngine.setFirstTimestamp(timestamp);
             replayEngine.closeConnection(requestKey, timestamp);
         }
+
+        private TransformedTargetRequestAndResponse
+        packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
+                                UniqueReplayerRequestKey requestKey,
+                                RequestResponsePacketPair rrPair,
+                                TransformedTargetRequestAndResponse summary,
+                                Exception t) {
+            log.trace("done sending and finalizing data to the packet handler");
+
+            try (var requestResponseTuple = getSourceTargetCaptureTuple(requestKey, rrPair, summary, t)) {
+                log.atInfo().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTuple).log();
+                tupleWriter.accept(requestResponseTuple);
+            }
+
+            if (t != null) { throw new CompletionException(t); }
+            if (summary.getError() != null) {
+                log.atInfo().setCause(summary.getError()).setMessage("Exception for request {}: ")
+                        .addArgument(requestKey).log();
+                exceptionRequestCount.incrementAndGet();
+            } else if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
+                log.atInfo().setCause(summary.getError()).setMessage("Unknown error transforming the request {}: ")
+                        .addArgument(requestKey).log();
+                exceptionRequestCount.incrementAndGet();
+            } else {
+                successfulRequestCount.incrementAndGet();
+            }
+            return summary;
+        }
     }
 
     private void waitForRemainingWork(Level logLevel,
@@ -585,51 +660,21 @@ public class TrafficReplayer {
             throws ExecutionException, InterruptedException, TimeoutException {
         Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
                 allRemainingWorkArray = requestToFinalWorkFuturesMap.entrySet().toArray(Map.Entry[]::new);
-        log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
-        if (log.isInfoEnabled()) {
-            LoggingEventBuilder loggingEventBuilderToUse = log.isTraceEnabled() ? log.atTrace() : log.atInfo();
-            long itemLimit = log.isTraceEnabled() ? Long.MAX_VALUE : MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL;
-            loggingEventBuilderToUse.setMessage(() -> " items: " +
-                            Arrays.stream(allRemainingWorkArray)
-                                    .map(kvp -> kvp.getKey() + " --> " +
-                                            kvp.getValue().formatAsString(TrafficReplayer::formatWorkItem))
-                                    .limit(itemLimit)
-                                    .collect(Collectors.joining("\n")))
-                    .log();
-        }
+        writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
 
         // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
         // and were removed from the live map (hopefully)
         DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>[] allCompletableFuturesArray =
                 Arrays.stream(allRemainingWorkArray)
-                        .map(kvp->kvp.getValue()).toArray(DiagnosticTrackableCompletableFuture[]::new);
+                        .map(Map.Entry::getValue).toArray(DiagnosticTrackableCompletableFuture[]::new);
         var allWorkFuture = StringTrackableCompletableFuture.allOf(allCompletableFuturesArray,
                 () -> "TrafficReplayer.AllWorkFinished");
         try {
             if (allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, allWorkFuture)) {
                 allWorkFuture.get(timeout);
             } else {
-                try {
-                    var finishedSignal = allRemainingWorkFutureOrShutdownSignalRef.get().future;
-                    assert finishedSignal.isDone() : "Expected this reference to be EITHER the current work futures " +
-                            "or a sentinel value indicating a shutdown has commenced.  The signal, when set, should " +
-                            "have been completed at the time that the reference was set";
-                    finishedSignal.get();
-                    log.debug("Did shutdown cleanly");
-                } catch (ExecutionException e) {
-                    var c = e.getCause();
-                    if (c instanceof Error) {
-                        throw (Error) c;
-                    }
-                    else throw e;
-                } catch (Error t) {
-                    log.atError().setCause(t).setMessage(() -> "Not waiting for all work to finish.  " +
-                            "The TrafficReplayer is shutting down").log();
-                    throw t;
-                }
+                handleAlreadySetFinishedSignal();
             }
-        } catch (CancellationException e) {
-            throw shutdownReasonRef.get();
         } catch (TimeoutException e) {
             var didCancel = allWorkFuture.future.cancel(true);
             if (!didCancel) {
@@ -651,6 +696,43 @@ public class TrafficReplayer {
                         // rest of the cleanup to finish, as per the name of the function
     }
 
+    private void handleAlreadySetFinishedSignal() throws InterruptedException, ExecutionException {
+        try {
+            var finishedSignal = allRemainingWorkFutureOrShutdownSignalRef.get().future;
+            assert finishedSignal.isDone() : "Expected this reference to be EITHER the current work futures " +
+                    "or a sentinel value indicating a shutdown has commenced.  The signal, when set, should " +
+                    "have been completed at the time that the reference was set";
+            finishedSignal.get();
+            log.debug("Did shutdown cleanly");
+        } catch (ExecutionException e) {
+            var c = e.getCause();
+            if (c instanceof Error) {
+                throw (Error) c;
+            } else {
+                throw e;
+            }
+        } catch (Error t) {
+            log.atError().setCause(t).setMessage(() -> "Not waiting for all work to finish.  " +
+                    "The TrafficReplayer is shutting down").log();
+            throw t;
+        }
+    }
+
+    private static void writeStatusLogsForRemainingWork(Level logLevel, Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[] allRemainingWorkArray) {
+        log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
+        if (log.isInfoEnabled()) {
+            LoggingEventBuilder loggingEventBuilderToUse = log.isTraceEnabled() ? log.atTrace() : log.atInfo();
+            long itemLimit = log.isTraceEnabled() ? Long.MAX_VALUE : MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL;
+            loggingEventBuilderToUse.setMessage(() -> " items: " +
+                            Arrays.stream(allRemainingWorkArray)
+                                    .map(kvp -> kvp.getKey() + " --> " +
+                                            kvp.getValue().formatAsString(TrafficReplayer::formatWorkItem))
+                                    .limit(itemLimit)
+                                    .collect(Collectors.joining("\n")))
+                    .log();
+        }
+    }
+
     private static String formatWorkItem(DiagnosticTrackableCompletableFuture<String,?> cf) {
         try {
             var resultValue = cf.get();
@@ -658,37 +740,12 @@ public class TrafficReplayer {
                 return "" + ((TransformedTargetRequestAndResponse) resultValue).getTransformationStatus();
             }
             return null;
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return e.getMessage();
+        } catch (ExecutionException e) {
             return e.getMessage();
         }
-    }
-
-    private TransformedTargetRequestAndResponse
-    packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
-                            UniqueReplayerRequestKey requestKey,
-                            RequestResponsePacketPair rrPair,
-                            TransformedTargetRequestAndResponse summary,
-                            Exception t) {
-        log.trace("done sending and finalizing data to the packet handler");
-
-        try (var requestResponseTuple = getSourceTargetCaptureTuple(requestKey, rrPair, summary, t)) {
-            log.atInfo().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTuple).log();
-            tupleWriter.accept(requestResponseTuple);
-        }
-
-        if (t != null) { throw new CompletionException(t); }
-        if (summary.getError() != null) {
-            log.atInfo().setCause(summary.getError()).setMessage("Exception for request {}: ")
-                .addArgument(requestKey).log();
-            exceptionRequestCount.incrementAndGet();
-        } else if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
-            log.atInfo().setCause(summary.getError()).setMessage("Unknown error transforming the request {}: ")
-                    .addArgument(requestKey).log();
-            exceptionRequestCount.incrementAndGet();
-        } else {
-            successfulRequestCount.incrementAndGet();
-        }
-        return summary;
     }
 
     private static SourceTargetCaptureTuple getSourceTargetCaptureTuple(UniqueReplayerRequestKey uniqueRequestKey,
@@ -705,7 +762,7 @@ public class TrafficReplayer {
             requestResponseTriple = new SourceTargetCaptureTuple(uniqueRequestKey, rrPair,
                     summary.requestPackets,
                     summary.getReceiptTimeAndResponsePackets()
-                            .map(entry -> entry.getValue()).collect(Collectors.toList()),
+                            .map(Map.Entry::getValue).collect(Collectors.toList()),
                     summary.getTransformationStatus(),
                     summary.getError(),
                     summary.getResponseDuration()
@@ -714,11 +771,12 @@ public class TrafficReplayer {
         return requestResponseTriple;
     }
 
-    private DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
-    transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request, UniqueReplayerRequestKey requestKey) {
+    public DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
+    transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request,
+                            UniqueReplayerRequestKey requestKey) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
-                ()->request.packetBytes.stream());
+                request.packetBytes::stream);
     }
 
     public static DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
@@ -736,7 +794,7 @@ public class TrafficReplayer {
             // It might be safer to chain this work directly inside the scheduleWork call above so that the
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
-            var sendFuture = transformationCompleteFuture.thenCompose(transformedResult ->
+            return transformationCompleteFuture.thenCompose(transformedResult ->
                         replayEngine.scheduleRequest(requestKey, start, end,
                                         transformedResult.transformedOutput.size(),
                                         transformedResult.transformedOutput.streamRetained())
@@ -751,7 +809,6 @@ public class TrafficReplayer {
                     () -> "transitioning transformed packets onto the wire")
                     .map(future->future.exceptionally(t->new TransformedTargetRequestAndResponse(null, null, t)),
                             ()->"Checking for exception out of sending data to the target server");
-            return sendFuture;
         } catch (Exception e) {
             log.debug("Caught exception in writeToSocket, so failing future");
             return StringTrackableCompletableFuture.failedFuture(e, ()->"TrafficReplayer.writeToSocketAndClose");
@@ -762,7 +819,7 @@ public class TrafficReplayer {
     transformAllData(IPacketFinalizingConsumer<R> packetHandler, Supplier<Stream<byte[]>> packetSupplier) {
         try {
             var logLabel = packetHandler.getClass().getSimpleName();
-            var packets = packetSupplier.get().map(b-> Unpooled.wrappedBuffer(b));
+            var packets = packetSupplier.get().map(Unpooled::wrappedBuffer);
             packets.forEach(packetData -> {
                 log.atDebug().setMessage(() -> logLabel + " sending " + packetData.readableBytes() +
                         " bytes to the packetHandler").log();
@@ -782,10 +839,7 @@ public class TrafficReplayer {
     public void stopReadingAsync() {
         log.warn("TrafficReplayer is being signalled to stop reading new TrafficStream objects");
         stopReadingRef.set(true);
-        var nextChunkFutureRef = this.nextChunkFutureRef.get();
-        if (nextChunkFutureRef != null) {
-            nextChunkFutureRef.cancel(true);
-        }
+        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f->f.cancel(true));
     }
 
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
@@ -818,14 +872,15 @@ public class TrafficReplayer {
                 break;
             }
         }
-        var rval = shutdownFutureRef.get();
+        var shutdownFuture = shutdownFutureRef.get();
         log.atWarn().setMessage(()->"Shutdown procedure has finished").log();
-        return rval;
+        return shutdownFuture;
     }
 
     public void pullCaptureFromSourceToAccumulator(
             ITrafficCaptureSource trafficChunkStream,
-            CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator) {
+            CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator)
+            throws InterruptedException {
         while (true) {
             log.trace("Reading next chunk from TrafficStream supplier");
             this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk());
@@ -835,13 +890,14 @@ public class TrafficReplayer {
             }
             try {
                 trafficStreams = this.nextChunkFutureRef.get().get();
-            } catch (InterruptedException | ExecutionException | CancellationException ex) {
+            } catch (ExecutionException ex) {
                 if (ex.getCause() instanceof EOFException) {
                     log.atWarn().setCause(ex.getCause()).setMessage("Got an EOF on the stream.  " +
                             "Done reading traffic streams.").log();
                     break;
                 } else {
                     log.atWarn().setCause(ex).setMessage("Interrupted.  Done reading traffic streams.").log();
+                    Thread.currentThread().interrupt();
                     throw new RuntimeException(ex);
                 }
             }
@@ -852,7 +908,7 @@ public class TrafficReplayer {
                         .filter(s -> !s.isEmpty())
                         .ifPresent(s -> log.atInfo().log("TrafficStream Summary: {" + s + "}"));
             }
-            trafficStreams.forEach(ts->trafficToHttpTransactionAccumulator.accept(ts));
+            trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
         }
     }
 }

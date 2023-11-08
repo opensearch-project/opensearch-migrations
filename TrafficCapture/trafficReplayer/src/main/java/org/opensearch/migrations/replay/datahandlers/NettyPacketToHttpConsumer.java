@@ -40,8 +40,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
-    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
-    private final static MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
+    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+    private static final MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     /**
@@ -138,10 +138,10 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var pipeline = c.pipeline();
         var lastHandler = pipeline.last();
         if (lastHandler == null || lastHandler instanceof SslHandler) {
-            assert c.config().isAutoRead() == false;
+            assert !c.config().isAutoRead();
             return false;
         } else {
-            assert c.config().isAutoRead() == true;
+            assert c.config().isAutoRead();
             return true;
         }
     }
@@ -193,7 +193,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 log.atWarn().setMessage(()->diagnosticLabel + "outbound channel was not set up successfully, " +
                         "NOT writing bytes hash=" + System.identityHashCode(packetData)).log();
                 channel.close();
-                return StringTrackableCompletableFuture.factory.failedFuture(channelInitException, ()->"");
+                return DiagnosticTrackableCompletableFuture.Factory.failedFuture(channelInitException, ()->"");
             }
         }, ()->"consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
         log.atTrace().setMessage(()->"Setting up write of packetData["+packetData+"] hash=" +
@@ -251,7 +251,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
-                    var future = new CompletableFuture();
+                    var future = new CompletableFuture<AggregatedRawResponse>();
                     var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,
                             ()->"NettyPacketToHttpConsumer.finalizeRequest()");
                     if (t == null) {

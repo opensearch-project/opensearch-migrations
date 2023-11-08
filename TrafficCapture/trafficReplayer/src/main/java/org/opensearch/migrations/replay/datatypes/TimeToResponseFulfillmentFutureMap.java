@@ -12,17 +12,13 @@ public class TimeToResponseFulfillmentFutureMap {
 
     public void appendTask(Instant start, Runnable packetSender) {
         assert timeToRunnableMap.keySet().stream().allMatch(t->!t.isAfter(start));
-        var existing = timeToRunnableMap.get(start);
-        if (existing == null) {
-            existing = new ArrayDeque<>();
-            timeToRunnableMap.put(start, existing);
-        }
+        var existing = timeToRunnableMap.computeIfAbsent(start, k->new ArrayDeque<>());
         existing.offer(packetSender);
     }
 
     public Map.Entry<Instant, Runnable> peekFirstItem() {
         var e = timeToRunnableMap.firstEntry();
-        return e == null ? null : new AbstractMap.SimpleEntry(e.getKey(), e.getValue().peek());
+        return e == null ? null : new AbstractMap.SimpleEntry<>(e.getKey(), e.getValue().peek());
     }
 
     public Instant removeFirstItem() {
@@ -44,7 +40,7 @@ public class TimeToResponseFulfillmentFutureMap {
     }
 
     public long calculateSizeSlowly() {
-        return timeToRunnableMap.values().stream().map(q->q.size()).mapToInt(x->x).sum();
+        return timeToRunnableMap.values().stream().map(ArrayDeque::size).mapToInt(x->x).sum();
     }
 
     @Override

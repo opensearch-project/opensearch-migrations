@@ -46,8 +46,8 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
         this(kafkaConsumer, topic, new KafkaBehavioralPolicy());
     }
 
-    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic, KafkaBehavioralPolicy behavioralPolicy) {
-        assert topic != null;
+    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, @NonNull String topic,
+                                 KafkaBehavioralPolicy behavioralPolicy) {
         this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
         this.behavioralPolicy = behavioralPolicy;
@@ -97,39 +97,33 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
     @Override
     @SuppressWarnings("unchecked")
     public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
-        return CompletableFuture.supplyAsync(() -> readNextTrafficStreamSynchronously());
+        return CompletableFuture.supplyAsync(this::readNextTrafficStreamSynchronously);
     }
 
     public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously() {
         try {
             ConsumerRecords<String, byte[]> records;
-            try {
-                records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
-                log.info("Kafka consumer poll has fetched {} records", records.count());
-            } catch (RuntimeException e) {
-                log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. Swallowing and awaiting next " +
-                        "metadata refresh to try again.").addArgument(topic).log();
-                records = new ConsumerRecords<>(Collections.emptyMap());
-            }
-            Stream<ITrafficStreamWithKey> trafficStream = StreamSupport.stream(records.spliterator(), false).map(record -> {
-                try {
-                    TrafficStream ts = TrafficStream.parseFrom(record.value());
-                    // Ensure we increment trafficStreamsRead even at a higher log level
-                    log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
-                    metricsLogger.atSuccess(MetricsEvent.PARSED_TRAFFIC_STREAM_FROM_KAFKA)
-                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, ts.getConnectionId())
-                            .setAttribute(MetricsAttributeKey.TOPIC_NAME, this.topic)
-                            .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, ts.getSerializedSize()).emit();
-                    return (ITrafficStreamWithKey) new TrafficStreamWithEmbeddedKey(ts);
-                } catch (InvalidProtocolBufferException e) {
-                    RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(record, e);
-                    metricsLogger.atError(MetricsEvent.PARSING_TRAFFIC_STREAM_FROM_KAFKA_FAILED, recordError)
-                            .setAttribute(MetricsAttributeKey.TOPIC_NAME, this.topic).emit();
-                    if (recordError != null) {
-                        throw recordError;
-                    }
-                    return null;
-                }
+            records = safePollWithSwallowedRuntimeExceptions();
+            Stream<ITrafficStreamWithKey> trafficStream = StreamSupport.stream(records.spliterator(), false)
+                    .map(kafkaRecord -> {
+                        try {
+                            TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
+                            // Ensure we increment trafficStreamsRead even at a higher log level
+                            log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.incrementAndGet(), ts);
+                            metricsLogger.atSuccess(MetricsEvent.PARSED_TRAFFIC_STREAM_FROM_KAFKA)
+                                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, ts.getConnectionId())
+                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, this.topic)
+                                    .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, ts.getSerializedSize()).emit();
+                            return (ITrafficStreamWithKey) new TrafficStreamWithEmbeddedKey(ts);
+                        } catch (InvalidProtocolBufferException e) {
+                            RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);
+                            metricsLogger.atError(MetricsEvent.PARSING_TRAFFIC_STREAM_FROM_KAFKA_FAILED, recordError)
+                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, this.topic).emit();
+                            if (recordError != null) {
+                                throw recordError;
+                            }
+                            return null;
+                        }
             }).filter(Objects::nonNull);
             // This simple commit should be removed when logic is in place for using commitTrafficStream()
             kafkaConsumer.commitSync();
@@ -138,6 +132,19 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
             log.error("Terminating Kafka traffic stream");
             throw e;
         }
+    }
+
+    private ConsumerRecords<String, byte[]> safePollWithSwallowedRuntimeExceptions() {
+        ConsumerRecords<String, byte[]> records;
+        try {
+            records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
+            log.info("Kafka consumer poll has fetched {} records", records.count());
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. " +
+                    "Swallowing and awaiting next metadata refresh to try again.").addArgument(topic).log();
+            records = new ConsumerRecords<>(Collections.emptyMap());
+        }
+        return records;
     }
 
     @Override

@@ -15,9 +15,9 @@ import java.util.Optional;
 public class RequestResponsePacketPair {
 
     public enum ReconstructionStatus {
-        Complete,
-        ExpiredPrematurely,
-        ClosedPrematurely
+        COMPLETE,
+        EXPIRED_PREMATURELY,
+        CLOSED_PREMATURELY
     }
 
     HttpMessageAndTimestamp requestData;

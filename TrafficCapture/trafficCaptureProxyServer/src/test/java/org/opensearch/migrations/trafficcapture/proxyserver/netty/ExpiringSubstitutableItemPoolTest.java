@@ -73,6 +73,7 @@ class ExpiringSubstitutableItemPoolTest {
                     try {
                         expiredItems.add(item.get());
                     } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                         throw new RuntimeException(e);
                     } catch (ExecutionException e) {
                         throw new RuntimeException(e);

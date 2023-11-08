@@ -21,16 +21,15 @@ import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSour
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.slf4j.event.Level;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
-import org.testcontainers.utility.DockerImageName;
 
-import java.io.BufferedOutputStream;
 import java.io.EOFException;
 import java.time.Duration;
 import java.time.Instant;
@@ -53,8 +52,14 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 @Slf4j
+// Turn this on to test with a live Kafka broker.  Other code changes will need to be activated too
 //@Testcontainers
-//@WrapWithNettyLeakDetection(repetitions = 1)
+// It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
+// to recycle the TrafficReplayers.  Since that shutdown process optimizes for speed of teardown, rather than tidying
+// everything up as it closes the door, some leaks may be inevitable.  E.g. when work is outstanding and being sent
+// to the test server, a shutdown will stop those work threads without letting them flush through all of their work
+// (since that could take a very long time) and some of the work might have been followed by resource releases.
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class FullTrafficReplayerTest {
 
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
@@ -101,6 +106,16 @@ public class FullTrafficReplayerTest {
             }
         };
 
+        runReplayerUntilSourceWasExhausted(httpServer, trafficSourceSupplier, tupleReceiver);
+
+        //Assertions.assertEquals();
+        log.error("done");
+    }
+
+    private static void runReplayerUntilSourceWasExhausted(SimpleNettyHttpServer httpServer,
+                                                           Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier,
+                                                           Consumer<SourceTargetCaptureTuple> tupleReceiver)
+            throws Exception {
         for (AtomicInteger runNumberRef = new AtomicInteger(); true; runNumberRef.incrementAndGet()) {
             int runNumber = runNumberRef.get();
             try {
@@ -108,17 +123,20 @@ public class FullTrafficReplayerTest {
                     Assertions.assertEquals(runNumber, runNumberRef.get());
                     tupleReceiver.accept(t);
                 });
-            } catch (FabricatedErrorToKillTheReplayer e) {
-                if (e.doneWithTest) {
-                    break;
-                } else {
-                    log.error("broke out of the replayer, but the doneWithTest flag was false");
-                }
+                // if this finished running without an exception, we need to stop the loop
+                break;
+            } catch (TrafficReplayer.TerminationException e) {
+                log.atLevel(e.shutdownCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
+                        .setCause(e.shutdownCause)
+                        .setMessage(()->"broke out of the replayer, with this shutdown reason")
+                        .log();
+                log.atLevel(e.immediateCause == null ? Level.INFO : Level.ERROR)
+                        .setCause(e.immediateCause)
+                        .setMessage(()->"broke out of the replayer, with the shutdown cause=" + e.shutdownCause +
+                                " and this immediate reason")
+                        .log();
             }
         }
-
-        //Assertions.assertEquals();
-        log.error("done");
     }
 
     private Tuple2<Stream<TrafficStream>, ToIntFunction<SourceTargetCaptureTuple>>
@@ -135,18 +153,13 @@ public class FullTrafficReplayerTest {
         var testCaseArr = generatedCases.toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
         var shuffledStreams =
                 randomlyInterleaveStreams(r, Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams)));
-        var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
 
         var previouslyCompletelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
         return new Tuple2<>(shuffledStreams, t -> {
             var key = t.uniqueRequestKey;
             var keyString = key.getTrafficStreamKey() + "_" + key.getSourceRequestIndex();
             previouslyCompletelyHandledItems.put(keyString, t);
-            var newSize = previouslyCompletelyHandledItems.size();
-            if (newSize >= numExpectedRequests) {
-                throw new FabricatedErrorToKillTheReplayer(true);
-            }
-            return newSize;
+            return previouslyCompletelyHandledItems.size();
         });
     }
 
@@ -328,14 +341,10 @@ public class FullTrafficReplayerTest {
                 TrafficReplayer.buildDefaultJsonTransformer(httpServer.localhostEndpoint().getHost()));
 
         try (var os = new NullOutputStream();
-             var bos = new BufferedOutputStream(os);
              var trafficSource = captureSourceSupplier.get();
              var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-            tr.runReplayWithIOStreams(Duration.ofSeconds(70), blockingTrafficSource, bos,
+            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
                     new TimeShifter(10 * 1000), tupleReceiver);
-        } catch (Exception e) {
-            log.atError().setCause(e).setMessage(() -> "eating exception to check for memory leaks.").log();
-            throw new RuntimeException(e);
         }
     }
 }

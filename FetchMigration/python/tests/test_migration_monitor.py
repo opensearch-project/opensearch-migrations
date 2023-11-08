@@ -1,7 +1,7 @@
 import logging
 import subprocess
 import unittest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock, PropertyMock, ANY
 
 import requests
 import responses
@@ -31,7 +31,7 @@ class TestMigrationMonitor(unittest.TestCase):
         logging.disable(logging.NOTSET)
 
     @patch('requests.post')
-    def test_shutdown(self, mock_post: MagicMock):
+    def test_shutdown_pipeline(self, mock_post: MagicMock):
         expected_shutdown_url = TEST_ENDPOINT + "/shutdown"
         test_endpoint = EndpointInfo(TEST_ENDPOINT, TEST_AUTH, TEST_FLAG)
         migration_monitor.shutdown_pipeline(test_endpoint)
@@ -78,101 +78,148 @@ class TestMigrationMonitor(unittest.TestCase):
         self.assertEqual(expected_val, val)
         # No matching metric returns None
         val = migration_monitor.get_metric_value(test_input, "invalid")
-        self.assertEqual(None, val)
+        self.assertIsNone(val)
 
-    @patch('migration_monitor.shutdown_pipeline')
-    @patch('time.sleep')
-    @patch('migration_monitor.check_if_complete')
-    @patch('migration_monitor.get_metric_value')
     @patch('migration_monitor.fetch_prometheus_metrics')
     # Note that mock objects are passed bottom-up from the patch order above
-    def test_run(self, mock_fetch: MagicMock, mock_get: MagicMock, mock_check: MagicMock, mock_sleep: MagicMock,
-                 mock_shut: MagicMock):
-        # The param values don't matter since we've mocked the check method
-        test_input = MigrationMonitorParams(1, "test")
-        mock_get.return_value = None
-        # Check will first fail, then pass
-        mock_check.side_effect = [False, True]
-        # Run test method
-        wait_time = 3
-        migration_monitor.run(test_input, wait_time)
-        # Test that fetch was called with the expected EndpointInfo
-        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
-        self.assertEqual(2, mock_fetch.call_count)
-        mock_fetch.assert_called_with(expected_endpoint_info)
-        mock_sleep.assert_called_with(wait_time)
-        mock_shut.assert_called_once_with(expected_endpoint_info)
+    def test_check_progress_metrics_failure(self, mock_fetch: MagicMock):
+        mock_progress = MagicMock()
+        # On API failure, check returns None
+        mock_fetch.return_value = None
+        # Endpoint info doesn't matter
+        return_value = migration_monitor.check_and_log_progress(MagicMock(), mock_progress)
+        # Same progress object is returned
+        self.assertEqual(mock_progress, return_value)
+        # API metric failure is recorded
+        mock_progress.record_metric_api_failure.assert_called_once()
 
-    @patch('migration_monitor.shutdown_pipeline')
-    @patch('time.sleep')
-    @patch('migration_monitor.check_if_complete')
     @patch('migration_monitor.get_metric_value')
     @patch('migration_monitor.fetch_prometheus_metrics')
+    def test_check_progress_missing_success_docs_metric(self, mock_fetch: MagicMock, mock_get_metric: MagicMock):
+        # Fetch return value is not None, but get-metric returns None
+        mock_fetch.return_value = MagicMock()
+        mock_get_metric.return_value = None
+        mock_progress = MagicMock()
+        # Endpoint info doesn't matter
+        return_value = migration_monitor.check_and_log_progress(MagicMock(), mock_progress)
+        # Same progress object is returned
+        self.assertEqual(mock_progress, return_value)
+        # API failure metric is reset is recorded
+        mock_progress.reset_metric_api_failure.assert_called_once()
+        # 3 metric values are read
+        self.assertEqual(3, mock_get_metric.call_count)
+        # Success doc failure metric is recorded
+        mock_progress.record_success_doc_value_failure.assert_called_once()
+
+    @patch('migration_monitor.get_metric_value')
+    @patch('migration_monitor.fetch_prometheus_metrics')
+    def test_check_and_log_progress(self, mock_fetch: MagicMock, mock_get_metric: MagicMock):
+        # Fetch return value is not None
+        mock_fetch.return_value = MagicMock()
+        # Get metric return value is not None
+        expected_value: int = 10
+        mock_get_metric.return_value = expected_value
+        mock_progress = MagicMock()
+        # Set up target-doc-count
+        mock_progress.target_doc_count.return_value = expected_value
+        # Endpoint info doesn't matter
+        return_value = migration_monitor.check_and_log_progress(MagicMock(), mock_progress)
+        # Same progress object is returned
+        self.assertEqual(mock_progress, return_value)
+        # 3 metric values are read
+        self.assertEqual(3, mock_get_metric.call_count)
+        # Success doc count is updated as expected
+        mock_progress.update_success_doc_count.assert_called_once_with(expected_value)
+        # All-docs-migrated check is invoked
+        mock_progress.all_docs_migrated.assert_called_once()
+
+    @patch('migration_monitor.shutdown_process')
+    @patch('migration_monitor.shutdown_pipeline')
+    @patch('time.sleep')
+    @patch('migration_monitor.check_and_log_progress')
     # Note that mock objects are passed bottom-up from the patch order above
-    def test_run_with_fetch_failure(self, mock_fetch: MagicMock, mock_get: MagicMock, mock_check: MagicMock,
-                                    mock_sleep: MagicMock, mock_shut: MagicMock):
+    def test_monitor_non_local(self, mock_check: MagicMock, mock_sleep: MagicMock, mock_shut_dp: MagicMock,
+                               mock_shut_proc: MagicMock):
         # The param values don't matter since we've mocked the check method
         test_input = MigrationMonitorParams(1, "test")
-        mock_get.return_value = None
-        mock_check.return_value = True
-        # Fetch call will first fail, then succeed
-        mock_fetch.side_effect = [None, MagicMock()]
+        mock_progress = MagicMock()
+        mock_progress.is_in_terminal_state.return_value = True
+        mock_check.return_value = mock_progress
         # Run test method
         wait_time = 3
-        migration_monitor.run(test_input, wait_time)
+        migration_monitor.run(test_input, None, wait_time)
         # Test that fetch was called with the expected EndpointInfo
         expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
-        self.assertEqual(2, mock_fetch.call_count)
-        mock_fetch.assert_called_with(expected_endpoint_info)
-        # We expect one wait cycle
         mock_sleep.assert_called_with(wait_time)
-        mock_shut.assert_called_once_with(expected_endpoint_info)
-
-    def test_check_if_complete(self):
-        # If any of the optional values are missing, we are not complete
-        self.assertFalse(migration_monitor.check_if_complete(None, 0, 1, 0, 2))
-        self.assertFalse(migration_monitor.check_if_complete(2, None, 1, 0, 2))
-        self.assertFalse(migration_monitor.check_if_complete(2, 0, None, 0, 2))
-        # Target count not reached
-        self.assertFalse(migration_monitor.check_if_complete(1, None, None, 0, 2))
-        # Target count reached, but has records in flight
-        self.assertFalse(migration_monitor.check_if_complete(2, 1, None, 0, 2))
-        # Target count reached, no records in flight, but no prev no_part_count
-        self.assertFalse(migration_monitor.check_if_complete(2, 0, 1, 0, 2))
-        # Terminal state
-        self.assertTrue(migration_monitor.check_if_complete(2, 0, 2, 1, 2))
+        mock_shut_dp.assert_called_once_with(expected_endpoint_info)
+        mock_shut_proc.assert_not_called()
 
     @patch('migration_monitor.shutdown_process')
     @patch('migration_monitor.shutdown_pipeline')
     # Note that mock objects are passed bottom-up from the patch order above
-    def test_migration_process_exit(self, mock_shut_dp: MagicMock, mock_shut_proc: MagicMock):
+    def test_monitor_local_process_exit(self, mock_shut_dp: MagicMock, mock_shut_proc: MagicMock):
         # The param values don't matter since we've mocked the check method
         test_input = MigrationMonitorParams(1, "test")
         mock_subprocess = MagicMock()
-        # set subprocess returncode to None to simulate a zombie Data Prepper process
-        mock_subprocess.returncode = 1
+        # Simulate an exited subprocess
+        expected_return_code: int = 1
+        mock_subprocess.returncode = expected_return_code
         # Run test method
-        wait_time = 3
-        return_code = migration_monitor.monitor_local(test_input, mock_subprocess, wait_time)
-        self.assertEqual(1, return_code)
+        return_code = migration_monitor.run(test_input, mock_subprocess)
+        self.assertEqual(expected_return_code, return_code)
         mock_shut_dp.assert_not_called()
+        mock_shut_proc.assert_not_called()
+
+    @patch('migration_monitor.shutdown_process')
+    @patch('migration_monitor.shutdown_pipeline')
+    @patch('migration_monitor.is_process_alive')
+    @patch('migration_monitor.check_and_log_progress')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_monitor_local_migration_complete(self, mock_check: MagicMock, mock_is_alive: MagicMock,
+                                              mock_shut_dp: MagicMock, mock_shut_proc: MagicMock):
+        # The param values don't matter since we've mocked the check method
+        test_input = MigrationMonitorParams(1, "test")
+        # Simulate a successful migration
+        mock_progress = MagicMock()
+        mock_progress.is_in_terminal_state.side_effect = [False, True]
+        mock_progress.is_migration_complete_success.return_value = True
+        mock_check.return_value = mock_progress
+        # Sequence of expected return values for a process that terminates successfully
+        mock_is_alive.side_effect = [True, True, False, False]
+        mock_subprocess = MagicMock()
+        expected_return_code: int = 0
+        mock_subprocess.returncode = expected_return_code
+        # Simulate timeout on wait
+        mock_subprocess.wait.side_effect = [subprocess.TimeoutExpired("test", 1)]
+        # Run test method
+        actual_return_code = migration_monitor.run(test_input, mock_subprocess)
+        self.assertEqual(expected_return_code, actual_return_code)
+        expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
+        mock_check.assert_called_once_with(expected_endpoint_info, ANY)
+        mock_shut_dp.assert_called_once_with(expected_endpoint_info)
         mock_shut_proc.assert_not_called()
 
     @patch('migration_monitor.shutdown_process')
     @patch('migration_monitor.shutdown_pipeline')
     @patch('migration_monitor.check_and_log_progress')
     # Note that mock objects are passed bottom-up from the patch order above
-    def test_process_shutdown_invocation(self, mock_check: MagicMock, mock_shut_dp: MagicMock,
-                                         mock_shut_proc: MagicMock):
+    def test_monitor_local_shutdown_process(self, mock_check: MagicMock, mock_shut_dp: MagicMock,
+                                            mock_shut_proc: MagicMock):
         # The param values don't matter since we've mocked the check method
         test_input = MigrationMonitorParams(1, "test")
-        mock_check.side_effect = [(False, 1), (True, 2)]
+        # Simulate a progressing, successful migration
+        mock_progress = MagicMock()
+        mock_progress.is_in_terminal_state.side_effect = [False, True, True]
+        mock_check.return_value = mock_progress
         mock_subprocess = MagicMock()
         # set subprocess returncode to None to simulate a zombie Data Prepper process
         mock_subprocess.returncode = None
+        # Shtudown-process call return code
+        expected_return_code: int = 137
+        mock_shut_proc.return_value = 137
         # Run test method
-        wait_time = 3
-        migration_monitor.monitor_local(test_input, mock_subprocess, wait_time)
+        actual_return_code = migration_monitor.run(test_input, mock_subprocess)
+        self.assertEqual(expected_return_code, actual_return_code)
         expected_endpoint_info = EndpointInfo(test_input.data_prepper_endpoint)
         mock_shut_dp.assert_called_once_with(expected_endpoint_info)
         mock_shut_proc.assert_called_once_with(mock_subprocess)

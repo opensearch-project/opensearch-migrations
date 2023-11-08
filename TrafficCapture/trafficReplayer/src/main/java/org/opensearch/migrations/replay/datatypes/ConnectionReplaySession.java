@@ -25,8 +25,9 @@ public class ConnectionReplaySession {
      * EventLoop so that we can route all calls for this object into that loop/thread.
      */
     public final EventLoop eventLoop;
-    public DiagnosticTrackableCompletableFuture<String,ChannelFuture> channelFutureFuture;
-    public OnlineRadixSorter<Runnable> scheduleSequencer;
+    @Getter @Setter
+    private DiagnosticTrackableCompletableFuture<String,ChannelFuture> channelFutureFuture;
+    public final OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
 
     @Getter
@@ -35,7 +36,7 @@ public class ConnectionReplaySession {
 
     public ConnectionReplaySession(EventLoop eventLoop) {
         this.eventLoop = eventLoop;
-        this.scheduleSequencer = new OnlineRadixSorter(0);
+        this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
     }
 

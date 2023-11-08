@@ -36,6 +36,6 @@ class EpochMillis implements Comparable<EpochMillis> {
 
     @Override
     public int compareTo(EpochMillis o) {
-        return Long.valueOf(this.millis).compareTo(o.millis);
+        return Long.compare(this.millis, o.millis);
     }
 }
