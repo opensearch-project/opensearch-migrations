@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -216,8 +217,10 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when,
-                                                          List<ITrafficStreamKey> keysHeld) {}
+                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          Instant when,
+                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();

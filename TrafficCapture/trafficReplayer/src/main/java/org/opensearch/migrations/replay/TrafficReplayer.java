@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -632,10 +633,10 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onConnectionClose(UniqueReplayerRequestKey requestKey, Instant timestamp,
+        public void onConnectionClose(ISourceTrafficChannelKey channelKey, int channelInteractionNum, Instant timestamp,
                                       List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
-            replayEngine.closeConnection(requestKey, timestamp);
+            replayEngine.closeConnection(channelKey, channelInteractionNum, timestamp);
             commitTrafficStreams(trafficStreamKeysBeingHeld);
         }
 

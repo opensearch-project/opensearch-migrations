@@ -15,6 +15,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
@@ -132,9 +133,9 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualChannelGet(UniqueReplayerRequestKey requestKey, boolean ignoreIfNotPresent) {
+    submitEventualChannelGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent) {
         ConnectionReplaySession channelFutureAndSchedule =
-                getCachedSession(requestKey, ignoreIfNotPresent);
+                getCachedSession(channelKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
             var rval = new DefaultPromise<ConnectionReplaySession>(eventLoopGroup.next());
             rval.setSuccess(null);
@@ -144,18 +145,18 @@ public class ClientConnectionPool {
             if (channelFutureAndSchedule.getChannelFutureFuture() == null) {
                 channelFutureAndSchedule.setChannelFutureFuture(
                         getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop,
-                                requestKey.getTrafficStreamKey().getConnectionId()));
+                                channelKey.getConnectionId()));
             }
             return channelFutureAndSchedule;
         });
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(UniqueReplayerRequestKey requestKey, boolean dontCreate) {
-        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(requestKey.getTrafficStreamKey().getConnectionId()) :
-                connectionId2ChannelCache.get(requestKey.getTrafficStreamKey().getConnectionId());
+    public ConnectionReplaySession getCachedSession(ISourceTrafficChannelKey channelKey, boolean dontCreate) {
+        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKey.getConnectionId()) :
+                connectionId2ChannelCache.get(channelKey.getConnectionId());
         if (crs != null) {
-            crs.setCurrentConnectionId(requestKey);
+            crs.setChannelId(channelKey);
         }
         return crs;
     }
@@ -180,7 +181,7 @@ public class ClientConnectionPool {
                             if (channelAndFutureWork.hasWorkRemaining()) {
                                 log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
                                         "(last associated with connection=" +
-                                        channelAndFutureWork.getCurrentConnectionId() +
+                                        channelAndFutureWork.getChannelId() +
                                         ").  " + channelAndFutureWork.calculateSizeSlowly() +
                                         " requests that were enqueued won't be run").log();
                             }

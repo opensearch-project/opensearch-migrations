@@ -2,10 +2,8 @@ package org.opensearch.migrations.replay.datatypes;
 
 import com.google.common.base.Objects;
 
-import java.util.StringJoiner;
-
 public abstract class UniqueSourceRequestKey {
-    public abstract ITrafficStreamKey getTrafficStreamKey();
+    public abstract ISourceTrafficChannelKey getTrafficStreamKey();
 
     public abstract int getSourceRequestIndex();
 

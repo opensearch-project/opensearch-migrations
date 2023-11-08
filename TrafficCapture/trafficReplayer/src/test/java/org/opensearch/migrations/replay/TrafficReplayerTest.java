@@ -5,6 +5,7 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
@@ -170,8 +171,10 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when,
-                                                          List<ITrafficStreamKey> keysHeld) {}
+                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          Instant when,
+                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -212,8 +215,10 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when,
-                                                          List<ITrafficStreamKey> keysHeld) {}
+                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          Instant when,
+                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
                         }
                 );
         byte[] serializedChunks;
