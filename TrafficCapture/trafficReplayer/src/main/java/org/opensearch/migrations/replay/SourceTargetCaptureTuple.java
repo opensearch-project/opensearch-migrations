@@ -189,9 +189,9 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             sj.add("diagnosticLabel=").add(uniqueRequestKey.toString());
             if (sourcePair != null) { sj.add("sourcePair=").add(sourcePair.toString()); }
             if (targetResponseDuration != null) { sj.add("targetResponseDuration=").add(targetResponseDuration+""); }
-            Optional.ofNullable(targetRequestData).filter(d->!d.isEmpty()).ifPresent(d-> sj.add("targetRequestData=")
-                    .add(PrettyPrinter.httpPacketBufsToString(PrettyPrinter.HttpMessageType.REQUEST,
-                            d.streamUnretained())));
+            Optional.ofNullable(targetRequestData).ifPresent(d-> sj.add("targetRequestData=")
+                    .add(d.isClosed() ? "CLOSED" : PrettyPrinter.httpPacketBufsToString(
+                            PrettyPrinter.HttpMessageType.REQUEST, d.streamUnretained())));
             Optional.ofNullable(targetResponseData).filter(d->!d.isEmpty()).ifPresent(d -> sj.add("targetResponseData=")
                     .add(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.RESPONSE, d)));
             sj.add("transformStatus=").add(transformationStatus+"");
