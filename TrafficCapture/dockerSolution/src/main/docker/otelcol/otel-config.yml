@@ -2,23 +2,16 @@ receivers:
   otlp:
     protocols:
       grpc:
-  hostmetrics:
-    scrapers:
-      cpu:
-      disk:
-      filesystem:
-      load:
-      memory:
-      network:
-      process:
-      processes:
-      paging:
 
 processors:
-  memory_limiter:
-    limit_mib: 300
   batch:
   attributes:
+    # This processor is currently renaming two attributes
+    # that are prefixed with `log4j.context_data.` to the base attribute name
+    # to make queries within OpenSearch clearer. Both the `insert from_attribute`
+    # and the `delete` actions will fail silently if the attribute is not present,
+    # which means that these are safe for events that both do and don't have these
+    # attributes. This pattern should be extended to all of our standard attributes.
     actions:
       - key: event
         from_attribute: log4j.context_data.event
@@ -36,8 +29,6 @@ extensions:
     client_auth: 
       username: "admin"
       password: "admin"
-  pprof:
-    endpoint: "localhost:1777"
   health_check:
 
 exporters:
@@ -49,13 +40,12 @@ exporters:
         authenticator: basicauth/client
       tls:
         insecure_skip_verify: true
-    # index: "logs"
   logging:
     verbosity: detailed
   debug:
 
 service:
-  extensions: [health_check, pprof, basicauth/client]
+  extensions: [health_check, basicauth/client]
   telemetry:
     logs:
       level: "debug"
