@@ -18,6 +18,7 @@ import {CaptureProxyStack} from "./service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
 import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
+import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -25,10 +26,21 @@ export interface StackPropsExt extends StackProps {
     readonly addOnMigrationDeployId?: string
 }
 
+export interface StackComposerProps extends StackProps {
+    readonly migrationsAppRegistryARN?: string
+}
+
 export class StackComposer {
     public stacks: Stack[] = [];
 
-    constructor(scope: Construct, props: StackProps) {
+    private addStacksToAppRegistry(scope: Construct, appRegistryAppARN: string, allStacks: Stack[]) {
+        for (let stack of allStacks) {
+            const appRegistryApp = Application.fromApplicationArn(stack, 'AppRegistryApplicationImport', appRegistryAppARN)
+            appRegistryApp.associateApplicationWithStack(stack)
+        }
+    }
+
+    constructor(scope: Construct, props: StackComposerProps) {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
         const account = props.env?.account
@@ -422,6 +434,10 @@ export class StackComposer {
             migrationConsoleStack.addDependency(mskUtilityStack)
             migrationConsoleStack.addDependency(openSearchStack)
             this.stacks.push(migrationConsoleStack)
+        }
+
+        if (props.migrationsAppRegistryARN) {
+            this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
         }
 
         function getContextForType(optionName: string, expectedType: string): any {
