@@ -77,6 +77,8 @@ export class StackComposer {
         const migrationAssistanceEnabled = getContextForType('migrationAssistanceEnabled', 'boolean')
         const mskARN = getContextForType('mskARN', 'string')
         const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
+        const mskRestrictPublicAccessTo = getContextForType('mskRestrictPublicAccessTo', 'string')
+        const mskRestrictPublicAccessType = getContextForType('mskRestrictPublicAccessType', 'string')
         const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
         const addOnMigrationDeployId = getContextForType('addOnMigrationDeployId', 'string')
         const captureProxyESServiceEnabled = getContextForType('captureProxyESServiceEnabled', 'boolean')
@@ -219,6 +221,8 @@ export class StackComposer {
                 trafficComparatorEnabled: trafficComparatorServiceEnabled,
                 mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
+                mskRestrictPublicAccessTo: mskRestrictPublicAccessTo,
+                mskRestrictPublicAccessType: mskRestrictPublicAccessType,
                 mskBrokerNodeCount: mskBrokerNodeCount,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
@@ -456,8 +460,8 @@ export class StackComposer {
             }
             // Access policies can provide a single Statement block or an array of Statement blocks
             if (Array.isArray(statements)) {
-                for (let i = 0; i < statements.length; i++) {
-                    const statement = PolicyStatement.fromJson(statements[i])
+                for (let statementBlock of statements) {
+                    const statement = PolicyStatement.fromJson(statementBlock)
                     accessPolicies.push(statement)
                 }
             }
