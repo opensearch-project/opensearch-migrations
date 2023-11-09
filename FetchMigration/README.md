@@ -4,7 +4,7 @@ The **Fetch Migration** tool simplifies the process of moving indexes and the da
 source cluster, such as Elasticsearch or OpenSearch, to a target OpenSearch cluster. It automates the process of 
 comparing indexes between the two clusters by creating index metadata, like settings and mappings that does not already exist on the target cluster using [Data Prepper](https://github.com/opensearch-project/data-prepper).
 
-The Fetch Migration tool consists of a Python script. However, a Docker image can be built using the included [Dockerfile](./Dockerfile) included in this repository.
+The Fetch Migration tool consists of a Python script which requires Python 3 or greater. However, a Docker image can be built using the included [Dockerfile](./Dockerfile) included in this repository.
 
 ## Components
 
@@ -30,12 +30,12 @@ The Fetch Migration currently has the following limitations:
 
 ## Running Fetch Migration
 
-Use either [Python](#python) or [Docker](#Docker) to run the Fetch Migration tool.
+Use either [python3](#python) or [Docker](#Docker) to run the Fetch Migration tool.
 
 ### Python
 
 1. [Clone](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) the `opensearch-migrations` repo using `git clone git@github.com:opensearch-project/opensearch-migrations.git`.
-2. Install [Python](https://www.python.org/).
+2. Install [python3](https://www.python.org/downloads/).
 3. Ensure that [pip](https://pip.pypa.io/en/stable/installation/#) by entering `pip --version`.
 4. (Optional) Set up and activate a [virtual environment](https://packaging.python.org/en/latest/tutorials/installing-packages/#creating-and-using-virtual-environments).
 5. Navigate to you cloned GitHub repo. Then, install the required Python dependencies by running the following command:
@@ -56,7 +56,7 @@ When successful, the script returns confirmation that your indexes have been mov
 
 To use the Fetch Migration tool with Docker, use the following steps:
 
-1. From your cloned Git repository, build the `fetch-migration` Docker image using the f
+1. From your cloned Git repository, build the `fetch-migration` Docker image using the following command:
 
    ```shell
    docker build -t fetch-migration .
