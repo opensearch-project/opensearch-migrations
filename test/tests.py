@@ -249,4 +249,3 @@ class E2ETests(unittest.TestCase):
         if source_count != target_count:
             logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
         self.assertEqual(source_count, target_count, f'{index}: doc counts do not match')
-
