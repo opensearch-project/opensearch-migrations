@@ -10,5 +10,6 @@
   "migrationConsoleServiceEnabled": true,
   "captureProxyESServiceEnabled": true,
   "trafficReplayerServiceEnabled": true,
+  "migrationAnalyticsServiceEnabled": true,
   "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
 }

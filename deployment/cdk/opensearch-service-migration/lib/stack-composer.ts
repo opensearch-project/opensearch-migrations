@@ -9,6 +9,7 @@ import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {FetchMigrationStack} from "./fetch-migration-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
+import {MigrationAnalyticsStack} from "./service-stacks/migration-analytics-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
@@ -105,6 +106,7 @@ export class StackComposer {
 
         let version: EngineVersion
         let accessPolicies: PolicyStatement[]|undefined
+
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
         const dataNodeCount = this.getContextForType('dataNodeCount', 'number', defaultValues, contextJSON)
@@ -154,6 +156,9 @@ export class StackComposer {
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
+
+        const migrationAnalyticsServiceEnabled = this.getContextForType('migrationAnalyticsServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const otelConfigFilePath = this.getContextForType('otelConfigFilePath', 'string', defaultValues, contextJSON)
 
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
@@ -452,6 +457,80 @@ export class StackComposer {
 
         if (props.migrationsAppRegistryARN) {
             this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
+        }
+        
+        let migrationAnalyticsStack
+        if (migrationAnalyticsServiceEnabled && networkStack) {
+            migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
+                vpc: networkStack.vpc,
+                otelConfigFilePath: otelConfigFilePath,
+                stackName: `OSMigrations-${stage}-${region}-MigrationAnalytics`,
+                description: "This stack contains resources for the Otel Collector and Analytics OS Cluster",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            // To enable the Migration Console to make requests to other service endpoints with Service Connect,
+            // it must be deployed after these services
+            if (captureProxyESStack) {
+                migrationAnalyticsStack.addDependency(captureProxyESStack)
+            }
+            if (captureProxyStack) {
+                migrationAnalyticsStack.addDependency(captureProxyStack)
+            }
+            if (elasticsearchStack) {
+                migrationAnalyticsStack.addDependency(elasticsearchStack)
+            }
+            this.stacks.push(migrationAnalyticsStack)
+        }
+
+
+        function getContextForType(optionName: string, expectedType: string): any {
+            const option = contextJSON[optionName]
+
+            // If no context is provided (undefined or empty string) and a default value exists, use it
+            if ((option === undefined || option === "") && defaultValues[optionName]) {
+                return defaultValues[optionName]
+            }
+
+            // Filter out invalid or missing options by setting undefined (empty strings, null, undefined, NaN)
+            if (option !== false && option !== 0 && !option) {
+                return undefined
+            }
+            // Values provided by the CLI will always be represented as a string and need to be parsed
+            if (typeof option === 'string') {
+                if (expectedType === 'number') {
+                    return parseInt(option)
+                }
+                if (expectedType === 'boolean' || expectedType === 'object') {
+                    return JSON.parse(option)
+                }
+            }
+            // Values provided by the cdk.context.json should be of the desired type
+            if (typeof option !== expectedType) {
+                throw new Error(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
+            }
+            return option
+        }
+
+        function parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
+            let accessPolicies: PolicyStatement[] = []
+            const statements = jsonObject['Statement']
+            if (!statements || statements.length < 1) {
+                throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
+            }
+            // Access policies can provide a single Statement block or an array of Statement blocks
+            if (Array.isArray(statements)) {
+                for (let i = 0; i < statements.length; i++) {
+                    const statement = PolicyStatement.fromJson(statements[i])
+                    accessPolicies.push(statement)
+                }
+            }
+            else {
+                const statement = PolicyStatement.fromJson(statements)
+                accessPolicies.push(statement)
+            }
+            return accessPolicies
         }
 
     }

@@ -65,6 +65,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
         this.createService({
             serviceName: "capture-proxy",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
+            // TODO: add otel collector endpoint
             dockerImageCommand: ['/bin/sh', '-c', `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`],
             securityGroups: securityGroups,
             taskRolePolicies: [mskClusterConnectPolicy, mskTopicProducerPolicy],
