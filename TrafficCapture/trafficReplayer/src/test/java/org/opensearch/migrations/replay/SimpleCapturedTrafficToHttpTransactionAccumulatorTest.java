@@ -219,6 +219,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
                             @Override
                             public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          RequestResponsePacketPair.ReconstructionStatus status,
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }

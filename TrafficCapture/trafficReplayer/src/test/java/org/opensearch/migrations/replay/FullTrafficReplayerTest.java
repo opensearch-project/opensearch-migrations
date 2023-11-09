@@ -138,7 +138,7 @@ public class FullTrafficReplayerTest {
 
         var receivedPerRun = new ArrayList<Integer>();
         var totalUniqueEverReceivedSizeAfterEachRun = new ArrayList<Integer>();
-        var previouslyCompletelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
+        var completelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
 
         for (; true; runNumberRef.incrementAndGet()) {
             var stopPoint = nextStopPointRef.get();
@@ -163,7 +163,7 @@ public class FullTrafficReplayerTest {
                             throw new FabricatedErrorToKillTheReplayer(false);
                         }
 
-                        var totalUnique = null != previouslyCompletelyHandledItems.put(keyString, t) ?
+                        var totalUnique = null != completelyHandledItems.put(keyString, t) ?
                                 totalUniqueEverReceived.get() :
                                 totalUniqueEverReceived.incrementAndGet();
 
@@ -189,8 +189,9 @@ public class FullTrafficReplayerTest {
             } finally {
                 waitForWorkerThreadsToStop();
                 log.info("Upon appending.... counter="+counter.get()+" totalUnique="+totalUniqueEverReceived.get()+
-                        " runNumber="+runNumber+" stopAt="+nextStopPointRef.get() +
-                        " nextReadCursor="+((ArrayCursorTrafficSourceFactory)trafficSourceSupplier).nextReadCursor);
+                        " runNumber="+runNumber+" stopAt="+nextStopPointRef.get() + " nextReadCursor="
+                        +((ArrayCursorTrafficSourceFactory)trafficSourceSupplier).nextReadCursor + "\n" +
+                        completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")));
                 log.info(Strings.repeat("\n", 20));
                 receivedPerRun.add(counter.get());
                 totalUniqueEverReceivedSizeAfterEachRun.add(totalUniqueEverReceived.get());
@@ -203,6 +204,9 @@ public class FullTrafficReplayerTest {
                 .toArray();
         var expectedSkipArray = new int[skippedPerRunDiffs.length];
         Arrays.fill(expectedSkipArray, 1);
+        log.atInfo().setMessage(()->"completely received request keys=\n{}")
+                .addArgument(completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")))
+                .log();
         Assertions.assertArrayEquals(expectedSkipArray, skippedPerRunDiffs);
         Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
     }

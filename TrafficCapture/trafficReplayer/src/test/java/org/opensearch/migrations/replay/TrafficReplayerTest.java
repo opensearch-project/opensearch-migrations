@@ -24,7 +24,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -173,6 +172,7 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          RequestResponsePacketPair.ReconstructionStatus status,
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
@@ -219,6 +219,7 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          RequestResponsePacketPair.ReconstructionStatus status,
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }

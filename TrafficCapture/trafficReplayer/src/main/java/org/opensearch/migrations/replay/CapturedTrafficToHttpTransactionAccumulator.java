@@ -221,7 +221,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             closedConnectionCounter.incrementAndGet();
             listener.onConnectionClose(accum.trafficChannelKey, accum.getIndexOfCurrentRequest(),
-                    timestamp, getTrafficStreamsHeldByAccum(accum));
+                    RequestResponsePacketPair.ReconstructionStatus.COMPLETE, timestamp, getTrafficStreamsHeldByAccum(accum));
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
             accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
@@ -400,7 +400,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         } finally {
             if (accumulation.hasSignaledRequests()) {
                 listener.onConnectionClose(accumulation.trafficChannelKey, accumulation.getIndexOfCurrentRequest(),
-                        accumulation.getLastTimestamp(), getTrafficStreamsHeldByAccum(accumulation));
+                        status, accumulation.getLastTimestamp(), getTrafficStreamsHeldByAccum(accumulation));
             }
         }
     }

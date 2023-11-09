@@ -590,7 +590,7 @@ public class TrafficReplayer {
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
                     packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
-                    commitTrafficStreams(rrPair.trafficStreamKeysBeingHeld);
+                    commitTrafficStreams(rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
                     return null;
                 } else if (t instanceof Error) {
                     throw (Error) t;
@@ -624,30 +624,37 @@ public class TrafficReplayer {
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                             List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            if (status == RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY) {
-                // eventually fill this in to commit the message
-                commitTrafficStreams(trafficStreamKeysBeingHeld);
-            }
+            commitTrafficStreams(trafficStreamKeysBeingHeld, status);
         }
 
         @SneakyThrows
-        private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            for (var tsk : trafficStreamKeysBeingHeld) {
-                trafficCaptureSource.commitTrafficStream(tsk);
+        private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld,
+                                          RequestResponsePacketPair.ReconstructionStatus status) {
+            commitTrafficStreams(trafficStreamKeysBeingHeld,
+                    status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY);
+        }
+
+        @SneakyThrows
+        private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
+            if (shouldCommit) {
+                for (var tsk : trafficStreamKeysBeingHeld) {
+                    trafficCaptureSource.commitTrafficStream(tsk);
+                }
             }
         }
 
         @Override
-        public void onConnectionClose(ISourceTrafficChannelKey channelKey, int channelInteractionNum, Instant timestamp,
+        public void onConnectionClose(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
+                                      RequestResponsePacketPair.ReconstructionStatus status, Instant timestamp,
                                       List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             replayEngine.closeConnection(channelKey, channelInteractionNum, timestamp);
-            commitTrafficStreams(trafficStreamKeysBeingHeld);
+            commitTrafficStreams(trafficStreamKeysBeingHeld, status);
         }
 
         @Override
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
-            commitTrafficStreams(List.of(tsk));
+            commitTrafficStreams(List.of(tsk), true);
         }
 
         private TransformedTargetRequestAndResponse

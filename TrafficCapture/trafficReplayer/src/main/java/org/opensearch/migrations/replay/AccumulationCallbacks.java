@@ -13,7 +13,8 @@ public interface AccumulationCallbacks {
     void onFullDataReceived(@NonNull UniqueReplayerRequestKey key, @NonNull RequestResponsePacketPair rrpp);
     void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                  @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
-    void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber, @NonNull Instant when,
+    void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
+                           RequestResponsePacketPair.ReconstructionStatus status, @NonNull Instant when,
                            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
     void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk);
 }
