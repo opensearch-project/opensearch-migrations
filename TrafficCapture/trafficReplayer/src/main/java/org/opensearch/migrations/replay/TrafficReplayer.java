@@ -7,6 +7,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.util.concurrent.Future;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -92,6 +93,7 @@ public class TrafficReplayer {
     private AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
     private AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
     private ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
+    private Future nettyShutdownFuture;
 
     public class DualException extends Exception {
         public final Throwable originalCause;
@@ -537,6 +539,7 @@ public class TrafficReplayer {
         }
         // if nobody has run shutdown yet, do so now so that we can tear down the netty resources
         shutdown(null).get(); // if somebody already HAD run shutdown, it will return the future already created
+        nettyShutdownFuture.sync();
     }
 
     @AllArgsConstructor
@@ -563,8 +566,10 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair) {
-            log.atTrace().setMessage(()->"Done receiving captured stream for this " + rrPair.requestData).log();
+        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
+                                       @NonNull RequestResponsePacketPair rrPair) {
+            log.atInfo().setMessage(()->"Done receiving captured stream for " + requestKey +
+                    ":" + rrPair.requestData).log();
             var resultantCf = requestFutureMap.remove(requestKey)
                     .map(f -> f.handle((summary,t)->handleCompletedTransaction(requestKey, rrPair, summary, t)),
                             () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
@@ -871,7 +876,7 @@ public class TrafficReplayer {
         }
         stopReadingAsync();
         shutdownReasonRef.compareAndSet(null, error);
-        clientConnectionPool.shutdownNow()
+        nettyShutdownFuture = clientConnectionPool.shutdownNow()
                 .addListener(f->{
                     if (f.isSuccess()) {
                         shutdownFutureRef.get().complete(null);
@@ -890,7 +895,7 @@ public class TrafficReplayer {
             }
         }
         var shutdownFuture = shutdownFutureRef.get();
-        log.atWarn().setMessage(()->"Shutdown procedure has finished").log();
+        log.atWarn().setMessage(()->"Shutdown setup has been initiated").log();
         return shutdownFuture;
     }
 
@@ -900,11 +905,11 @@ public class TrafficReplayer {
             throws InterruptedException {
         while (true) {
             log.trace("Reading next chunk from TrafficStream supplier");
-            this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk());
-            List<ITrafficStreamWithKey> trafficStreams = null;
             if (stopReadingRef.get()) {
                 break;
             }
+            this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk());
+            List<ITrafficStreamWithKey> trafficStreams = null;
             try {
                 trafficStreams = this.nextChunkFutureRef.get().get();
             } catch (ExecutionException ex) {
