@@ -101,7 +101,7 @@ public class FullTrafficReplayerTest {
                 .build();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
         runReplayerUntilSourceWasExhausted(0, httpServer, trafficSourceSupplier);
-        Assertions.assertEquals(0, trafficSourceSupplier.commitCursor.get());
+        Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
         log.error("done");
     }
 
@@ -117,7 +117,7 @@ public class FullTrafficReplayerTest {
                         .collect(Collectors.joining("\n"))).log();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
         runReplayerUntilSourceWasExhausted(numExpectedRequests, httpServer, trafficSourceSupplier);
-        Assertions.assertEquals(trafficSourceSupplier.streams.size()-1, trafficSourceSupplier.commitCursor.get());
+        Assertions.assertEquals(trafficSourceSupplier.streams.size(), trafficSourceSupplier.nextReadCursor.get());
         log.error("done");
     }
 
@@ -150,7 +150,7 @@ public class FullTrafficReplayerTest {
                         ISourceTrafficChannelKey tsk = key.getTrafficStreamKey();
                         var keyString = tsk.getConnectionId() + "_" + key.getSourceRequestIndex();
                         if (((TrafficStreamCursorKey)(key.getTrafficStreamKey())).arrayIndex > stopPoint) {
-                            log.error("Stopping");
+                            log.error("Request received after our ingest threshold. Throwing.  Discarding "+key);
                             var roughlyDoubled = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
                             nextStopPointRef.compareAndSet(stopPoint, roughlyDoubled);
                             throw new FabricatedErrorToKillTheReplayer(false);
@@ -183,7 +183,7 @@ public class FullTrafficReplayerTest {
                 waitForWorkerThreadsToStop();
                 log.info("Upon appending.... counter="+counter.get()+" totalUnique="+totalUniqueEverReceived.get()+
                         " runNumber="+runNumber+" stopAt="+nextStopPointRef.get() +
-                        " commitCursor="+((ArrayCursorTrafficSourceFactory)trafficSourceSupplier).commitCursor);
+                        " nextReadCursor="+((ArrayCursorTrafficSourceFactory)trafficSourceSupplier).nextReadCursor);
                 log.info(Strings.repeat("\n", 20));
                 receivedPerRun.add(counter.get());
                 totalUniqueEverReceivedSizeAfterEachRun.add(totalUniqueEverReceived.get());
@@ -201,6 +201,8 @@ public class FullTrafficReplayerTest {
     }
 
     private static void waitForWorkerThreadsToStop() throws InterruptedException {
+        var sleepMs = 2;
+        final var MAX_SLEEP_MS = 100;
         while (true) {
             var rootThreadGroup = getRootThreadGroup();
             if (!foundClientPoolThread(rootThreadGroup)) {
@@ -208,7 +210,8 @@ public class FullTrafficReplayerTest {
                 return;
             } else {
                 log.trace("Found a client connection pool - waiting briefly and retrying.");
-                Thread.sleep(100);
+                Thread.sleep(sleepMs);
+                sleepMs = Math.max(MAX_SLEEP_MS, sleepMs*2);
             }
         }
     }
@@ -354,7 +357,7 @@ public class FullTrafficReplayerTest {
 
     private static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {
         List<TrafficStream> streams;
-        AtomicInteger commitCursor = new AtomicInteger(-1);
+        AtomicInteger nextReadCursor = new AtomicInteger();
 
         public ArrayCursorTrafficSourceFactory(List<TrafficStream> streams) {
             this.streams = streams;
@@ -362,7 +365,7 @@ public class FullTrafficReplayerTest {
 
         public ISimpleTrafficCaptureSource get() {
             var rval = new ArrayCursorTrafficCaptureSource(this);
-            log.error("trafficSource="+rval+" readCursor="+rval.readCursor.get()+" commitCursor="+commitCursor.get());
+            log.error("trafficSource="+rval+" readCursor="+rval.readCursor.get()+" nextReadCursor="+ nextReadCursor.get());
             return rval;
         }
     }
@@ -373,7 +376,7 @@ public class FullTrafficReplayerTest {
         ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory;
 
         public ArrayCursorTrafficCaptureSource(ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
-            this.readCursor = new AtomicInteger(arrayCursorTrafficSourceFactory.commitCursor.get()+1);
+            this.readCursor = new AtomicInteger(arrayCursorTrafficSourceFactory.nextReadCursor.get());
             this.arrayCursorTrafficSourceFactory = arrayCursorTrafficSourceFactory;
         }
 
@@ -400,9 +403,9 @@ public class FullTrafficReplayerTest {
                 assert didRemove;
                 var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;
                 if (topCursor == incomingCursor) {
-                    topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex()).orElse(topCursor);
+                    topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex()).orElse(topCursor+1);
                     log.info("Commit called for "+trafficStreamKey+", and new topCursor="+topCursor);
-                    arrayCursorTrafficSourceFactory.commitCursor.set(topCursor);
+                    arrayCursorTrafficSourceFactory.nextReadCursor.set(topCursor);
                 } else {
                     log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
                 }

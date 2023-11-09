@@ -39,7 +39,7 @@ public class RequestSenderOrchestrator {
         var connectionSession = clientConnectionPool.getCachedSession(channelKey, false);
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
-                        ()->"waiting for final signal to confirm close has finished");
+                        ()->"waiting for final signal to confirm processing work has finished");
         log.atDebug().setMessage(()->"Scheduling work for "+channelKey+" at time "+timestamp).log();
         connectionSession.eventLoop.schedule(()->
                         task.get().map(f->f.whenComplete((v,t) -> {
@@ -88,20 +88,21 @@ public class RequestSenderOrchestrator {
     }
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
-    asynchronouslyInvokeRunnableToSetupFuture(ISourceTrafficChannelKey requestKey, int channelInteractionNumber,
+    asynchronouslyInvokeRunnableToSetupFuture(ISourceTrafficChannelKey channelKey, int channelInteractionNumber,
                                               boolean ignoreIfChannelNotPresent,
                                               DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
                                               Consumer<ConnectionReplaySession> successFn) {
         var channelFutureAndScheduleFuture =
-                clientConnectionPool.submitEventualSessionGet(requestKey, ignoreIfChannelNotPresent);
+                clientConnectionPool.submitEventualSessionGet(channelKey, ignoreIfChannelNotPresent);
         channelFutureAndScheduleFuture.addListener(submitFuture->{
             if (!submitFuture.isSuccess()) {
                 log.atError().setCause(submitFuture.cause())
-                        .setMessage(()->requestKey.toString() + " unexpected issue found from a scheduled task")
+                        .setMessage(()->channelKey.toString() + " unexpected issue found from a scheduled task")
                         .log();
                 finalTunneledResponse.future.completeExceptionally(submitFuture.cause());
             } else {
-                log.atInfo().setMessage(()->requestKey.toString() + " in submitFuture(success) callback").log();
+                log.atTrace().setMessage(()->channelKey.toString() +
+                        " on the channel's thread... getting a ConnectionReplaySession for it").log();
                 var channelFutureAndRequestSchedule = ((ConnectionReplaySession) submitFuture.get());
                 if (channelFutureAndRequestSchedule == null) {
                     finalTunneledResponse.future.complete(null);
@@ -110,8 +111,8 @@ public class RequestSenderOrchestrator {
                 channelFutureAndRequestSchedule.getChannelFutureFuture()
                         .map(channelFutureGetAttemptFuture->channelFutureGetAttemptFuture
                                         .thenAccept(v->{
-                                            log.atTrace().setMessage(()->requestKey.toString() +
-                                                    " ChannelFuture was created with "+v).log();
+                                            log.atTrace().setMessage(()->channelKey.toString() + " in submitFuture(success) and scheduling the task" +
+                                                    " for " + finalTunneledResponse.toString()).log();
                                             assert v.channel() ==
                                                     channelFutureAndRequestSchedule.getChannelFutureFuture().future
                                                             .getNow(null).channel();
@@ -122,13 +123,13 @@ public class RequestSenderOrchestrator {
                                                                 () -> successFn.accept(channelFutureAndRequestSchedule),
                                                                 x -> x.run());
                                                         if (cffr.scheduleSequencer.hasPending()) {
-                                                            log.atDebug().setMessage(()->"Sequencer for "+requestKey+
+                                                            log.atDebug().setMessage(()->"Sequencer for "+channelKey+
                                                                     " = "+cffr.scheduleSequencer).log();
                                                         }
                                                     });
                                         })
                                         .exceptionally(t->{
-                                            log.atTrace().setCause(t).setMessage(()->requestKey.toString() +
+                                            log.atTrace().setCause(t).setMessage(()->channelKey.toString() +
                                                     " ChannelFuture creation threw an exception").log();
                                             finalTunneledResponse.future.completeExceptionally(t);
                                             return null;
@@ -203,7 +204,6 @@ public class RequestSenderOrchestrator {
                                           DiagnosticTrackableCompletableFuture<String,T> responseFuture,
                                           Consumer<ConnectionReplaySession> task) {
         var cf = channelFutureAndItsFutureRequests.getInnerChannelFuture();
-        log.trace("cf="+cf);
         cf.addListener(f->{
             log.atTrace().setMessage(()->"channel creation has finished initialized (success="+f.isSuccess()+")").log();
             if (!f.isSuccess()) {

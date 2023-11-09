@@ -118,7 +118,6 @@ public class ClientConnectionPool {
                                         (channelClosedFuturesArray.stream().filter(c -> !c.isDone()).count()));
             } catch (Exception e) {
                 log.atError().setCause(e).setMessage("Caught error while closing cached connections").log();
-                log.error("bad", e);
                 eventLoopFuture.future.completeExceptionally(e);
             }
         });
