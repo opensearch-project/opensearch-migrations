@@ -19,7 +19,7 @@ RUN chmod ug+x /root/humanReadableLogs.py
 RUN chmod ug+x /root/catIndices.sh
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
-RUN wget -qO- https://archive.apache.org/dist/kafka/3.5.0/kafka_2.13-3.5.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
+RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
 RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v1.1.9/aws-msk-iam-auth-1.1.9-all.jar
 WORKDIR /root
 
