@@ -124,8 +124,14 @@ class TestFetchOrchestrator(unittest.TestCase):
         for config in bad_configs:
             original = copy.deepcopy(config)
             orchestrator.update_target_host(config, "host")
-            # Bad configs shoudl result in no change
+            # Bad configs should result in no change
             self.assertEqual(config, original)
+
+    def test_get_local_endpoint(self):
+        # Default value for insecure flag (secure endpoint)
+        self.assertEqual("https://localhost:123", orchestrator.get_local_endpoint(123))
+        # insecure endpoint
+        self.assertEqual("http://localhost:123", orchestrator.get_local_endpoint(123, True))
 
 
 if __name__ == '__main__':

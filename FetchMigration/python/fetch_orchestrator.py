@@ -28,6 +28,13 @@ def __get_env_string(name: str) -> Optional[str]:
         return None
 
 
+def get_local_endpoint(port: int = 4900, is_insecure: bool = False) -> str:
+    protocol = "https"
+    if is_insecure:
+        protocol = "http"
+    return protocol + "://localhost:" + str(port)
+
+
 def update_target_host(dp_config: dict, target_host: str):
     # Inline target host only supports HTTPS, so force it
     target_with_protocol = target_host
@@ -108,13 +115,19 @@ if __name__ == '__main__':  # pragma no cover
         "pipeline_file_path",
         help="Path to the Data Prepper pipeline YAML file to parse for source and target endpoint information"
     )
+    # Optional positional argument
     arg_parser.add_argument(
-        "data_prepper_endpoint",
-        help="Data Prepper endpoint for monitoring the migration"
+        "port", type=int,
+        nargs='?', default=4900,
+        help="Local port at which the Data Prepper process will expose its APIs"
     )
+    # Flags
+    arg_parser.add_argument("--insecure", "-k", action="store_true",
+                            help="Specifies that the local Data Prepper process is not using SSL")
     cli_args = arg_parser.parse_args()
-    base_path = os.path.expandvars(cli_args.data_prepper_path)
-    return_code = run(base_path, os.path.expandvars(cli_args.pipeline_file_path), cli_args.data_prepper_endpoint)
+    data_prepper_endpoint = get_local_endpoint(cli_args.port, cli_args.insecure)
+    return_code = run(os.path.expandvars(cli_args.data_prepper_path), os.path.expandvars(cli_args.pipeline_file_path),
+                      data_prepper_endpoint)
     if return_code == 0:
         sys.exit(0)
     else:
