@@ -1,3 +1,6 @@
+import json
+import subprocess
+
 from operations import create_index, check_index, create_document, \
     delete_document, delete_index, get_document
 from http import HTTPStatus
@@ -13,6 +16,23 @@ import secrets
 from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
+
+
+def get_indices(endpoint, auth):
+    response = requests.get(f'{endpoint}/_cat/indices', auth=auth, verify=False)
+    indices = []
+    response_lines = response.text.strip().split('\n')
+    for line in response_lines:
+        parts = line.split()
+        index_name = parts[2]
+        indices.append(index_name)
+    return indices
+
+
+def get_doc_count(endpoint, index, auth):
+    response = requests.get(f'{endpoint}/{index}/_count', auth=auth, verify=False)
+    count = json.loads(response.text)['count']
+    return count
 
 
 # The following "retry_request" function's purpose is to retry a certain request for "max_attempts"
@@ -59,6 +79,7 @@ class E2ETests(unittest.TestCase):
         self.auth = (self.username, self.password)
         self.index = f"my_index_{uuid.uuid4()}"
         self.doc_id = '7'
+        self.ignore_list = []
 
     def setUp(self):
         self.set_common_values()
@@ -200,3 +221,31 @@ class E2ETests(unittest.TestCase):
         incorrectUri = "/_cluster/incorrectUri"
         response = requests.get(f'{self.proxy_endpoint}{incorrectUri}', auth=self.auth, verify=False)
         self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
+
+    def test_0007_OSB(self):
+        cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name=migration']
+        container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
+
+        if container_id:
+            cmd_exec = f"docker exec {container_id} ./runTestBenchmarks.sh"
+            logger.warning(f"Running command: {cmd_exec}")
+            subprocess.run(cmd_exec, shell=True)
+        else:
+            logger.error("Migration-console container was not found, please double check that deployment was a success")
+            self.assert_(False)
+
+        source_indices = get_indices(self.source_endpoint, self.auth)
+        target_indices = get_indices(self.target_endpoint, self.auth)
+
+        common_indices = set(source_indices) & set(target_indices)
+        valid_indices = [index for index in common_indices if index not in self.ignore_list and index != "searchguard"]
+
+        self.assertTrue(valid_indices, "No valid indices found to compare after running OpenSearch Benchmark")
+
+        for index in valid_indices:
+            source_count = get_doc_count(self.source_endpoint, index, self.auth)
+        target_count = get_doc_count(self.target_endpoint, index, self.auth)
+
+        if source_count != target_count:
+            logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
+        self.assertEqual(source_count, target_count, f'{index}: doc counts do not match')
