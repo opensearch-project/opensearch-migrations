@@ -11,6 +11,7 @@ import yaml
 
 import metadata_migration
 import migration_monitor
+from fetch_orchestrator_params import FetchOrchestratorParams
 from metadata_migration_params import MetadataMigrationParams
 from migration_monitor_params import MigrationMonitorParams
 
@@ -26,13 +27,6 @@ def __get_env_string(name: str) -> Optional[str]:
         return val
     else:
         return None
-
-
-def get_local_endpoint(port: int = 4900, is_insecure: bool = False) -> str:
-    protocol = "https"
-    if is_insecure:
-        protocol = "http"
-    return protocol + "://localhost:" + str(port)
 
 
 def update_target_host(dp_config: dict, target_host: str):
@@ -74,27 +68,34 @@ def write_inline_target_host(pipeline_file_path: str, inline_target_host: str):
         yaml.safe_dump(pipeline_yaml, pipeline_file)
 
 
-def run(dp_base_path: str, dp_config_file: str, dp_endpoint: str) -> Optional[int]:
+def run(params: FetchOrchestratorParams) -> Optional[int]:
     # This is expected to be a base64 encoded string
     inline_pipeline = __get_env_string("INLINE_PIPELINE")
     inline_target_host = __get_env_string("INLINE_TARGET_HOST")
     if inline_pipeline is not None:
-        write_inline_pipeline(dp_config_file)
+        write_inline_pipeline(params.pipeline_file_path)
     elif inline_target_host is not None:
-        write_inline_target_host(dp_config_file, inline_target_host)
-    dp_exec_path = dp_base_path + __DP_EXECUTABLE_SUFFIX
-    output_file = dp_base_path + __PIPELINE_OUTPUT_FILE_SUFFIX
-    metadata_migration_params = MetadataMigrationParams(dp_config_file, output_file, report=True)
-    logging.info("Running pre-migration steps...\n")
+        write_inline_target_host(params.pipeline_file_path, inline_target_host)
+    dp_exec_path = params.data_prepper_path + __DP_EXECUTABLE_SUFFIX
+    output_file = params.data_prepper_path + __PIPELINE_OUTPUT_FILE_SUFFIX
+    if params.is_dry_run:
+        logging.info("Dry-run flag enabled, no actual changes will be made\n")
+    elif params.is_create_only:
+        logging.info("Create-only flag enabled, will only perform metadata migration\n")
+    metadata_migration_params = MetadataMigrationParams(params.pipeline_file_path, output_file,
+                                                        report=True, dryrun=params.is_dry_run)
+    logging.info("Running metadata migration...\n")
     metadata_migration_result = metadata_migration.run(metadata_migration_params)
-    if len(metadata_migration_result.created_indices) > 0:
+    if len(metadata_migration_result.created_indices) > 0 and not params.is_only_metadata_migration():
         # Kick off a subprocess for Data Prepper
         logging.info("Running Data Prepper...\n")
         proc = subprocess.Popen(dp_exec_path)
         # Run the migration monitor next
-        migration_monitor_params = MigrationMonitorParams(metadata_migration_result.target_doc_count, dp_endpoint)
+        migration_monitor_params = MigrationMonitorParams(metadata_migration_result.target_doc_count,
+                                                          params.get_local_endpoint())
         logging.info("Starting migration monitor...\n")
         return migration_monitor.run(migration_monitor_params, proc)
+    logging.info("Fetch Migration workflow concluded\n")
 
 
 if __name__ == '__main__':  # pragma no cover
@@ -124,10 +125,16 @@ if __name__ == '__main__':  # pragma no cover
     # Flags
     arg_parser.add_argument("--insecure", "-k", action="store_true",
                             help="Specifies that the local Data Prepper process is not using SSL")
+    arg_parser.add_argument("--dryrun", action="store_true",
+                            help="Performs a dry-run. Only a report is printed - no indices are created or migrated")
+    arg_parser.add_argument("--createonly", "-c", action="store_true",
+                            help="Skips data migration and only creates indices on the target cluster")
     cli_args = arg_parser.parse_args()
-    data_prepper_endpoint = get_local_endpoint(cli_args.port, cli_args.insecure)
-    return_code = run(os.path.expandvars(cli_args.data_prepper_path), os.path.expandvars(cli_args.pipeline_file_path),
-                      data_prepper_endpoint)
+    params = FetchOrchestratorParams(os.path.expandvars(cli_args.data_prepper_path),
+                                     os.path.expandvars(cli_args.pipeline_file_path),
+                                     port=cli_args.port, insecure=cli_args.insecure,
+                                     dryrun=cli_args.dryrun, create_only=cli_args.createonly)
+    return_code = run(params)
     if return_code == 0:
         sys.exit(0)
     else:
