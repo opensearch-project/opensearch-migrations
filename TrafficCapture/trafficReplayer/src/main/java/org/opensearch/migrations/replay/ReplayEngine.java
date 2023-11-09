@@ -6,6 +6,7 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
+import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -154,17 +155,13 @@ public class ReplayEngine {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
-        logStartOfWork(channelKey, newCount, atTime, label);
+        logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
         var future = networkSendOrchestrator.scheduleClose(channelKey, channelInteractionNum, atTime);
         hookWorkFinishingUpdates(future, timestamp, channelKey, label);
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
         return networkSendOrchestrator.clientConnectionPool.closeConnectionsAndShutdown();
-    }
-
-    public Future shutdownNow() {
-        return networkSendOrchestrator.clientConnectionPool.shutdownNow();
     }
 
     public int getNumConnectionsCreated() {

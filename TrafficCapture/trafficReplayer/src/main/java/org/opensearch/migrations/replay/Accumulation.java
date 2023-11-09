@@ -42,16 +42,17 @@ public class Accumulation {
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
     }
 
-    public RequestResponsePacketPair getOrCreateTransactionPair() {
+    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
         if (rrPair != null) {
             return rrPair;
         }
-        rrPair = new RequestResponsePacketPair();
+        rrPair = new RequestResponsePacketPair(forTrafficStreamKey);
         return rrPair;
     }
 
     public UniqueReplayerRequestKey getRequestKey() {
-        return new UniqueReplayerRequestKey(trafficChannelKey, startingSourceRequestIndex, getIndexOfCurrentRequest());
+        return new UniqueReplayerRequestKey(getRrPair().getBeginningTrafficStreamKey(),
+                startingSourceRequestIndex, getIndexOfCurrentRequest());
     }
 
     public boolean hasSignaledRequests() {

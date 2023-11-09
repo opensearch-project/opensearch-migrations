@@ -41,7 +41,7 @@ class ExpiringTrafficStreamMapUnorderedTest {
             expiringMap.expireOldEntries(new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0), accumulation, ts);
             createdAccumulations.add(accumulation);
             if (accumulation != null) {
-                var rrPair = accumulation.getOrCreateTransactionPair();
+                var rrPair = accumulation.getOrCreateTransactionPair(new PojoTrafficStreamKey("n","c",1));
                 rrPair.addResponseData(ts, ("Add" + i).getBytes(StandardCharsets.UTF_8));
             }
             expiredCountsPerLoop.add(expiredAccumulations.size());

@@ -16,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
@@ -28,6 +27,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ClientConnectionPool {
 
+    public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
     private final URI serverUri;
     private final SslContext sslContext;
     public final NioEventLoopGroup eventLoopGroup;
@@ -40,11 +40,14 @@ public class ClientConnectionPool {
         this.serverUri = serverUri;
         this.sslContext = sslContext;
         this.eventLoopGroup =
-                new NioEventLoopGroup(numThreads, new DefaultThreadFactory("targetConnectionPool"));
+                new NioEventLoopGroup(numThreads, new DefaultThreadFactory(TARGET_CONNECTION_POOL_NAME));
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(new CacheLoader<>() {
             @Override
             public ConnectionReplaySession load(final String s) {
+                if (eventLoopGroup.isShuttingDown()) {
+                    throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
+                }
                 numConnectionsCreated.incrementAndGet();
                 log.trace("creating connection session");
                 // arguably the most only thing that matters here is associating this item with an
@@ -133,7 +136,7 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualChannelGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent) {
+    submitEventualSessionGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent) {
         ConnectionReplaySession channelFutureAndSchedule =
                 getCachedSession(channelKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {

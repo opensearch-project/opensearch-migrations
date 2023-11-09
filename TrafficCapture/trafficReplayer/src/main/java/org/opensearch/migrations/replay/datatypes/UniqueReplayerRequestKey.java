@@ -5,12 +5,13 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode
 public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     public final ISourceTrafficChannelKey trafficStreamKey;
-    public final int sourceRequestIndexOffsetAtFirstObservation;
+    public final int sourceRequestIndexOffsetAtStartOfAccumulation;
     public final int replayerRequestIndex;
 
-    public UniqueReplayerRequestKey(ISourceTrafficChannelKey streamKey, int sourceOffset, int replayerIndex) {
+    public UniqueReplayerRequestKey(ISourceTrafficChannelKey streamKey, int sourceOffsetAtStartOfAccumulation,
+                                    int replayerIndex) {
         this.trafficStreamKey = streamKey;
-        this.sourceRequestIndexOffsetAtFirstObservation = sourceOffset;
+        this.sourceRequestIndexOffsetAtStartOfAccumulation = sourceOffsetAtStartOfAccumulation;
         this.replayerRequestIndex = replayerIndex;
     }
 
@@ -21,7 +22,7 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
 
     @Override
     public int getSourceRequestIndex() {
-        return replayerRequestIndex + sourceRequestIndexOffsetAtFirstObservation;
+        return replayerRequestIndex + sourceRequestIndexOffsetAtStartOfAccumulation;
     }
 
     public int getReplayerRequestIndex() {
@@ -44,7 +45,7 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
         //
         // That code currently resides in CapturedTrafficToHttpTransactionAccumulator.
         return trafficStreamKey + "." + getSourceRequestIndex() +
-                (sourceRequestIndexOffsetAtFirstObservation == 0 ? "" :
-                        "(offset: "+sourceRequestIndexOffsetAtFirstObservation+")");
+                (sourceRequestIndexOffsetAtStartOfAccumulation == 0 ? "" :
+                        "(offset: "+ sourceRequestIndexOffsetAtStartOfAccumulation +")");
     }
 }

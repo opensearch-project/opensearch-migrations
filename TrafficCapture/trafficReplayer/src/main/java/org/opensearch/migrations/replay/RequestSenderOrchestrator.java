@@ -61,9 +61,9 @@ public class RequestSenderOrchestrator {
                         ()->"waiting for final aggregated response");
         log.atDebug().setMessage(()->"Scheduling request for "+requestKey+" at start time "+start).log();
         return asynchronouslyInvokeRunnableToSetupFuture(requestKey.getTrafficStreamKey(),
-                requestKey.getSourceRequestIndex(),
+                requestKey.getReplayerRequestIndex(),
                 false, finalTunneledResponse,
-                channelFutureAndRequestSchedule-> scheduleSendOnConnectionSession(requestKey,
+                channelFutureAndRequestSchedule-> scheduleSendOnConnectionReplaySession(requestKey,
                         channelFutureAndRequestSchedule, finalTunneledResponse, start, interval, packets));
     }
 
@@ -77,7 +77,7 @@ public class RequestSenderOrchestrator {
         asynchronouslyInvokeRunnableToSetupFuture(channelKey, channelInteractionNum, true,
                 finalTunneledResponse,
                 channelFutureAndRequestSchedule->
-                    scheduleOnConnectionSession(channelKey, channelInteractionNum, channelFutureAndRequestSchedule,
+                    scheduleOnConnectionReplaySession(channelKey, channelInteractionNum, channelFutureAndRequestSchedule,
                             finalTunneledResponse, timestamp, "close", () -> {
                                 log.trace("Closing client connection " + channelInteraction);
                                 clientConnectionPool.closeConnection(channelKey.getConnectionId());
@@ -93,7 +93,7 @@ public class RequestSenderOrchestrator {
                                               DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
                                               Consumer<ConnectionReplaySession> successFn) {
         var channelFutureAndScheduleFuture =
-                clientConnectionPool.submitEventualChannelGet(requestKey, ignoreIfChannelNotPresent);
+                clientConnectionPool.submitEventualSessionGet(requestKey, ignoreIfChannelNotPresent);
         channelFutureAndScheduleFuture.addListener(submitFuture->{
             if (!submitFuture.isSuccess()) {
                 log.atError().setCause(submitFuture.cause())
@@ -101,7 +101,7 @@ public class RequestSenderOrchestrator {
                         .log();
                 finalTunneledResponse.future.completeExceptionally(submitFuture.cause());
             } else {
-                log.atTrace().setMessage(()->requestKey.toString() + " in submitFuture(success) callback").log();
+                log.atInfo().setMessage(()->requestKey.toString() + " in submitFuture(success) callback").log();
                 var channelFutureAndRequestSchedule = ((ConnectionReplaySession) submitFuture.get());
                 if (channelFutureAndRequestSchedule == null) {
                     finalTunneledResponse.future.complete(null);
@@ -139,17 +139,17 @@ public class RequestSenderOrchestrator {
         return finalTunneledResponse;
     }
 
-    private <T> void scheduleOnConnectionSession(ISourceTrafficChannelKey channelKey, int channelInteractionIdx,
-                                                 ConnectionReplaySession channelFutureAndRequestSchedule,
-                                                 StringTrackableCompletableFuture<T> signalCleanupCompleteToFuture,
-                                                 Instant atTime, String activityNameForLogging, Runnable task) {
+    private <T> void scheduleOnConnectionReplaySession(ISourceTrafficChannelKey channelKey, int channelInteractionIdx,
+                                                       ConnectionReplaySession channelFutureAndRequestSchedule,
+                                                       StringTrackableCompletableFuture<T> futureToBeCompletedByTask,
+                                                       Instant atTime, String activityNameForLogging, Runnable task) {
         var channelInteraction = new IndexedChannelInteraction(channelKey, channelInteractionIdx);
         log.atInfo().setMessage(()->channelInteraction + " scheduling " + activityNameForLogging + " at " + atTime).log();
 
         var schedule = channelFutureAndRequestSchedule.schedule;
         var eventLoop = channelFutureAndRequestSchedule.getInnerChannelFuture().channel().eventLoop();
 
-        signalCleanupCompleteToFuture.map(f->f.whenComplete((v,t)-> {
+        futureToBeCompletedByTask.map(f->f.whenComplete((v,t)-> {
             var itemStartTimeOfPopped = schedule.removeFirstItem();
             assert atTime.equals(itemStartTimeOfPopped):
                     "Expected to have popped the item to match the start time for the responseFuture that finished";
@@ -185,17 +185,17 @@ public class RequestSenderOrchestrator {
                 "... " + schedule).log();
     }
 
-    private void scheduleSendOnConnectionSession(UniqueReplayerRequestKey requestKey,
-                                                 ConnectionReplaySession channelFutureAndRequestSchedule,
-                                                 StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
-                                                 Instant start, Duration interval, Stream<ByteBuf> packets) {
+    private void scheduleSendOnConnectionReplaySession(UniqueReplayerRequestKey requestKey,
+                                                       ConnectionReplaySession channelFutureAndRequestSchedule,
+                                                       StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
+                                                       Instant start, Duration interval, Stream<ByteBuf> packets) {
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
         var packetReceiverRef = new AtomicReference<NettyPacketToHttpConsumer>();
         Runnable packetSender = () -> sendNextPartAndContinue(() ->
                         getPacketReceiver(requestKey, channelFutureAndRequestSchedule.getInnerChannelFuture(),
                                 packetReceiverRef),
                 eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
-        scheduleOnConnectionSession(requestKey.trafficStreamKey, requestKey.getSourceRequestIndex(),
+        scheduleOnConnectionReplaySession(requestKey.trafficStreamKey, requestKey.getSourceRequestIndex(),
                 channelFutureAndRequestSchedule, responseFuture, start, "send", packetSender);
     }
 

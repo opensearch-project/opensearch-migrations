@@ -207,19 +207,24 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return Optional.empty();
     }
 
+    private static List<ITrafficStreamKey> getTrafficStreamsHeldByAccum(Accumulation accum) {
+        return accum.hasRrPair() ? accum.getRrPair().trafficStreamKeysBeingHeld : List.of();
+    }
+
     private Optional<CONNECTION_STATUS>
     handleCloseObservationThatAffectEveryState(Accumulation accum,
                                                TrafficObservation observation,
                                                @NonNull ITrafficStreamKey trafficStreamKey,
                                                Instant timestamp) {
         if (observation.hasClose()) {
-            accum.getOrCreateTransactionPair().holdTrafficStream(trafficStreamKey);
+            accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             closedConnectionCounter.incrementAndGet();
-            listener.onConnectionClose(accum.getRequestKey(), timestamp, accum.getRrPair().trafficStreamKeysBeingHeld);
+            listener.onConnectionClose(accum.trafficChannelKey, accum.getIndexOfCurrentRequest(),
+                    timestamp, getTrafficStreamsHeldByAccum(accum));
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
-            accum.getOrCreateTransactionPair().holdTrafficStream(trafficStreamKey);
+            accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             exceptionConnectionCounter.incrementAndGet();
             accum.resetForNextRequest();
@@ -244,7 +249,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (!accum.hasRrPair()) {
                 requestCounter.incrementAndGet();
             }
-            var rrPair = accum.getOrCreateTransactionPair();
+            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey);
             log.atTrace().setMessage(() -> "Adding request data for accum[" + connectionId + "]=" + accum).log();
             rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             log.atTrace().setMessage(() -> "Added request data for accum[" + connectionId + "]=" + accum).log();
@@ -253,7 +258,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             handleEndOfRequest(accum);
         } else if (observation.hasReadSegment()) {
             log.atTrace().setMessage(()->"Adding request segment for accum[" + connectionId + "]=" + accum).log();
-            var rrPair = accum.getOrCreateTransactionPair();
+            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey);
             if (rrPair.requestData == null) {
                 rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
                 requestCounter.incrementAndGet();
@@ -394,8 +399,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             }
         } finally {
             if (accumulation.hasSignaledRequests()) {
-                listener.onConnectionClose(accumulation.getRequestKey(), accumulation.getLastTimestamp(),
-                        accumulation.hasRrPair() ? accumulation.getRrPair().trafficStreamKeysBeingHeld : List.of());
+                listener.onConnectionClose(accumulation.trafficChannelKey, accumulation.getIndexOfCurrentRequest(),
+                        accumulation.getLastTimestamp(), getTrafficStreamsHeldByAccum(accumulation));
             }
         }
     }

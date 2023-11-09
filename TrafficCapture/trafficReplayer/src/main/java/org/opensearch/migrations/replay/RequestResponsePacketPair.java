@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import com.google.common.base.Objects;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
@@ -24,6 +25,16 @@ public class RequestResponsePacketPair {
     HttpMessageAndTimestamp responseData;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
+
+    public RequestResponsePacketPair(ITrafficStreamKey startingAtTrafficStreamKey) {
+        this.trafficStreamKeysBeingHeld = new ArrayList<>();
+        this.trafficStreamKeysBeingHeld.add(startingAtTrafficStreamKey);
+    }
+
+    @NonNull ITrafficStreamKey getBeginningTrafficStreamKey() {
+        assert trafficStreamKeysBeingHeld != null && !trafficStreamKeysBeingHeld.isEmpty();
+        return trafficStreamKeysBeingHeld.get(0);
+    }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {
@@ -51,7 +62,10 @@ public class RequestResponsePacketPair {
         if (trafficStreamKeysBeingHeld == null) {
             trafficStreamKeysBeingHeld = new ArrayList<>();
         }
-        trafficStreamKeysBeingHeld.add(trafficStreamKey);
+        if (trafficStreamKeysBeingHeld.size() == 0 ||
+                trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size()-1)) {
+            trafficStreamKeysBeingHeld.add(trafficStreamKey);
+        }
     }
 
     private static final List<ITrafficStreamKey> emptyUnmodifiableList = List.of();
