@@ -111,7 +111,7 @@ public class FullTrafficReplayerTest {
             "3,false",
             "-1,false",
             "3,true",
-//            "-1,true",
+            "-1,true",
     })
     @Tag("longTest")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
@@ -379,11 +379,14 @@ public class FullTrafficReplayerTest {
     private static class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         final AtomicInteger readCursor;
         final PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
+        Integer cursorHighWatermark;
         ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory;
 
         public ArrayCursorTrafficCaptureSource(ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
-            this.readCursor = new AtomicInteger(arrayCursorTrafficSourceFactory.nextReadCursor.get());
+            var startingCursor = arrayCursorTrafficSourceFactory.nextReadCursor.get();
+            this.readCursor = new AtomicInteger(startingCursor);
             this.arrayCursorTrafficSourceFactory = arrayCursorTrafficSourceFactory;
+            cursorHighWatermark = startingCursor;
         }
 
         @Override
@@ -397,6 +400,7 @@ public class FullTrafficReplayerTest {
             var key = new TrafficStreamCursorKey(stream, idx);
             synchronized (pQueue) {
                 pQueue.add(key);
+                cursorHighWatermark = idx;
             }
             return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamWithKey(stream, key)));
         }
@@ -413,7 +417,8 @@ public class FullTrafficReplayerTest {
                 }
                 assert didRemove;
                 if (topCursor == incomingCursor) {
-                    topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex()).orElse(topCursor+1);
+                    topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex())
+                            .orElse(cursorHighWatermark+1); // most recent cursor was previously popped
                     log.info("Commit called for "+trafficStreamKey+", and new topCursor="+topCursor);
                     arrayCursorTrafficSourceFactory.nextReadCursor.set(topCursor);
                 } else {
