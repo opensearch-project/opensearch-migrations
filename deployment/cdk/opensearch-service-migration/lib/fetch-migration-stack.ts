@@ -67,8 +67,8 @@ export class FetchMigrationStack extends Stack {
 
         // Create DP pipeline config from template file
         let dpPipelineData: string = readFileSync(props.dpPipelineTemplatePath, 'utf8');
+        // Replace only source cluster host - target host will be overridden by inline env var
         dpPipelineData = dpPipelineData.replace("<SOURCE_CLUSTER_HOST>", props.sourceEndpoint);
-        dpPipelineData = dpPipelineData.replace("<TARGET_CLUSTER_HOST>", targetClusterEndpoint);
         // Base64 encode
         let encodedPipeline = Buffer.from(dpPipelineData).toString("base64");
 
@@ -77,9 +77,12 @@ export class FetchMigrationStack extends Stack {
             secretName: `${props.stage}-${props.defaultDeployId}-${fetchMigrationContainer.containerName}-pipelineConfig`,
             secretStringValue: SecretValue.unsafePlainText(encodedPipeline)
         });
-        // Add secret to container
+        // Add secrets to container
         fetchMigrationContainer.addSecret("INLINE_PIPELINE",
             ECSSecret.fromSecretsManager(dpPipelineConfigSecret)
+        );
+        fetchMigrationContainer.addSecret("INLINE_TARGET_HOST",
+            ECSSecret.fromSsmParameter(targetClusterEndpoint)
         );
 
         let networkConfigJson = {
