@@ -39,7 +39,7 @@ These are the **prerequisites** to being able to attach the Capture Proxy:
   `JAVA_HOME=$(dirname "$(dirname "$(type -p java)")")`
     * If that doesn’t work, then find the java directory on your node and set it as $JAVA_HOME
 
-Follow these steps to attach a Capture Proxy on the node.
+### Follow these steps to attach a Capture Proxy on the node.
 
 1. **Log in to one of the coordinator nodes** for command line access.
 2. **Update node’s port setting**.
