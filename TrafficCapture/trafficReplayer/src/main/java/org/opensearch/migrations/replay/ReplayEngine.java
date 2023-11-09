@@ -1,10 +1,11 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
@@ -96,7 +97,7 @@ public class ReplayEngine {
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
     hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp,
-                             UniqueRequestKey requestKey, String taskDescription) {
+                             UniqueReplayerRequestKey requestKey, String taskDescription) {
         return future.map(f->f
                         .whenComplete((v,t)->Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
                         .whenComplete((v,t)->{
@@ -112,13 +113,13 @@ public class ReplayEngine {
                 ()->"Updating fields for callers to poll progress and updating backpressure");
     }
 
-    private static void logStartOfWork(UniqueRequestKey requestKey, long newCount, Instant start, String label) {
+    private static void logStartOfWork(UniqueReplayerRequestKey requestKey, long newCount, Instant start, String label) {
         log.atInfo().setMessage(()->"Scheduling '" + label + "' (" + requestKey +
                 ") to run at " + start + " incremented tasksOutstanding to "+ newCount).log();
     }
 
     public <T> DiagnosticTrackableCompletableFuture<String, T>
-    scheduleTransformationWork(UniqueRequestKey requestKey, Instant originalStart,
+    scheduleTransformationWork(UniqueReplayerRequestKey requestKey, Instant originalStart,
                                Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "processing";
@@ -129,13 +130,13 @@ public class ReplayEngine {
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueRequestKey requestKey, Instant originalStart, Instant originalEnd,
+    scheduleRequest(UniqueReplayerRequestKey requestKey, Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
-        var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1) : Duration.ZERO;
+        var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1L) : Duration.ZERO;
         logStartOfWork(requestKey, newCount, start, label);
         metricsLogger.atSuccess()
                 .addKeyValue("requestId", requestKey.toString())
@@ -147,7 +148,7 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }
 
-    public void closeConnection(UniqueRequestKey requestKey, Instant timestamp) {
+    public void closeConnection(UniqueReplayerRequestKey requestKey, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
@@ -156,8 +157,12 @@ public class ReplayEngine {
         hookWorkFinishingUpdates(future, timestamp, requestKey, label);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, Void> close() {
-        return networkSendOrchestrator.clientConnectionPool.stopGroup();
+    public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
+        return networkSendOrchestrator.clientConnectionPool.closeConnectionsAndShutdown();
+    }
+
+    public Future shutdownNow() {
+        return networkSendOrchestrator.clientConnectionPool.shutdownNow();
     }
 
     public int getNumConnectionsCreated() {

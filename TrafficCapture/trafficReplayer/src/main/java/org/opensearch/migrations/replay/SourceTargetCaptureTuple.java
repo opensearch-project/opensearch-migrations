@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -8,6 +9,7 @@ import org.json.HTTP;
 import org.json.JSONObject;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -18,23 +20,27 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
-    private RequestResponsePacketPair sourcePair;
-    private final TransformedPackets targetRequestData;
-    private final List<byte[]> targetResponseData;
-    private final HttpRequestTransformationStatus transformationStatus;
-    private final Throwable errorCause;
+    final UniqueSourceRequestKey uniqueRequestKey;
+    final RequestResponsePacketPair sourcePair;
+    final TransformedPackets targetRequestData;
+    final List<byte[]> targetResponseData;
+    final HttpRequestTransformationStatus transformationStatus;
+    final Throwable errorCause;
     Duration targetResponseDuration;
 
-    public SourceTargetCaptureTuple(RequestResponsePacketPair sourcePair,
+    public SourceTargetCaptureTuple(UniqueSourceRequestKey uniqueRequestKey,
+                                    RequestResponsePacketPair sourcePair,
                                     TransformedPackets targetRequestData,
                                     List<byte[]> targetResponseData,
                                     HttpRequestTransformationStatus transformationStatus,
                                     Throwable errorCause,
                                     Duration targetResponseDuration) {
+        this.uniqueRequestKey = uniqueRequestKey;
         this.sourcePair = sourcePair;
         this.targetRequestData = targetRequestData;
         this.targetResponseData = targetResponseData;
@@ -48,7 +54,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         targetRequestData.close();
     }
 
-    public static class TupleToFileWriter {
+    public static class TupleToFileWriter implements Consumer<SourceTargetCaptureTuple> {
         OutputStream outputStream;
         Logger tupleLogger = LogManager.getLogger("OutputTupleJsonLogger");
 
@@ -61,10 +67,10 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
             String head = scanner.next();
-            int header_length = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
+            int headerLength = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
             // SequenceInputStreams cannot be reset, so it's recreated from the original data.
             SequenceInputStream bodyStream = ReplayUtils.byteArraysToInputStream(data);
-            bodyStream.skip(header_length);
+            for (int leftToSkip = headerLength; leftToSkip > 0; leftToSkip -= bodyStream.skip(leftToSkip)) {}
 
             // There are several limitations introduced by using the HTTP.toJSONObject call.
             // 1. We need to replace "\r\n" with "\n" which could mask differences in the responses.
@@ -72,7 +78,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             //    We deal with this in the code that reads these JSONs, but it's a more brittle and error-prone format
             //    than it would be otherwise.
             // TODO: Refactor how messages are converted to JSON and consider using a more sophisticated HTTP parsing strategy.
-            JSONObject message = HTTP.toJSONObject(head.replaceAll("\r\n", "\n"));
+            JSONObject message = HTTP.toJSONObject(head.replace("\r\n", "\n"));
             String base64body = Base64.getEncoder().encodeToString(bodyStream.readAllBytes());
             message.put("body", base64body);
             return message;
@@ -94,7 +100,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             return message;
         }
 
-        private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
+        private JSONObject toJSONObject(SourceTargetCaptureTuple triple) {
             // TODO: Use Netty to parse the packets as HTTP rather than json.org (we can also remove it as a dependency)
             JSONObject meta = new JSONObject();
             meta.put("sourceRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
@@ -109,7 +115,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             if (triple.targetResponseData != null && !triple.targetResponseData.isEmpty()) {
                 meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData, triple.targetResponseDuration));
             }
-            meta.put("connectionId", triple.sourcePair.requestKey);
+            meta.put("connectionId", triple.uniqueRequestKey);
             return meta;
         }
 
@@ -157,7 +163,9 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
          *
          * @param  triple  the RequestResponseResponseTriple object to be converted into json and written to the stream.
          */
-        public void writeJSON(SourceTargetCaptureTuple triple) throws IOException {
+        @Override
+        @SneakyThrows
+        public void accept(SourceTargetCaptureTuple triple) {
             JSONObject jsonObject = toJSONObject(triple);
 
             tupleLogger.info(jsonObject.toString());
@@ -170,13 +178,13 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     public String toString() {
         return PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.TRUNCATED, () -> {
             final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
-            sb.append("\n diagnosticLabel=").append(sourcePair.requestKey);
+            sb.append("\n diagnosticLabel=").append(uniqueRequestKey);
             sb.append("\n sourcePair=").append(sourcePair);
             sb.append("\n targetResponseDuration=").append(targetResponseDuration);
             sb.append("\n targetRequestData=")
-                    .append(PrettyPrinter.httpPacketBufsToString(PrettyPrinter.HttpMessageType.Request, targetRequestData.streamUnretained()));
+                    .append(PrettyPrinter.httpPacketBufsToString(PrettyPrinter.HttpMessageType.REQUEST, targetRequestData.streamUnretained()));
             sb.append("\n targetResponseData=")
-                    .append(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.Response, targetResponseData));
+                    .append(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.RESPONSE, targetResponseData));
             sb.append("\n transformStatus=").append(transformationStatus);
             sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
             sb.append('}');

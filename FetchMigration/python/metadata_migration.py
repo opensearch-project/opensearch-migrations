@@ -1,10 +1,10 @@
 import argparse
-import yaml
 from typing import Optional
+
+import yaml
 
 import index_operations
 import utils
-
 # Constants
 from endpoint_info import EndpointInfo
 from metadata_migration_params import MetadataMigrationParams
@@ -163,14 +163,17 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     # We expect the Data Prepper pipeline to only have a single top-level value
     pipeline_config = next(iter(dp_config.values()))
     validate_pipeline_config(pipeline_config)
+    result = MetadataMigrationResult()
     # Fetch EndpointInfo and indices
     source_endpoint_info, source_indices = compute_endpoint_and_fetch_indices(pipeline_config, SOURCE_KEY)
+    # If source indices is empty, return immediately
+    if len(source_indices.keys()) == 0:
+        return result
     target_endpoint_info, target_indices = compute_endpoint_and_fetch_indices(pipeline_config, SINK_KEY)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
     # The first element in the tuple is the set of indices to create
     indices_to_create = diff[0]
-    result = MetadataMigrationResult()
     if indices_to_create:
         result.created_indices = indices_to_create
         result.target_doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)
@@ -180,7 +183,7 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
         # Write output YAML
         if len(args.output_file) > 0:
             write_output(dp_config, indices_to_create, args.output_file)
-            if args.report:
+            if args.report:  # pragma no cover
                 print("Wrote output YAML pipeline to: " + args.output_file)
         if not args.dryrun:
             index_data = dict()

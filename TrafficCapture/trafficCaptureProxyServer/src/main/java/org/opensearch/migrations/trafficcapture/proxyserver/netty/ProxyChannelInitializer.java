@@ -13,7 +13,7 @@ import javax.net.ssl.SSLEngine;
 import java.io.IOException;
 import java.util.function.Supplier;
 
-public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
+public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
 
     private final IConnectionCaptureFactory connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
@@ -30,7 +30,8 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
         return (httpRequest != null &&
                 (httpRequest.method().equals(HttpMethod.POST) ||
                         httpRequest.method().equals(HttpMethod.PUT) ||
-                        httpRequest.method().equals(HttpMethod.DELETE)));
+                        httpRequest.method().equals(HttpMethod.DELETE) ||
+                        httpRequest.method().equals(HttpMethod.PATCH)));
     }
 
     @Override
@@ -42,7 +43,7 @@ public class ProxyChannelInitializer extends ChannelInitializer<SocketChannel> {
 
         var offloader = connectionCaptureFactory.createOffloader(ch.id().asLongText());
         ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler(offloader,
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler<T>(offloader,
                 this::shouldGuaranteeMessageOffloading));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }

@@ -1,29 +1,22 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
-import {App} from 'aws-cdk-lib';
+import {readFileSync} from 'fs';
+import {App, Tags} from 'aws-cdk-lib';
 import {StackComposer} from "../lib/stack-composer";
 
 const app = new App();
+const version = readFileSync('../../../VERSION', 'utf-8')
+Tags.of(app).add("migration_deployment", version)
 const account = process.env.CDK_DEFAULT_ACCOUNT
 const region = process.env.CDK_DEFAULT_REGION
-const stage = process.env.CDK_DEPLOYMENT_STAGE
-let copilotAppName = process.env.COPILOT_APP_NAME
-let copilotEnvName = process.env.COPILOT_ENV_NAME
-if (!stage) {
-    throw new Error("Required environment variable CDK_DEPLOYMENT_STAGE has not been set (i.e. dev, gamma, PROD)")
-}
-if (!copilotAppName) {
-    console.log("COPILOT_APP_NAME has not been set, defaulting to 'migration-copilot' for stack export identifier")
-    copilotAppName = "migration-copilot"
-}
-if (!copilotEnvName) {
-    console.log(`COPILOT_ENV_NAME has not been set, defaulting to CDK stage: ${stage} for stack export identifier`)
-    copilotEnvName = stage
+// Environment setting to allow providing an existing AWS AppRegistry application ARN which each created CDK stack
+// from this CDK app will be added to.
+const migrationsAppRegistryARN = process.env.MIGRATIONS_APP_REGISTRY_ARN
+if (migrationsAppRegistryARN) {
+    console.info(`App Registry mode is enabled for CFN stack tracking. Will attempt to import the App Registry application from the MIGRATIONS_APP_REGISTRY_ARN env variable of ${migrationsAppRegistryARN} and looking in the configured region of ${region}`)
 }
 
 new StackComposer(app, {
-    env: { account: account, region: region },
-    stage: stage,
-    copilotAppName: copilotAppName,
-    copilotEnvName: copilotEnvName
+    migrationsAppRegistryARN: migrationsAppRegistryARN,
+    env: { account: account, region: region }
 });

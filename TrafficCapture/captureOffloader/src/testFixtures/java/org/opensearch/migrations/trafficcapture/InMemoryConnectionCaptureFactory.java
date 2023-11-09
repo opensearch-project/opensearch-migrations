@@ -1,16 +1,20 @@
 package org.opensearch.migrations.trafficcapture;
 
 import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NonNull;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Stream;
 
-public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFactory {
+public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFactory<Void> {
 
     private final int bufferSize;
     private final String nodeId;
@@ -30,31 +34,44 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
         this.onCaptureClosedCallback = onCaptureClosedCallback;
     }
 
-    private CompletableFuture closeHandler(ByteBuffer byteBuffer) {
-        return CompletableFuture.runAsync(() -> {
-            byte[] filledBytes = Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position());
-            recordedStreams.add(new RecordedTrafficStream(filledBytes));
-        });
+    @AllArgsConstructor
+    class StreamManager extends OrderedStreamLifecyleManager<Void> {
+        @Override
+        public CodedOutputStreamHolder createStream() {
+            return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
+        }
+
+        @Override
+        protected CompletableFuture<Void> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+            if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
+                throw new IllegalArgumentException("Unknown outputStreamHolder sent back to StreamManager: " +
+                        outputStreamHolder);
+            }
+            var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
+            return CompletableFuture.runAsync(() -> {
+                var bb = osh.getByteBuffer();
+                byte[] filledBytes = Arrays.copyOfRange(bb.array(), 0, bb.position());
+                recordedStreams.add(new RecordedTrafficStream(filledBytes));
+            })
+                    .whenComplete((v,t)->onCaptureClosedCallback.run())
+                    .thenApply(x->null);
+        }
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) throws IOException {
+    public IChannelConnectionCaptureSerializer<Void> createOffloader(String connectionId) throws IOException {
         // This array is only an indirection to work around Java's constraint that lambda values are final
-        CompletableFuture[] singleAggregateCfRef = new CompletableFuture[1];
-        singleAggregateCfRef[0] = CompletableFuture.completedFuture(null);
-        WeakHashMap<CodedOutputStream, ByteBuffer> codedStreamToByteBufferMap = new WeakHashMap<>();
-        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, () -> {
-            ByteBuffer bb = ByteBuffer.allocate(bufferSize);
-            var cos = CodedOutputStream.newInstance(bb);
-            codedStreamToByteBufferMap.put(cos, bb);
-            return cos;
-        }, (captureSerializerResult) -> {
-            CodedOutputStream codedOutputStream = captureSerializerResult.getCodedOutputStream();
-            CompletableFuture cf = closeHandler(codedStreamToByteBufferMap.get(codedOutputStream));
-            codedStreamToByteBufferMap.remove(codedOutputStream);
-            singleAggregateCfRef[0] = singleAggregateCfRef[0].isDone() ? cf : CompletableFuture.allOf(singleAggregateCfRef[0], cf);
-            cf.whenComplete((v,t)->onCaptureClosedCallback.run());
-            return singleAggregateCfRef[0];
-        });
+        return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager());
+    }
+
+    public Stream<TrafficStream> getRecordedTrafficStreamsStream() {
+        return recordedStreams.stream()
+                .map(rts-> {
+                    try {
+                        return TrafficStream.parseFrom(rts.data);
+                    } catch (InvalidProtocolBufferException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
     }
 }

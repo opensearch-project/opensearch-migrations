@@ -43,6 +43,7 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
                 Thread.sleep(consumeDuration.toMillis());
                 log.info("woke up from sleeping for " + nextRequestPacket);
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
             try {

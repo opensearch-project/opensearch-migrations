@@ -12,12 +12,13 @@ public class KafkaBehavioralPolicy {
      * TrafficStream protobuf object. The default implementation here simply returns null(which the caller will ignore)
      * instead of returning an Exception for the caller to throw.
      *
-     * @param record The record unable to be parsed
+     * @param kafkaRecord The record unable to be parsed
      * @param e The exception encountered when parsing the record
      * @return Null if no exception should be thrown, otherwise provide the exception that will be thrown by the calling class
      */
-    public RuntimeException onInvalidKafkaRecord(ConsumerRecord<String, byte[]> record, InvalidProtocolBufferException e) {
-        log.error("Unable to parse incoming traffic stream with record id: {} from error: ", record.key(), e);
+    public RuntimeException onInvalidKafkaRecord(ConsumerRecord<String, byte[]> kafkaRecord,
+                                                 InvalidProtocolBufferException e) {
+        log.error("Unable to parse incoming traffic stream with record id: {} from error: ", kafkaRecord.key(), e);
         return null;
     }
 }

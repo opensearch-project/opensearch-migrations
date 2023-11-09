@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -98,16 +97,8 @@ class NettyScanningHttpProxyTest {
         interactionsCapturedCountdown.await();
         var recordedStreams = captureFactory.getRecordedStreams();
         Assertions.assertEquals(1, recordedStreams.size());
-        var recordedTrafficStreams =
-                recordedStreams.stream()
-                        .map(rts-> {
-                            try {
-                                return TrafficStream.parseFrom(rts.data);
-                            } catch (InvalidProtocolBufferException e) {
-                                throw new RuntimeException(e);
-                            }
-                        })
-                        .toArray(TrafficStream[]::new);
+        var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream()
+                .toArray(TrafficStream[]::new);
         Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
         log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
         var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
@@ -184,7 +175,7 @@ class NettyScanningHttpProxyTest {
         var upstreamTestServer = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                upstreamTestServer.set(new SimpleHttpServer(false, port.intValue(),
+                upstreamTestServer.set(new SimpleHttpServer(false, port,
                         NettyScanningHttpProxyTest::makeContext));
             } catch (Exception e) {
                 throw new RuntimeException(e);
@@ -193,15 +184,18 @@ class NettyScanningHttpProxyTest {
         var underlyingPort = upstreamTestServer.get().port();
 
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
-            nshp.set(new NettyScanningHttpProxy(port.intValue()));
+            nshp.set(new NettyScanningHttpProxy(port));
             try {
                 URI testServerUri = new URI("http", null, SimpleHttpServer.LOCALHOST, underlyingPort,
-                    null, null, null);
+                        null, null, null);
                 var connectionPool = new BacksideConnectionPool(testServerUri, null,
                         10, Duration.ofSeconds(10));
-                nshp.get().start(connectionPool,1, null, connectionCaptureFactory);
-                System.out.println("proxy port = "+port.intValue());
-            } catch (InterruptedException | URISyntaxException e) {
+                nshp.get().start(connectionPool, 1, null, connectionCaptureFactory);
+                System.out.println("proxy port = " + port);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } catch (URISyntaxException e) {
                 throw new RuntimeException(e);
             }
         });

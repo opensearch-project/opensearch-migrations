@@ -1,31 +1,38 @@
 import {StackPropsExt} from "./stack-composer";
 import {IVpc} from "aws-cdk-lib/aws-ec2";
-import {CfnOutput, CfnWaitCondition, CfnWaitConditionHandle, CustomResource, Duration, Stack} from "aws-cdk-lib";
+import {CfnWaitCondition, CfnWaitConditionHandle, CustomResource, Duration, Stack} from "aws-cdk-lib";
 import {Construct} from "constructs";
 import {Effect, ManagedPolicy, PolicyDocument, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {NodejsFunction} from "aws-cdk-lib/aws-lambda-nodejs";
 import {Runtime} from "aws-cdk-lib/aws-lambda";
-import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId, Provider} from "aws-cdk-lib/custom-resources";
+import {Provider} from "aws-cdk-lib/custom-resources";
 import * as path from "path";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
-export interface mskUtilityStackProps extends StackPropsExt {
+export interface MskUtilityStackProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly mskARN: string,
     readonly mskEnablePublicEndpoints?: boolean
 }
 
-
+/**
+ * This stack exists to provide additional needed functionality to the L1 MSK Construct. This functionality includes
+ * enabling public endpoints on a created MSK cluster. As well as retrieving public and private broker endpoints in
+ * a consistent ORDERED fashion.
+ */
 export class MSKUtilityStack extends Stack {
 
-    constructor(scope: Construct, id: string, props: mskUtilityStackProps) {
+    constructor(scope: Construct, id: string, props: MskUtilityStackProps) {
         super(scope, id, props);
 
-        let brokerEndpointsOutput
+        const mskARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`)
+        let brokerEndpoints
+        // If the public endpoints setting is enabled we will launch a Lambda custom resource to enable public endpoints and then wait for these
+        // endpoints to become created before we return the endpoints and stop the process
         if (props.mskEnablePublicEndpoints) {
             const lambdaInvokeStatement = new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: ["lambda:InvokeFunction"],
-                resources: ["*"]
+                resources: [`arn:aws:lambda:${props.env?.region}:${props.env?.account}:function:OSMigrations*`]
             })
             // Updating connectivity for an MSK cluster requires some VPC permissions
             // (https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonmanagedstreamingforapachekafka.html#amazonmanagedstreamingforapachekafka-cluster)
@@ -40,7 +47,7 @@ export class MSKUtilityStack extends Stack {
                 actions: ["kafka:UpdateConnectivity",
                     "kafka:DescribeClusterV2",
                     "kafka:GetBootstrapBrokers"],
-                resources: [props.mskARN]
+                resources: [mskARN]
             })
             const lambdaExecDocument = new PolicyDocument({
                 statements: [lambdaInvokeStatement, describeVPCStatement, mskUpdateConnectivityStatement]
@@ -66,7 +73,7 @@ export class MSKUtilityStack extends Stack {
                 timeout: Duration.minutes(15),
                 entry: path.join(__dirname, 'lambda/msk-public-endpoint-handler.ts'),
                 role: lambdaExecRole,
-                environment: {MSK_ARN: props.mskARN, MAX_ATTEMPTS: "4"}
+                environment: {MSK_ARN: mskARN, MAX_ATTEMPTS: "4"}
             });
 
             const customResourceProvider = new Provider(this, 'customResourceProvider', {
@@ -92,41 +99,56 @@ export class MSKUtilityStack extends Stack {
                 handle: wcHandle.ref
             })
             waitCondition.node.addDependency(customResource);
-            brokerEndpointsOutput = waitCondition.attrData.toString()
+            brokerEndpoints = waitCondition.attrData.toString()
         }
+        // If public endpoints are not enabled we will launch a simple Lambda custom resource to retrieve the private broker endpoints
         else {
-            const mskGetBrokersCustomResource = getBrokersCustomResource(this, props.vpc, props.mskARN)
-            brokerEndpointsOutput = `export MIGRATION_KAFKA_BROKER_ENDPOINTS=${mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringSaslIam")}`
-            //brokerEndpointsOutput = mskGetBrokersCustomResource.getResponseField("BootstrapBrokerStringPublicSaslIam")
-        }
+            const mskUpdateConnectivityStatement = new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ["kafka:GetBootstrapBrokers"],
+                resources: [mskARN]
+            })
+            const lambdaExecDocument = new PolicyDocument({
+                statements: [mskUpdateConnectivityStatement]
+            })
 
-        const cfnOutput = new CfnOutput(this, 'CopilotBrokerEndpointsExport', {
-            value: brokerEndpointsOutput,
-            description: 'Exported MSK broker endpoint values created by CDK that are needed by Copilot container deployments',
+            const lambdaExecRole = new Role(this, 'mskAccessLambda', {
+                assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
+                description: 'Allow lambda to access MSK to retrieve brokers',
+                inlinePolicies: {
+                    mskAccessDoc: lambdaExecDocument,
+                },
+                // Required policies that the default Lambda exec role would add
+                managedPolicies: [
+                    ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaVPCAccessExecutionRole"),
+                    ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole")
+                ]
+            });
+
+            const mskPublicLambda = new NodejsFunction(this, 'mskGetBrokersLambdaFunction', {
+                runtime: Runtime.NODEJS_18_X,
+                vpc: props.vpc,
+                handler: 'handler',
+                timeout: Duration.minutes(3),
+                entry: path.join(__dirname, 'lambda/msk-ordered-endpoints-handler.ts'),
+                role: lambdaExecRole,
+                environment: {MSK_ARN: mskARN}
+            });
+
+            const customResourceProvider = new Provider(this, 'customResourceProvider', {
+                onEventHandler: mskPublicLambda,
+            });
+
+            const customResource = new CustomResource(this, "mskGetBrokersCustomResource", {
+                serviceToken: customResourceProvider.serviceToken
+            })
+            // Access BROKER_ENDPOINTS from the Lambda return value
+            brokerEndpoints = customResource.getAttString("BROKER_ENDPOINTS")
+        }
+        new StringParameter(this, 'SSMParameterMSKBrokers', {
+            description: 'OpenSearch Migration Parameter for MSK Brokers',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`,
+            stringValue: brokerEndpoints
         });
     }
-}
-
-export function getBrokersCustomResource(scope: Construct, vpc: IVpc, clusterArn: string): AwsCustomResource {
-    const getBrokersCR = new AwsCustomResource(scope, 'migrationMSKGetBrokersCR', {
-        onCreate: {
-            service: 'Kafka',
-            action: 'getBootstrapBrokers',
-            parameters: {
-                ClusterArn: clusterArn,
-            },
-            physicalResourceId: PhysicalResourceId.of(Date.now().toString())
-        },
-        onUpdate: {
-            service: 'Kafka',
-            action: 'getBootstrapBrokers',
-            parameters: {
-                ClusterArn: clusterArn,
-            },
-            physicalResourceId: PhysicalResourceId.of(Date.now().toString())
-        },
-        policy: AwsCustomResourcePolicy.fromSdkCalls({resources: [clusterArn]}),
-        vpc: vpc
-    })
-    return getBrokersCR
 }

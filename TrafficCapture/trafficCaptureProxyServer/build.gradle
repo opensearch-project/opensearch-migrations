@@ -40,7 +40,7 @@ dependencies {
     implementation 'com.google.protobuf:protobuf-java:3.22.2'
 
     testImplementation project(':captureProtobufs')
-    testImplementation project(path: ':testUtilities')
+    testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':captureOffloader'))
 }
 

@@ -101,7 +101,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                                             readGate.acquire();
                                         } catch (InterruptedException e) {
                                             log.atWarn().setCause(e).log("Interrupted while waiting to read more data");
-                                            throw new RuntimeException(e);
+                                            Thread.currentThread().interrupt();
+                                            break;
                                         }
                                     }
                                     return null;

@@ -58,4 +58,8 @@ public class NettyScanningHttpProxy {
             bossGroup.shutdownGracefully();
         }
     }
+
+    public void waitForClose() throws InterruptedException {
+        mainChannel.closeFuture().sync();
+    }
 }

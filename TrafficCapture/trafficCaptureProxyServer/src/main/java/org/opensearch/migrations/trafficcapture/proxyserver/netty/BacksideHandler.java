@@ -49,7 +49,7 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        cause.printStackTrace();
+        log.atError().setCause(cause).setMessage("Caught error").log();
         String channelId = ctx.channel().id().asLongText();
         FrontsideHandler.closeAndFlush(ctx.channel());
         metricsLogger.atError(cause)

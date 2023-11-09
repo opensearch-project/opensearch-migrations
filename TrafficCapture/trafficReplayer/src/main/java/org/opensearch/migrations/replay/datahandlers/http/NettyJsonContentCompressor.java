@@ -1,11 +1,8 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.DefaultHttpContent;
-import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
@@ -64,7 +61,7 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
                 contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
                 if (msg instanceof LastHttpContent) {
                     closeStream();
-                    ctx.fireChannelRead(DefaultLastHttpContent.EMPTY_LAST_CONTENT);
+                    ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
                 }
                 return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
            } else {

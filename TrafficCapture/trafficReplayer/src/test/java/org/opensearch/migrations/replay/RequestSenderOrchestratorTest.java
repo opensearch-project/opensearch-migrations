@@ -8,10 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datatypes.UniqueRequestKey;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.testutils.HttpFirstLine;
-import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
@@ -20,7 +17,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -43,7 +39,7 @@ class RequestSenderOrchestratorTest {
         Instant lastEndTime = baseTime;
         var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
         for (int i = 0; i<NUM_REQUESTS_TO_SCHEDULE; ++i) {
-            var rKey = new UniqueRequestKey(TestTrafficStreamKey.instance, i);
+            var rKey = TestRequestKey.getTestConnectionRequestId(i);
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
             var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
@@ -55,7 +51,7 @@ class RequestSenderOrchestratorTest {
             lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
         var closeFuture = senderOrchestrator.scheduleClose(
-                new UniqueRequestKey(TestTrafficStreamKey.instance, NUM_REQUESTS_TO_SCHEDULE),
+                TestRequestKey.getTestConnectionRequestId(NUM_REQUESTS_TO_SCHEDULE),
                 lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
@@ -64,7 +60,7 @@ class RequestSenderOrchestratorTest {
             var arr = cf.get();
             Assertions.assertEquals(null, arr.error);
             Assertions.assertTrue(arr.responseSizeInBytes > 0);
-            var httpMessage = PrettyPrinter.parseHttpMessageFromBufs(PrettyPrinter.HttpMessageType.Response,
+            var httpMessage = PrettyPrinter.parseHttpMessageFromBufs(PrettyPrinter.HttpMessageType.RESPONSE,
                     arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())));
             try {
                 var response = (FullHttpResponse) httpMessage;

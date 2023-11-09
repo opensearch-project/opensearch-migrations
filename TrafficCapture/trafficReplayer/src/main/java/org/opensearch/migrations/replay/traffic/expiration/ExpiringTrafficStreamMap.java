@@ -23,9 +23,9 @@ import java.util.stream.Stream;
  * First, we're fine buffering a variable number of items and secondly, this should be threadsafe and able to
  * be used in highly concurrent contexts.
  *
- * TODO - there will be a race condition in the ExpiringTrafficStream maps/sets where items could be expunged from
- * the collections while they're still in use because this class doesn't have visibility into how items are being used.
- * If that is an issue, using collection items with atomically updated refCounts would mitigate that situation.
+ * Potential TODO - there may be a race condition in the ExpiringTrafficStream maps/sets where items could be expunged
+ * from the collections while they're still in use since this doesn't have visibility into how items are used.
+ * Requiring collection items to have atomically updated refCounts would mitigate that situation.
  */
 @Slf4j
 public class ExpiringTrafficStreamMap {
@@ -76,7 +76,6 @@ public class ExpiringTrafficStreamMap {
                                              Accumulation accumulation, int attempts) {
         var expiringQueue = getOrCreateNodeMap(trafficStreamKey.getNodeId(), observedTimestampMillis);
         var latestPossibleKeyValueAtIncoming = expiringQueue.getLatestPossibleKeyValue();
-        var incomingLastTimestampForAccumulation = accumulation.getNewestPacketTimestampInMillisReference().get();
         // for expiration tracking purposes, push incoming packets' timestamps to be monotonic?
         var timestampMillis = new EpochMillis(Math.max(observedTimestampMillis.millis, expiringQueue.lastKey().millis));
 
@@ -138,7 +137,7 @@ public class ExpiringTrafficStreamMap {
     }
 
     public Accumulation get(ITrafficStreamKey trafficStreamKey, Instant timestamp) {
-        var accumulation = connectionAccumulationMap.get(trafficStreamKey);
+        var accumulation = connectionAccumulationMap.get(makeKey(trafficStreamKey));
         if (accumulation == null) {
             return null;
         }
@@ -151,17 +150,19 @@ public class ExpiringTrafficStreamMap {
     public Accumulation getOrCreateWithoutExpiration(
             ITrafficStreamKey trafficStreamKey,
             Function<ITrafficStreamKey, Accumulation> accumulationGenerator) {
-        var key = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
-        return connectionAccumulationMap.computeIfAbsent(key, k -> {
+        return connectionAccumulationMap.computeIfAbsent(makeKey(trafficStreamKey), k -> {
             newConnectionCounter.incrementAndGet();
             return accumulationGenerator.apply(trafficStreamKey);
         });
     }
 
+    private ScopedConnectionIdKey makeKey(ITrafficStreamKey trafficStreamKey) {
+        return new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
+    }
+
     public void expireOldEntries(ITrafficStreamKey trafficStreamKey, Accumulation accumulation, Instant timestamp) {
-        var key = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
         if (!updateExpirationTrackers(trafficStreamKey, new EpochMillis(timestamp), accumulation, 0)) {
-            connectionAccumulationMap.remove(key);
+            connectionAccumulationMap.remove(makeKey(trafficStreamKey));
         }
     }
 

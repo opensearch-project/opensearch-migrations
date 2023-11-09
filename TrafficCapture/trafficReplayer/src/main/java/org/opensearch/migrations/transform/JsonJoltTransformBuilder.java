@@ -110,7 +110,7 @@ public class JsonJoltTransformBuilder {
     }
 
     public IJsonTransformer build() {
-        if (chainedSpec.size() == 0) {
+        if (chainedSpec.isEmpty()) {
             addCannedOperation(CANNED_OPERATION.PASS_THRU);
         }
         return new JsonJoltTransformer((List) chainedSpec);

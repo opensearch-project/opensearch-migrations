@@ -15,13 +15,13 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
      * This is used to match a URI of the form /INDEX/TYPE/foo... so that it can be
      * transformed into /INDEX/foo...
      */
-    final static Pattern TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES =
+    static final Pattern TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES =
             Pattern.compile("^(\\/[^\\/]*)\\/[^\\/]*(\\/[^\\/]*)$");
 
     /**
      * This is used to match a URI of the form /foo...
      */
-    final static Pattern SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE =
+    static final Pattern SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE =
             Pattern.compile("^(\\/[^\\/]*)$");
     public static final String SEARCH_URI_COMPONENT = "/_search";
     public static final String DOC_URI_COMPONENT = "/_doc";
@@ -37,7 +37,7 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
     }
 
     private Object transformHttpMessage(Map<String, Object> httpMsg) {
-        var incomingMethod = httpMsg.get(HttpJsonMessageWithFaultingPayload.METHOD);
+        var incomingMethod = httpMsg.get(HttpJsonMessageWithFaultingPayload.METHOD_KEY);
         if ("GET".equals(incomingMethod)) {
             processGet(httpMsg);
         } else if ("PUT".equals(incomingMethod)) {
@@ -47,30 +47,30 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
     }
 
     private void processGet(Map<String, Object> httpMsg) {
-        var incomingUri = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI);
+        var incomingUri = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI_KEY);
         var matchedUri = TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES.matcher(incomingUri);
         if (matchedUri.matches()) {
             var operationStr = matchedUri.group(2);
             if (operationStr.equals(SEARCH_URI_COMPONENT)) {
-                httpMsg.put(HttpJsonMessageWithFaultingPayload.URI, matchedUri.group(1) + operationStr);
+                httpMsg.put(HttpJsonMessageWithFaultingPayload.URI_KEY, matchedUri.group(1) + operationStr);
             }
         }
     }
 
     private void processPut(Map<String, Object> httpMsg) {
-        final var uriStr = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI);
+        final var uriStr = (String) httpMsg.get(HttpJsonMessageWithFaultingPayload.URI_KEY);
         var matchedTriple = TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES.matcher(uriStr);
         if (matchedTriple.matches()) {
             // TODO: Add support for multiple type mappings per index (something possible with
             // versions before ES7)
-            httpMsg.put(HttpJsonMessageWithFaultingPayload.URI,
+            httpMsg.put(HttpJsonMessageWithFaultingPayload.URI_KEY,
                     matchedTriple.group(1) + DOC_URI_COMPONENT + matchedTriple.group(2));
             return;
         }
         var matchedSingle = SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE.matcher(uriStr);
         if (matchedSingle.matches()) {
             var topPayloadElement =
-                    (Map<String, Object>) ((Map<String, Object>) httpMsg.get(HttpJsonMessageWithFaultingPayload.PAYLOAD))
+                    (Map<String, Object>) ((Map<String, Object>) httpMsg.get(HttpJsonMessageWithFaultingPayload.PAYLOAD_KEY))
                             .get(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY);
             var mappingsValue = (Map<String, Object>) topPayloadElement.get(MAPPINGS_KEYNAME);
             if (mappingsValue != null) {
@@ -81,8 +81,6 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
 
     private void exciseMappingsType(Map<String, Object> mappingsParent, Map<String, Object> mappingsValue) {
         var firstMappingOp = mappingsValue.entrySet().stream().findFirst();
-        firstMappingOp.ifPresent(firstMapping -> {
-            mappingsParent.put(MAPPINGS_KEYNAME, firstMapping.getValue());
-        });
+        firstMappingOp.ifPresent(firstMapping -> mappingsParent.put(MAPPINGS_KEYNAME, firstMapping.getValue()));
     }
 }

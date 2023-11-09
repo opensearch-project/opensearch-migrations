@@ -1,8 +1,11 @@
 {
   "name": "opensearch-service-domain-cdk",
   "version": "0.1.0",
-  "bin": {
-    "opensearch-service-domain-cdk": "bin/opensearch-service-domain-cdk.js"
+  "description": "CDK infrastructure for migrating to AWS OpenSearch",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Amazon Web Services",
+    "url": "https://github.com/opensearch-project"
   },
   "scripts": {
     "build": "tsc",
@@ -20,10 +23,11 @@
     "typescript": "~4.9.4"
   },
   "dependencies": {
+    "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.100.0-alpha.0",
     "@aws-sdk/client-kafka": "^3.410.0",
     "@aws-sdk/client-lambda": "^3.359.0",
     "@types/aws-lambda": "^8.10.117",
-    "aws-cdk-lib": "2.88.0",
+    "aws-cdk-lib": "2.100.0",
     "aws-lambda": "^1.0.7",
     "constructs": "^10.0.0",
     "semver": "^7.5.4",
