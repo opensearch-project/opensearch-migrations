@@ -8,7 +8,7 @@ target_no_auth=false
 
 # Check for the presence of MIGRATION_DOMAIN_ENDPOINT environment variable
 if [ -n "$MIGRATION_DOMAIN_ENDPOINT" ]; then
-    target_endpoint="https://${MIGRATION_DOMAIN_ENDPOINT}:443"
+    target_endpoint="${MIGRATION_DOMAIN_ENDPOINT}"
     target_auth_user_and_pass="admin:Admin123!"
 else
     target_endpoint="https://opensearchtarget:9200"

@@ -92,7 +92,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
 
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
         const cdkDomainEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
-        const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint : `https://${cdkDomainEndpoint}:443`
+        const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint : cdkDomainEndpoint
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
         let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth`

@@ -9,8 +9,9 @@ import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface NetworkStackProps extends StackPropsExt {
-    readonly vpcId?: string
-    readonly availabilityZoneCount?: number
+    readonly vpcId?: string,
+    readonly availabilityZoneCount?: number,
+    readonly targetClusterEndpoint?: string
 }
 
 export class NetworkStack extends Stack {
@@ -75,6 +76,17 @@ export class NetworkStack extends Stack {
                 description: 'OpenSearch migration parameter for target OpenSearch access security group id',
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
                 stringValue: defaultSecurityGroup.securityGroupId
+            });
+        }
+
+        if (props.targetClusterEndpoint)
+        {
+            // TODO validation for provided URI
+            const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
+            new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
+                description: 'OpenSearch migration parameter for OpenSearch endpoint',
+                parameterName: `/migration/${props.stage}/${deployId}/osClusterEndpoint`,
+                stringValue: props.targetClusterEndpoint
             });
         }
 

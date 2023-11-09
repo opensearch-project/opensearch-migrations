@@ -107,6 +107,8 @@ export class StackComposer {
         const elasticsearchServiceEnabled = getContextForType('elasticsearchServiceEnabled', 'boolean')
         const kafkaBrokerServiceEnabled = getContextForType('kafkaBrokerServiceEnabled', 'boolean')
         const kafkaZookeeperServiceEnabled = getContextForType('kafkaZookeeperServiceEnabled', 'boolean')
+        const targetClusterEndpoint = getContextForType('targetClusterEndpoint', 'string')
+        const targetClusterAccessSecurityGroup = getContextForType('targetClusterAccessSecurityGroup', 'string')
         const fetchMigrationEnabled = getContextForType('fetchMigrationEnabled', 'boolean')
         const dpPipelineTemplatePath = getContextForType('dpPipelineTemplatePath', 'string')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
@@ -180,49 +182,54 @@ export class StackComposer {
             this.stacks.push(networkStack)
         }
 
-        const openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
-            version: version,
-            domainName: domainName,
-            dataNodeInstanceType: dataNodeType,
-            dataNodes: dataNodeCount,
-            dedicatedManagerNodeType: dedicatedManagerNodeType,
-            dedicatedManagerNodeCount: dedicatedManagerNodeCount,
-            warmInstanceType: warmNodeType,
-            warmNodes: warmNodeCount,
-            accessPolicies: accessPolicies,
-            useUnsignedBasicAuth: useUnsignedBasicAuth,
-            fineGrainedManagerUserARN: fineGrainedManagerUserARN,
-            fineGrainedManagerUserName: fineGrainedManagerUserName,
-            fineGrainedManagerUserSecretManagerKeyARN: fineGrainedManagerUserSecretManagerKeyARN,
-            enableDemoAdmin: enableDemoAdmin,
-            enforceHTTPS: enforceHTTPS,
-            tlsSecurityPolicy: tlsSecurityPolicy,
-            ebsEnabled: ebsEnabled,
-            ebsIops: ebsIops,
-            ebsVolumeSize: ebsVolumeSize,
-            ebsVolumeType: ebsVolumeType,
-            encryptionAtRestEnabled: encryptionAtRestEnabled,
-            encryptionAtRestKmsKeyARN: encryptionAtRestKmsKeyARN,
-            appLogEnabled: loggingAppLogEnabled,
-            appLogGroup: loggingAppLogGroupARN,
-            nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
-            vpc: networkStack ? networkStack.vpc : undefined,
-            vpcSubnetIds: vpcSubnetIds,
-            vpcSecurityGroupIds: vpcSecurityGroupIds,
-            availabilityZoneCount: availabilityZoneCount,
-            domainRemovalPolicy: domainRemovalPolicy,
-            stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
-            description: "This stack contains resources to create/manage an OpenSearch Service domain",
-            stage: stage,
-            defaultDeployId: defaultDeployId,
-            addOnMigrationDeployId: addOnMigrationDeployId,
-            ...props,
-        });
+        // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
+        // created cluster like below or an imported one
+        let openSearchStack
+        if (!targetClusterEndpoint) {
+            openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
+                version: version,
+                domainName: domainName,
+                dataNodeInstanceType: dataNodeType,
+                dataNodes: dataNodeCount,
+                dedicatedManagerNodeType: dedicatedManagerNodeType,
+                dedicatedManagerNodeCount: dedicatedManagerNodeCount,
+                warmInstanceType: warmNodeType,
+                warmNodes: warmNodeCount,
+                accessPolicies: accessPolicies,
+                useUnsignedBasicAuth: useUnsignedBasicAuth,
+                fineGrainedManagerUserARN: fineGrainedManagerUserARN,
+                fineGrainedManagerUserName: fineGrainedManagerUserName,
+                fineGrainedManagerUserSecretManagerKeyARN: fineGrainedManagerUserSecretManagerKeyARN,
+                enableDemoAdmin: enableDemoAdmin,
+                enforceHTTPS: enforceHTTPS,
+                tlsSecurityPolicy: tlsSecurityPolicy,
+                ebsEnabled: ebsEnabled,
+                ebsIops: ebsIops,
+                ebsVolumeSize: ebsVolumeSize,
+                ebsVolumeType: ebsVolumeType,
+                encryptionAtRestEnabled: encryptionAtRestEnabled,
+                encryptionAtRestKmsKeyARN: encryptionAtRestKmsKeyARN,
+                appLogEnabled: loggingAppLogEnabled,
+                appLogGroup: loggingAppLogGroupARN,
+                nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
+                vpc: networkStack ? networkStack.vpc : undefined,
+                vpcSubnetIds: vpcSubnetIds,
+                vpcSecurityGroupIds: vpcSecurityGroupIds,
+                availabilityZoneCount: availabilityZoneCount,
+                domainRemovalPolicy: domainRemovalPolicy,
+                stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
+                description: "This stack contains resources to create/manage an OpenSearch Service domain",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                addOnMigrationDeployId: addOnMigrationDeployId,
+                ...props,
+            });
 
-        if (networkStack) {
-            openSearchStack.addDependency(networkStack)
+            if (networkStack) {
+                openSearchStack.addDependency(networkStack)
+            }
+            this.stacks.push(openSearchStack)
         }
-        this.stacks.push(openSearchStack)
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
         let migrationStack
@@ -261,7 +268,7 @@ export class StackComposer {
         // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
         // TODO: Future work to provide orchestration between fetch migration and migration assistance
         let fetchMigrationStack
-        if (fetchMigrationEnabled && networkStack && openSearchStack && migrationStack) {
+        if (fetchMigrationEnabled && networkStack && migrationStack) {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,
@@ -272,7 +279,9 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            fetchMigrationStack.addDependency(openSearchStack)
+            if (openSearchStack) {
+                fetchMigrationStack.addDependency(openSearchStack)
+            }
             fetchMigrationStack.addDependency(migrationStack)
             this.stacks.push(fetchMigrationStack)
         }
@@ -292,7 +301,7 @@ export class StackComposer {
         }
 
         let trafficReplayerStack
-        if ((trafficReplayerServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) || (addOnMigrationDeployId && networkStack)) {
+        if ((trafficReplayerServiceEnabled && networkStack && migrationStack && mskUtilityStack) || (addOnMigrationDeployId && networkStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpc: networkStack.vpc,
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
@@ -313,7 +322,9 @@ export class StackComposer {
             if (migrationStack) {
                 trafficReplayerStack.addDependency(migrationStack)
             }
-            trafficReplayerStack.addDependency(openSearchStack)
+            if (openSearchStack) {
+                trafficReplayerStack.addDependency(openSearchStack)
+            }
             trafficReplayerStack.addDependency(networkStack)
             this.stacks.push(trafficReplayerStack)
         }
@@ -407,7 +418,7 @@ export class StackComposer {
         }
 
         let migrationConsoleStack
-        if (migrationConsoleServiceEnabled && networkStack && openSearchStack && mskUtilityStack) {
+        if (migrationConsoleServiceEnabled && networkStack && mskUtilityStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
                 fetchMigrationEnabled: fetchMigrationEnabled,
@@ -431,8 +442,10 @@ export class StackComposer {
             if (fetchMigrationStack) {
                 migrationConsoleStack.addDependency(fetchMigrationStack)
             }
+            if (openSearchStack) {
+                migrationConsoleStack.addDependency(openSearchStack)
+            }
             migrationConsoleStack.addDependency(mskUtilityStack)
-            migrationConsoleStack.addDependency(openSearchStack)
             this.stacks.push(migrationConsoleStack)
         }
 
