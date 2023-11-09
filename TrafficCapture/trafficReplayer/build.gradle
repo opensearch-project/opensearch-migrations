@@ -47,7 +47,7 @@ dependencies {
     implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"${resilience4jVersion}"
     implementation group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"${resilience4jVersion}"
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.94.Final'
-    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.5.1'
+    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.6.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
