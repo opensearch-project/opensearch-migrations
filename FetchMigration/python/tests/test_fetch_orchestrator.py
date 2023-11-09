@@ -119,7 +119,7 @@ class TestFetchOrchestrator(unittest.TestCase):
         mock_metadata_migration.return_value = MetadataMigrationResult()
         orchestrator.run(FetchOrchestratorParams("test", "test"))
         mock_metadata_migration.assert_called_once_with(ANY)
-        mock_write_pipeline.assert_called_once_with("test")
+        mock_write_pipeline.assert_called_once_with("test", "test", None)
         mock_update_host.assert_not_called()
 
     @patch('builtins.open', new_callable=mock_open())

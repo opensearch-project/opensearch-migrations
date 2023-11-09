@@ -48,11 +48,8 @@ def update_target_host(dp_config: dict, target_host: str):
             pipeline_config[metadata_migration.SINK_KEY] = {plugin_name: plugin_config}
 
 
-def write_inline_pipeline(pipeline_file_path: str):
-    # This is expected to be a base64 encoded string
-    inline_pipeline = __get_env_string("INLINE_PIPELINE")
+def write_inline_pipeline(pipeline_file_path: str, inline_pipeline: str, inline_target_host: Optional[str]):
     pipeline_yaml = yaml.safe_load(base64.b64decode(inline_pipeline))
-    inline_target_host = __get_env_string("INLINE_TARGET_HOST")
     if inline_target_host is not None:
         update_target_host(pipeline_yaml, inline_target_host)
     with open(pipeline_file_path, 'w') as out_file:
@@ -73,7 +70,7 @@ def run(params: FetchOrchestratorParams) -> Optional[int]:
     inline_pipeline = __get_env_string("INLINE_PIPELINE")
     inline_target_host = __get_env_string("INLINE_TARGET_HOST")
     if inline_pipeline is not None:
-        write_inline_pipeline(params.pipeline_file_path)
+        write_inline_pipeline(params.pipeline_file_path, inline_pipeline, inline_target_host)
     elif inline_target_host is not None:
         write_inline_target_host(params.pipeline_file_path, inline_target_host)
     dp_exec_path = params.data_prepper_path + __DP_EXECUTABLE_SUFFIX
