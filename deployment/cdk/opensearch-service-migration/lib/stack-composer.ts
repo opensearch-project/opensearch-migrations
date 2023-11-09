@@ -108,7 +108,6 @@ export class StackComposer {
         const kafkaBrokerServiceEnabled = getContextForType('kafkaBrokerServiceEnabled', 'boolean')
         const kafkaZookeeperServiceEnabled = getContextForType('kafkaZookeeperServiceEnabled', 'boolean')
         const targetClusterEndpoint = getContextForType('targetClusterEndpoint', 'string')
-        const targetClusterAccessSecurityGroup = getContextForType('targetClusterAccessSecurityGroup', 'string')
         const fetchMigrationEnabled = getContextForType('fetchMigrationEnabled', 'boolean')
         const dpPipelineTemplatePath = getContextForType('dpPipelineTemplatePath', 'string')
         const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')

@@ -6,6 +6,7 @@ import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
+import {createOpenSearchIAMAccessPolicy, createOpenSearchServerlessIAMAccessPolicy} from "../common-utilities";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
@@ -80,7 +81,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
         }
-        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy]
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy]
 
         if (props.fetchMigrationEnabled) {
             environment["FETCH_MIGRATION_COMMAND"] = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`)

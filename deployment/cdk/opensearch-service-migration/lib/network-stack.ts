@@ -17,6 +17,14 @@ export interface NetworkStackProps extends StackPropsExt {
 export class NetworkStack extends Stack {
     public readonly vpc: IVpc;
 
+    private validateHttpURL(urlString: string) {
+        // URL will throw error if the urlString is invalid
+        let url = new URL(urlString);
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+            throw new Error(`Invalid url protocol for target endpoint: ${urlString} was expecting 'http' or 'https'`)
+        }
+    }
+
     constructor(scope: Construct, id: string, props: NetworkStackProps) {
         super(scope, id, props);
 
@@ -79,9 +87,8 @@ export class NetworkStack extends Stack {
             });
         }
 
-        if (props.targetClusterEndpoint)
-        {
-            // TODO validation for provided URI
+        if (props.targetClusterEndpoint) {
+            this.validateHttpURL(props.targetClusterEndpoint)
             const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
             new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
                 description: 'OpenSearch migration parameter for OpenSearch endpoint',

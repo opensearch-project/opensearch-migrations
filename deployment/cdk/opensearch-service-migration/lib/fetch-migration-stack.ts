@@ -13,6 +13,11 @@ import {join} from "path";
 import {readFileSync} from "fs"
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {
+    createDefaultECSTaskRole,
+    createOpenSearchIAMAccessPolicy,
+    createOpenSearchServerlessIAMAccessPolicy
+} from "./common-utilities";
 
 export interface FetchMigrationProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -36,10 +41,18 @@ export class FetchMigrationStack extends Stack {
             vpc: props.vpc
         })
 
+        const serviceName = "fetch-migration"
+        const ecsTaskRole = createDefaultECSTaskRole(this, serviceName)
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        ecsTaskRole.addToPolicy(openSearchPolicy)
+        ecsTaskRole.addToPolicy(openSearchServerlessPolicy)
         // ECS Task Definition
         const fetchMigrationFargateTask = new FargateTaskDefinition(this, "fetchMigrationFargateTask", {
+            family: `migration-${props.stage}-${serviceName}`,
             memoryLimitMiB: 2048,
-            cpu: 512
+            cpu: 512,
+            taskRole: ecsTaskRole
         });
 
         new StringParameter(this, 'SSMParameterFetchMigrationTaskDefArn', {
@@ -61,7 +74,7 @@ export class FetchMigrationStack extends Stack {
         // Create Fetch Migration Container
         const fetchMigrationContainer = fetchMigrationFargateTask.addContainer("fetchMigrationContainer", {
             image: ContainerImage.fromAsset(join(__dirname, "../../../..", "FetchMigration")),
-            containerName: "fetch-migration",
+            containerName: serviceName,
             logging: LogDrivers.awsLogs({ streamPrefix: 'fetch-migration-lg', logRetention: 30 })
         });
 

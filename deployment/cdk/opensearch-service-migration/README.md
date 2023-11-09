@@ -91,7 +91,7 @@ Once a service has been deployed, a command shell can be opened for that service
 # ./accessContainer.sh <service-name> <stage> <region>
 ./accessContainer.sh migration-console dev us-east-1
 ```
-To be able to execute this command the user will need to have their AWS credentials configured for their environment. It is also worth noting that the identity used should have permissions to `ecs:ExecuteCommand` on both the cluster and the given container task. The IAM policy needed could look similar to the below:
+To be able to execute this command the user will need to have their AWS credentials configured for their environment. It is also worth noting that the identity used should have permissions to `ecs:ExecuteCommand` on both the ECS cluster and the given container task, for which an Administrator or Deployment role may already have. An example IAM policy that could be added, which allows accessing any of the containers on the ECS cluster, can be seen below:
 ```shell
 {
     "Version": "2012-10-17",
