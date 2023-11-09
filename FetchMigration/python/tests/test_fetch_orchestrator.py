@@ -143,7 +143,7 @@ class TestFetchOrchestrator(unittest.TestCase):
     # Note that mock objects are passed bottom-up from the patch order above
     def test_write_inline_target_host(self, mock_file_open: MagicMock, mock_yaml_load: MagicMock,
                                       mock_yaml_dump: MagicMock):
-        mock_yaml_load.return_value = {"root": {"sink": {"opensearch": {"hosts": ["val"]}}}}
+        mock_yaml_load.return_value = {"root": {"sink": [{"opensearch": {"hosts": ["val"]}}]}}
         inline_target = "host"
         expected_target_url = "https://" + inline_target
         test_values = [
@@ -152,7 +152,7 @@ class TestFetchOrchestrator(unittest.TestCase):
         ]
         expected_pipeline = copy.deepcopy(mock_yaml_load.return_value)
         # TODO - replace with jsonpath
-        expected_pipeline["root"]["sink"]["opensearch"]["hosts"] = [expected_target_url]
+        expected_pipeline["root"]["sink"][0]["opensearch"]["hosts"] = [expected_target_url]
         for val in test_values:
             mock_file_open.reset_mock()
             mock_yaml_dump.reset_mock()

@@ -45,7 +45,7 @@ def update_target_host(dp_config: dict, target_host: str):
             plugin_name, plugin_config = metadata_migration.get_supported_endpoint(pipeline_config,
                                                                                    metadata_migration.SINK_KEY)
             plugin_config[metadata_migration.HOSTS_KEY] = [target_with_protocol]
-            pipeline_config[metadata_migration.SINK_KEY] = {plugin_name: plugin_config}
+            pipeline_config[metadata_migration.SINK_KEY] = [{plugin_name: plugin_config}]
 
 
 def write_inline_pipeline(pipeline_file_path: str, inline_pipeline: str, inline_target_host: Optional[str]):
