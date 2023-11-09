@@ -236,22 +236,17 @@ class E2ETests(unittest.TestCase):
 
         source_indices = get_indices(self.source_endpoint, self.auth)
         target_indices = get_indices(self.target_endpoint, self.auth)
-        processed_indices = []
 
-        for index in set(source_indices) & set(target_indices):
-            if index not in self.ignore_list:
-                if index != "searchguard":
-                    source_count = get_doc_count(self.source_endpoint, index, self.auth)
-                    target_count = get_doc_count(self.target_endpoint, index, self.auth)
-                    processed_indices.append(index)
+        common_indices = set(source_indices) & set(target_indices)
+        valid_indices = [index for index in common_indices if index not in self.ignore_list and index != "searchguard"]
 
-                if source_count != source_count:
-                    logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
-                    self.assertEqual(source_count, target_count)
-                else:
-                    self.assertEqual(source_count, target_count)
-                    logger.info(f'{index}: doc counts match on both source and target endpoints - {source_count}')
+        self.assertTrue(valid_indices, "No valid indices found to compare after running OpenSearch Benchmark")
 
-        if not processed_indices:
-            logger.error("There were no indices to compare, check that OpenSearch Benchmark ran successfully")
-            self.assert_(False)
+        for index in valid_indices:
+            source_count = get_doc_count(self.source_endpoint, index, self.auth)
+        target_count = get_doc_count(self.target_endpoint, index, self.auth)
+
+        if source_count != target_count:
+            logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
+        self.assertEqual(source_count, target_count, f'{index}: doc counts do not match')
+
