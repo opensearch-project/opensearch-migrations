@@ -6,4 +6,4 @@ script_dir_abs_path=$(dirname "$script_abs_path")
 cd $script_dir_abs_path || exit
 
 cd ../../../TrafficCapture || exit
-./gradlew :dockerSolution:buildDockerImages
+./gradlew :dockerSolution:buildDockerImages -x test

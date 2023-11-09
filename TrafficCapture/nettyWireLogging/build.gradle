@@ -11,7 +11,7 @@ plugins {
 dependencies {
     implementation project(':captureOffloader')
     implementation project(':coreUtilities')
-    api group: 'io.netty', name: 'netty-all', version: '4.1.94.Final'
+    api group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
     testImplementation project(':captureProtobufs')
