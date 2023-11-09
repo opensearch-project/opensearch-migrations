@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -175,6 +176,8 @@ class TrafficReplayerTest {
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
+
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -219,6 +222,7 @@ class TrafficReplayerTest {
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
                         }
                 );
         byte[] serializedChunks;

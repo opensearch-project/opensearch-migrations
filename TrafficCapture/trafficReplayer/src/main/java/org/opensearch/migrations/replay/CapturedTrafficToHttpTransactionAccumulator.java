@@ -139,11 +139,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
         if (accum.hasRrPair()) {
             accum.getRrPair().holdTrafficStream(tsk);
-        } else {
+        } else if (!trafficStream.getSubStream(trafficStream.getSubStreamCount()-1).hasClose()) {
             assert accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK ||
                     accum.state == Accumulation.State.IGNORING_LAST_REQUEST ||
-                    trafficStream.getSubStreamCount() == 0 ||
-                    trafficStream.getSubStream(trafficStream.getSubStreamCount()-1).hasClose();
+                    trafficStream.getSubStreamCount() == 0;
+            listener.onTrafficStreamIgnored(tsk);
         }
     }
 

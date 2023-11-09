@@ -15,4 +15,5 @@ public interface AccumulationCallbacks {
                                  @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
     void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber, @NonNull Instant when,
                            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
+    void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk);
 }

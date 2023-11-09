@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -221,6 +222,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
+
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();

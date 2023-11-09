@@ -17,6 +17,9 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
@@ -70,9 +73,7 @@ public class FullTrafficReplayerTest {
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
     public static final String TEST_GROUP_PRODUCER_ID = "TEST_GROUP_PRODUCER_ID";
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC";
-    public static final int TEST_RECORD_COUNT = 100;
     public static final String TEST_NODE_ID = "TestNodeId";
-    public static final String TEST_TRAFFIC_STREAM_ID_STRING = "TEST_TRAFFIC_STREAM_ID_STRING";
     public static final int PRODUCER_SLEEP_INTERVAL_MS = 100;
     public static final Duration MAX_WAIT_TIME_FOR_TOPIC = Duration.ofMillis(PRODUCER_SLEEP_INTERVAL_MS*2);
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
@@ -105,12 +106,18 @@ public class FullTrafficReplayerTest {
         log.error("done");
     }
 
-    @Test
+    @ParameterizedTest
+    @CsvSource(value = {
+            "3,false",
+            "-1,false",
+            "3,true",
+//            "-1,true",
+    })
     @Tag("longTest")
-    public void fullTest() throws Throwable {
+    public void fullTest(int testSize, boolean randomize) throws Throwable {
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 TestHttpServerContext::makeResponse);
-        var streamAndConsumer = generateStreamAndTupleConsumerWithSomeChecks(3);
+        var streamAndConsumer = generateStreamAndTupleConsumerWithSomeChecks(testSize, randomize);
         var numExpectedRequests = streamAndConsumer._2;
         var trafficStreams = streamAndConsumer._1.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(ts->TrafficStreamUtils.summarizeTrafficStream(ts))
@@ -246,20 +253,14 @@ public class FullTrafficReplayerTest {
     }
 
     private Tuple2<Stream<TrafficStream>, Integer>
-    generateStreamAndTupleConsumerWithSomeChecks() {
-        return generateStreamAndTupleConsumerWithSomeChecks(-1);
-    }
-
-    private Tuple2<Stream<TrafficStream>, Integer>
-    generateStreamAndTupleConsumerWithSomeChecks(int count) {
-        Random r = new Random(1);
+    generateStreamAndTupleConsumerWithSomeChecks(int count, boolean randomize) {
         var generatedCases = count > 0 ?
                 TrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
                 TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes();
         var testCaseArr = generatedCases.toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
-        var aggregatedStreams =
+        var aggregatedStreams = randomize ?
+                randomlyInterleaveStreams(count, Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :
                 Arrays.stream(testCaseArr).flatMap(c->Arrays.stream(c.trafficStreams));
-                //randomlyInterleaveStreams(r, Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams)));
 
         var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
         return new Tuple2<>(aggregatedStreams, numExpectedRequests);
@@ -280,11 +281,12 @@ public class FullTrafficReplayerTest {
         }
     }
 
-    public static <T> Stream<T> randomlyInterleaveStreams(Random r, Stream<Stream<T>> orderedItemStreams) {
+    public static <T> Stream<T> randomlyInterleaveStreams(int randomSeed, Stream<Stream<T>> orderedItemStreams) {
         List<Iterator<T>> iteratorList = orderedItemStreams
                 .map(Stream::iterator)
                 .filter(it->it.hasNext())
                 .collect(Collectors.toCollection(()->new ArrayList<>()));
+        var r = new Random(randomSeed);
         return Streams.stream(new Iterator<T>() {
             @Override
             public boolean hasNext() {
@@ -398,10 +400,14 @@ public class FullTrafficReplayerTest {
         @Override
         public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             synchronized (pQueue) { // figure out if I need to do something more efficient later
+                log.info("Commit called for "+trafficStreamKey+" with pQueue.size="+pQueue.size());
+                var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;
                 int topCursor = pQueue.peek().arrayIndex;
                 var didRemove = pQueue.remove(trafficStreamKey);
+                if (!didRemove) {
+                    log.error("no item "+incomingCursor+" to remove from "+pQueue);
+                }
                 assert didRemove;
-                var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;
                 if (topCursor == incomingCursor) {
                     topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex()).orElse(topCursor+1);
                     log.info("Commit called for "+trafficStreamKey+", and new topCursor="+topCursor);

@@ -645,6 +645,11 @@ public class TrafficReplayer {
             commitTrafficStreams(trafficStreamKeysBeingHeld);
         }
 
+        @Override
+        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
+            commitTrafficStreams(List.of(tsk));
+        }
+
         private TransformedTargetRequestAndResponse
         packageAndWriteResponse(Consumer<SourceTargetCaptureTuple> tupleWriter,
                                 @NonNull UniqueReplayerRequestKey requestKey,
