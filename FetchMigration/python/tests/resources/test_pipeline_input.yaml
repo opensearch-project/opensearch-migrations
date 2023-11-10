@@ -16,6 +16,7 @@ test-pipeline-input:
         - sink1:
             num_array: [0]
         - opensearch:
-            hosts: ["https://os_host"]
+            hosts:
+              - "https://os_host"
             username: "test_user"
             password: "test"
