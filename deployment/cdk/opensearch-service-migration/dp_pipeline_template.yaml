@@ -3,7 +3,8 @@ historical-data-migration:
   # Source cluster configuration
   source:
     opensearch:
-      # DO NOT CHANGE the hosts value - this will be updated by the CDK
+      # CDK code will replace this value, so DO NOT CHANGE this
+      # unless the file is being used outside of the CDK
       hosts:
       - <SOURCE_CLUSTER_HOST>
       # Uncomment the following line to disable TLS
@@ -17,10 +18,9 @@ historical-data-migration:
   # Target cluster configuration
   sink:
   - opensearch:
-      # DO NOT CHANGE the hosts value - this will be updated by the CDK
-      # But adjust the protocol (http or https) as appropriate
+      # Note - CDK code will replace this value with the target cluster endpoint
       hosts:
-      - https://<TARGET_CLUSTER_HOST>
+      - <TARGET_CLUSTER_ENDPOINT_PLACEHOLDER>
       # Derive index name from record metadata
       index: ${getMetadata("opensearch-index")}
       # Use the same document ID as the source cluster document

@@ -162,6 +162,6 @@ if __name__ == '__main__':  # pragma no cover
         help="Target doc_count to reach, after which the Data Prepper pipeline will be terminated"
     )
     namespace = arg_parser.parse_args()
-    print("\n##### Starting monitor tool... #####\n")
+    logging.info("\n##### Starting monitor tool... #####\n")
     run(MigrationMonitorParams(namespace.target_count, namespace.data_prepper_endpoint))
-    print("\n##### Ending monitor tool... #####\n")
+    logging.info("\n##### Ending monitor tool... #####\n")

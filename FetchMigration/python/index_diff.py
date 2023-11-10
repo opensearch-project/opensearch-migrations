@@ -16,16 +16,20 @@ class IndexDiff:
     def __init__(self, source: dict, target: dict):
         self.identical_empty_indices = set()
         self.conflicting_indices = set()
-        indices_in_target = set(source.keys()) & set(target.keys())
-        for index in indices_in_target:
+        # Compute index names that are present in both the source and target
+        indices_intersection = set(source.keys()) & set(target.keys())
+        # Check if these "common" indices are identical or have metadata conflicts
+        for index in indices_intersection:
             # Check settings
             if utils.has_differences(SETTINGS_KEY, source[index], target[index]):
                 self.conflicting_indices.add(index)
             # Check mappings
             if utils.has_differences(MAPPINGS_KEY, source[index], target[index]):
                 self.conflicting_indices.add(index)
-        self.identical_indices = set(indices_in_target) - set(self.conflicting_indices)
-        self.indices_to_create = set(source.keys()) - set(indices_in_target)
+        # Identical indices are the subset that do not have metadata conflicts
+        self.identical_indices = set(indices_intersection) - set(self.conflicting_indices)
+        # Indices that are not already on the target need to be created
+        self.indices_to_create = set(source.keys()) - set(indices_intersection)
 
     def set_identical_empty_indices(self, indices: set):
         self.identical_empty_indices = indices
