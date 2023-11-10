@@ -1,108 +1,23 @@
 import argparse
-from typing import Optional
 
 import yaml
 
+import endpoint_utils
 import index_operations
 import utils
-# Constants
-from endpoint_info import EndpointInfo
 from metadata_migration_params import MetadataMigrationParams
 from metadata_migration_result import MetadataMigrationResult
 
-SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
-SOURCE_KEY = "source"
-SINK_KEY = "sink"
-HOSTS_KEY = "hosts"
-DISABLE_AUTH_KEY = "disable_authentication"
-USER_KEY = "username"
-PWD_KEY = "password"
-INSECURE_KEY = "insecure"
-CONNECTION_KEY = "connection"
+# Constants
 INDICES_KEY = "indices"
 INCLUDE_KEY = "include"
 INDEX_NAME_KEY = "index_name_regex"
 
 
-# This config key may be either directly in the main dict (for sink)
-# or inside a nested dict (for source). The default value is False.
-def is_insecure(config: dict) -> bool:
-    if INSECURE_KEY in config:
-        return config[INSECURE_KEY]
-    elif CONNECTION_KEY in config and INSECURE_KEY in config[CONNECTION_KEY]:
-        return config[CONNECTION_KEY][INSECURE_KEY]
-    return False
-
-
-# TODO Only supports basic auth for now
-def get_auth(input_data: dict) -> Optional[tuple]:
-    if not input_data.get(DISABLE_AUTH_KEY, False) and USER_KEY in input_data and PWD_KEY in input_data:
-        return input_data[USER_KEY], input_data[PWD_KEY]
-
-
-def get_endpoint_info(plugin_config: dict) -> EndpointInfo:
-    # "hosts" can be a simple string, or an array of hosts for Logstash to hit.
-    # This tool needs one accessible host, so we pick the first entry in the latter case.
-    url = plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
-    url += "/"
-    # verify boolean will be the inverse of the insecure SSL key, if present
-    should_verify = not is_insecure(plugin_config)
-    return EndpointInfo(url, get_auth(plugin_config), should_verify)
-
-
-def check_supported_endpoint(config: dict) -> Optional[tuple]:
-    for supported_type in SUPPORTED_ENDPOINTS:
-        if supported_type in config:
-            return supported_type, config[supported_type]
-
-
-def get_supported_endpoint(config: dict, key: str) -> tuple:
-    # The value of each key may be a single plugin (as a dict)
-    # or a list of plugin configs
-    supported_tuple = tuple()
-    if type(config[key]) is dict:
-        supported_tuple = check_supported_endpoint(config[key])
-    elif type(config[key]) is list:
-        for entry in config[key]:
-            supported_tuple = check_supported_endpoint(entry)
-            # Break out of the loop at the first supported type
-            if supported_tuple:
-                break
-    if not supported_tuple:
-        raise ValueError("Could not find any supported endpoints in section: " + key)
-    # First tuple value is the name, second value is the config dict
-    return supported_tuple[0], supported_tuple[1]
-
-
-def validate_plugin_config(config: dict, key: str):
-    # Raises a ValueError if no supported endpoints are found
-    supported_endpoint = get_supported_endpoint(config, key)
-    plugin_config = supported_endpoint[1]
-    if HOSTS_KEY not in plugin_config:
-        raise ValueError("No hosts defined for endpoint: " + supported_endpoint[0])
-    # Check if auth is disabled. If so, no further validation is required
-    if plugin_config.get(DISABLE_AUTH_KEY, False):
-        return
-    elif USER_KEY not in plugin_config:
-        raise ValueError("Invalid auth configuration (no username) for endpoint: " + supported_endpoint[0])
-    elif PWD_KEY not in plugin_config:
-        raise ValueError("Invalid auth configuration (no password for username) for endpoint: " +
-                         supported_endpoint[0])
-
-
-def validate_pipeline_config(config: dict):
-    if SOURCE_KEY not in config:
-        raise ValueError("Missing source configuration in Data Prepper pipeline YAML")
-    if SINK_KEY not in config:
-        raise ValueError("Missing sink configuration in Data Prepper pipeline YAML")
-    validate_plugin_config(config, SOURCE_KEY)
-    validate_plugin_config(config, SINK_KEY)
-
-
 def write_output(yaml_data: dict, new_indices: set, output_path: str):
     pipeline_config = next(iter(yaml_data.values()))
-    # Endpoint is a tuple of (type, config)
-    source_config = get_supported_endpoint(pipeline_config, SOURCE_KEY)[1]
+    # Result is a tuple of (type, config)
+    source_config = endpoint_utils.get_supported_endpoint_config(pipeline_config, endpoint_utils.SOURCE_KEY)[1]
     source_indices = source_config.get(INDICES_KEY, dict())
     included_indices = source_indices.get(INCLUDE_KEY, list())
     for index in new_indices:
@@ -145,14 +60,6 @@ def print_report(index_differences: tuple[set, set, set], count: int):  # pragma
     print("Total documents to be moved: " + str(count))
 
 
-def compute_endpoint_and_fetch_indices(config: dict, key: str) -> tuple[EndpointInfo, dict]:
-    endpoint = get_supported_endpoint(config, key)
-    # Endpoint is a tuple of (type, config)
-    endpoint_info = get_endpoint_info(endpoint[1])
-    indices = index_operations.fetch_all_indices(endpoint_info)
-    return endpoint_info, indices
-
-
 def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     # Sanity check
     if not args.report and len(args.output_file) == 0:
@@ -162,14 +69,19 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
         dp_config = yaml.safe_load(pipeline_file)
     # We expect the Data Prepper pipeline to only have a single top-level value
     pipeline_config = next(iter(dp_config.values()))
-    validate_pipeline_config(pipeline_config)
+    # Raises a ValueError if source or sink definitions are missing
+    endpoint_utils.validate_pipeline(pipeline_config)
+    source_endpoint_info = endpoint_utils.get_endpoint_info_from_pipeline_config(pipeline_config,
+                                                                                 endpoint_utils.SOURCE_KEY)
+    target_endpoint_info = endpoint_utils.get_endpoint_info_from_pipeline_config(pipeline_config,
+                                                                                 endpoint_utils.SINK_KEY)
     result = MetadataMigrationResult()
-    # Fetch EndpointInfo and indices
-    source_endpoint_info, source_indices = compute_endpoint_and_fetch_indices(pipeline_config, SOURCE_KEY)
+    # Fetch indices
+    source_indices = index_operations.fetch_all_indices(source_endpoint_info)
     # If source indices is empty, return immediately
     if len(source_indices.keys()) == 0:
         return result
-    target_endpoint_info, target_indices = compute_endpoint_and_fetch_indices(pipeline_config, SINK_KEY)
+    target_indices = index_operations.fetch_all_indices(target_endpoint_info)
     # Compute index differences and print report
     diff = get_index_differences(source_indices, target_indices)
     # The first element in the tuple is the set of indices to create
