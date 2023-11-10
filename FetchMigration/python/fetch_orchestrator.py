@@ -9,6 +9,7 @@ from typing import Optional
 
 import yaml
 
+import endpoint_utils
 import metadata_migration
 import migration_monitor
 from fetch_orchestrator_params import FetchOrchestratorParams
@@ -40,12 +41,12 @@ def update_target_host(dp_config: dict, target_host: str):
         # We expect the Data Prepper pipeline to only have a single top-level value
         pipeline_config = next(iter(dp_config.values()))
         # The entire pipeline will be validated later
-        if metadata_migration.SINK_KEY in pipeline_config:
+        if endpoint_utils.SINK_KEY in pipeline_config:
             # throws ValueError if no supported endpoints are found
-            plugin_name, plugin_config = metadata_migration.get_supported_endpoint(pipeline_config,
-                                                                                   metadata_migration.SINK_KEY)
-            plugin_config[metadata_migration.HOSTS_KEY] = [target_with_protocol]
-            pipeline_config[metadata_migration.SINK_KEY] = [{plugin_name: plugin_config}]
+            plugin_name, plugin_config = endpoint_utils.get_supported_endpoint_config(pipeline_config,
+                                                                                      endpoint_utils.SINK_KEY)
+            plugin_config[endpoint_utils.HOSTS_KEY] = [target_with_protocol]
+            pipeline_config[endpoint_utils.SINK_KEY] = [{plugin_name: plugin_config}]
 
 
 def write_inline_pipeline(pipeline_file_path: str, inline_pipeline: str, inline_target_host: Optional[str]):

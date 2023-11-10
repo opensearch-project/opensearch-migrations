@@ -41,7 +41,7 @@ def create_plugin_config(host_list: list[str],
     return config
 
 
-# Utility method to creat a test config section
+# Utility method to create a test config section
 def create_config_section(plugin_config: dict) -> dict:
     valid_plugin = dict()
     valid_plugin[random.choice(SUPPORTED_ENDPOINTS)] = plugin_config
