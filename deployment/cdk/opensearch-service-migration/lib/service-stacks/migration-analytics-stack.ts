@@ -35,7 +35,7 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: `otel-collector-${deployId}`,
-            dockerImageRegistryName: 'public.ecr.aws/a0w2c5q7/otelcol-with-opensearch:latest',
+            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelcol"),
             securityGroups: securityGroups,
             // environment: {
             //     "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
