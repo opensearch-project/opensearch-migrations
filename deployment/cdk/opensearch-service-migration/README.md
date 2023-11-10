@@ -127,7 +127,7 @@ After the benchmark has been run, the indices and documents of the source and ta
 ```
 
 ## Importing Target Clusters
-By default, if a `targetClusterEndpoint` option isn't provided this CDK will create an OpenSearch Service Domain (using provided options) to be the target cluster of this solution. While setting up this Domain, the CDK will also configure a relevant security group and allows options to configure an access policy on the Domain (`accessPolicies` and `openAccessPolicyEnabled` options) such that the Domain is fully setup for use at deployment. 
+By default, if a `targetClusterEndpoint` option isn't provided, this CDK will create an OpenSearch Service Domain (using provided options) to be the target cluster of this solution. While setting up this Domain, the CDK will also configure a relevant security group and allows options to configure an access policy on the Domain (`accessPolicies` and `openAccessPolicyEnabled` options) such that the Domain is fully setup for use at deployment. 
 
 In the case of an imported target cluster, there are normally some modifications that need to be made on the existing target cluster to allow proper functioning of this solution after deployment which the below subsections elaborate on.
 
@@ -138,8 +138,8 @@ For a Domain, there are typically two items that need to be configured to allow 
 
 #### OpenSearch Serverless
 A Collection, will need to configure a Network and Data Access policy to allow proper functioning of this solution
-1. The Collection should have a network policy that either has a `Public` access type on the given Collection OpenSearch endpoint, or preferably has a `VPC` access type by creating a VPC endpoint on the VPC used for this solution and attaching the `osClusterAccessSG` security group to that VPC endpoint
-2. The data access policy needed should grant permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection, and use the task roles of the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration) as the principals for this data access policy. This could potentially be focused down to specific indexes or operations for sensitive cases, but should be monitored as this could prevent some historical-data/requests from being replayed to the Collection 
+1. The Collection should have a network policy that has a `VPC` access type by creating a VPC endpoint on the VPC used for this solution. This VPC endpoint should be configured for the private subnets of the VPC and attach the `osClusterAccessSG` security group.
+2. The data access policy needed should grant permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection, and use the task roles of the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration) as the principals for this data access policy. This could potentially be focused down to specific indexes or operations for sensitive cases, but should be monitored as this could prevent some historical-data/requests from being replayed to the Collection
 
 See [Configuring SigV4 Replayer Requests](#configuring-sigv4-replayer-requests) for details on enabling SigV4 requests from the Traffic Replayer to the target cluster after following the previous setup
 

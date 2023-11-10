@@ -17,12 +17,20 @@ export interface NetworkStackProps extends StackPropsExt {
 export class NetworkStack extends Stack {
     public readonly vpc: IVpc;
 
-    private validateHttpURL(urlString: string) {
+    // Validate a proper url string is provided and return an url string which contains a protocol and hostname, and only
+    // contains the port if it is not the default protocol port (e.g. 443, 80)
+    private validateAndReturnFormattedHttpURL(urlString: string) {
         // URL will throw error if the urlString is invalid
         let url = new URL(urlString);
         if (url.protocol !== "http:" && url.protocol !== "https:") {
             throw new Error(`Invalid url protocol for target endpoint: ${urlString} was expecting 'http' or 'https'`)
         }
+        // URLs that contain the default protocol port (e.g. 443, 80) will not show in the URL toString()
+        let formattedUrlString = url.toString()
+        if (formattedUrlString.endsWith("/")) {
+            formattedUrlString = formattedUrlString.slice(0, -1)
+        }
+        return formattedUrlString
     }
 
     constructor(scope: Construct, id: string, props: NetworkStackProps) {
@@ -88,12 +96,12 @@ export class NetworkStack extends Stack {
         }
 
         if (props.targetClusterEndpoint) {
-            this.validateHttpURL(props.targetClusterEndpoint)
+            const formattedClusterEndpoint = this.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint)
             const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
             new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
                 description: 'OpenSearch migration parameter for OpenSearch endpoint',
                 parameterName: `/migration/${props.stage}/${deployId}/osClusterEndpoint`,
-                stringValue: props.targetClusterEndpoint
+                stringValue: formattedClusterEndpoint
             });
         }
 
