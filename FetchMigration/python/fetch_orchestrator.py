@@ -59,7 +59,7 @@ def write_inline_pipeline(pipeline_file_path: str, inline_pipeline: str, inline_
 
 
 def write_inline_target_host(pipeline_file_path: str, inline_target_host: str):
-    with open(pipeline_file_path, 'rw') as pipeline_file:
+    with open(pipeline_file_path, 'r+') as pipeline_file:
         pipeline_yaml = yaml.safe_load(pipeline_file)
         update_target_host(pipeline_yaml, inline_target_host)
         # Note - this does not preserve comments

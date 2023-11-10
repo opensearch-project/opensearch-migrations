@@ -157,7 +157,7 @@ class TestFetchOrchestrator(unittest.TestCase):
             mock_file_open.reset_mock()
             mock_yaml_dump.reset_mock()
             orchestrator.write_inline_target_host("test", val)
-            mock_file_open.assert_called_once_with("test", "rw")
+            mock_file_open.assert_called_once_with("test", "r+")
             mock_yaml_dump.assert_called_once_with(expected_pipeline, ANY)
 
     def test_update_target_host_bad_config(self):
