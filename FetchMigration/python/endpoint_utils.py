@@ -29,7 +29,7 @@ URL_REGION_PATTERN = re.compile(r"([\w-]*)\.(es|aoss)\.amazonaws\.com")
 def __get_url(plugin_config: dict) -> str:
     # "hosts" can be a simple string, or an array of hosts for Logstash to hit.
     # This tool needs one accessible host, so we pick the first entry in the latter case.
-    return plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
+    return plugin_config[HOSTS_KEY][0] if isinstance(plugin_config[HOSTS_KEY], list) else plugin_config[HOSTS_KEY]
 
 
 # Helper function that attempts to extract the AWS region from a URL,
@@ -47,7 +47,7 @@ def get_aws_region(plugin_config: dict) -> str:
         return plugin_config[AWS_REGION_KEY]
     elif plugin_config.get(AWS_CONFIG_KEY, None) is not None:
         aws_config = plugin_config[AWS_CONFIG_KEY]
-        if type(aws_config) is not dict:
+        if not isinstance(aws_config, dict):
             raise ValueError("Unexpected value for 'aws' configuration")
         elif aws_config.get(AWS_CONFIG_REGION_KEY, None) is not None:
             return aws_config[AWS_CONFIG_REGION_KEY]
@@ -100,9 +100,9 @@ def validate_auth(plugin_name: str, plugin_config: dict):
 def get_supported_endpoint_config(pipeline_config: dict, section_key: str) -> tuple:
     # The value of each key may be a single plugin (as a dict) or a list of plugin configs
     supported_tuple = tuple()
-    if type(pipeline_config[section_key]) is dict:
+    if isinstance(pipeline_config[section_key], dict):
         supported_tuple = __check_supported_endpoint(pipeline_config[section_key])
-    elif type(pipeline_config[section_key]) is list:
+    elif isinstance(pipeline_config[section_key], list):
         for entry in pipeline_config[section_key]:
             supported_tuple = __check_supported_endpoint(entry)
             # Break out of the loop at the first supported type
@@ -133,7 +133,7 @@ def get_auth(plugin_config: dict) -> Optional[tuple] | AWS4Auth:
         # OpenSearch Serverless uses a different service name
         if AWS_CONFIG_KEY in plugin_config:
             aws_config = plugin_config[AWS_CONFIG_KEY]
-            if type(aws_config) is dict and aws_config.get(IS_SERVERLESS_KEY, False):
+            if isinstance(aws_config, dict) and aws_config.get(IS_SERVERLESS_KEY, False):
                 is_serverless = True
         region = get_aws_region(plugin_config)
         return get_aws_sigv4_auth(region, is_serverless)
