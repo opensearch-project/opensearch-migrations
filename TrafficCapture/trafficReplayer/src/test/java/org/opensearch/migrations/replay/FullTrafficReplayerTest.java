@@ -28,6 +28,7 @@ import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSour
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.testutils.StreamInterleaver;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -60,8 +61,6 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 @Slf4j
-// Turn this on to test with a live Kafka broker.  Other code changes will need to be activated too
-//@Testcontainers
 // It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
 // to recycle the TrafficReplayers.  Since that shutdown process optimizes for speed of teardown, rather than tidying
 // everything up as it closes the door, some leaks may be inevitable.  E.g. when work is outstanding and being sent
@@ -70,24 +69,28 @@ import java.util.stream.Stream;
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class FullTrafficReplayerTest {
 
-    public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
-    public static final String TEST_GROUP_PRODUCER_ID = "TEST_GROUP_PRODUCER_ID";
-    public static final String TEST_TOPIC_NAME = "TEST_TOPIC";
-    public static final String TEST_NODE_ID = "TestNodeId";
-    public static final int PRODUCER_SLEEP_INTERVAL_MS = 100;
-    public static final Duration MAX_WAIT_TIME_FOR_TOPIC = Duration.ofMillis(PRODUCER_SLEEP_INTERVAL_MS*2);
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
+    public static final String TEST_NODE_ID = "TestNodeId";
     public static final String TEST_CONNECTION_ID = "testConnectionId";
 
-    @AllArgsConstructor
-    private static class FabricatedErrorToKillTheReplayer extends Error {
-        public final boolean doneWithTest;
-    }
+    private static class CountingTupleReceiverFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
+        AtomicInteger nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
 
-    @Container
-    // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private KafkaContainer embeddedKafkaBroker;
-//             = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));;
+        @Override
+        public Consumer<SourceTargetCaptureTuple> get() {
+            log.info("StopAt="+nextStopPointRef.get());
+            var stopPoint = nextStopPointRef.get();
+            return tuple -> {
+                var key = tuple.uniqueRequestKey;
+                if (((TrafficStreamCursorKey) (key.getTrafficStreamKey())).arrayIndex > stopPoint) {
+                    log.error("Request received after our ingest threshold. Throwing.  Discarding " + key);
+                    var nextStopPoint = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
+                    nextStopPointRef.compareAndSet(stopPoint, nextStopPoint);
+                    throw new TrafficReplayerRunner.FabricatedErrorToKillTheReplayer(false);
+                }
+            };
+        }
+    }
 
     @Test
     @Tag("longTest")
@@ -101,7 +104,8 @@ public class FullTrafficReplayerTest {
                         .setClose(CloseObservation.newBuilder().build()).build())
                 .build();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
-        runReplayerUntilSourceWasExhausted(0, httpServer, trafficSourceSupplier);
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
+                httpServer.localhostEndpoint(), new CountingTupleReceiverFactory(), trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
         log.error("done");
     }
@@ -123,137 +127,10 @@ public class FullTrafficReplayerTest {
         log.atInfo().setMessage(()->trafficStreams.stream().map(ts->TrafficStreamUtils.summarizeTrafficStream(ts))
                         .collect(Collectors.joining("\n"))).log();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
-        runReplayerUntilSourceWasExhausted(numExpectedRequests, httpServer, trafficSourceSupplier);
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(numExpectedRequests,
+                httpServer.localhostEndpoint(), new CountingTupleReceiverFactory(), trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.streams.size(), trafficSourceSupplier.nextReadCursor.get());
         log.error("done");
-    }
-
-    private static void runReplayerUntilSourceWasExhausted(int numExpectedRequests,
-                                                           SimpleNettyHttpServer httpServer,
-                                                           Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier)
-            throws Throwable {
-        AtomicInteger runNumberRef = new AtomicInteger();
-        var totalUniqueEverReceived = new AtomicInteger();
-        var nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
-
-        var receivedPerRun = new ArrayList<Integer>();
-        var totalUniqueEverReceivedSizeAfterEachRun = new ArrayList<Integer>();
-        var completelyHandledItems = new ConcurrentHashMap<String, SourceTargetCaptureTuple>();
-
-        for (; true; runNumberRef.incrementAndGet()) {
-            var stopPoint = nextStopPointRef.get();
-            int runNumber = runNumberRef.get();
-            var counter = new AtomicInteger();
-            try {
-                runTrafficReplayer(trafficSourceSupplier, httpServer, (t) -> {
-                    if (runNumber != runNumberRef.get()) {
-                        // for an old replayer.  I'm not sure why shutdown isn't blocking until all threads are dead,
-                        // but that behavior only impacts this test as far as I can tell.
-                        return;
-                    }
-                    Assertions.assertEquals(runNumber, runNumberRef.get());
-                    var key = t.uniqueRequestKey;
-                    synchronized (nextStopPointRef) {
-                        ISourceTrafficChannelKey tsk = key.getTrafficStreamKey();
-                        var keyString = tsk.getConnectionId() + "_" + key.getSourceRequestIndex();
-                        if (((TrafficStreamCursorKey)(key.getTrafficStreamKey())).arrayIndex > stopPoint) {
-                            log.error("Request received after our ingest threshold. Throwing.  Discarding "+key);
-                            var roughlyDoubled = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
-                            nextStopPointRef.compareAndSet(stopPoint, roughlyDoubled);
-                            throw new FabricatedErrorToKillTheReplayer(false);
-                        }
-
-                        var totalUnique = null != completelyHandledItems.put(keyString, t) ?
-                                totalUniqueEverReceived.get() :
-                                totalUniqueEverReceived.incrementAndGet();
-
-                        var c = counter.incrementAndGet();
-                        log.info("counter="+c+" totalUnique="+totalUnique+" runNum="+runNumber+" key="+key);
-                    }
-                });
-                // if this finished running without an exception, we need to stop the loop
-                break;
-            } catch (TrafficReplayer.TerminationException e) {
-                log.atLevel(e.originalCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
-                        .setCause(e.originalCause)
-                        .setMessage(()->"broke out of the replayer, with this shutdown reason")
-                        .log();
-                log.atLevel(e.immediateCause == null ? Level.INFO : Level.ERROR)
-                        .setCause(e.immediateCause)
-                        .setMessage(()->"broke out of the replayer, with the shutdown cause=" + e.originalCause +
-                                " and this immediate reason")
-                        .log();
-                if (!(e.originalCause instanceof FabricatedErrorToKillTheReplayer)) {
-                    throw e.immediateCause;
-                }
-            } finally {
-                waitForWorkerThreadsToStop();
-                log.info("Upon appending.... counter="+counter.get()+" totalUnique="+totalUniqueEverReceived.get()+
-                        " runNumber="+runNumber+" stopAt="+nextStopPointRef.get() + " nextReadCursor="
-                        +((ArrayCursorTrafficSourceFactory)trafficSourceSupplier).nextReadCursor + "\n" +
-                        completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")));
-                log.info(Strings.repeat("\n", 20));
-                receivedPerRun.add(counter.get());
-                totalUniqueEverReceivedSizeAfterEachRun.add(totalUniqueEverReceived.get());
-            }
-        }
-        var skippedPerRun = IntStream.range(0, receivedPerRun.size())
-                .map(i->totalUniqueEverReceivedSizeAfterEachRun.get(i)-receivedPerRun.get(i)).toArray();
-        var skippedPerRunDiffs = IntStream.range(0, receivedPerRun.size()-1)
-                .map(i->(skippedPerRun[i]<=skippedPerRun[i+1]) ? 1 : 0)
-                .toArray();
-        var expectedSkipArray = new int[skippedPerRunDiffs.length];
-        Arrays.fill(expectedSkipArray, 1);
-        log.atInfo().setMessage(()->"completely received request keys=\n{}")
-                .addArgument(completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")))
-                .log();
-        Assertions.assertArrayEquals(expectedSkipArray, skippedPerRunDiffs);
-        Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
-    }
-
-    private static void waitForWorkerThreadsToStop() throws InterruptedException {
-        var sleepMs = 2;
-        final var MAX_SLEEP_MS = 100;
-        while (true) {
-            var rootThreadGroup = getRootThreadGroup();
-            if (!foundClientPoolThread(rootThreadGroup)) {
-                log.info("No client connection pool threads, done polling.");
-                return;
-            } else {
-                log.trace("Found a client connection pool - waiting briefly and retrying.");
-                Thread.sleep(sleepMs);
-                sleepMs = Math.max(MAX_SLEEP_MS, sleepMs*2);
-            }
-        }
-    }
-
-    private static boolean foundClientPoolThread(ThreadGroup group) {
-        Thread[] threads = new Thread[group.activeCount()*2];
-        var numThreads = group.enumerate(threads);
-        for (int i=0; i<numThreads; ++i) {
-            if (threads[i].getName().startsWith(ClientConnectionPool.TARGET_CONNECTION_POOL_NAME)) {
-                return true;
-            }
-        }
-
-        int numGroups = group.activeGroupCount();
-        ThreadGroup[] groups = new ThreadGroup[numGroups * 2];
-        numGroups = group.enumerate(groups, false);
-        for (int i=0; i<numGroups; ++i) {
-            if (foundClientPoolThread(groups[i])) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static ThreadGroup getRootThreadGroup() {
-        var rootThreadGroup = Thread.currentThread().getThreadGroup();
-        while (true) {
-            var tmp = rootThreadGroup.getParent();
-            if (tmp != null) { rootThreadGroup = tmp; }
-            else { return rootThreadGroup; }
-        }
     }
 
     private Tuple2<Stream<TrafficStream>, Integer>
@@ -263,71 +140,12 @@ public class FullTrafficReplayerTest {
                 TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes();
         var testCaseArr = generatedCases.toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
         var aggregatedStreams = randomize ?
-                randomlyInterleaveStreams(count, Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :
+                StreamInterleaver.randomlyInterleaveStreams(new Random(count),
+                        Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :
                 Arrays.stream(testCaseArr).flatMap(c->Arrays.stream(c.trafficStreams));
 
         var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
         return new Tuple2<>(aggregatedStreams, numExpectedRequests);
-    }
-
-    private <R extends AutoCloseable> void
-    loadStreamsAsynchronouslyWithResource(KafkaConsumer<String, byte[]> kafkaConsumer, R resource, Consumer<R> loader)
-            throws Exception {
-        try {
-            new Thread(()->loader.accept(resource)).start();
-            var startTime = Instant.now();
-            while (!kafkaConsumer.listTopics().isEmpty()) {
-                Thread.sleep(10);
-                Assertions.assertTrue(Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0);
-            }
-        } finally {
-            resource.close();
-        }
-    }
-
-    public static <T> Stream<T> randomlyInterleaveStreams(int randomSeed, Stream<Stream<T>> orderedItemStreams) {
-        List<Iterator<T>> iteratorList = orderedItemStreams
-                .map(Stream::iterator)
-                .filter(it->it.hasNext())
-                .collect(Collectors.toCollection(()->new ArrayList<>()));
-        var r = new Random(randomSeed);
-        return Streams.stream(new Iterator<T>() {
-            @Override
-            public boolean hasNext() {
-                return !iteratorList.isEmpty();
-            }
-            @Override
-            public T next() {
-                var slotIdx = r.nextInt(iteratorList.size());
-                var collectionIterator = iteratorList.get(slotIdx);
-                var nextItem = collectionIterator.next();
-                if (!collectionIterator.hasNext()) {
-                    var lastIdx = iteratorList.size()-1;
-                    iteratorList.set(slotIdx, iteratorList.get(lastIdx));
-                    iteratorList.remove(lastIdx);
-                }
-                return nextItem;
-            }
-        });
-    }
-
-    Producer<String, byte[]> buildKafkaProducer() {
-        var kafkaProps = new Properties();
-        kafkaProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
-        kafkaProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
-        // Property details: https://docs.confluent.io/platform/current/installation/configuration/producer-configs.html#delivery-timeout-ms
-        kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10000);
-        kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
-        kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
-        kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, TEST_GROUP_PRODUCER_ID);
-        kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, embeddedKafkaBroker.getBootstrapServers());
-        try {
-            return new KafkaProducer(kafkaProps);
-        } catch (Exception e) {
-            log.atError().setCause(e).log();
-            System.exit(1);
-            throw e;
-        }
     }
 
     @Getter
@@ -384,6 +202,7 @@ public class FullTrafficReplayerTest {
 
         public ArrayCursorTrafficCaptureSource(ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
             var startingCursor = arrayCursorTrafficSourceFactory.nextReadCursor.get();
+            log.info("startingCursor = "  + startingCursor);
             this.readCursor = new AtomicInteger(startingCursor);
             this.arrayCursorTrafficSourceFactory = arrayCursorTrafficSourceFactory;
             cursorHighWatermark = startingCursor;
@@ -428,66 +247,5 @@ public class FullTrafficReplayerTest {
         }
     }
 
-    private Supplier<ISimpleTrafficCaptureSource> loadStreamsToKafka(Stream<TrafficStream> streams) throws Exception {
-        var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
-                TEST_GROUP_CONSUMER_ID, false,  null);
-        kafkaConsumerProps.setProperty("max.poll.interval.ms", "300000");
-        var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
 
-        var kafkaProducer = buildKafkaProducer();
-        var counter = new AtomicInteger();
-        loadStreamsAsynchronouslyWithResource(kafkaConsumer, streams, s->s.forEach(trafficStream ->
-            writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(trafficStream),
-                    "KEY_" + counter.incrementAndGet())));
-
-        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME, null);
-    }
-
-    private Supplier<ISimpleTrafficCaptureSource>
-    loadStreamsToKafkaFromCompressedFile(KafkaConsumer<String, byte[]> kafkaConsumer,
-                                         String filename, int recordCount) throws Exception {
-        var kafkaProducer = buildKafkaProducer();
-        loadStreamsAsynchronouslyWithResource(kafkaConsumer, new V0_1TrafficCaptureSource(filename),
-                originalTrafficSource -> {
-                    try {
-                        for (int i = 0; i < recordCount; ++i) {
-                            List<ITrafficStreamWithKey> chunks = null;
-                            chunks = originalTrafficSource.readNextTrafficStreamChunk().get();
-                            for (int j = 0; j < chunks.size(); ++j) {
-                                writeTrafficStreamRecord(kafkaProducer, chunks.get(j), "KEY_" + i + "_" + j);
-                            }
-                        }
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME, null);
-    }
-
-    @SneakyThrows
-    private static void writeTrafficStreamRecord(Producer<String, byte[]> kafkaProducer,
-                                                 ITrafficStreamWithKey trafficStream,
-                                                 String recordId) {
-        var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStream.getStream().toByteArray());
-        var sendFuture = kafkaProducer.send(record, (metadata, exception) -> {});
-        sendFuture.get();
-        Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
-    }
-
-    private static void runTrafficReplayer(Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
-                                           SimpleNettyHttpServer httpServer,
-                                           Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
-        log.info("Starting a new replayer and running it");
-        var tr = new TrafficReplayer(httpServer.localhostEndpoint(),
-                new StaticAuthTransformerFactory("TEST"),
-                true, 10, 10*1024,
-                TrafficReplayer.buildDefaultJsonTransformer(httpServer.localhostEndpoint().getHost()));
-
-        try (var os = new NullOutputStream();
-             var trafficSource = captureSourceSupplier.get();
-             var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
-                    new TimeShifter(10 * 1000), tupleReceiver);
-        }
-    }
 }
