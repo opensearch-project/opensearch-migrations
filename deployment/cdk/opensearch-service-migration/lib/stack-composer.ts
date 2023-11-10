@@ -145,7 +145,6 @@ export class StackComposer {
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
-        const trafficReplayerTargetEndpoint = this.getContextForType('trafficReplayerTargetEndpoint', 'string', defaultValues, contextJSON)
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
         const trafficComparatorServiceEnabled = this.getContextForType('trafficComparatorServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -353,7 +352,6 @@ export class StackComposer {
                 vpc: networkStack.vpc,
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
                 addOnMigrationDeployId: addOnMigrationDeployId,
-                customTargetEndpoint: trafficReplayerTargetEndpoint,
                 customKafkaGroupId: trafficReplayerGroupId,
                 extraArgs: trafficReplayerExtraArgs,
                 enableComparatorLink: trafficComparatorServiceEnabled,

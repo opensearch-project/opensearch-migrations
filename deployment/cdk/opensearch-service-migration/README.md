@@ -126,17 +126,36 @@ After the benchmark has been run, the indices and documents of the source and ta
 ./catIndices.sh
 ```
 
-## Configuring SigV4 access
-When this solution is deployed, it will attempt to configure needed IAM permissions on its applicable Migration services (Traffic Replayer and Migration Console) to allow SigV4 communication between the service and the AWS OpenSearch Service or OpenSearch Serverless target cluster. In addition to this, the target cluster must be configured to allow these resources as well, which the following subsections will discuss. 
+## Importing Target Clusters
+By default, if a `targetClusterEndpoint` option isn't provided this CDK will create an OpenSearch Service Domain (using provided options) to be the target cluster of this solution. While setting up this Domain, the CDK will also configure a relevant security group and allows options to configure an access policy on the Domain (`accessPolicies` and `openAccessPolicyEnabled` options) such that the Domain is fully setup for use at deployment. 
 
-There is also an assumption here that security groups are in place that allow communication between these Migration services and the target cluster. If the OpenSearch Service is created with this CDK, the relevant security group will be created and configured automatically. Otherwise, imported target clusters will need to add the `osClusterAccessSG` security group (created after deployment) to their target cluster or modify their existing security groups to allow communication.
+In the case of an imported target cluster, there are normally some modifications that need to be made on the existing target cluster to allow proper functioning of this solution after deployment which the below subsections elaborate on.
 
 #### OpenSearch Service
-If an open access policy is in place for the Domain, either configured manually or with the `openAccessPolicyEnabled` [option](./options.md) for Domains created with this CDK, this should be sufficient and no changes should be needed on this front. If a custom access policy is in place it must allow the IAM task roles for the applicable Migration services (Traffic Replayer and Migration Console) to access.
+For a Domain, there are typically two items that need to be configured to allow proper functioning of this solution
+1. The Domain should have a security group that allows communication from the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration). This CDK will automatically create an `osClusterAccessSG` security group, which has already been applied to the Migration services, that a user should then add to their existing Domain to allow this access.
+2. The access policy on the Domain should be an open access policy that allows all access or an access policy that at least allows the IAM task roles for the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration)
 
 #### OpenSearch Serverless
-When using an existing OpenSearch Serverless Collection, some additional configuration is needed for the data access policies to allow the Traffic Replayer and Migration Console services to communicate with the Serverless cluster. Mainly, the IAM task roles for these Migration services should be added to a data access policy that allows them permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection. This will allow the Replayer to create, modify, and delete indexes as it mirrors incoming traffic. This can also be focused down to specific indexes or operations for sensitive cases, but should be monitored as this could prevent some requests from being replayed. 
+A Collection, will need to configure a Network and Data Access policy to allow proper functioning of this solution
+1. The Collection should have a network policy that either has a `Public` access type on the given Collection OpenSearch endpoint, or preferably has a `VPC` access type by creating a VPC endpoint on the VPC used for this solution and attaching the `osClusterAccessSG` security group to that VPC endpoint
+2. The data access policy needed should grant permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection, and use the task roles of the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration) as the principals for this data access policy. This could potentially be focused down to specific indexes or operations for sensitive cases, but should be monitored as this could prevent some historical-data/requests from being replayed to the Collection 
 
+See [Configuring SigV4 Replayer Requests](#configuring-sigv4-replayer-requests) for details on enabling SigV4 requests from the Traffic Replayer to the target cluster after following the previous setup
+
+## Configuring SigV4 Replayer Requests
+With any [required setup](#importing-target-clusters) on the target cluster having been completed, a user can then use the `trafficReplayerExtraArgs` option to specify the Traffic Replayer argument for enabling SigV4 auth, which the below sections show. **Note**: The `trafficReplayerEnableClusterFGACAuth` option should not be used if enabling SigV4 auth for the Traffic Replayer as only one auth mechanism should be specified. See [here](#how-is-an-authorization-header-set-for-requests-from-the-replayer-to-the-target-cluster) for more details on how the Traffic Replayer sets its auth header.
+#### OpenSearch Service
+```shell
+# e.g. --sigv4-auth-header-service-region es,us-east-1
+"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region es,<region>"
+```
+
+#### OpenSearch Serverless
+```shell
+# e.g. --sigv4-auth-header-service-region aoss,us-east-1
+"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region aoss,<region>"
+```
 
 ## Kicking off Fetch Migration
 
