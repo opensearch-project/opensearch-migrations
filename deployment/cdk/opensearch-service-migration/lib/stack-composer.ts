@@ -40,6 +40,54 @@ export class StackComposer {
         }
     }
 
+    private getContextForType(optionName: string, expectedType: string, defaultValues: { [x: string]: (any); }, contextJSON: { [x: string]: (any); }): any {
+        const option = contextJSON[optionName]
+
+        // If no context is provided (undefined or empty string) and a default value exists, use it
+        if ((option === undefined || option === "") && defaultValues[optionName]) {
+            return defaultValues[optionName]
+        }
+
+        // Filter out invalid or missing options by setting undefined (empty strings, null, undefined, NaN)
+        if (option !== false && option !== 0 && !option) {
+            return undefined
+        }
+        // Values provided by the CLI will always be represented as a string and need to be parsed
+        if (typeof option === 'string') {
+            if (expectedType === 'number') {
+                return parseInt(option)
+            }
+            if (expectedType === 'boolean' || expectedType === 'object') {
+                return JSON.parse(option)
+            }
+        }
+        // Values provided by the cdk.context.json should be of the desired type
+        if (typeof option !== expectedType) {
+            throw new Error(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
+        }
+        return option
+    }
+
+    private parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
+        let accessPolicies: PolicyStatement[] = []
+        const statements = jsonObject['Statement']
+        if (!statements || statements.length < 1) {
+            throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
+        }
+        // Access policies can provide a single Statement block or an array of Statement blocks
+        if (Array.isArray(statements)) {
+            for (let statementBlock of statements) {
+                const statement = PolicyStatement.fromJson(statementBlock)
+                accessPolicies.push(statement)
+            }
+        }
+        else {
+            const statement = PolicyStatement.fromJson(statements)
+            accessPolicies.push(statement)
+        }
+        return accessPolicies
+    }
+
     constructor(scope: Construct, props: StackComposerProps) {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
@@ -55,62 +103,62 @@ export class StackComposer {
         if (!contextJSON) {
             throw new Error(`No CDK context block found for contextId '${contextId}'`)
         }
-        const stage = getContextForType('stage', 'string')
+        const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         let version: EngineVersion
         let accessPolicies: PolicyStatement[]|undefined
-        const domainName = getContextForType('domainName', 'string')
-        const dataNodeType = getContextForType('dataNodeType', 'string')
-        const dataNodeCount = getContextForType('dataNodeCount', 'number')
-        const dedicatedManagerNodeType = getContextForType('dedicatedManagerNodeType', 'string')
-        const dedicatedManagerNodeCount = getContextForType('dedicatedManagerNodeCount', 'number')
-        const warmNodeType = getContextForType('warmNodeType', 'string')
-        const warmNodeCount = getContextForType('warmNodeCount', 'number')
-        const useUnsignedBasicAuth = getContextForType('useUnsignedBasicAuth', 'boolean')
-        const fineGrainedManagerUserARN = getContextForType('fineGrainedManagerUserARN', 'string')
-        const fineGrainedManagerUserName = getContextForType('fineGrainedManagerUserName', 'string')
-        const fineGrainedManagerUserSecretManagerKeyARN = getContextForType('fineGrainedManagerUserSecretManagerKeyARN', 'string')
-        const enableDemoAdmin = getContextForType('enableDemoAdmin', 'boolean')
-        const enforceHTTPS = getContextForType('enforceHTTPS', 'boolean')
-        const ebsEnabled = getContextForType('ebsEnabled', 'boolean')
-        const ebsIops = getContextForType('ebsIops', 'number')
-        const ebsVolumeSize = getContextForType('ebsVolumeSize', 'number')
-        const encryptionAtRestEnabled = getContextForType('encryptionAtRestEnabled', 'boolean')
-        const encryptionAtRestKmsKeyARN = getContextForType("encryptionAtRestKmsKeyARN", 'string')
-        const loggingAppLogEnabled = getContextForType('loggingAppLogEnabled', 'boolean')
-        const loggingAppLogGroupARN = getContextForType('loggingAppLogGroupARN', 'string')
-        const noneToNodeEncryptionEnabled = getContextForType('nodeToNodeEncryptionEnabled', 'boolean')
-        const vpcId = getContextForType('vpcId', 'string')
-        const vpcEnabled = getContextForType('vpcEnabled', 'boolean')
-        const vpcSecurityGroupIds = getContextForType('vpcSecurityGroupIds', 'object')
-        const vpcSubnetIds = getContextForType('vpcSubnetIds', 'object')
-        const openAccessPolicyEnabled = getContextForType('openAccessPolicyEnabled', 'boolean')
-        const availabilityZoneCount = getContextForType('availabilityZoneCount', 'number')
-        const migrationAssistanceEnabled = getContextForType('migrationAssistanceEnabled', 'boolean')
-        const mskARN = getContextForType('mskARN', 'string')
-        const mskEnablePublicEndpoints = getContextForType('mskEnablePublicEndpoints', 'boolean')
-        const mskRestrictPublicAccessTo = getContextForType('mskRestrictPublicAccessTo', 'string')
-        const mskRestrictPublicAccessType = getContextForType('mskRestrictPublicAccessType', 'string')
-        const mskBrokerNodeCount = getContextForType('mskBrokerNodeCount', 'number')
-        const addOnMigrationDeployId = getContextForType('addOnMigrationDeployId', 'string')
-        const captureProxyESServiceEnabled = getContextForType('captureProxyESServiceEnabled', 'boolean')
-        const migrationConsoleServiceEnabled = getContextForType('migrationConsoleServiceEnabled', 'boolean')
-        const trafficReplayerServiceEnabled = getContextForType('trafficReplayerServiceEnabled', 'boolean')
-        const trafficReplayerEnableClusterFGACAuth = getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean')
-        const trafficReplayerTargetEndpoint = getContextForType('trafficReplayerTargetEndpoint', 'string')
-        const trafficReplayerGroupId = getContextForType('trafficReplayerGroupId', 'string')
-        const trafficReplayerExtraArgs = getContextForType('trafficReplayerExtraArgs', 'string')
-        const trafficComparatorServiceEnabled = getContextForType('trafficComparatorServiceEnabled', 'boolean')
-        const trafficComparatorJupyterServiceEnabled = getContextForType('trafficComparatorJupyterServiceEnabled', 'boolean')
-        const captureProxyServiceEnabled = getContextForType('captureProxyServiceEnabled', 'boolean')
-        const captureProxySourceEndpoint = getContextForType('captureProxySourceEndpoint', 'string')
-        const elasticsearchServiceEnabled = getContextForType('elasticsearchServiceEnabled', 'boolean')
-        const kafkaBrokerServiceEnabled = getContextForType('kafkaBrokerServiceEnabled', 'boolean')
-        const kafkaZookeeperServiceEnabled = getContextForType('kafkaZookeeperServiceEnabled', 'boolean')
-        const targetClusterEndpoint = getContextForType('targetClusterEndpoint', 'string')
-        const fetchMigrationEnabled = getContextForType('fetchMigrationEnabled', 'boolean')
-        const dpPipelineTemplatePath = getContextForType('dpPipelineTemplatePath', 'string')
-        const sourceClusterEndpoint = getContextForType('sourceClusterEndpoint', 'string')
+        const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
+        const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
+        const dataNodeCount = this.getContextForType('dataNodeCount', 'number', defaultValues, contextJSON)
+        const dedicatedManagerNodeType = this.getContextForType('dedicatedManagerNodeType', 'string', defaultValues, contextJSON)
+        const dedicatedManagerNodeCount = this.getContextForType('dedicatedManagerNodeCount', 'number', defaultValues, contextJSON)
+        const warmNodeType = this.getContextForType('warmNodeType', 'string', defaultValues, contextJSON)
+        const warmNodeCount = this.getContextForType('warmNodeCount', 'number', defaultValues, contextJSON)
+        const useUnsignedBasicAuth = this.getContextForType('useUnsignedBasicAuth', 'boolean', defaultValues, contextJSON)
+        const fineGrainedManagerUserARN = this.getContextForType('fineGrainedManagerUserARN', 'string', defaultValues, contextJSON)
+        const fineGrainedManagerUserName = this.getContextForType('fineGrainedManagerUserName', 'string', defaultValues, contextJSON)
+        const fineGrainedManagerUserSecretManagerKeyARN = this.getContextForType('fineGrainedManagerUserSecretManagerKeyARN', 'string', defaultValues, contextJSON)
+        const enableDemoAdmin = this.getContextForType('enableDemoAdmin', 'boolean', defaultValues, contextJSON)
+        const enforceHTTPS = this.getContextForType('enforceHTTPS', 'boolean', defaultValues, contextJSON)
+        const ebsEnabled = this.getContextForType('ebsEnabled', 'boolean', defaultValues, contextJSON)
+        const ebsIops = this.getContextForType('ebsIops', 'number', defaultValues, contextJSON)
+        const ebsVolumeSize = this.getContextForType('ebsVolumeSize', 'number', defaultValues, contextJSON)
+        const encryptionAtRestEnabled = this.getContextForType('encryptionAtRestEnabled', 'boolean', defaultValues, contextJSON)
+        const encryptionAtRestKmsKeyARN = this.getContextForType("encryptionAtRestKmsKeyARN", 'string', defaultValues, contextJSON)
+        const loggingAppLogEnabled = this.getContextForType('loggingAppLogEnabled', 'boolean', defaultValues, contextJSON)
+        const loggingAppLogGroupARN = this.getContextForType('loggingAppLogGroupARN', 'string', defaultValues, contextJSON)
+        const noneToNodeEncryptionEnabled = this.getContextForType('nodeToNodeEncryptionEnabled', 'boolean', defaultValues, contextJSON)
+        const vpcId = this.getContextForType('vpcId', 'string', defaultValues, contextJSON)
+        const vpcEnabled = this.getContextForType('vpcEnabled', 'boolean', defaultValues, contextJSON)
+        const vpcSecurityGroupIds = this.getContextForType('vpcSecurityGroupIds', 'object', defaultValues, contextJSON)
+        const vpcSubnetIds = this.getContextForType('vpcSubnetIds', 'object', defaultValues, contextJSON)
+        const openAccessPolicyEnabled = this.getContextForType('openAccessPolicyEnabled', 'boolean', defaultValues, contextJSON)
+        const availabilityZoneCount = this.getContextForType('availabilityZoneCount', 'number', defaultValues, contextJSON)
+        const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
+        const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
+        const mskEnablePublicEndpoints = this.getContextForType('mskEnablePublicEndpoints', 'boolean', defaultValues, contextJSON)
+        const mskRestrictPublicAccessTo = this.getContextForType('mskRestrictPublicAccessTo', 'string', defaultValues, contextJSON)
+        const mskRestrictPublicAccessType = this.getContextForType('mskRestrictPublicAccessType', 'string', defaultValues, contextJSON)
+        const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
+        const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
+        const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
+        const trafficReplayerTargetEndpoint = this.getContextForType('trafficReplayerTargetEndpoint', 'string', defaultValues, contextJSON)
+        const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
+        const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
+        const trafficComparatorServiceEnabled = this.getContextForType('trafficComparatorServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const trafficComparatorJupyterServiceEnabled = this.getContextForType('trafficComparatorJupyterServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const captureProxySourceEndpoint = this.getContextForType('captureProxySourceEndpoint', 'string', defaultValues, contextJSON)
+        const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const kafkaZookeeperServiceEnabled = this.getContextForType('kafkaZookeeperServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
+        const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
+        const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
+        const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
 
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
@@ -122,7 +170,7 @@ export class StackComposer {
             throw new Error("Domain name is not present and is a required field")
         }
 
-        const engineVersion = getContextForType('engineVersion', 'string')
+        const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         if (engineVersion && engineVersion.startsWith("OS_")) {
             // Will accept a period delimited version string (i.e. 1.3) and return a proper EngineVersion
             version = EngineVersion.openSearch(engineVersion.substring(3))
@@ -141,23 +189,23 @@ export class StackComposer {
             })
             accessPolicies = [openPolicy]
         } else {
-            const accessPolicyJson = getContextForType('accessPolicies', 'object')
-            accessPolicies = accessPolicyJson ? parseAccessPolicies(accessPolicyJson) : undefined
+            const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
+            accessPolicies = accessPolicyJson ? this.parseAccessPolicies(accessPolicyJson) : undefined
         }
 
-        const tlsSecurityPolicyName = getContextForType('tlsSecurityPolicy', 'string')
+        const tlsSecurityPolicyName = this.getContextForType('tlsSecurityPolicy', 'string', defaultValues, contextJSON)
         const tlsSecurityPolicy: TLSSecurityPolicy|undefined = tlsSecurityPolicyName ? TLSSecurityPolicy[tlsSecurityPolicyName as keyof typeof TLSSecurityPolicy] : undefined
         if (tlsSecurityPolicyName && !tlsSecurityPolicy) {
             throw new Error("Provided tlsSecurityPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_opensearchservice.TLSSecurityPolicy.html")
         }
 
-        const ebsVolumeTypeName = getContextForType('ebsVolumeType', 'string')
+        const ebsVolumeTypeName = this.getContextForType('ebsVolumeType', 'string', defaultValues, contextJSON)
         const ebsVolumeType: EbsDeviceVolumeType|undefined = ebsVolumeTypeName ? EbsDeviceVolumeType[ebsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
         if (ebsVolumeTypeName && !ebsVolumeType) {
             throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
         }
 
-        const domainRemovalPolicyName = getContextForType('domainRemovalPolicy', 'string')
+        const domainRemovalPolicyName = this.getContextForType('domainRemovalPolicy', 'string', defaultValues, contextJSON)
         const domainRemovalPolicy = domainRemovalPolicyName ? RemovalPolicy[domainRemovalPolicyName as keyof typeof RemovalPolicy] : undefined
         if (domainRemovalPolicyName && !domainRemovalPolicy) {
             throw new Error("Provided domainRemovalPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html")
@@ -450,54 +498,6 @@ export class StackComposer {
 
         if (props.migrationsAppRegistryARN) {
             this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
-        }
-
-        function getContextForType(optionName: string, expectedType: string): any {
-            const option = contextJSON[optionName]
-
-            // If no context is provided (undefined or empty string) and a default value exists, use it
-            if ((option === undefined || option === "") && defaultValues[optionName]) {
-                return defaultValues[optionName]
-            }
-
-            // Filter out invalid or missing options by setting undefined (empty strings, null, undefined, NaN)
-            if (option !== false && option !== 0 && !option) {
-                return undefined
-            }
-            // Values provided by the CLI will always be represented as a string and need to be parsed
-            if (typeof option === 'string') {
-                if (expectedType === 'number') {
-                    return parseInt(option)
-                }
-                if (expectedType === 'boolean' || expectedType === 'object') {
-                    return JSON.parse(option)
-                }
-            }
-            // Values provided by the cdk.context.json should be of the desired type
-            if (typeof option !== expectedType) {
-                throw new Error(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
-            }
-            return option
-        }
-
-        function parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
-            let accessPolicies: PolicyStatement[] = []
-            const statements = jsonObject['Statement']
-            if (!statements || statements.length < 1) {
-                throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
-            }
-            // Access policies can provide a single Statement block or an array of Statement blocks
-            if (Array.isArray(statements)) {
-                for (let statementBlock of statements) {
-                    const statement = PolicyStatement.fromJson(statementBlock)
-                    accessPolicies.push(statement)
-                }
-            }
-            else {
-                const statement = PolicyStatement.fromJson(statements)
-                accessPolicies.push(statement)
-            }
-            return accessPolicies
         }
 
     }

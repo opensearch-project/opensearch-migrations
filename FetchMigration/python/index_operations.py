@@ -13,8 +13,8 @@ __INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version",
 
 
 def fetch_all_indices(endpoint: EndpointInfo) -> dict:
-    actual_endpoint = endpoint.url + __ALL_INDICES_ENDPOINT
-    resp = requests.get(actual_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+    all_indices_url: str = endpoint.add_path(__ALL_INDICES_ENDPOINT)
+    resp = requests.get(all_indices_url, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
     result = dict(resp.json())
     for index in list(result.keys()):
         # Remove system indices
@@ -31,19 +31,21 @@ def fetch_all_indices(endpoint: EndpointInfo) -> dict:
 
 def create_indices(indices_data: dict, endpoint: EndpointInfo):
     for index in indices_data:
-        actual_endpoint = endpoint.url + index
+        index_endpoint = endpoint.add_path(index)
         data_dict = dict()
         data_dict[SETTINGS_KEY] = indices_data[index][SETTINGS_KEY]
         data_dict[MAPPINGS_KEY] = indices_data[index][MAPPINGS_KEY]
         try:
-            resp = requests.put(actual_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl, json=data_dict)
+            resp = requests.put(index_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(),
+                                json=data_dict)
             resp.raise_for_status()
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Failed to create index [{index}] - {e!s}")
 
 
 def doc_count(indices: set, endpoint: EndpointInfo) -> int:
-    actual_endpoint = endpoint.url + ','.join(indices) + __COUNT_ENDPOINT
-    resp = requests.get(actual_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+    count_endpoint_suffix: str = ','.join(indices) + __COUNT_ENDPOINT
+    doc_count_endpoint: str = endpoint.add_path(count_endpoint_suffix)
+    resp = requests.get(doc_count_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
     result = dict(resp.json())
     return int(result[COUNT_KEY])

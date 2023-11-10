@@ -15,49 +15,53 @@ class ProgressMetrics:
     _REC_IN_FLIGHT_KEY = "records_in_flight"
     _NO_PART_KEY = "no_partitions"
 
-    target_doc_count: int
-    idle_threshold: int
-    current_values_map: dict[str, Optional[int]]
-    prev_values_map: dict[str, Optional[int]]
-    counter_map: dict[str, int]
+    # Private member variables
+    __target_doc_count: int
+    __idle_threshold: int
+    __current_values_map: dict[str, Optional[int]]
+    __prev_values_map: dict[str, Optional[int]]
+    __counter_map: dict[str, int]
 
     def __init__(self, doc_count, idle_threshold):
-        self.target_doc_count = doc_count
-        self.idle_threshold = idle_threshold
-        self.current_values_map = dict()
-        self.prev_values_map = dict()
-        self.counter_map = dict()
+        self.__target_doc_count = doc_count
+        self.__idle_threshold = idle_threshold
+        self.__current_values_map = dict()
+        self.__prev_values_map = dict()
+        self.__counter_map = dict()
+
+    def get_target_doc_count(self) -> int:
+        return self.__target_doc_count
 
     def __reset_counter(self, key: str):
-        if key in self.counter_map:
-            del self.counter_map[key]
+        if key in self.__counter_map:
+            del self.__counter_map[key]
 
     def __increment_counter(self, key: str):
-        val = self.counter_map.get(key, 0)
-        self.counter_map[key] = val + 1
+        val = self.__counter_map.get(key, 0)
+        self.__counter_map[key] = val + 1
 
     def __get_idle_value_key_name(self, key: str) -> str:
         return self.__IDLE_VALUE_PREFIX + key
 
     def __get_idle_value_count(self, key: str) -> Optional[int]:
         idle_value_key = self.__get_idle_value_key_name(key)
-        return self.counter_map.get(idle_value_key)
+        return self.__counter_map.get(idle_value_key)
 
     def __record_value(self, key: str, val: Optional[int]):
-        if key in self.current_values_map:
+        if key in self.__current_values_map:
             # Move current value to previous
-            self.prev_values_map[key] = self.current_values_map[key]
+            self.__prev_values_map[key] = self.__current_values_map[key]
             # Track idle value metrics
             idle_value_key = self.__get_idle_value_key_name(key)
-            if self.prev_values_map[key] == val:
+            if self.__prev_values_map[key] == val:
                 self.__increment_counter(idle_value_key)
             else:
                 self.__reset_counter(idle_value_key)
         # Store new value
-        self.current_values_map[key] = val
+        self.__current_values_map[key] = val
 
     def __get_current_value(self, key: str) -> Optional[int]:
-        return self.current_values_map.get(key)
+        return self.__current_values_map.get(key)
 
     def reset_metric_api_failure(self):
         self.__reset_counter(self._METRIC_API_FAIL_KEY)
@@ -88,20 +92,20 @@ class ProgressMetrics:
         success_doc_count = self.__get_current_value(self._SUCCESS_DOCS_KEY)
         if success_doc_count is None:
             success_doc_count = 0
-        return math.floor((success_doc_count * 100) / self.target_doc_count)
+        return math.floor((success_doc_count * 100) / self.__target_doc_count)
 
     def all_docs_migrated(self) -> bool:
         # TODO Add a check for partitionsCompleted = indices
         success_doc_count = self.__get_current_value(self._SUCCESS_DOCS_KEY)
         if success_doc_count is None:
             success_doc_count = 0
-        return success_doc_count >= self.target_doc_count
+        return success_doc_count >= self.__target_doc_count
 
     def is_migration_complete_success(self) -> bool:
         is_idle_pipeline: bool = False
         rec_in_flight = self.__get_current_value(self._REC_IN_FLIGHT_KEY)
         no_partitions_count = self.__get_current_value(self._NO_PART_KEY)
-        prev_no_partitions_count = self.prev_values_map.get(self._NO_PART_KEY, 0)
+        prev_no_partitions_count = self.__prev_values_map.get(self._NO_PART_KEY, 0)
         # Check for no records in flight
         if rec_in_flight is not None and rec_in_flight == 0:
             # No-partitions metrics should steadily tick up
@@ -113,15 +117,15 @@ class ProgressMetrics:
         keys_to_check = [self._NO_PART_KEY, self._SUCCESS_DOCS_KEY]
         for key in keys_to_check:
             val = self.__get_idle_value_count(key)
-            if val is not None and val >= self.idle_threshold:
+            if val is not None and val >= self.__idle_threshold:
                 logging.warning("Idle pipeline detected because [" + key + "] value was idle above threshold: " +
-                                str(self.idle_threshold))
+                                str(self.__idle_threshold))
                 return True
         # End of loop
         return False
 
     def is_too_may_api_failures(self) -> bool:
-        return self.counter_map.get(self._METRIC_API_FAIL_KEY, 0) >= self.idle_threshold
+        return self.__counter_map.get(self._METRIC_API_FAIL_KEY, 0) >= self.__idle_threshold
 
     def is_in_terminal_state(self) -> bool:
         return self.is_migration_complete_success() or self.is_migration_idle() or self.is_too_may_api_failures()
@@ -131,4 +135,4 @@ class ProgressMetrics:
             logging.debug("Idle pipeline metrics - " +
                           f"Records in flight: [{self.__get_current_value(self._REC_IN_FLIGHT_KEY)}], " +
                           f"No-partitions counter: [{self.__get_current_value(self._NO_PART_KEY)}]" +
-                          f"Previous no-partition value: [{self.prev_values_map.get(self._NO_PART_KEY)}]")
+                          f"Previous no-partition value: [{self.__prev_values_map.get(self._NO_PART_KEY)}]")

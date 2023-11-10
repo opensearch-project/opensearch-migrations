@@ -14,7 +14,7 @@ dependencies {
     implementation project(':coreUtilities')
     implementation 'org.projectlombok:lombok:1.18.26'
     implementation 'com.google.protobuf:protobuf-java:3.22.2'
-    implementation 'org.apache.kafka:kafka-clients:3.5.1'
+    implementation 'org.apache.kafka:kafka-clients:3.6.0'
     implementation 'software.amazon.msk:aws-msk-iam-auth:1.1.9'
     implementation 'org.slf4j:slf4j-api:2.0.7'
     testImplementation project(':captureProtobufs')
