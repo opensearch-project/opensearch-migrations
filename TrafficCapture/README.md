@@ -28,7 +28,8 @@ For more details, check out the [Docker Solution README](dockerSolution/README.m
 The Traffic Capture Proxy Server acts as a middleman, capturing traffic going to a source, which can then be used by the Traffic Replayer.
 
 This tool can be attached to coordinator nodes in clusters with a minimum of two coordinator nodes and start capturing traffic
-while having zero downtime on the cluster. More details on attaching a Capture Proxy can be found here: [Capture Proxy](trafficCaptureProxyServer/README.md).
+while having zero downtime on the cluster. Be aware that zero downtime is only achievable **if** the remaining nodes in-service can handle the additional load on the cluster. 
+More details on attaching a Capture Proxy can be found here: [Capture Proxy](trafficCaptureProxyServer/README.md).
 
 ### Traffic Replayer
 

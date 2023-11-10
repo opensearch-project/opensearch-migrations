@@ -8,7 +8,7 @@ Please note that this is one method for installing the Capture Proxy on a node, 
 
 These are the **prerequisites** to being able to attach the Capture Proxy:
 
-* **Make sure that the node and your MSK client are in the same VPC and Security Groups**
+* **Make sure that your MSK client is accessible by the coordinator nodes in the cluster*
     * Add the following IAM policy to the node/EC2 instance so that it’s able to store the captured traffic in Kafka:
     * From the AWS Console, go to the EC2 instance page, click on **IAM Role**,  click on **Add permissions**, choose **Create inline policy**, click on **JSON VIEW** then add the following policy (replace region and account-id).
 
@@ -34,10 +34,11 @@ These are the **prerequisites** to being able to attach the Capture Proxy:
     }
   ```
 
-* From **linux command line** of that EC2 instance: Check that the **JAVA_HOME environment variable is set** properly `(echo $JAVA_HOME)`, if not, then try running the following command that might help set it correctly:
+* **Verify Java installation is accessible**. 
+  * From linux command line of that EC2 instance, Check that the JAVA_HOME environment variable is set properly `(echo $JAVA_HOME)`, if not, then try running the following command that might help set it correctly:
 
-  `JAVA_HOME=$(dirname "$(dirname "$(type -p java)")")`
-    * If that doesn’t work, then find the java directory on your node and set it as $JAVA_HOME
+    `JAVA_HOME=$(dirname "$(dirname "$(type -p java)")")`
+      * If that doesn’t work, then find the java directory on your node and set it as $JAVA_HOME
 
 ### Follow these steps to attach a Capture Proxy on the node.
 
@@ -68,8 +69,6 @@ These are the **prerequisites** to being able to attach the Capture Proxy:
     * **--enableMSKAuth**: Enables SASL Kafka properties required for connecting to MSK with IAM auth.
     * **--insecureDestination**: Do not check the destination server’s certificate.
 
-
-
 8. **Test the port** that the Capture Proxy is now listening to.
     1. `curl https://localhost:9200` or `http://`
     2. You should expect the same response when sending a request to either ports (9200, 19200), except that the traffic sent to the port that the Capture Proxy is listening to, will be captured and sent to your MSK Client, also forwarded to the new Elasticsearch port.
@@ -78,23 +77,5 @@ These are the **prerequisites** to being able to attach the Capture Proxy:
      1. Log in to the Migration Console container.
      2. Go the Kafka tools directory
        cd kafka-tools/kafka/bin
-     3. Create the following file to allow communication with an AWS MSK cluster. Name it: `msk-iam-auth.properties`
-
-     ```
-     # --- Additional setup to use AWS MSK IAM library for communication with an AWS MSK cluster
-     # Sets up TLS for encryption and SASL for authN.
-     security.protocol = SASL_SSL
-    
-     # Identifies the SASL mechanism to use.
-     sasl.mechanism = AWS_MSK_IAM
-    
-     # Binds SASL client implementation.
-     sasl.jaas.config = software.amazon.msk.auth.iam.IAMLoginModule required;
-    
-     # Encapsulates constructing a SigV4 signature based on extracted credentials.
-     # The SASL client bound by "sasl.jaas.config" invokes this class.
-     sasl.client.callback.handler.class = software.amazon.msk.auth.iam.IAMClientCallbackHandler
-     ```
-       
-     4.  Run the following command to list the Kafka topics, and confirm that a new topic was created.
-         `./kafka-topics.sh —bootstrap-server "$MIGRATION_KAFKA_BROKER_ENDPOINTS" —list —command-config msk-iam-auth.properties`
+     3. Run the following command to list the Kafka topics, and confirm that a new topic was created.
+         `./kafka-topics.sh --bootstrap-server "$MIGRATION_KAFKA_BROKER_ENDPOINTS" --list --command-config ../../aws/msk-iam-auth.properties`
