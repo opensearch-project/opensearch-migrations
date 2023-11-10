@@ -1,5 +1,5 @@
 import re
-from typing import Optional
+from typing import Optional, Union
 
 from requests_aws4auth import AWS4Auth
 from botocore.session import Session
@@ -124,7 +124,7 @@ def get_aws_sigv4_auth(region: str, is_serverless: bool = False) -> AWS4Auth:
         return AWS4Auth(region=region, service=ES_SERVICE_NAME, refreshable_credentials=credentials)
 
 
-def get_auth(plugin_config: dict) -> Optional[tuple] | AWS4Auth:
+def get_auth(plugin_config: dict) -> Union[AWS4Auth, tuple, None]:
     # Basic auth
     if USER_KEY in plugin_config and PWD_KEY in plugin_config:
         return plugin_config[USER_KEY], plugin_config[PWD_KEY]

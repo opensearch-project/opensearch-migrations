@@ -10,7 +10,7 @@ from endpoint_info import EndpointInfo
 from tests import test_constants
 
 
-class TestSearchEndpoint(unittest.TestCase):
+class TestIndexOperations(unittest.TestCase):
     @responses.activate
     def test_fetch_all_indices(self):
         # Set up GET response
