@@ -872,6 +872,7 @@ public class TrafficReplayer {
 
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
         log.warn("Shutting down "+this+" because of "+error);
+        shutdownReasonRef.compareAndSet(null, error);
         if (!shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
             log.atError().setMessage(()->"Shutdown was already signaled by {}.  " +
                     "Ignoring this shutdown request due to {}.")
@@ -880,7 +881,6 @@ public class TrafficReplayer {
                     .log();
             return shutdownFutureRef.get();
         }
-        shutdownReasonRef.compareAndSet(null, error);
         stopReadingRef.set(true);
         nettyShutdownFuture = clientConnectionPool.shutdownNow()
                 .addListener(f->{
