@@ -62,7 +62,7 @@ public class RequestResponsePacketPair {
         if (trafficStreamKeysBeingHeld == null) {
             trafficStreamKeysBeingHeld = new ArrayList<>();
         }
-        if (trafficStreamKeysBeingHeld.size() == 0 ||
+        if (trafficStreamKeysBeingHeld.isEmpty() ||
                 trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size()-1)) {
             trafficStreamKeysBeingHeld.add(trafficStreamKey);
         }

@@ -473,7 +473,7 @@ public class TrafficReplayer {
             trafficToHttpTransactionAccumulator.close();
             wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
             if (shutdownFutureRef.get() == null) {
-                assert requestToFinalWorkFuturesMap.size() == 0 :
+                assert requestToFinalWorkFuturesMap.isEmpty() :
                         "expected to wait for all the in flight requests to fully flush and self destruct themselves";
             }
         }
