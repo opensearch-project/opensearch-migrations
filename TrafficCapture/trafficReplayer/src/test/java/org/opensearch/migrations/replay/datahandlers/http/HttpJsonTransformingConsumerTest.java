@@ -5,11 +5,11 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
 import org.opensearch.migrations.replay.TestRequestKey;
+import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.transform.JsonCompositeTransformer;
-import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 
 import java.nio.charset.StandardCharsets;
@@ -25,7 +25,7 @@ class HttpJsonTransformingConsumerTest {
                 new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler =
-                new HttpJsonTransformingConsumer<AggregatedRawResponse>(JsonJoltTransformer.newBuilder().build(),
+                new HttpJsonTransformingConsumer<AggregatedRawResponse>(new TransformationLoader().getTransformerFactoryLoader(null, null),
                         null, testPacketCapture, "TEST",
                         TestRequestKey.getTestConnectionRequestId(0));
         byte[] testBytes;
@@ -46,9 +46,7 @@ class HttpJsonTransformingConsumerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(
-                        JsonJoltTransformer.newBuilder()
-                                .addHostSwitchOperation("test.domain")
-                                .build(),
+                        new TransformationLoader().getTransformerFactoryLoader("test.domain"),
                         null, testPacketCapture, "TEST",
                         TestRequestKey.getTestConnectionRequestId(0));
         byte[] testBytes;
@@ -73,9 +71,7 @@ class HttpJsonTransformingConsumerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(
-                        JsonJoltTransformer.newBuilder()
-                                .addHostSwitchOperation("test.domain")
-                                .build(),
+                        new TransformationLoader().getTransformerFactoryLoader("test.domain"),
                         RemovingAuthTransformerFactory.instance,
                         testPacketCapture, "TEST",
                         TestRequestKey.getTestConnectionRequestId(0));
@@ -102,7 +98,7 @@ class HttpJsonTransformingConsumerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
-            public Object transformJson(Object incomingJson) {
+            public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
                 // just walk everything - that's enough to touch the payload and throw
                 walkMaps(incomingJson);
                 return incomingJson;

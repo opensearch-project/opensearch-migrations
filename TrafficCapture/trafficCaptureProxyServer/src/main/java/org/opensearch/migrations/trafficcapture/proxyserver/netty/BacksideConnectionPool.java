@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 public class BacksideConnectionPool {
     private final URI backsideUri;
     private final SslContext backsideSslContext;
-    private final FastThreadLocal connectionCacheForEachThread;
+    private final FastThreadLocal<ExpiringSubstitutableItemPool<ChannelFuture, Void>> connectionCacheForEachThread;
     private final Duration inactivityTimeout;
     private final int poolSize;
 
@@ -33,7 +33,7 @@ public class BacksideConnectionPool {
                                   int poolSize, Duration inactivityTimeout) {
         this.backsideUri = backsideUri;
         this.backsideSslContext = backsideSslContext;
-        this.connectionCacheForEachThread = new FastThreadLocal();
+        this.connectionCacheForEachThread = new FastThreadLocal<>();
         this.inactivityTimeout = inactivityTimeout;
         this.poolSize = poolSize;
     }
@@ -47,8 +47,7 @@ public class BacksideConnectionPool {
 
     private ExpiringSubstitutableItemPool<ChannelFuture, Void>
     getExpiringWarmChannelPool(EventLoop eventLoop) {
-        var thisContextsConnectionCache = (ExpiringSubstitutableItemPool<ChannelFuture, Void>)
-                connectionCacheForEachThread.get();
+        var thisContextsConnectionCache = connectionCacheForEachThread.get();
         if (thisContextsConnectionCache == null) {
             thisContextsConnectionCache =
                     new ExpiringSubstitutableItemPool<ChannelFuture, Void>(inactivityTimeout,

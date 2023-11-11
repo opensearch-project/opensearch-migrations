@@ -338,7 +338,7 @@ public class FullTrafficReplayerTest {
         var tr = new TrafficReplayer(httpServer.localhostEndpoint(),
                 new StaticAuthTransformerFactory("TEST"),
                 true, 10, 10*1024,
-                TrafficReplayer.buildDefaultJsonTransformer(httpServer.localhostEndpoint().getHost()));
+                new TransformationLoader().getTransformerFactoryLoader(httpServer.localhostEndpoint().getHost()));
 
         try (var os = new NullOutputStream();
              var trafficSource = captureSourceSupplier.get();

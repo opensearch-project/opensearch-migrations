@@ -50,8 +50,8 @@ export class FetchMigrationStack extends Stack {
         // ECS Task Definition
         const fetchMigrationFargateTask = new FargateTaskDefinition(this, "fetchMigrationFargateTask", {
             family: `migration-${props.stage}-${serviceName}`,
-            memoryLimitMiB: 2048,
-            cpu: 512,
+            memoryLimitMiB: 4096,
+            cpu: 1024,
             taskRole: ecsTaskRole
         });
 

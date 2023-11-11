@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -44,8 +43,6 @@ public class PayloadRepackingTest {
     @ParameterizedTest
     @MethodSource("makeCombinations")
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
-        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
-
         var transformerBuilder = JsonJoltTransformer.newBuilder();
 
         if (doGzip) { transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP); }
