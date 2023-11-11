@@ -10,7 +10,9 @@ import java.time.Clock;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import lombok.extern.slf4j.Slf4j;
@@ -35,14 +37,12 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
 
     static {
-        AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<String>() {{
-            add("authorization");
-            add("x-amz-date");
-            add("x-amz-security-token");
-        }};
-        AUTH_HEADERS_TO_PULL_WITH_PAYLOAD = new HashSet<String>(AUTH_HEADERS_TO_PULL_NO_PAYLOAD) {{
-            add(AMZ_CONTENT_SHA_256);
-        }};
+        AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<>(Set.of(
+                "authorization",
+                "x-amz-date",
+                "x-amz-security-token"));
+        AUTH_HEADERS_TO_PULL_WITH_PAYLOAD = Stream.concat(AUTH_HEADERS_TO_PULL_NO_PAYLOAD.stream(),
+                        Stream.of(AMZ_CONTENT_SHA_256)).collect(Collectors.toCollection(HashSet::new));
     }
 
     private MessageDigest messageDigest;
@@ -87,8 +87,6 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
     }
 
     private static class AwsSignerWithPrecomputedContentHash extends BaseAws4Signer {
-        public AwsSignerWithPrecomputedContentHash() {}
-
         protected String calculateContentHash(SdkHttpFullRequest.Builder mutableRequest,
                                               Aws4SignerParams signerParams,
                                               SdkChecksum contentFlexibleChecksum) {
