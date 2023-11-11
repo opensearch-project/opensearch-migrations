@@ -870,12 +870,6 @@ public class TrafficReplayer {
         }
     }
 
-    public void stopReadingAsync() {
-        log.warn("TrafficReplayer is being signalled to stop reading new TrafficStream objects");
-        stopReadingRef.set(true);
-        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f->f.cancel(true));
-    }
-
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
         log.warn("Shutting down "+this+" because of "+error);
         if (!shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
@@ -886,8 +880,8 @@ public class TrafficReplayer {
                     .log();
             return shutdownFutureRef.get();
         }
-        stopReadingAsync();
         shutdownReasonRef.compareAndSet(null, error);
+        stopReadingRef.set(true);
         nettyShutdownFuture = clientConnectionPool.shutdownNow()
                 .addListener(f->{
                     if (f.isSuccess()) {
