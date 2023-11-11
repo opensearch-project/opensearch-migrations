@@ -14,8 +14,7 @@ public class TrafficStreamWithEmbeddedKey implements ITrafficStreamWithKey {
 
     @Override
     public ITrafficStreamKey getKey() {
-        return new PojoTrafficStreamKey(stream.getNodeId(), stream.getConnectionId(),
-                TrafficStreamUtils.getTrafficStreamIndex(stream));
+        return new PojoTrafficStreamKey(stream);
     }
 
     @Override

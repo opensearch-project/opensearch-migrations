@@ -1,8 +1,10 @@
 package org.opensearch.migrations.replay;
 
+import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.testutils.StreamInterleaver;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -238,6 +240,27 @@ public class TrafficStreamGenerator {
         public final TrafficStream[] trafficStreams;
         public final int[] requestByteSizes;
         public final int[] responseByteSizes;
+    }
+
+    @AllArgsConstructor
+    public static class StreamAndExpectedSizes {
+        public final Stream<TrafficStream> stream;
+        public final int numHttpTransactions;
+    }
+
+    static StreamAndExpectedSizes
+    generateStreamAndSumOfItsTransactions(int count, boolean randomize) {
+        var generatedCases = count > 0 ?
+                generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
+                generateAllIndicativeRandomTrafficStreamsAndSizes();
+        var testCaseArr = generatedCases.toArray(RandomTrafficStreamAndTransactionSizes[]::new);
+        var aggregatedStreams = randomize ?
+                StreamInterleaver.randomlyInterleaveStreams(new Random(count),
+                        Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :
+                Arrays.stream(testCaseArr).flatMap(c->Arrays.stream(c.trafficStreams));
+
+        var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
+        return new StreamAndExpectedSizes(aggregatedStreams, numExpectedRequests);
     }
 
     public static Stream<RandomTrafficStreamAndTransactionSizes>

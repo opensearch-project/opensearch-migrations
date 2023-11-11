@@ -1,64 +1,36 @@
 package org.opensearch.migrations.replay;
 
-import com.google.common.base.Strings;
-import com.google.common.collect.Streams;
-import io.vavr.Tuple2;
-import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.SneakyThrows;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
-import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
-import org.opensearch.migrations.testutils.StreamInterleaver;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
-import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
-import org.slf4j.event.Level;
-import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
 
 import java.io.EOFException;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
-import java.util.Properties;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 @Slf4j
 // It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
@@ -73,7 +45,7 @@ public class FullTrafficReplayerTest {
     public static final String TEST_NODE_ID = "TestNodeId";
     public static final String TEST_CONNECTION_ID = "testConnectionId";
 
-    private static class CountingTupleReceiverFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
+    private static class IndexWatchingReceiverFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
         AtomicInteger nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
 
         @Override
@@ -93,7 +65,6 @@ public class FullTrafficReplayerTest {
     }
 
     @Test
-    @Tag("longTest")
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 TestHttpServerContext::makeResponse);
@@ -105,7 +76,7 @@ public class FullTrafficReplayerTest {
                 .build();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
-                httpServer.localhostEndpoint(), new CountingTupleReceiverFactory(), trafficSourceSupplier);
+                httpServer.localhostEndpoint(), new IndexWatchingReceiverFactory(), trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
         log.error("done");
     }
@@ -121,31 +92,16 @@ public class FullTrafficReplayerTest {
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 TestHttpServerContext::makeResponse);
-        var streamAndConsumer = generateStreamAndTupleConsumerWithSomeChecks(testSize, randomize);
-        var numExpectedRequests = streamAndConsumer._2;
-        var trafficStreams = streamAndConsumer._1.collect(Collectors.toList());
+        var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
+        var numExpectedRequests = streamAndConsumer.numHttpTransactions;
+        var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(ts->TrafficStreamUtils.summarizeTrafficStream(ts))
                         .collect(Collectors.joining("\n"))).log();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(numExpectedRequests,
-                httpServer.localhostEndpoint(), new CountingTupleReceiverFactory(), trafficSourceSupplier);
+                httpServer.localhostEndpoint(), new IndexWatchingReceiverFactory(), trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.streams.size(), trafficSourceSupplier.nextReadCursor.get());
         log.error("done");
-    }
-
-    private Tuple2<Stream<TrafficStream>, Integer>
-    generateStreamAndTupleConsumerWithSomeChecks(int count, boolean randomize) {
-        var generatedCases = count > 0 ?
-                TrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
-                TrafficStreamGenerator.generateAllIndicativeRandomTrafficStreamsAndSizes();
-        var testCaseArr = generatedCases.toArray(TrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
-        var aggregatedStreams = randomize ?
-                StreamInterleaver.randomlyInterleaveStreams(new Random(count),
-                        Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :
-                Arrays.stream(testCaseArr).flatMap(c->Arrays.stream(c.trafficStreams));
-
-        var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
-        return new Tuple2<>(aggregatedStreams, numExpectedRequests);
     }
 
     @Getter
@@ -170,13 +126,6 @@ public class FullTrafficReplayerTest {
         public int compareTo(TrafficStreamCursorKey other) {
             return Integer.compare(arrayIndex, other.arrayIndex);
         }
-    }
-
-    @AllArgsConstructor
-    @Getter
-    private static class PojoTrafficStreamWithKey implements ITrafficStreamWithKey {
-        TrafficStream stream;
-        ITrafficStreamKey key;
     }
 
     private static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {

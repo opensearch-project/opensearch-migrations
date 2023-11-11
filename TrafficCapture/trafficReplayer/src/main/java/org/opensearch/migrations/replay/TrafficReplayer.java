@@ -911,6 +911,7 @@ public class TrafficReplayer {
         return shutdownFuture;
     }
 
+    @SneakyThrows
     public void pullCaptureFromSourceToAccumulator(
             ITrafficCaptureSource trafficChunkStream,
             CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator)
@@ -930,9 +931,8 @@ public class TrafficReplayer {
                             "Done reading traffic streams.").log();
                     break;
                 } else {
-                    log.atWarn().setCause(ex).setMessage("Interrupted.  Done reading traffic streams.").log();
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException(ex);
+                    log.atWarn().setCause(ex).setMessage("Done reading traffic streams due to exception.").log();
+                    throw ex.getCause();
                 }
             }
             if (log.isInfoEnabled()) {
