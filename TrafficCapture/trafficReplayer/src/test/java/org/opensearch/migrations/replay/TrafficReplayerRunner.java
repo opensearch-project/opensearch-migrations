@@ -136,10 +136,9 @@ public class TrafficReplayerRunner {
                                            URI endpoint,
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
         log.info("Starting a new replayer and running it");
-        var tr = new TrafficReplayer(endpoint,
+        var tr = new TrafficReplayer(endpoint, null,
                 new StaticAuthTransformerFactory("TEST"),
-                true, 10, 10*1024,
-                TrafficReplayer.buildDefaultJsonTransformer(endpoint.getHost()));
+                true, 10, 10*1024);
 
         try (var os = new NullOutputStream();
              var trafficSource = captureSourceSupplier.get();

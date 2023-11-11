@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -13,7 +14,7 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
+import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -28,10 +29,7 @@ import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
-import org.opensearch.migrations.transform.JsonCompositeTransformer;
-import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.JsonTypeMappingTransformer;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
@@ -116,29 +114,24 @@ public class TrafficReplayer {
         }
     }
 
-    public static IJsonTransformer buildDefaultJsonTransformer(String newHostName) {
-        var joltJsonTransformerBuilder = JsonJoltTransformer.newBuilder()
-                .addHostSwitchOperation(newHostName);
-        var joltJsonTransformer = joltJsonTransformerBuilder.build();
-        return new JsonCompositeTransformer(joltJsonTransformer, new JsonTypeMappingTransformer());
-    }
-
     public TrafficReplayer(URI serverUri,
+                           String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
                            boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, authTransformerFactory, allowInsecureConnections, 0, 1024);
+        this(serverUri, fullTransformerConfig, authTransformerFactory, allowInsecureConnections, 0, 1024);
     }
 
 
     public TrafficReplayer(URI serverUri,
+                           String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
                            boolean allowInsecureConnections,
                            int numSendingThreads, int maxConcurrentOutstandingRequests)
             throws SSLException {
         this(serverUri, authTransformerFactory, allowInsecureConnections,
                 numSendingThreads, maxConcurrentOutstandingRequests,
-                buildDefaultJsonTransformer(serverUri.getHost())
+                new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost(), fullTransformerConfig)
         );
     }
     
@@ -304,6 +297,13 @@ public class TrafficReplayer {
             arity=1,
             description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
         String kafkaTrafficPropertyFile;
+
+        @Parameter(required = false,
+        names = "--transformer-config",
+        arity = 1,
+        description = "Json configuration of message transformers.  Keys are the names of the loaded transformers " +
+                "(shortname or longname) and values are the configuration passed to each of the transformers.")
+        String transformerConfig;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -345,7 +345,7 @@ public class TrafficReplayer {
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
-            var tr = new TrafficReplayer(uri, authTransformer,
+            var tr = new TrafficReplayer(uri, params.transformerConfig, authTransformer,
                     params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer(bufferedOutputStream);
@@ -896,10 +896,11 @@ public class TrafficReplayer {
                         shutdownFutureRef.get().completeExceptionally(f.cause());
                     }
                 });
-        var signalFuture = error == null ?
+        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f->f.cancel(true));
+        var shutdownWasSignalledFuture = error == null ?
                 StringTrackableCompletableFuture.<Void>completedFuture(null, ()->"TrafficReplayer shutdown") :
                 StringTrackableCompletableFuture.<Void>failedFuture(error, ()->"TrafficReplayer shutdown");
-        while (!allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, signalFuture)) {
+        while (!allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, shutdownWasSignalledFuture)) {
             var otherRemainingWorkObj = allRemainingWorkFutureOrShutdownSignalRef.get();
             if (otherRemainingWorkObj != null) {
                 otherRemainingWorkObj.future.cancel(true);

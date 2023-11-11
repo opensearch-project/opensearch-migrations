@@ -1,15 +1,19 @@
-package org.opensearch.migrations.transform;
+package org.opensearch.migrations.replay;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
+import org.opensearch.migrations.transform.JsonJoltTransformer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Slf4j
@@ -17,19 +21,20 @@ import java.util.Map;
 class JsonTransformerTest {
     public static final String DUMMY_HOSTNAME_TEST_STRING = "THIS_IS_A_TEST_STRING_THAT_ONLY_EXISTS_IN_ONE_PLACE";
     ObjectMapper mapper = new ObjectMapper();
+    static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>(){};
 
     public JsonTransformerTest() {
         mapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true);
     }
 
     private Map<String, Object> parseStringAsJson(String jsonStr) throws JsonProcessingException {
-        return mapper.readValue(jsonStr, JsonJoltTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
+        return mapper.readValue(jsonStr, TYPE_REFERENCE_FOR_MAP_TYPE);
     }
 
     @SneakyThrows
     private Map<String, Object> parseSampleRequestFromResource(String path) {
         try (InputStream inputStream = JsonJoltTransformBuilder.class.getResourceAsStream("/requests/"+path)) {
-            return mapper.readValue(inputStream, JsonJoltTransformBuilder.TYPE_REFERENCE_FOR_MAP_TYPE);
+            return mapper.readValue(inputStream, TYPE_REFERENCE_FOR_MAP_TYPE);
         }
     }
 
@@ -64,5 +69,4 @@ class JsonTransformerTest {
         log.error("transformed json document: "+transformedJsonOutputStr);
         Assertions.assertTrue(transformedJsonOutputStr.contains(DUMMY_HOSTNAME_TEST_STRING));
     }
-
 }

@@ -41,14 +41,14 @@ def shutdown_process(proc: Popen) -> Optional[int]:
 
 
 def shutdown_pipeline(endpoint: EndpointInfo):
-    shutdown_endpoint = endpoint.url + __SHUTDOWN_API_PATH
-    requests.post(shutdown_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+    shutdown_endpoint = endpoint.add_path(__SHUTDOWN_API_PATH)
+    requests.post(shutdown_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
 
 
 def fetch_prometheus_metrics(endpoint: EndpointInfo) -> Optional[List[Metric]]:
-    metrics_endpoint = endpoint.url + __METRICS_API_PATH
+    metrics_endpoint = endpoint.add_path(__METRICS_API_PATH)
     try:
-        response = requests.get(metrics_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+        response = requests.get(metrics_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
         response.raise_for_status()
     except requests.exceptions.RequestException:
         return None
@@ -95,11 +95,20 @@ def __should_continue_monitoring(progress: ProgressMetrics, proc: Optional[Popen
     return not progress.is_in_terminal_state() and (proc is None or is_process_alive(proc))
 
 
+def __log_migration_end_reason(progress: ProgressMetrics):  # pragma no cover
+    if progress.is_migration_complete_success():
+        logging.info("Migration monitor observed successful migration, shutting down...\n")
+    elif progress.is_migration_idle():
+        logging.warning("Migration monitor observed idle pipeline (migration may be incomplete), shutting down...")
+    elif progress.is_too_may_api_failures():
+        logging.warning("Migration monitor was unable to fetch migration metrics, terminating...")
+
+
 # The "dp_process" parameter is optional, and signifies a local Data Prepper process
 def run(args: MigrationMonitorParams, dp_process: Optional[Popen] = None, poll_interval_seconds: int = 30) -> int:
     endpoint_info = EndpointInfo(args.data_prepper_endpoint)
     progress_metrics = ProgressMetrics(args.target_count, __IDLE_THRESHOLD)
-    logging.info("Starting migration monitor until target doc count: " + str(progress_metrics.target_doc_count))
+    logging.info("Starting migration monitor until target doc count: " + str(progress_metrics.get_target_doc_count()))
     while __should_continue_monitoring(progress_metrics, dp_process):
         if dp_process is not None:
             # Wait on local process
@@ -120,12 +129,7 @@ def run(args: MigrationMonitorParams, dp_process: Optional[Popen] = None, poll_i
         logging.error("Please delete any partially migrated indices before retrying the migration.")
         return dp_process.returncode
     else:
-        if progress_metrics.is_migration_complete_success():
-            logging.info("Migration monitor observed successful migration, shutting down...\n")
-        elif progress_metrics.is_migration_idle():
-            logging.warning("Migration monitor observed idle pipeline (migration may be incomplete), shutting down...")
-        elif progress_metrics.is_too_may_api_failures():
-            logging.warning("Migration monitor was unable to fetch migration metrics, terminating...")
+        __log_migration_end_reason(progress_metrics)
         # Shut down Data Prepper pipeline via API
         shutdown_pipeline(endpoint_info)
         if dp_process is None:
@@ -158,6 +162,6 @@ if __name__ == '__main__':  # pragma no cover
         help="Target doc_count to reach, after which the Data Prepper pipeline will be terminated"
     )
     namespace = arg_parser.parse_args()
-    print("\n##### Starting monitor tool... #####\n")
+    logging.info("\n##### Starting monitor tool... #####\n")
     run(MigrationMonitorParams(namespace.target_count, namespace.data_prepper_endpoint))
-    print("\n##### Ending monitor tool... #####\n")
+    logging.info("\n##### Ending monitor tool... #####\n")

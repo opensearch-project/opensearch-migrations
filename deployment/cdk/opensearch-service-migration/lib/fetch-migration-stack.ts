@@ -26,7 +26,7 @@ export class FetchMigrationStack extends Stack {
         super(scope, id, props);
 
         // Import required values
-        const targetClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
+        const targetClusterEndpoint = StringParameter.fromStringParameterName(this, "targetClusterEndpoint", `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const domainAccessGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)
         // This SG allows outbound access for ECR access as well as communication with other services in the cluster
         const serviceConnectGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)
@@ -38,8 +38,8 @@ export class FetchMigrationStack extends Stack {
 
         // ECS Task Definition
         const fetchMigrationFargateTask = new FargateTaskDefinition(this, "fetchMigrationFargateTask", {
-            memoryLimitMiB: 2048,
-            cpu: 512
+            memoryLimitMiB: 4096,
+            cpu: 1024
         });
 
         new StringParameter(this, 'SSMParameterFetchMigrationTaskDefArn', {
@@ -67,8 +67,8 @@ export class FetchMigrationStack extends Stack {
 
         // Create DP pipeline config from template file
         let dpPipelineData: string = readFileSync(props.dpPipelineTemplatePath, 'utf8');
+        // Replace only source cluster host - target host will be overridden by inline env var
         dpPipelineData = dpPipelineData.replace("<SOURCE_CLUSTER_HOST>", props.sourceEndpoint);
-        dpPipelineData = dpPipelineData.replace("<TARGET_CLUSTER_HOST>", targetClusterEndpoint);
         // Base64 encode
         let encodedPipeline = Buffer.from(dpPipelineData).toString("base64");
 
@@ -77,9 +77,12 @@ export class FetchMigrationStack extends Stack {
             secretName: `${props.stage}-${props.defaultDeployId}-${fetchMigrationContainer.containerName}-pipelineConfig`,
             secretStringValue: SecretValue.unsafePlainText(encodedPipeline)
         });
-        // Add secret to container
+        // Add secrets to container
         fetchMigrationContainer.addSecret("INLINE_PIPELINE",
             ECSSecret.fromSecretsManager(dpPipelineConfigSecret)
+        );
+        fetchMigrationContainer.addSecret("INLINE_TARGET_HOST",
+            ECSSecret.fromSsmParameter(targetClusterEndpoint)
         );
 
         let networkConfigJson = {

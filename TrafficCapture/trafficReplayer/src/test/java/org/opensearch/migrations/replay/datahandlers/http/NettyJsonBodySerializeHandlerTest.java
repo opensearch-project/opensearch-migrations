@@ -11,14 +11,13 @@ import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
 import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.transform.IHttpMessage;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Random;
 import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 @Slf4j
 @WrapWithNettyLeakDetection
@@ -31,7 +30,7 @@ public class NettyJsonBodySerializeHandlerTest {
         headers.put(IHttpMessage.CONTENT_TYPE, List.of(IHttpMessage.APPLICATION_JSON));
         var fullHttpMessageWithJsonBody = new HttpJsonMessageWithFaultingPayload(headers);
         fullHttpMessageWithJsonBody.setPayloadFaultMap(new PayloadAccessFaultingMap(headers));
-        fullHttpMessageWithJsonBody.payload().put(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY, randomJson);
+        fullHttpMessageWithJsonBody.payload().put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, randomJson);
 
         var channel = new EmbeddedChannel(new NettyJsonBodySerializeHandler());
         channel.writeInbound(fullHttpMessageWithJsonBody);
