@@ -87,6 +87,20 @@ export class StackComposer {
         return accessPolicies
     }
 
+
+    private getEngineVersion(engineVersionString: string) : EngineVersion {
+        let version: EngineVersion
+        if (engineVersionString && engineVersionString.startsWith("OS_")) {
+            // Will accept a period delimited version string (i.e. 1.3) and return a proper EngineVersion
+            version = EngineVersion.openSearch(engineVersionString.substring(3))
+        } else if (engineVersionString && engineVersionString.startsWith("ES_")) {
+            version = EngineVersion.elasticsearch(engineVersionString.substring(3))
+        } else {
+            throw new Error("Engine version is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9")
+        }
+        return version
+    }
+
     constructor(scope: Construct, props: StackComposerProps) {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
@@ -160,6 +174,27 @@ export class StackComposer {
         const migrationAnalyticsServiceEnabled = this.getContextForType('migrationAnalyticsServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelConfigFilePath = this.getContextForType('otelConfigFilePath', 'string', defaultValues, contextJSON)
 
+        const analyticsDomainEngineVersion = this.getContextForType('analyticsDomainEngineVersion', 'string', defaultValues, contextJSON)
+        const analyticsDomainDataNodeType = this.getContextForType('analyticsDomainDataNodeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainDataNodeCount = this.getContextForType('analyticsDomainDataNodeCount', 'number', defaultValues, contextJSON)
+        const analyticsDomainDedicatedManagerNodeType = this.getContextForType('analyticsDomainDedicatedManagerNodeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainDedicatedManagerNodeCount = this.getContextForType('analyticsDomainDedicatedManagerNodeCount', 'number', defaultValues, contextJSON)
+        const analyticsDomainWarmNodeType = this.getContextForType('analyticsDomainWarmNodeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainWarmNodeCount = this.getContextForType('analyticsDomainWarmNodeCount', 'number', defaultValues, contextJSON)
+        // const analyticsDomainUseUnsignedBasicAuth = this.getContextForType('analyticsDomainUseUnsignedBasicAuth', 'boolean')
+        // const analyticsDomainFineGrainedManagerUserARN = this.getContextForType('analyticsDomainFineGrainedManagerUserARN', 'string')
+        // const analyticsDomainFineGrainedManagerUserName = this.getContextForType('analyticsDomainFineGrainedManagerUserName', 'string')
+        // const analyticsDomainFineGrainedManagerUserSecretManagerKeyARN = this.getContextForType('analyticsDomainFineGrainedManagerUserSecretManagerKeyARN', 'string')
+        const analyticsDomainEnforceHTTPS = this.getContextForType('analyticsDomainEnforceHTTPS', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainEbsEnabled = this.getContextForType('analyticsDomainEbsEnabled', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainEbsIops = this.getContextForType('analyticsDomainEbsIops', 'number', defaultValues, contextJSON)
+        const analyticsDomainEbsVolumeSize = this.getContextForType('analyticsDomainEbsVolumeSize', 'number', defaultValues, contextJSON)
+        const analyticsDomainEncryptionAtRestEnabled = this.getContextForType('analyticsDomainEncryptionAtRestEnabled', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainEncryptionAtRestKmsKeyARN = this.getContextForType("analyticsDomainEncryptionAtRestKmsKeyARN", 'string', defaultValues, contextJSON)
+        const analyticsDomainLoggingAppLogEnabled = this.getContextForType('analyticsDomainLoggingAppLogEnabled', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainLoggingAppLogGroupARN = this.getContextForType('analyticsDomainLoggingAppLogGroupARN', 'string', defaultValues, contextJSON)
+        const analyticsDomainNoneToNodeEncryptionEnabled = this.getContextForType('analyticsDomainNodeToNodeEncryptionEnabled', 'boolean', defaultValues, contextJSON)
+
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
         }
@@ -171,14 +206,7 @@ export class StackComposer {
         }
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
-        if (engineVersion && engineVersion.startsWith("OS_")) {
-            // Will accept a period delimited version string (i.e. 1.3) and return a proper EngineVersion
-            version = EngineVersion.openSearch(engineVersion.substring(3))
-        } else if (engineVersion && engineVersion.startsWith("ES_")) {
-            version = EngineVersion.elasticsearch(engineVersion.substring(3))
-        } else {
-            throw new Error("Engine version is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9")
-        }
+        version = this.getEngineVersion(engineVersion)
 
         if (openAccessPolicyEnabled) {
             const openPolicy = new PolicyStatement({
@@ -202,6 +230,12 @@ export class StackComposer {
         const ebsVolumeTypeName = this.getContextForType('ebsVolumeType', 'string', defaultValues, contextJSON)
         const ebsVolumeType: EbsDeviceVolumeType|undefined = ebsVolumeTypeName ? EbsDeviceVolumeType[ebsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
         if (ebsVolumeTypeName && !ebsVolumeType) {
+            throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
+        }
+
+        const analyticsDomainEbsVolumeTypeName = this.getContextForType('analyticsDomainEbsVolumeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainEbsVolumeType: EbsDeviceVolumeType|undefined = analyticsDomainEbsVolumeTypeName ? EbsDeviceVolumeType[analyticsDomainEbsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
+        if (analyticsDomainEbsVolumeTypeName && !analyticsDomainEbsVolumeType) {
             throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
         }
 
@@ -304,6 +338,47 @@ export class StackComposer {
             })
             mskUtilityStack.addDependency(migrationStack)
             this.stacks.push(mskUtilityStack)
+        }
+
+        let migrationAnalyticsStack
+        if (migrationAnalyticsServiceEnabled && networkStack) {
+            migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-MigrationAnalytics`,
+                description: "This stack contains resources for the Open Telemetry Collector and Analytics OS Cluster",
+                engineVersion: this.getEngineVersion(analyticsDomainEngineVersion ?? engineVersion), // if no analytics version is specified, use the same as the target cluster
+                dataNodeInstanceType: analyticsDomainDataNodeType,
+                dataNodes: analyticsDomainDataNodeCount,
+                dedicatedManagerNodeType: analyticsDomainDedicatedManagerNodeType,
+                dedicatedManagerNodeCount: analyticsDomainDedicatedManagerNodeCount,
+                warmInstanceType: analyticsDomainWarmNodeType,
+                warmNodes: analyticsDomainWarmNodeCount,
+                enforceHTTPS: analyticsDomainEnforceHTTPS,
+                ebsEnabled: analyticsDomainEbsEnabled,
+                ebsIops: analyticsDomainEbsIops,
+                ebsVolumeSize: analyticsDomainEbsVolumeSize,
+                ebsVolumeType: analyticsDomainEbsVolumeType,
+                encryptionAtRestEnabled: analyticsDomainEncryptionAtRestEnabled,
+                encryptionAtRestKmsKeyARN: analyticsDomainEncryptionAtRestKmsKeyARN,
+                appLogEnabled: analyticsDomainLoggingAppLogEnabled,
+                appLogGroup: analyticsDomainLoggingAppLogGroupARN,
+                nodeToNodeEncryptionEnabled: analyticsDomainNoneToNodeEncryptionEnabled,
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            // To enable the Migration Console to make requests to other service endpoints with Service Connect,
+            // it must be deployed after these services
+            // if (captureProxyESStack) {
+            //     migrationAnalyticsStack.addDependency(captureProxyESStack)
+            // }
+            // if (captureProxyStack) {
+            //     migrationAnalyticsStack.addDependency(captureProxyStack)
+            // }
+            // if (elasticsearchStack) {
+            //     migrationAnalyticsStack.addDependency(elasticsearchStack)
+            // }
+            this.stacks.push(migrationAnalyticsStack)
         }
 
         // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
@@ -457,80 +532,6 @@ export class StackComposer {
 
         if (props.migrationsAppRegistryARN) {
             this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
-        }
-        
-        let migrationAnalyticsStack
-        if (migrationAnalyticsServiceEnabled && networkStack) {
-            migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
-                vpc: networkStack.vpc,
-                otelConfigFilePath: otelConfigFilePath,
-                stackName: `OSMigrations-${stage}-${region}-MigrationAnalytics`,
-                description: "This stack contains resources for the Otel Collector and Analytics OS Cluster",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            // To enable the Migration Console to make requests to other service endpoints with Service Connect,
-            // it must be deployed after these services
-            if (captureProxyESStack) {
-                migrationAnalyticsStack.addDependency(captureProxyESStack)
-            }
-            if (captureProxyStack) {
-                migrationAnalyticsStack.addDependency(captureProxyStack)
-            }
-            if (elasticsearchStack) {
-                migrationAnalyticsStack.addDependency(elasticsearchStack)
-            }
-            this.stacks.push(migrationAnalyticsStack)
-        }
-
-
-        function getContextForType(optionName: string, expectedType: string): any {
-            const option = contextJSON[optionName]
-
-            // If no context is provided (undefined or empty string) and a default value exists, use it
-            if ((option === undefined || option === "") && defaultValues[optionName]) {
-                return defaultValues[optionName]
-            }
-
-            // Filter out invalid or missing options by setting undefined (empty strings, null, undefined, NaN)
-            if (option !== false && option !== 0 && !option) {
-                return undefined
-            }
-            // Values provided by the CLI will always be represented as a string and need to be parsed
-            if (typeof option === 'string') {
-                if (expectedType === 'number') {
-                    return parseInt(option)
-                }
-                if (expectedType === 'boolean' || expectedType === 'object') {
-                    return JSON.parse(option)
-                }
-            }
-            // Values provided by the cdk.context.json should be of the desired type
-            if (typeof option !== expectedType) {
-                throw new Error(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
-            }
-            return option
-        }
-
-        function parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
-            let accessPolicies: PolicyStatement[] = []
-            const statements = jsonObject['Statement']
-            if (!statements || statements.length < 1) {
-                throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
-            }
-            // Access policies can provide a single Statement block or an array of Statement blocks
-            if (Array.isArray(statements)) {
-                for (let i = 0; i < statements.length; i++) {
-                    const statement = PolicyStatement.fromJson(statements[i])
-                    accessPolicies.push(statement)
-                }
-            }
-            else {
-                const statement = PolicyStatement.fromJson(statements)
-                accessPolicies.push(statement)
-            }
-            return accessPolicies
         }
 
     }

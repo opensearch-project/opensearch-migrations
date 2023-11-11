@@ -46,19 +46,24 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly vpcSubnetIds?: string[],
   readonly vpcSecurityGroupIds?: string[],
   readonly availabilityZoneCount?: number,
-  readonly domainRemovalPolicy?: RemovalPolicy
+  readonly domainRemovalPolicy?: RemovalPolicy,
+  readonly domainAccessSecurityGroupParameter?: string,
+  readonly endpointParameterName?: string
 }
 
 
 export class OpenSearchDomainStack extends Stack {
 
-  createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
+
+  createSSMParameters(domain: Domain, endpointParameterName: string|undefined, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
+    
+    const endpointParameter = endpointParameterName ?? "osClusterEndpoint"
     new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
       description: 'OpenSearch migration parameter for OpenSearch endpoint',
-      parameterName: `/migration/${stage}/${deployId}/osClusterEndpoint`,
+      parameterName: `/migration/${stage}/${deployId}/${endpointParameter}`,
       stringValue: domain.domainEndpoint
     });
-
+    
     if (domain.masterUserPassword && !adminUserSecret) {
       console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
     }
@@ -82,12 +87,12 @@ export class OpenSearchDomainStack extends Stack {
     let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
         Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
 
-
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
+    const domainAccessSecurityGroupParameter = props.domainAccessSecurityGroupParameter ?? "osAccessSecurityGroupId"
     const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
-        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`))
+        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/${domainAccessSecurityGroupParameter}`))
 
     // Map objects from props
 
@@ -165,7 +170,16 @@ export class OpenSearchDomainStack extends Stack {
       removalPolicy: props.domainRemovalPolicy
     });
 
-    this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
 
+    if (domain.masterUserPassword && !adminUserSecret) {
+      console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${props.stage}/${deployId}/osUserAndSecret`)
+    }
+    else if (domain.masterUserPassword && adminUserSecret) {
+      new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
+        description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
+        parameterName: `/migration/${props.stage}/${deployId}/osUserAndSecretArn`,
+        stringValue: `${adminUserName} ${adminUserSecret.secretArn}`
+      });
+    }
   }
 }
