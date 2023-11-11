@@ -35,8 +35,10 @@ public class JsonJoltTransformerProvider implements IJsonTransformerProvider {
                     var cannedValueStr = (String) cannedValue;
                     var cannedOperation = getCannedOperationOrThrow(cannedValueStr);
                     builder.addCannedOperation(cannedOperation);
-                } else {
+                } else if (scriptValue != null) {
                     builder.addOperationObject((Map<String,Object>)scriptValue);
+                } else {
+                    throw new IllegalArgumentException(getConfigUsageStr());
                 }
             }
         } catch (ClassCastException e) {
@@ -54,7 +56,7 @@ public class JsonJoltTransformerProvider implements IJsonTransformerProvider {
     }
 
     private String getConfigUsageStr() {
-        return this.getClass().getName()+" expects the incoming configuration " +
+        return this.getClass().getName() + " expects the incoming configuration " +
                 "to be a Map<String,Object> or a List<Map<String,Object>>.  " +
                 "Each of the Maps should have one key-value, either \"canned\" or \"script\".  " +
                 "Canned values should be a string that specifies the name of the pre-built transformation to use " +
@@ -63,6 +65,6 @@ public class JsonJoltTransformerProvider implements IJsonTransformerProvider {
                 ".  " +
                 "Script values should be a fully-formed inlined Jolt transformation in json form.  " +
                 "All of the values (canned or inlined) within a configuration will be concatenated " +
-                "into one chained Jolt transformation";
+                "into one chained Jolt transformation.";
     }
 }
