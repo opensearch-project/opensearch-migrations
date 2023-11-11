@@ -63,17 +63,6 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-        log.debug("channelRead COMPLETE");
-        ctx.fireChannelReadComplete();
-    }
-
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        log.atError().setCause(cause).setMessage("Caught error").log();
-        ctx.close();
-    }
-
     /**
      * This will close our proxy connection to downstream services.
      * @param ctx current channel context.

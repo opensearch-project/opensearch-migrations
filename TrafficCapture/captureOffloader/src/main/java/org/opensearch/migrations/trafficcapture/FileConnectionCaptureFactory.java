@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture;
 
 import lombok.AllArgsConstructor;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.FileNotFoundException;
@@ -38,7 +39,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
                 var filePath = rootPath.resolve(id + "_" + n.toString() + ".protocap");
                 return new FileOutputStream(filePath.toString());
             } catch (FileNotFoundException e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         });
     }
@@ -72,7 +73,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
                     fs.flush();
                     log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
                 } catch (IOException e) {
-                    throw new RuntimeException(e);
+                    throw Lombok.sneakyThrow(e);
                 }
             }).thenApply(v->null);
         }

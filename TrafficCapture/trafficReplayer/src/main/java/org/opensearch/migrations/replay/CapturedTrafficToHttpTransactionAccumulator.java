@@ -175,8 +175,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                           @NonNull ITrafficStreamKey trafficStreamKey,
                                                           TrafficObservation observation) {
         log.atTrace().setMessage(()->"Adding observation: "+observation).log();
-        var timestamp =
-                Optional.of(observation.getTs()).map(TrafficStreamUtils::instantFromProtoTimestamp).get();
+        var timestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
 
         return handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp)
