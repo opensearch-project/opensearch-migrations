@@ -1,7 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
-
 import java.io.IOException;
 
 public interface IAuthTransformerFactory extends AutoCloseable {

@@ -3,6 +3,7 @@ package org.opensearch.migrations.transform;
 import com.bazaarvoice.jolt.Chainr;
 
 import java.util.List;
+import java.util.Map;
 
 public class JsonJoltTransformer implements IJsonTransformer {
 
@@ -18,7 +19,7 @@ public class JsonJoltTransformer implements IJsonTransformer {
     }
 
     @Override
-    public Object transformJson(Object incomingJson) {
-        return this.spec.transform(incomingJson);
+    public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
+        return (Map<String,Object>) this.spec.transform(incomingJson);
     }
 }
