@@ -59,7 +59,7 @@ def write_inline_pipeline(pipeline_file_path: str, inline_pipeline: str, inline_
 
 
 def write_inline_target_host(pipeline_file_path: str, inline_target_host: str):
-    with open(pipeline_file_path, 'rw') as pipeline_file:
+    with open(pipeline_file_path, 'r+') as pipeline_file:
         pipeline_yaml = yaml.safe_load(pipeline_file)
         update_target_host(pipeline_yaml, inline_target_host)
         # Note - this does not preserve comments
@@ -84,7 +84,7 @@ def run(params: FetchOrchestratorParams) -> Optional[int]:
                                                         report=True, dryrun=params.is_dry_run)
     logging.info("Running metadata migration...\n")
     metadata_migration_result = metadata_migration.run(metadata_migration_params)
-    if len(metadata_migration_result.created_indices) > 0 and not params.is_only_metadata_migration():
+    if len(metadata_migration_result.migration_indices) > 0 and not params.is_only_metadata_migration():
         # Kick off a subprocess for Data Prepper
         logging.info("Running Data Prepper...\n")
         proc = subprocess.Popen(dp_exec_path)

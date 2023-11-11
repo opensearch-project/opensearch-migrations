@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from moto import mock_iam
 
 import endpoint_utils
+from endpoint_info import EndpointInfo
 from tests import test_constants
 
 # Constants
@@ -70,6 +71,10 @@ class TestEndpointUtils(unittest.TestCase):
     def test_is_insecure_missing_nested(self):
         test_input = {"key1": 123, CONNECTION_KEY: {"key2": "val"}}
         self.assertFalse(endpoint_utils.is_insecure(test_input))
+
+    def test_auth_normalized_url(self):
+        val = EndpointInfo("test")
+        self.assertEqual("test/", val.get_url())
 
     def test_get_auth_returns_none(self):
         # The following inputs should not return an auth tuple:

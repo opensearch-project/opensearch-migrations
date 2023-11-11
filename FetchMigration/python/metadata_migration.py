@@ -1,10 +1,12 @@
 import argparse
+import logging
 
 import yaml
 
 import endpoint_utils
 import index_operations
 import utils
+from index_diff import IndexDiff
 from metadata_migration_params import MetadataMigrationParams
 from metadata_migration_result import MetadataMigrationResult
 
@@ -14,13 +16,13 @@ INCLUDE_KEY = "include"
 INDEX_NAME_KEY = "index_name_regex"
 
 
-def write_output(yaml_data: dict, new_indices: set, output_path: str):
+def write_output(yaml_data: dict, indices_to_migrate: set, output_path: str):
     pipeline_config = next(iter(yaml_data.values()))
     # Result is a tuple of (type, config)
     source_config = endpoint_utils.get_supported_endpoint_config(pipeline_config, endpoint_utils.SOURCE_KEY)[1]
     source_indices = source_config.get(INDICES_KEY, dict())
     included_indices = source_indices.get(INCLUDE_KEY, list())
-    for index in new_indices:
+    for index in indices_to_migrate:
         included_indices.append({INDEX_NAME_KEY: index})
     source_indices[INCLUDE_KEY] = included_indices
     source_config[INDICES_KEY] = source_indices
@@ -28,36 +30,15 @@ def write_output(yaml_data: dict, new_indices: set, output_path: str):
         yaml.dump(yaml_data, out_file)
 
 
-# Computes differences in indices between source and target.
-# Returns a tuple with 3 elements:
-# - The 1st element is the set of indices to create on the target
-# - The 2nd element is a set of indices that are identical on source and target
-# - The 3rd element is a set of indices that are present on both source and target,
-# but differ in their settings or mappings.
-def get_index_differences(source: dict, target: dict) -> tuple[set, set, set]:
-    index_conflicts = set()
-    indices_in_target = set(source.keys()) & set(target.keys())
-    for index in indices_in_target:
-        # Check settings
-        if utils.has_differences(index_operations.SETTINGS_KEY, source[index], target[index]):
-            index_conflicts.add(index)
-        # Check mappings
-        if utils.has_differences(index_operations.MAPPINGS_KEY, source[index], target[index]):
-            index_conflicts.add(index)
-    identical_indices = set(indices_in_target) - set(index_conflicts)
-    indices_to_create = set(source.keys()) - set(indices_in_target)
-    return indices_to_create, identical_indices, index_conflicts
-
-
-# The order of data in the tuple is:
-# (indices to create), (identical indices), (indices with conflicts)
-def print_report(index_differences: tuple[set, set, set], count: int):  # pragma no cover
-    print("Identical indices in the target cluster (no changes will be made): " +
-          utils.string_from_set(index_differences[1]))
-    print("Indices in target cluster with conflicting settings/mappings: " +
-          utils.string_from_set(index_differences[2]))
-    print("Indices to create: " + utils.string_from_set(index_differences[0]))
-    print("Total documents to be moved: " + str(count))
+def print_report(diff: IndexDiff, total_doc_count: int):  # pragma no cover
+    logging.info("Identical indices in the target cluster: " + utils.string_from_set(diff.identical_indices))
+    logging.info("Identical empty indices in the target cluster (data will be migrated): " +
+                 utils.string_from_set(diff.identical_empty_indices))
+    logging.info("Indices present in both clusters with conflicting settings/mappings (data will not be migrated): " +
+                 utils.string_from_set(diff.conflicting_indices))
+    logging.info("Indices to be created in the target cluster (data will be migrated): " +
+                 utils.string_from_set(diff.indices_to_create))
+    logging.info("Total number of documents to be moved: " + str(total_doc_count))
 
 
 def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
@@ -83,23 +64,29 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
         return result
     target_indices = index_operations.fetch_all_indices(target_endpoint_info)
     # Compute index differences and print report
-    diff = get_index_differences(source_indices, target_indices)
-    # The first element in the tuple is the set of indices to create
-    indices_to_create = diff[0]
-    if indices_to_create:
-        result.created_indices = indices_to_create
-        result.target_doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)
+    diff = IndexDiff(source_indices, target_indices)
+    if diff.identical_indices:
+        # Identical indices with zero documents on the target are eligible for migration
+        target_doc_count = index_operations.doc_count(diff.identical_indices, target_endpoint_info)
+        # doc_count only returns indices that have non-zero counts, so the difference in responses
+        # gives us the set of identical, empty indices
+        result.migration_indices = diff.identical_indices.difference(target_doc_count.index_doc_count_map.keys())
+        diff.set_identical_empty_indices(result.migration_indices)
+    if diff.indices_to_create:
+        result.migration_indices.update(diff.indices_to_create)
+    if result.migration_indices:
+        doc_count_result = index_operations.doc_count(result.migration_indices, source_endpoint_info)
+        result.target_doc_count = doc_count_result.total
     if args.report:
         print_report(diff, result.target_doc_count)
-    if indices_to_create:
+    if result.migration_indices:
         # Write output YAML
         if len(args.output_file) > 0:
-            write_output(dp_config, indices_to_create, args.output_file)
-            if args.report:  # pragma no cover
-                print("Wrote output YAML pipeline to: " + args.output_file)
+            write_output(dp_config, result.migration_indices, args.output_file)
+            logging.debug("Wrote output YAML pipeline to: " + args.output_file)
         if not args.dryrun:
             index_data = dict()
-            for index_name in indices_to_create:
+            for index_name in diff.indices_to_create:
                 index_data[index_name] = source_indices[index_name]
             index_operations.create_indices(index_data, target_endpoint_info)
     return result
