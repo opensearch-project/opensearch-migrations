@@ -38,7 +38,7 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         log.info("incoming buffer refcnt="+nextRequestPacket.refCnt());
         var duplicatedPacket = nextRequestPacket.duplicate().retain();
-        return new DiagnosticTrackableCompletableFuture(CompletableFuture.runAsync(() -> {
+        return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.runAsync(() -> {
             try {
                 log.info("Running async future for " + nextRequestPacket);
                 Thread.sleep(consumeDuration.toMillis());

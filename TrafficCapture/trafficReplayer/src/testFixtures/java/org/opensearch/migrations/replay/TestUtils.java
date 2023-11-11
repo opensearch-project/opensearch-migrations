@@ -26,12 +26,16 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 
 @Slf4j
 public class TestUtils {
+
+    private TestUtils() {}
 
     static String resolveReferenceString(StringBuilder referenceStringBuilder) {
         return resolveReferenceString(referenceStringBuilder, List.of());
@@ -74,7 +78,7 @@ public class TestUtils {
     chainedDualWriteHeaderAndPayloadParts(IPacketConsumer packetConsumer,
                                           List<String> stringParts,
                                           StringBuilder referenceStringAccumulator,
-                                          Function<Integer, String> headersGenerator) {
+                                          IntFunction<String> headersGenerator) {
         var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
         String headers = headersGenerator.apply(contentLength) + "\r\n";
         referenceStringAccumulator.append(headers);
@@ -120,7 +124,8 @@ public class TestUtils {
                                        String extraHeaders,
                                        List<String> stringParts,
                                        DefaultHttpHeaders expectedRequestHeaders,
-                                       Function<StringBuilder, String> expectedOutputGenerator) throws Exception {
+                                       Function<StringBuilder, String> expectedOutputGenerator)
+            throws IOException, ExecutionException, InterruptedException {
         runPipelineAndValidate(x -> x,
                 authTransformer, extraHeaders, stringParts, expectedRequestHeaders, expectedOutputGenerator);
     }
@@ -130,13 +135,15 @@ public class TestUtils {
                                        String extraHeaders,
                                        List<String> stringParts,
                                        DefaultHttpHeaders expectedRequestHeaders,
-                                       Function<StringBuilder, String> expectedOutputGenerator) throws Exception {
+                                       Function<StringBuilder, String> expectedOutputGenerator)
+            throws IOException, ExecutionException, InterruptedException
+    {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
                 new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null));
-        var transformingHandler = new HttpJsonTransformingConsumer(transformer, authTransformer, testPacketCapture,
+        var transformingHandler = new HttpJsonTransformingConsumer<>(transformer, authTransformer, testPacketCapture,
                 "TEST", TestRequestKey.getTestConnectionRequestId(0));
 
-        var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
+        var contentLength = stringParts.stream().mapToInt(String::length).sum();
         var headerString = "GET / HTTP/1.1\r\n" +
                 "host: localhost\r\n" +
                 (extraHeaders == null ? "" : extraHeaders) +
@@ -146,18 +153,19 @@ public class TestUtils {
                         stringParts, referenceStringBuilder, headerString);
 
         var innermostFinalizeCallCount = new AtomicInteger();
-        DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse> finalizationFuture =
+        var finalizationFuture =
                 allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest(),
                         ()->"PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture");
         finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse, t) -> {
-            Assertions.assertNull(t);
-            Assertions.assertNotNull(aggregatedRawResponse);
-            // do nothing but check connectivity between the layers in the bottom most handler
-            innermostFinalizeCallCount.incrementAndGet();
-        }), ()->"PayloadRepackingTest.runPipelineAndValidate.assertCheck");
-        finalizationFuture.get();
+                    Assertions.assertNull(t);
+                    Assertions.assertNotNull(aggregatedRawResponse);
+                    // do nothing but check connectivity between the layers in the bottom most handler
+                    innermostFinalizeCallCount.incrementAndGet();
+                }), ()->"PayloadRepackingTest.runPipelineAndValidate.assertCheck")
+                .get();
 
         verifyCapturedResponseMatchesExpectedPayload(testPacketCapture.getBytesCaptured(),
                 expectedRequestHeaders, expectedOutputGenerator.apply(referenceStringBuilder));
+        Assertions.assertEquals(1, innermostFinalizeCallCount.get());
     }
 }

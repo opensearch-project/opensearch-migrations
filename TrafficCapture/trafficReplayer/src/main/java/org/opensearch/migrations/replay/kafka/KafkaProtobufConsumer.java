@@ -113,7 +113,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                 return Optional.empty();
             }
         }
-    };
+    }
     private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
 
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
@@ -274,7 +274,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
             newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk);
             newHeadValue.ifPresent(o -> {
                 if (tracker.isEmpty()) {
-                    partitionToOffsetLifecycleTrackerMap.remove(tracker);
+                    partitionToOffsetLifecycleTrackerMap.remove(p);
                 }
                 nextSetOfCommitsMap.put(new TopicPartition(topic, p), new OffsetAndMetadata(o));
             });

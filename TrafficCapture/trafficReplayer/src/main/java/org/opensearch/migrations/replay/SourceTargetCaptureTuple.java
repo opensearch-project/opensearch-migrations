@@ -110,7 +110,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
                         .ifPresent(d -> meta.put("sourceRequest", jsonFromHttpData(d)));
                 Optional.ofNullable(p.responseData).flatMap(d -> Optional.ofNullable(d.packetBytes))
                         .ifPresent(d -> meta.put("sourceResponse", jsonFromHttpData(d,
-                                //log.warn("TODO: These durations are not measuring the same values!");
+                                // TODO: These durations are not measuring the same values!
                                 Duration.between(tuple.sourcePair.requestData.getLastPacketTimestamp(),
                                         tuple.sourcePair.responseData.getLastPacketTimestamp()))));
             });
@@ -176,7 +176,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         public void accept(SourceTargetCaptureTuple triple) {
             JSONObject jsonObject = toJSONObject(triple);
 
-            tupleLogger.info(jsonObject.toString());
+            tupleLogger.info(()->jsonObject.toString());
             outputStream.write((jsonObject.toString()+"\n").getBytes(StandardCharsets.UTF_8));
             outputStream.flush();
         }

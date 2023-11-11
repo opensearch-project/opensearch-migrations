@@ -27,8 +27,8 @@ public class HttpCaptureSerializerUtil {
         }
     }
 
-    public static HttpProcessedState addRelevantHttpMessageIndicatorEvents(
-            IChannelConnectionCaptureSerializer trafficOffloader,
+    public static <T> HttpProcessedState addRelevantHttpMessageIndicatorEvents(
+            IChannelConnectionCaptureSerializer<T> trafficOffloader,
             List<Object> parsedMsgs) throws IOException {
         Instant timestamp = Instant.now();
         for (var obj : parsedMsgs) {

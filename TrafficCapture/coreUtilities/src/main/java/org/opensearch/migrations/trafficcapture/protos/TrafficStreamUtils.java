@@ -15,14 +15,14 @@ public class TrafficStreamUtils {
 
     public static Optional<Instant> getFirstTimestamp(TrafficStream ts) {
         var substream = ts.getSubStreamList();
-        return substream != null && substream.size() > 0 ?
+        return substream != null && !substream.isEmpty() ?
                 Optional.of(instantFromProtoTimestamp(substream.get(0).getTs())) :
                 Optional.empty();
     }
 
     public static Optional<Instant> getLastTimestamp(TrafficStream ts) {
         var substream = ts.getSubStreamList();
-        return substream != null && substream.size() > 0 ?
+        return substream != null && !substream.isEmpty() ?
                 Optional.of(instantFromProtoTimestamp(substream.get(substream.size()-1).getTs())) :
                 Optional.empty();
     }

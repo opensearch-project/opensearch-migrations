@@ -2,7 +2,7 @@ package org.opensearch.migrations.replay.datatypes;
 
 import lombok.EqualsAndHashCode;
 
-@EqualsAndHashCode
+@EqualsAndHashCode(callSuper = true)
 public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     public final ISourceTrafficChannelKey trafficStreamKey;
     public final int sourceRequestIndexOffsetAtStartOfAccumulation;

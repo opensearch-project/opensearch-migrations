@@ -20,7 +20,7 @@ import java.util.Set;
  * the paylaod (unzip, parse, etc).  If a transform DOES require the payload to be present, get()
  *
  */
-@EqualsAndHashCode
+@EqualsAndHashCode(callSuper = false)
 @Slf4j
 public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 

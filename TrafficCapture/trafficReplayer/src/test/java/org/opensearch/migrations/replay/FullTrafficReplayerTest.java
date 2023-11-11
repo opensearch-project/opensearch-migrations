@@ -66,8 +66,9 @@ public class FullTrafficReplayerTest {
 
     @Test
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
+        var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                TestHttpServerContext::makeResponse);
+                response->TestHttpServerContext.makeResponse(random, response));
         var trafficStreamWithJustClose = TrafficStream.newBuilder()
                 .setNodeId(TEST_NODE_ID)
                 .setConnectionId(TEST_CONNECTION_ID)
@@ -90,8 +91,9 @@ public class FullTrafficReplayerTest {
     })
     @Tag("longTest")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
+        var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                TestHttpServerContext::makeResponse);
+                response->TestHttpServerContext.makeResponse(random,response));
         var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
         var numExpectedRequests = streamAndConsumer.numHttpTransactions;
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());

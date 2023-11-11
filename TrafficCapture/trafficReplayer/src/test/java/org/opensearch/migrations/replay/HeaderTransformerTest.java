@@ -16,6 +16,7 @@ import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -44,7 +45,7 @@ public class HeaderTransformerTest {
     private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer<AggregatedRawResponse> transformingHandler,
                                                  AggregatedRawResponse dummyAggregatedResponse,
                                                  TestCapturePacketToHttpHandler testPacketCapture,
-                                                 Function<Integer,String> makeHeaders)
+                                                 IntFunction<String> makeHeaders)
             throws ExecutionException, InterruptedException
     {
         Random r = new Random(2);
@@ -67,9 +68,9 @@ public class HeaderTransformerTest {
             Assertions.assertNotNull(aggregatedRawResponse);
             // do nothing but check connectivity between the layers in the bottom most handler
             innermostFinalizeCallCount.incrementAndGet();
-            Assertions.assertEquals(dummyAggregatedResponse, aggregatedRawResponse);
-        }), ()->"HeaderTransformerTest.runRandomPayloadWithTransformer.assertionCheck");
-        finalizationFuture.get();
+            Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED,
+                    aggregatedRawResponse.transformationStatus);
+        }), ()->"HeaderTransformerTest.runRandomPayloadWithTransformer.assertionCheck").get();
         Assertions.assertEquals(TestUtils.resolveReferenceString(referenceStringBuilder,
                         List.of(new AbstractMap.SimpleEntry(SOURCE_CLUSTER_NAME, SILLY_TARGET_CLUSTER_NAME))),
                 testPacketCapture.getCapturedAsString());

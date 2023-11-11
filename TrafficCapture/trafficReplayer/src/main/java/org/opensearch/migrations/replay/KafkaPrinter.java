@@ -7,6 +7,7 @@ import com.google.protobuf.CodedOutputStream;
 import lombok.Lombok;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
@@ -113,8 +114,7 @@ public class KafkaPrinter {
         properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
 
-        KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties);
-        try {
+        try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties)) {
             consumer.subscribe(Collections.singleton(topic));
             pipeRecordsToProtoBufDelimited(consumer, getDelimitedProtoBufOutputter(System.out));
         } catch (WakeupException e) {
@@ -122,7 +122,6 @@ public class KafkaPrinter {
         } catch (Exception e) {
             log.error("Unexpected exception", e);
         } finally {
-            consumer.close();
             log.info("This consumer close successfully.");
         }
     }
@@ -138,7 +137,7 @@ public class KafkaPrinter {
     static void processNextChunkOfKafkaEvents(Consumer<String, byte[]> kafkaConsumer, java.util.function.Consumer<Stream<byte[]>> binaryReceiver) {
         var records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
         binaryReceiver.accept(StreamSupport.stream(records.spliterator(), false)
-                .map(cr->cr.value()));
+                .map(ConsumerRecord::value));
     }
 
     static java.util.function.Consumer<Stream<byte[]>> getDelimitedProtoBufOutputter(OutputStream outputStream) {

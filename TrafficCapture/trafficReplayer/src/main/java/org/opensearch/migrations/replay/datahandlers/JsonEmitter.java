@@ -112,10 +112,10 @@ public class JsonEmitter implements AutoCloseable {
         }
     }
 
-    private JsonGenerator jsonGenerator;
-    private ChunkingByteBufOutputStream outputStream;
-    private ObjectMapper objectMapper;
-    private Deque<LevelContext> cursorStack;
+    private final JsonGenerator jsonGenerator;
+    private final ChunkingByteBufOutputStream outputStream;
+    private final ObjectMapper objectMapper;
+    private final Deque<LevelContext<? extends Object>> cursorStack;
 
     @SneakyThrows
     public JsonEmitter(ByteBufAllocator byteBufAllocator) {
