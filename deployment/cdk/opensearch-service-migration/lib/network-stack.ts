@@ -17,9 +17,9 @@ export interface NetworkStackProps extends StackPropsExt {
 export class NetworkStack extends Stack {
     public readonly vpc: IVpc;
 
-    // Validate a proper url string is provided and return an url string which contains a protocol and hostname, and only
-    // contains the port if it is not the default protocol port (e.g. 443, 80)
-    private validateAndReturnFormattedHttpURL(urlString: string) {
+    // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
+    // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
+    static validateAndReturnFormattedHttpURL(urlString: string) {
         // URL will throw error if the urlString is invalid
         let url = new URL(urlString);
         if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -29,6 +29,14 @@ export class NetworkStack extends Stack {
         let formattedUrlString = url.toString()
         if (formattedUrlString.endsWith("/")) {
             formattedUrlString = formattedUrlString.slice(0, -1)
+        }
+        if (!url.port) {
+            if (url.protocol === "http:") {
+                formattedUrlString = formattedUrlString.concat(":80")
+            }
+            else {
+                formattedUrlString = formattedUrlString.concat(":443")
+            }
         }
         return formattedUrlString
     }
@@ -96,7 +104,7 @@ export class NetworkStack extends Stack {
         }
 
         if (props.targetClusterEndpoint) {
-            const formattedClusterEndpoint = this.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint)
+            const formattedClusterEndpoint = NetworkStack.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint)
             const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
             new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
                 description: 'OpenSearch migration parameter for OpenSearch endpoint',
