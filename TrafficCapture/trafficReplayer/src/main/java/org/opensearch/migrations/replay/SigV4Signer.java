@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.IHttpMessage;
@@ -75,7 +76,7 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
             try {
                 this.messageDigest = MessageDigest.getInstance("SHA-256");
             } catch (NoSuchAlgorithmException e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         }
         messageDigest.update(payloadChunk);

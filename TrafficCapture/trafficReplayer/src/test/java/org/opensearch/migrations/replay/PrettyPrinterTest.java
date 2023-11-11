@@ -76,7 +76,7 @@ public class PrettyPrinterTest {
             case Empty:
                 return new byte[0];
             default:
-                throw new RuntimeException("Unknown scenario type: " + contentDirective);
+                throw new IllegalStateException("Unknown scenario type: " + contentDirective);
         }
     }
 
@@ -125,7 +125,7 @@ public class PrettyPrinterTest {
             case POOLED_BYTEBUF:
                 return prettyPrintByteBufs(byteArrays, messageType, true);
             default:
-                throw new RuntimeException("Unknown type: " + bufferType);
+                throw new IllegalStateException("Unknown type: " + bufferType);
         }
     }
 
@@ -148,7 +148,7 @@ public class PrettyPrinterTest {
                     case SimpleGetRequest:
                         return SAMPLE_REQUEST_AS_BLOCKS;
                     default:
-                        throw new RuntimeException("Unknown BufferContent value: " + content);
+                        throw new IllegalStateException("Unknown BufferContent value: " + content);
                 }
             case PARSED_HTTP:
                 switch (content) {
@@ -157,10 +157,10 @@ public class PrettyPrinterTest {
                     case SimpleGetRequest:
                         return SAMPLE_REQUEST_AS_PARSED_HTTP;
                     default:
-                        throw new RuntimeException("Unknown BufferContent value: " + content);
+                        throw new IllegalStateException("Unknown BufferContent value: " + content);
                 }
             default:
-                throw new RuntimeException("Unknown PacketPrintFormat: "+format);
+                throw new IllegalStateException("Unknown PacketPrintFormat: "+format);
         }
     }
 }

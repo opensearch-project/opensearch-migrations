@@ -1,5 +1,6 @@
 package org.opensearch.migrations.testutils;
 
+import lombok.Lombok;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.InvocationInterceptor;
@@ -51,7 +52,7 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
                                     ExtensionContext extensionContext) throws Throwable {
 
         var selfInstance =
-                invocationContext.getTarget().orElseThrow(() -> new RuntimeException("Target instance not found"));
+                invocationContext.getTarget().orElseThrow(() -> new IllegalStateException("Target instance not found"));
         wrapWithLeakChecks(extensionContext,
                 ()-> {
                     Method m = invocationContext.getExecutable();
@@ -66,7 +67,7 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
                                             ReflectiveInvocationContext<Method> invocationContext,
                                             ExtensionContext extensionContext) throws Throwable {
         var selfInstance =
-                invocationContext.getTarget().orElseThrow(() -> new RuntimeException("Target instance not found"));
+                invocationContext.getTarget().orElseThrow(() -> new IllegalStateException("Target instance not found"));
         wrapWithLeakChecks(extensionContext,
                 ()->{
                     {
@@ -84,7 +85,7 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
         } catch (Exception e) {
             throw e;
         } catch (Throwable t) {
-            throw new RuntimeException(t);
+            throw Lombok.sneakyThrow(t);
         }
     }
 }

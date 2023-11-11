@@ -394,7 +394,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 case IGNORING_LAST_REQUEST:
                     break;
                 default:
-                    throw new RuntimeException("Unknown enum type: "+accumulation.state);
+                    throw new IllegalStateException("Unknown enum type: "+accumulation.state);
             }
         } finally {
             if (accumulation.hasSignaledRequests()) {

@@ -76,7 +76,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
                 }
                 break;
             default:
-                throw new RuntimeException("Unknown transfer encoding mode " + streamMode);
+                throw new IllegalStateException("Unknown transfer encoding mode " + streamMode);
         }
     }
 

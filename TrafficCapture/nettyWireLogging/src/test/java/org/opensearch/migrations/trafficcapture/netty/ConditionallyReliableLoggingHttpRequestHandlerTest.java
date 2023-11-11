@@ -4,6 +4,7 @@ import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.AllArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -43,22 +44,21 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
             return new CodedOutputStreamAndByteBufferWrapper(1024*1024);
         }
 
+        @SneakyThrows
         @Override
         public CompletableFuture<Object>
         kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
             if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
-                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                throw new IllegalStateException("Unknown outputStreamHolder sent back to StreamManager: " +
                         outputStreamHolder);
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
             CodedOutputStream cos = osh.getOutputStream();
-            try {
-                cos.flush();
-                byteBufferAtomicReference.set(osh.getByteBuffer().flip().asReadOnlyBuffer());
-                log.error("byteBufferAtomicReference.get="+byteBufferAtomicReference.get());
-            } catch (IOException e) {
-                throw new RuntimeException();
-            }
+
+            cos.flush();
+            byteBufferAtomicReference.set(osh.getByteBuffer().flip().asReadOnlyBuffer());
+            log.error("byteBufferAtomicReference.get="+byteBufferAtomicReference.get());
+
             return CompletableFuture.completedFuture(flushCount.incrementAndGet());
         }
     }

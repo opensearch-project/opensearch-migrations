@@ -21,6 +21,8 @@ import java.util.stream.Stream;
 
 @Slf4j
 public class TransformationLoader {
+    public static final String WRONG_JSON_STRUCTURE_MESSAGE = "Must specify the top-level configuration list with a sequence of " +
+            "maps that have only one key each, where the key is the name of the transformer to be configured.";
     private final List<IJsonTransformerProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
 
@@ -62,10 +64,10 @@ public class TransformationLoader {
     private IJsonTransformer configureTransformerFromConfig(Map<String, Object> c) {
         var keys = c.keySet();
         if (keys.size() != 1) {
-            throw new IllegalArgumentException("Must specify the top-level configuration list with a sequence of " +
-                    "maps that have only one key each, where the key is the name of the transformer to be configured.");
+            throw new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE);
         }
-        var key = keys.stream().findFirst().get();
+        var key = keys.stream().findFirst()
+                .orElseThrow(()->new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE));
         for (var p : providers) {
             var className = p.getClass().getName();
             if (className.equals(key)) {

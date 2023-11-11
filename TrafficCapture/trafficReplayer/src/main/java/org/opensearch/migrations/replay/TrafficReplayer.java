@@ -143,13 +143,13 @@ public class TrafficReplayer {
             throws SSLException
     {
         if (serverUri.getPort() < 0) {
-            throw new RuntimeException("Port not present for URI: "+serverUri);
+            throw new IllegalArgumentException("Port not present for URI: "+serverUri);
         }
         if (serverUri.getHost() == null) {
-            throw new RuntimeException("Hostname not present for URI: "+serverUri);
+            throw new IllegalArgumentException("Hostname not present for URI: "+serverUri);
         }
         if (serverUri.getScheme() == null) {
-            throw new RuntimeException("Scheme (http|https) is not present for URI: "+serverUri);
+            throw new IllegalArgumentException("Scheme (http|https) is not present for URI: "+serverUri);
         }
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
         clientConnectionPool = new ClientConnectionPool(serverUri,
@@ -397,7 +397,7 @@ public class TrafficReplayer {
                 params.authHeaderValue != null &&
                 params.useSigV4ServiceAndRegion != null &&
                 params.awsAuthHeaderUserAndSecret != null) {
-            throw new RuntimeException("Cannot specify more than one auth option: " +
+            throw new IllegalArgumentException("Cannot specify more than one auth option: " +
                     formatAuthArgFlagsAsString());
         }
 
@@ -425,7 +425,7 @@ public class TrafficReplayer {
         } else if (params.useSigV4ServiceAndRegion != null) {
             var serviceAndRegion = params.useSigV4ServiceAndRegion.split(",");
             if (serviceAndRegion.length != 2) {
-                throw new RuntimeException("Format for " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG + " must be " +
+                throw new IllegalArgumentException("Format for " + SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG + " must be " +
                         "'SERVICE_NAME,REGION', such as 'es,us-east-1'");
             }
             String serviceName = serviceAndRegion[0];
@@ -774,7 +774,7 @@ public class TrafficReplayer {
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return e.getMessage();
+            return "Exception: " + e.getMessage();
         } catch (ExecutionException e) {
             return e.getMessage();
         }

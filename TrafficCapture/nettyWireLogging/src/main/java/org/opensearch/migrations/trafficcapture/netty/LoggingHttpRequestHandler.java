@@ -15,6 +15,7 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
@@ -108,7 +109,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
                 try {
                     super.channelUnregistered(ctx);
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    throw Lombok.sneakyThrow(e);
                 }
             }
         });
@@ -123,7 +124,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
             try {
                 super.channelUnregistered(ctx);
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         });
         super.handlerRemoved(ctx);

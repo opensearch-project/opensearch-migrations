@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -49,6 +50,7 @@ public class Utils {
         );
     }
 
+    @SneakyThrows(value = {IOException.class})
     public static String packetsToCompressedTrafficStream(Stream<byte[]> byteArrStream) {
         var tsb = TrafficStream.newBuilder()
                 .setNumberOfThisLastChunk(1);
@@ -64,8 +66,6 @@ public class Utils {
             baos.flush();
             var binaryContents = baos.toByteArray();
             return Base64.getEncoder().encodeToString(binaryContents);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
     

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import com.google.common.collect.Streams;
+import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -167,7 +168,7 @@ public class KafkaRestartingTrafficReplayerTest {
                             }
                         }
                     } catch (Exception e) {
-                        throw new RuntimeException(e);
+                        throw Lombok.sneakyThrow(e);
                     }
                 });
         return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME, null);

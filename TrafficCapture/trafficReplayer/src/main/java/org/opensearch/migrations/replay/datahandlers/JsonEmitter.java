@@ -10,6 +10,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.CompositeByteBuf;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -95,7 +96,7 @@ public class JsonEmitter implements AutoCloseable {
             try {
                 super.close();
             } catch (IOException e) {
-                throw new RuntimeException("Expected OutputStream::close() to be empty as per docs in Java 11");
+                throw new IllegalStateException("Expected OutputStream::close() to be empty as per docs in Java 11");
             }
         }
 
@@ -177,7 +178,7 @@ public class JsonEmitter implements AutoCloseable {
             try {
                 flush();
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
             var byteBuf = outputStream.recycleByteBufRetained();
             log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + null");
