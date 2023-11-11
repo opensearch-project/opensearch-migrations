@@ -47,7 +47,7 @@ dependencies {
 
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
     testFixturesImplementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
-    testFixturesImplementation group: 'io.netty', name: 'netty-all', version: '4.1.94.Final'
+    testFixturesImplementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
     testFixturesImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testFixturesImplementation group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: '1.74'
     testFixturesImplementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.74'

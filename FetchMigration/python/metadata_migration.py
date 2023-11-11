@@ -1,111 +1,28 @@
 import argparse
-from typing import Optional
+import logging
 
 import yaml
 
+import endpoint_utils
 import index_operations
 import utils
-# Constants
-from endpoint_info import EndpointInfo
+from index_diff import IndexDiff
 from metadata_migration_params import MetadataMigrationParams
 from metadata_migration_result import MetadataMigrationResult
 
-SUPPORTED_ENDPOINTS = ["opensearch", "elasticsearch"]
-SOURCE_KEY = "source"
-SINK_KEY = "sink"
-HOSTS_KEY = "hosts"
-DISABLE_AUTH_KEY = "disable_authentication"
-USER_KEY = "username"
-PWD_KEY = "password"
-INSECURE_KEY = "insecure"
-CONNECTION_KEY = "connection"
+# Constants
 INDICES_KEY = "indices"
 INCLUDE_KEY = "include"
 INDEX_NAME_KEY = "index_name_regex"
 
 
-# This config key may be either directly in the main dict (for sink)
-# or inside a nested dict (for source). The default value is False.
-def is_insecure(config: dict) -> bool:
-    if INSECURE_KEY in config:
-        return config[INSECURE_KEY]
-    elif CONNECTION_KEY in config and INSECURE_KEY in config[CONNECTION_KEY]:
-        return config[CONNECTION_KEY][INSECURE_KEY]
-    return False
-
-
-# TODO Only supports basic auth for now
-def get_auth(input_data: dict) -> Optional[tuple]:
-    if not input_data.get(DISABLE_AUTH_KEY, False) and USER_KEY in input_data and PWD_KEY in input_data:
-        return input_data[USER_KEY], input_data[PWD_KEY]
-
-
-def get_endpoint_info(plugin_config: dict) -> EndpointInfo:
-    # "hosts" can be a simple string, or an array of hosts for Logstash to hit.
-    # This tool needs one accessible host, so we pick the first entry in the latter case.
-    url = plugin_config[HOSTS_KEY][0] if type(plugin_config[HOSTS_KEY]) is list else plugin_config[HOSTS_KEY]
-    url += "/"
-    # verify boolean will be the inverse of the insecure SSL key, if present
-    should_verify = not is_insecure(plugin_config)
-    return EndpointInfo(url, get_auth(plugin_config), should_verify)
-
-
-def check_supported_endpoint(config: dict) -> Optional[tuple]:
-    for supported_type in SUPPORTED_ENDPOINTS:
-        if supported_type in config:
-            return supported_type, config[supported_type]
-
-
-def get_supported_endpoint(config: dict, key: str) -> tuple:
-    # The value of each key may be a single plugin (as a dict)
-    # or a list of plugin configs
-    supported_tuple = tuple()
-    if type(config[key]) is dict:
-        supported_tuple = check_supported_endpoint(config[key])
-    elif type(config[key]) is list:
-        for entry in config[key]:
-            supported_tuple = check_supported_endpoint(entry)
-            # Break out of the loop at the first supported type
-            if supported_tuple:
-                break
-    if not supported_tuple:
-        raise ValueError("Could not find any supported endpoints in section: " + key)
-    # First tuple value is the name, second value is the config dict
-    return supported_tuple[0], supported_tuple[1]
-
-
-def validate_plugin_config(config: dict, key: str):
-    # Raises a ValueError if no supported endpoints are found
-    supported_endpoint = get_supported_endpoint(config, key)
-    plugin_config = supported_endpoint[1]
-    if HOSTS_KEY not in plugin_config:
-        raise ValueError("No hosts defined for endpoint: " + supported_endpoint[0])
-    # Check if auth is disabled. If so, no further validation is required
-    if plugin_config.get(DISABLE_AUTH_KEY, False):
-        return
-    elif USER_KEY not in plugin_config:
-        raise ValueError("Invalid auth configuration (no username) for endpoint: " + supported_endpoint[0])
-    elif PWD_KEY not in plugin_config:
-        raise ValueError("Invalid auth configuration (no password for username) for endpoint: " +
-                         supported_endpoint[0])
-
-
-def validate_pipeline_config(config: dict):
-    if SOURCE_KEY not in config:
-        raise ValueError("Missing source configuration in Data Prepper pipeline YAML")
-    if SINK_KEY not in config:
-        raise ValueError("Missing sink configuration in Data Prepper pipeline YAML")
-    validate_plugin_config(config, SOURCE_KEY)
-    validate_plugin_config(config, SINK_KEY)
-
-
-def write_output(yaml_data: dict, new_indices: set, output_path: str):
+def write_output(yaml_data: dict, indices_to_migrate: set, output_path: str):
     pipeline_config = next(iter(yaml_data.values()))
-    # Endpoint is a tuple of (type, config)
-    source_config = get_supported_endpoint(pipeline_config, SOURCE_KEY)[1]
+    # Result is a tuple of (type, config)
+    source_config = endpoint_utils.get_supported_endpoint_config(pipeline_config, endpoint_utils.SOURCE_KEY)[1]
     source_indices = source_config.get(INDICES_KEY, dict())
     included_indices = source_indices.get(INCLUDE_KEY, list())
-    for index in new_indices:
+    for index in indices_to_migrate:
         included_indices.append({INDEX_NAME_KEY: index})
     source_indices[INCLUDE_KEY] = included_indices
     source_config[INDICES_KEY] = source_indices
@@ -113,44 +30,15 @@ def write_output(yaml_data: dict, new_indices: set, output_path: str):
         yaml.dump(yaml_data, out_file)
 
 
-# Computes differences in indices between source and target.
-# Returns a tuple with 3 elements:
-# - The 1st element is the set of indices to create on the target
-# - The 2nd element is a set of indices that are identical on source and target
-# - The 3rd element is a set of indices that are present on both source and target,
-# but differ in their settings or mappings.
-def get_index_differences(source: dict, target: dict) -> tuple[set, set, set]:
-    index_conflicts = set()
-    indices_in_target = set(source.keys()) & set(target.keys())
-    for index in indices_in_target:
-        # Check settings
-        if utils.has_differences(index_operations.SETTINGS_KEY, source[index], target[index]):
-            index_conflicts.add(index)
-        # Check mappings
-        if utils.has_differences(index_operations.MAPPINGS_KEY, source[index], target[index]):
-            index_conflicts.add(index)
-    identical_indices = set(indices_in_target) - set(index_conflicts)
-    indices_to_create = set(source.keys()) - set(indices_in_target)
-    return indices_to_create, identical_indices, index_conflicts
-
-
-# The order of data in the tuple is:
-# (indices to create), (identical indices), (indices with conflicts)
-def print_report(index_differences: tuple[set, set, set], count: int):  # pragma no cover
-    print("Identical indices in the target cluster (no changes will be made): " +
-          utils.string_from_set(index_differences[1]))
-    print("Indices in target cluster with conflicting settings/mappings: " +
-          utils.string_from_set(index_differences[2]))
-    print("Indices to create: " + utils.string_from_set(index_differences[0]))
-    print("Total documents to be moved: " + str(count))
-
-
-def compute_endpoint_and_fetch_indices(config: dict, key: str) -> tuple[EndpointInfo, dict]:
-    endpoint = get_supported_endpoint(config, key)
-    # Endpoint is a tuple of (type, config)
-    endpoint_info = get_endpoint_info(endpoint[1])
-    indices = index_operations.fetch_all_indices(endpoint_info)
-    return endpoint_info, indices
+def print_report(diff: IndexDiff, total_doc_count: int):  # pragma no cover
+    logging.info("Identical indices in the target cluster: " + utils.string_from_set(diff.identical_indices))
+    logging.info("Identical empty indices in the target cluster (data will be migrated): " +
+                 utils.string_from_set(diff.identical_empty_indices))
+    logging.info("Indices present in both clusters with conflicting settings/mappings (data will not be migrated): " +
+                 utils.string_from_set(diff.conflicting_indices))
+    logging.info("Indices to be created in the target cluster (data will be migrated): " +
+                 utils.string_from_set(diff.indices_to_create))
+    logging.info("Total number of documents to be moved: " + str(total_doc_count))
 
 
 def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
@@ -162,32 +50,43 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
         dp_config = yaml.safe_load(pipeline_file)
     # We expect the Data Prepper pipeline to only have a single top-level value
     pipeline_config = next(iter(dp_config.values()))
-    validate_pipeline_config(pipeline_config)
+    # Raises a ValueError if source or sink definitions are missing
+    endpoint_utils.validate_pipeline(pipeline_config)
+    source_endpoint_info = endpoint_utils.get_endpoint_info_from_pipeline_config(pipeline_config,
+                                                                                 endpoint_utils.SOURCE_KEY)
+    target_endpoint_info = endpoint_utils.get_endpoint_info_from_pipeline_config(pipeline_config,
+                                                                                 endpoint_utils.SINK_KEY)
     result = MetadataMigrationResult()
-    # Fetch EndpointInfo and indices
-    source_endpoint_info, source_indices = compute_endpoint_and_fetch_indices(pipeline_config, SOURCE_KEY)
+    # Fetch indices
+    source_indices = index_operations.fetch_all_indices(source_endpoint_info)
     # If source indices is empty, return immediately
     if len(source_indices.keys()) == 0:
         return result
-    target_endpoint_info, target_indices = compute_endpoint_and_fetch_indices(pipeline_config, SINK_KEY)
+    target_indices = index_operations.fetch_all_indices(target_endpoint_info)
     # Compute index differences and print report
-    diff = get_index_differences(source_indices, target_indices)
-    # The first element in the tuple is the set of indices to create
-    indices_to_create = diff[0]
-    if indices_to_create:
-        result.created_indices = indices_to_create
-        result.target_doc_count = index_operations.doc_count(indices_to_create, source_endpoint_info)
+    diff = IndexDiff(source_indices, target_indices)
+    if diff.identical_indices:
+        # Identical indices with zero documents on the target are eligible for migration
+        target_doc_count = index_operations.doc_count(diff.identical_indices, target_endpoint_info)
+        # doc_count only returns indices that have non-zero counts, so the difference in responses
+        # gives us the set of identical, empty indices
+        result.migration_indices = diff.identical_indices.difference(target_doc_count.index_doc_count_map.keys())
+        diff.set_identical_empty_indices(result.migration_indices)
+    if diff.indices_to_create:
+        result.migration_indices.update(diff.indices_to_create)
+    if result.migration_indices:
+        doc_count_result = index_operations.doc_count(result.migration_indices, source_endpoint_info)
+        result.target_doc_count = doc_count_result.total
     if args.report:
         print_report(diff, result.target_doc_count)
-    if indices_to_create:
+    if result.migration_indices:
         # Write output YAML
         if len(args.output_file) > 0:
-            write_output(dp_config, indices_to_create, args.output_file)
-            if args.report:
-                print("Wrote output YAML pipeline to: " + args.output_file)
+            write_output(dp_config, result.migration_indices, args.output_file)
+            logging.debug("Wrote output YAML pipeline to: " + args.output_file)
         if not args.dryrun:
             index_data = dict()
-            for index_name in indices_to_create:
+            for index_name in diff.indices_to_create:
                 index_data[index_name] = source_indices[index_name]
             index_operations.create_indices(index_data, target_endpoint_info)
     return result

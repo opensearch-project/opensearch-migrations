@@ -8,7 +8,7 @@ import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
-export interface networkStackProps extends StackPropsExt {
+export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string
     readonly availabilityZoneCount?: number
 }
@@ -16,7 +16,7 @@ export interface networkStackProps extends StackPropsExt {
 export class NetworkStack extends Stack {
     public readonly vpc: IVpc;
 
-    constructor(scope: Construct, id: string, props: networkStackProps) {
+    constructor(scope: Construct, id: string, props: NetworkStackProps) {
         super(scope, id, props);
 
         // Retrieve original deployment VPC for addon deployments
@@ -65,7 +65,7 @@ export class NetworkStack extends Stack {
             });
 
             // Create a default SG which only allows members of this SG to access the Domain endpoints
-            const defaultSecurityGroup = new SecurityGroup(this, 'domainMigrationAccessSG', {
+            const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
                 vpc: this.vpc,
                 allowAllOutbound: false,
             });
