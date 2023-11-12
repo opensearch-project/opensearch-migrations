@@ -293,7 +293,7 @@ public class TrafficReplayer {
         String transformerConfig;
     }
 
-    public static Parameters parseArgs(String[] args) {
+    private static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
         try {

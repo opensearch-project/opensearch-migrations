@@ -4,7 +4,7 @@ import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
-import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
+import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 

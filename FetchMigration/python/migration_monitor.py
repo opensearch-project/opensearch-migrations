@@ -1,6 +1,5 @@
 import argparse
 import logging
-import math
 import subprocess
 import time
 from subprocess import Popen
@@ -12,14 +11,20 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from endpoint_info import EndpointInfo
 from migration_monitor_params import MigrationMonitorParams
+from progress_metrics import ProgressMetrics
 
 # Path to the Data Prepper Prometheus metrics API endpoint
 # Used to monitor the progress of the migration
-__METRICS_API_PATH = "/metrics/prometheus"
-__SHUTDOWN_API_PATH = "/shutdown"
-__DOC_SUCCESS_METRIC = "_opensearch_documentsSuccess"
-__RECORDS_IN_FLIGHT_METRIC = "_BlockingBuffer_recordsInFlight"
-__NO_PARTITIONS_METRIC = "_noPartitionsAcquired"
+__METRICS_API_PATH: str = "/metrics/prometheus"
+__SHUTDOWN_API_PATH: str = "/shutdown"
+__DOC_SUCCESS_METRIC: str = "_opensearch_documentsSuccess"
+__RECORDS_IN_FLIGHT_METRIC: str = "_BlockingBuffer_recordsInFlight"
+__NO_PARTITIONS_METRIC: str = "_noPartitionsAcquired"
+__IDLE_THRESHOLD: int = 5
+
+
+def is_process_alive(proc: Popen) -> bool:
+    return proc.returncode is None
 
 
 # Gracefully shutdown a subprocess
@@ -29,21 +34,21 @@ def shutdown_process(proc: Popen) -> Optional[int]:
     try:
         proc.wait(timeout=60)
     except subprocess.TimeoutExpired:
-        if proc.returncode is None:
+        if is_process_alive(proc):
             # Failed to terminate, send SIGKILL
             proc.kill()
     return proc.returncode
 
 
 def shutdown_pipeline(endpoint: EndpointInfo):
-    shutdown_endpoint = endpoint.url + __SHUTDOWN_API_PATH
-    requests.post(shutdown_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+    shutdown_endpoint = endpoint.add_path(__SHUTDOWN_API_PATH)
+    requests.post(shutdown_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
 
 
 def fetch_prometheus_metrics(endpoint: EndpointInfo) -> Optional[List[Metric]]:
-    metrics_endpoint = endpoint.url + __METRICS_API_PATH
+    metrics_endpoint = endpoint.add_path(__METRICS_API_PATH)
     try:
-        response = requests.get(metrics_endpoint, auth=endpoint.auth, verify=endpoint.verify_ssl)
+        response = requests.get(metrics_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
         response.raise_for_status()
     except requests.exceptions.RequestException:
         return None
@@ -60,104 +65,81 @@ def get_metric_value(metric_families: List, metric_suffix: str) -> Optional[int]
     return None
 
 
-def check_if_complete(doc_count: Optional[int], in_flight: Optional[int], no_partition_count: Optional[int],
-                      prev_no_partition: int, target: int) -> bool:
-    # Check for target doc_count
-    # TODO Add a check for partitionsCompleted = indices
-    if doc_count is not None and doc_count >= target:
-        # Check for idle pipeline
-        logging.info("Target doc count reached, checking for idle pipeline...")
-        # Debug metrics
-        if logging.getLogger().isEnabledFor(logging.DEBUG):  # pragma no cover
-            debug_msg_template: str = "Idle pipeline metrics - " + \
-                "Records in flight: [{0}], " + \
-                "No-partitions counter: [{1}]" + \
-                "Previous no-partition value: [{2}]"
-            logging.debug(debug_msg_template.format(in_flight, no_partition_count, prev_no_partition))
-
-        if in_flight is not None and in_flight == 0:
-            # No-partitions metrics should steadily tick up
-            if no_partition_count is not None and no_partition_count > prev_no_partition > 0:
-                return True
-    return False
-
-
-def check_and_log_progress(endpoint_info: EndpointInfo, target_doc_count: int, prev_no_partitions_count: int) -> \
-        tuple[bool, int]:
-    terminal: bool = False
+def check_and_log_progress(endpoint_info: EndpointInfo, progress: ProgressMetrics) -> ProgressMetrics:
     # If the API call fails, the response is empty
     metrics = fetch_prometheus_metrics(endpoint_info)
     if metrics is not None:
+        # Reset API failure counter
+        progress.reset_metric_api_failure()
         success_docs = get_metric_value(metrics, __DOC_SUCCESS_METRIC)
-        rec_in_flight = get_metric_value(metrics, __RECORDS_IN_FLIGHT_METRIC)
-        no_partitions_count = get_metric_value(metrics, __NO_PARTITIONS_METRIC)
-        if success_docs is not None:  # pragma no cover
-            completion_percentage: int = math.floor((success_docs * 100) / target_doc_count)
+        progress.update_records_in_flight_count(get_metric_value(metrics, __RECORDS_IN_FLIGHT_METRIC))
+        progress.update_no_partitions_count(get_metric_value(metrics, __NO_PARTITIONS_METRIC))
+        if success_docs is not None:
+            completion_percentage = progress.update_success_doc_count(success_docs)
             progress_message: str = "Completed " + str(success_docs) + \
                                     " docs ( " + str(completion_percentage) + "% )"
             logging.info(progress_message)
+            if progress.all_docs_migrated():
+                logging.info("All documents migrated...")
         else:
+            progress.record_success_doc_value_failure()
             logging.warning("Could not fetch progress stats from Data Prepper response, " +
                             "will retry on next polling cycle...")
-        terminal = check_if_complete(success_docs, rec_in_flight, no_partitions_count, prev_no_partitions_count,
-                                     target_doc_count)
-        if not terminal:
-            # Save no_partitions_count
-            prev_no_partitions_count = no_partitions_count
     else:
+        progress.record_metric_api_failure()
         logging.warning("Data Prepper metrics API call failed, will retry on next polling cycle...")
-    # TODO - Handle idle non-terminal pipeline
-    return terminal, prev_no_partitions_count
+    return progress
 
 
-def monitor_local(args: MigrationMonitorParams, dp_process: Popen, poll_interval_seconds: int = 30) -> Optional[int]:
+def __should_continue_monitoring(progress: ProgressMetrics, proc: Optional[Popen] = None) -> bool:
+    return not progress.is_in_terminal_state() and (proc is None or is_process_alive(proc))
+
+
+def __log_migration_end_reason(progress: ProgressMetrics):  # pragma no cover
+    if progress.is_migration_complete_success():
+        logging.info("Migration monitor observed successful migration, shutting down...\n")
+    elif progress.is_migration_idle():
+        logging.warning("Migration monitor observed idle pipeline (migration may be incomplete), shutting down...")
+    elif progress.is_too_may_api_failures():
+        logging.warning("Migration monitor was unable to fetch migration metrics, terminating...")
+
+
+# The "dp_process" parameter is optional, and signifies a local Data Prepper process
+def run(args: MigrationMonitorParams, dp_process: Optional[Popen] = None, poll_interval_seconds: int = 30) -> int:
     endpoint_info = EndpointInfo(args.data_prepper_endpoint)
-    target_doc_count: int = args.target_count
-    # Counter to track the no_partition_count metric
-    no_partition_count: int = 0
-    is_migration_complete = False
-    logging.info("Starting migration monitor until target doc count: " + str(target_doc_count))
-    # Sets returncode. A value of None means the subprocess has not yet terminated
-    dp_process.poll()
-    while dp_process.returncode is None and not is_migration_complete:
-        try:
-            dp_process.wait(timeout=poll_interval_seconds)
-        except subprocess.TimeoutExpired:
-            pass
-        if dp_process.returncode is None:
-            is_migration_complete, no_partition_count = check_and_log_progress(
-                endpoint_info, target_doc_count, no_partition_count)
+    progress_metrics = ProgressMetrics(args.target_count, __IDLE_THRESHOLD)
+    logging.info("Starting migration monitor until target doc count: " + str(progress_metrics.get_target_doc_count()))
+    while __should_continue_monitoring(progress_metrics, dp_process):
+        if dp_process is not None:
+            # Wait on local process
+            try:
+                dp_process.wait(timeout=poll_interval_seconds)
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            # Thread sleep
+            time.sleep(poll_interval_seconds)
+        if dp_process is None or is_process_alive(dp_process):
+            progress_metrics = check_and_log_progress(endpoint_info, progress_metrics)
     # Loop terminated
-    if not is_migration_complete:
+    if not progress_metrics.is_in_terminal_state():
+        # This will only happen for a local Data Prepper process
         logging.error("Migration did not complete, process exited with code: " + str(dp_process.returncode))
         # TODO - Implement rollback
         logging.error("Please delete any partially migrated indices before retrying the migration.")
         return dp_process.returncode
     else:
+        __log_migration_end_reason(progress_metrics)
         # Shut down Data Prepper pipeline via API
-        logging.info("Migration monitor observed successful migration and idle pipeline, shutting down...\n")
         shutdown_pipeline(endpoint_info)
-        if dp_process.returncode is None:
+        if dp_process is None:
+            # No local process
+            return 0
+        elif is_process_alive(dp_process):
             # Workaround for https://github.com/opensearch-project/data-prepper/issues/3141
             return shutdown_process(dp_process)
         else:
             return dp_process.returncode
-
-
-def run(args: MigrationMonitorParams, poll_interval_seconds: int = 30) -> None:
-    endpoint_info = EndpointInfo(args.data_prepper_endpoint)
-    target_doc_count: int = args.target_count
-    # Counter to track the no_partition_count metric
-    no_partition_count: int = 0
-    is_migration_complete = False
-    logging.info("Starting migration monitor until target doc count: " + str(target_doc_count))
-    while not is_migration_complete:
-        time.sleep(poll_interval_seconds)
-        is_migration_complete, no_partition_count = check_and_log_progress(
-            endpoint_info, target_doc_count, no_partition_count)
-    # Loop terminated, shut down the Data Prepper pipeline
-    logging.info("Migration monitor observed successful migration and idle pipeline, shutting down...\n")
-    shutdown_pipeline(endpoint_info)
 
 
 if __name__ == '__main__':  # pragma no cover
@@ -180,6 +162,6 @@ if __name__ == '__main__':  # pragma no cover
         help="Target doc_count to reach, after which the Data Prepper pipeline will be terminated"
     )
     namespace = arg_parser.parse_args()
-    print("\n##### Starting monitor tool... #####\n")
+    logging.info("\n##### Starting monitor tool... #####\n")
     run(MigrationMonitorParams(namespace.target_count, namespace.data_prepper_endpoint))
-    print("\n##### Ending monitor tool... #####\n")
+    logging.info("\n##### Ending monitor tool... #####\n")

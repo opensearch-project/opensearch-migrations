@@ -21,7 +21,7 @@ import java.util.concurrent.CompletableFuture;
 
 
 @Slf4j
-public class KafkaCaptureFactory implements IConnectionCaptureFactory {
+public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMetadata> {
 
     private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHandler");
 
@@ -49,8 +49,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory {
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) {
-        return new StreamChannelConnectionCaptureSerializer(nodeId, connectionId, new StreamManager(connectionId));
+    public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(String connectionId) {
+        return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager(connectionId));
     }
 
     @AllArgsConstructor
