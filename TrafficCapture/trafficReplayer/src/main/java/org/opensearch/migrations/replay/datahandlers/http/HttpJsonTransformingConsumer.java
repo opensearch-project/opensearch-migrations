@@ -58,8 +58,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     private final List<List<Integer>> chunkSizes;
     // This is here for recovery, in case anything goes wrong with a transformation & we want to
     // just dump it directly.  Notice that we're already storing all of the bytes until the response
-    // comes back so that we can format the output.  These should be
-    // backed by the exact same byte[] arrays, so the memory consumption should already be absorbed.
+    // comes back so that we can format the output.  These should be backed by the exact same
+    // byte[] arrays, so the memory consumption should already be absorbed.
     private final List<ByteBuf> chunks;
 
     public HttpJsonTransformingConsumer(IJsonTransformer transformer,
