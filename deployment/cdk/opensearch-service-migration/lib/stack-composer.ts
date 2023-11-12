@@ -22,7 +22,8 @@ import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
     readonly defaultDeployId: string
-    readonly addOnMigrationDeployId?: string
+    readonly addOnMigrationDeployId?: string,
+    readonly region?: string
 }
 
 export interface StackComposerProps extends StackProps {
@@ -352,7 +353,7 @@ export class StackComposer {
                 description: "This stack contains resources for the Open Telemetry Collector and Analytics OS Cluster",
                 engineVersion: this.getEngineVersion(analyticsDomainEngineVersion ?? engineVersion), // if no analytics version is specified, use the same as the target cluster
                 dataNodeInstanceType: analyticsDomainDataNodeType,
-                dataNodes: analyticsDomainDataNodeCount ?? availabilityZoneCount,
+                dataNodes: analyticsDomainDataNodeCount ?? availabilityZoneCount, // There's probably a better way to do this, but the node count must be >= the zone count, and possibly must be the same even/odd as zone count
                 dedicatedManagerNodeType: analyticsDomainDedicatedManagerNodeType,
                 dedicatedManagerNodeCount: analyticsDomainDedicatedManagerNodeCount,
                 warmInstanceType: analyticsDomainWarmNodeType,
@@ -368,23 +369,14 @@ export class StackComposer {
                 appLogGroup: analyticsDomainLoggingAppLogGroupARN,
                 nodeToNodeEncryptionEnabled: analyticsDomainNoneToNodeEncryptionEnabled,
                 stage: stage,
+                region: region,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            // To enable the Migration Console to make requests to other service endpoints with Service Connect,
-            // it must be deployed after these services
-            // if (captureProxyESStack) {
-            //     migrationAnalyticsStack.addDependency(captureProxyESStack)
-            // }
-            // if (captureProxyStack) {
-            //     migrationAnalyticsStack.addDependency(captureProxyStack)
-            // }
-            // if (elasticsearchStack) {
-            //     migrationAnalyticsStack.addDependency(elasticsearchStack)
-            // }
             if (networkStack) {
                 migrationAnalyticsStack.openSearchAnalyticsStack.addDependency(networkStack)
             }
+            // The general analytics stack (otel collector) is dependent on the analytics cluster being deployed first
             this.stacks.push(migrationAnalyticsStack.openSearchAnalyticsStack)
             migrationAnalyticsStack.addDependency(migrationAnalyticsStack.openSearchAnalyticsStack)
             this.stacks.push(migrationAnalyticsStack)
@@ -514,6 +506,7 @@ export class StackComposer {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
                 fetchMigrationEnabled: fetchMigrationEnabled,
+                migrationAnalyticsEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

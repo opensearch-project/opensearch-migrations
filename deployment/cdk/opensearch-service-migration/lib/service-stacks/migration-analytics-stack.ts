@@ -34,7 +34,7 @@ export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly encryptionAtRestKmsKeyARN?: string,
     readonly appLogEnabled?: boolean,
     readonly appLogGroup?: string,
-    readonly nodeToNodeEncryptionEnabled?: boolean
+    readonly nodeToNodeEncryptionEnabled?: boolean,
 }
 
 // The MigrationAnalyticsStack consists of the OpenTelemetry Collector ECS container & an
@@ -48,7 +48,7 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
 
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
-            // SecurityGroup.fromSecurityGroupId(this, "analyticsDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAnalyticsAccessSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)),
         ]
 
         this.createService({
@@ -60,8 +60,9 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             ...props
         });
     
-        this.openSearchAnalyticsStack = new OpenSearchDomainStack(scope, `openSearchAnalyticsStack`,
+        this.openSearchAnalyticsStack = new OpenSearchDomainStack(scope, `analyticsDomainStack`,
         {
+            stackName: `OSMigrations-${props.stage}-${props.region}-AnalyticsDomain`,
             version: props.engineVersion,
             domainName: "migration-analytics-domain",
             dataNodeInstanceType: props.dataNodeInstanceType,
