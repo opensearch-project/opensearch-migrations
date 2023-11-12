@@ -53,7 +53,6 @@ class E2ETests(unittest.TestCase):
         self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
         self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:19200')
         self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
-        self.jupyter_endpoint = os.getenv('JUPYTER_NOTEBOOK', 'http://localhost:8888/api')
         self.username = os.getenv('username', 'admin')
         self.password = os.getenv('password', 'admin')
         self.auth = (self.username, self.password)
@@ -157,11 +156,6 @@ class E2ETests(unittest.TestCase):
         source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
-
-    def test_0003_jupyterAwake(self):
-        # Making sure that the Jupyter notebook is up and can be reached.
-        response = requests.get(self.jupyter_endpoint)
-        self.assertEqual(response.status_code, HTTPStatus.OK)
 
     def test_0004_negativeAuth_invalidCreds(self):
         # This test sends negative credentials to the clusters to validate that unauthorized access is prevented.
