@@ -1,3 +1,4 @@
+import {Stack} from "aws-cdk-lib";
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
@@ -40,6 +41,8 @@ export interface MigrationAnalyticsProps extends StackPropsExt {
 // OpenSearch cluster with dashboard.
 export class MigrationAnalyticsStack extends MigrationServiceCore {
 
+    openSearchAnalyticsStack: Stack
+
     constructor(scope: Construct, id: string, props: MigrationAnalyticsProps) {
         super(scope, id, props)
 
@@ -57,7 +60,7 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             ...props
         });
     
-        const openSearchAnalyticsStack = new OpenSearchDomainStack(scope, `openSearchAnalyticsStack`,
+        this.openSearchAnalyticsStack = new OpenSearchDomainStack(scope, `openSearchAnalyticsStack`,
         {
             version: props.engineVersion,
             domainName: "migration-analytics-domain",
@@ -81,7 +84,7 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             vpcSubnetIds: props.vpcSubnetIds,
             vpcSecurityGroupIds: props.vpcSecurityGroupIds,
             availabilityZoneCount: props.availabilityZoneCount,
-            domainAccessSecurityGroupParameter: "analyticsDomainSecurityGroupId",
+            domainAccessSecurityGroupParameter: "analyticsDomainSGId",
             endpointParameterName: "analyticsDomainEndpoint",
             ...props
         })
