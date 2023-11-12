@@ -11,7 +11,6 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly trafficComparatorEnabled: boolean,
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
     readonly mskEnablePublicEndpoints?: boolean,
@@ -126,30 +125,6 @@ export class MigrationAssistanceStack extends Stack {
             parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`,
             stringValue: mskCluster.clusterName
         });
-
-        if (props.trafficComparatorEnabled) {
-            const comparatorSQLiteSG = new SecurityGroup(this, 'comparatorSQLiteSG', {
-                vpc: props.vpc,
-                allowAllOutbound: false,
-            });
-            comparatorSQLiteSG.addIngressRule(comparatorSQLiteSG, Port.allTraffic());
-            new StringParameter(this, 'SSMParameterComparatorSQLAccessGroupId', {
-                description: 'OpenSearch migration parameter for Comparator SQL volume access security group id',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLAccessSecurityGroupId`,
-                stringValue: comparatorSQLiteSG.securityGroupId
-            });
-
-            // Create an EFS file system for the traffic-comparator
-            const comparatorSQLiteEFS = new FileSystem(this, 'comparatorSQLiteEFS', {
-                vpc: props.vpc,
-                securityGroup: comparatorSQLiteSG
-            });
-            new StringParameter(this, 'SSMParameterComparatorSQLVolumeEFSId', {
-                description: 'OpenSearch migration parameter for Comparator SQL EFS filesystem id',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/comparatorSQLVolumeEFSId`,
-                stringValue: comparatorSQLiteEFS.fileSystemId
-            });
-        }
 
         const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
             vpc: props.vpc,
