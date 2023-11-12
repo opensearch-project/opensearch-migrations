@@ -47,7 +47,7 @@ javaContainerServices.each { projectName, dockerImageName ->
     CommonUtils.createDockerfile(project, projectName, baseImageProjectOverrides, dockerFilesForExternalServices)
 }
 
-(javaContainerServices).forEach { projectName, dockerImageName ->
+javaContainerServices.forEach { projectName, dockerImageName ->
     def dockerBuildDir = "build/docker/${projectName}"
     task "buildDockerImage_${projectName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${projectName}"
