@@ -115,7 +115,7 @@ services:
     image: public.ecr.aws/a0w2c5q7/otelcol-with-opensearch:latest
     container_name: otel-collector
     ports:
-      - "4137:4137"
+      - "4317:4317"
       - "13133:13133"
     volumes:
       - ./otelcol/otel-config.yml:/etc/otel-config.yml
