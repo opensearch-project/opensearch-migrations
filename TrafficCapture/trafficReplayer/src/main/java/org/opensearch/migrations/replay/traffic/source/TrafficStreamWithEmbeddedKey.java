@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.traffic.source;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 public class TrafficStreamWithEmbeddedKey implements ITrafficStreamWithKey {
     public final TrafficStream stream;

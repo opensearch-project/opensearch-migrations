@@ -83,8 +83,9 @@ public class KafkaRestartingTrafficReplayerTest {
     })
     @Tag("longTest")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
+        var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                TestHttpServerContext::makeResponse);
+                response->TestHttpServerContext.makeResponse(random, response));
         var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(ts-> TrafficStreamUtils.summarizeTrafficStream(ts))

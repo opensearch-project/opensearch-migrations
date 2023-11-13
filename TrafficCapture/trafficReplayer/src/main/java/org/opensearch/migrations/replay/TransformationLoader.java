@@ -87,22 +87,21 @@ public class TransformationLoader {
             var loadedTransformers = getTransformerFactoryFromServiceLoader(fullConfig);
             return new JsonCompositeTransformer(Stream.concat(
                     loadedTransformers,
-                    Optional.ofNullable(newHostName).map(h->Stream.of(new HostTransformer(h))).orElse(Stream.of())
+                    Optional.ofNullable(newHostName).stream().map(HostTransformer::new)
             ).toArray(IJsonTransformer[]::new));
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Could not parse the transformer configuration as a json list", e);
         }
     }
 
-    private class HostTransformer implements IJsonTransformer {
+    private static class HostTransformer implements IJsonTransformer {
         private final String newHostName;
 
         @Override
         public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
-            var asMap = (Map<String, Object>) incomingJson;
-            var headers = (Map<String, Object>) asMap.get(JsonKeysForHttpMessage.HEADERS_KEY);
+            var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
             headers.replace("host", newHostName);
-            return asMap;
+            return incomingJson;
         }
 
         public HostTransformer(String newHostName) {

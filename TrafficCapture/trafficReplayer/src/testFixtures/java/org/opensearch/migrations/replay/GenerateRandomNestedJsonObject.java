@@ -40,10 +40,10 @@ public class GenerateRandomNestedJsonObject {
     @SneakyThrows
     public static Object makeRandomJsonObject(Random random, int numNodes, int numArrays) {
         assert numArrays < numNodes;
-        PruferTreeGenerator ptg = new PruferTreeGenerator<String>();
+        var ptg = new PruferTreeGenerator<String>();
         var edges = IntStream.range(0, numNodes-3).map(x->random.nextInt(numNodes-1)+1).sorted().toArray();
         var tree = ptg.makeTree(vn -> Integer.toString(vn), edges);
-        PriorityQueue<AbstractMap.Entry<Map<String,Object>,String>> parentAndBiggestChildPQ =
+        PriorityQueue<Map.Entry<Map<String,Object>,String>> parentAndBiggestChildPQ =
                 new PriorityQueue<>(Comparator.comparingInt(kvp->
                         -1 * getSize(kvp.getKey().get(kvp.getValue()))
                 ));
@@ -57,7 +57,7 @@ public class GenerateRandomNestedJsonObject {
     }
 
     private static void replaceTopItemsForArrays(int numArrays,
-                                                 PriorityQueue<AbstractMap.Entry<Map<String,Object>,String>>
+                                                 PriorityQueue<Map.Entry<Map<String,Object>,String>>
                                                          parentAndBiggestChildPQ) {
         for (int i=0; i<numArrays; ++i) {
             var pairToEdit = parentAndBiggestChildPQ.poll();
@@ -73,7 +73,7 @@ public class GenerateRandomNestedJsonObject {
 
     public static Object
     convertSimpleNodeToJsonTree(PruferTreeGenerator.SimpleNode<String> treeNode,
-                                PriorityQueue<AbstractMap.Entry<Map<String,Object>,String>>
+                                PriorityQueue<Map.Entry<Map<String,Object>,String>>
                                         parentAndBiggestChildPQ) {
         if (treeNode.hasChildren()) {
             var myMap = new LinkedHashMap<String, Object>();

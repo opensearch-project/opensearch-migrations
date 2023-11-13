@@ -112,7 +112,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
             }
         }
     }
-    
+  
     private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
 
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);

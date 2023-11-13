@@ -4,8 +4,6 @@ import lombok.ToString;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
-import java.util.StringJoiner;
-
 @ToString
 public class PojoTrafficStreamKey implements ITrafficStreamKey {
     private final String nodeId;

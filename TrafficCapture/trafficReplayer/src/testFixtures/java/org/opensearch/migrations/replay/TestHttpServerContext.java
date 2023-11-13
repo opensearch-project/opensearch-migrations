@@ -7,12 +7,15 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Random;
 
 public class TestHttpServerContext {
 
+    private TestHttpServerContext() {}
+
     public static final int MAX_RESPONSE_TIME_MS = 250;
 
-    public static String SERVER_RESPONSE_BODY_PREFIX = "Boring Response to ";
+    public static final String SERVER_RESPONSE_BODY_PREFIX = "Boring Response to ";
 
     static String getUriForIthRequest(int i) {
         return String.format("/%04d", i);
@@ -28,8 +31,8 @@ public class TestHttpServerContext {
                 getUriForIthRequest(i));
     }
 
-    public static SimpleHttpResponse makeResponse(HttpFirstLine r) {
-        return makeResponse(r, Duration.ofMillis((int)(Math.random()* MAX_RESPONSE_TIME_MS)));
+    public static SimpleHttpResponse makeResponse(Random rand, HttpFirstLine response) {
+        return makeResponse(response, Duration.ofMillis(rand.nextInt(MAX_RESPONSE_TIME_MS)));
     }
 
     public static SimpleHttpResponse makeResponse(HttpFirstLine r, Duration responseWaitTime) {

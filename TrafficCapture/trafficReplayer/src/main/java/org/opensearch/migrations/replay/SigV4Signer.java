@@ -32,8 +32,8 @@ import software.amazon.awssdk.utils.BinaryUtils;
 
 @Slf4j
 public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransformer {
-    private final static HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
-    private final static HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
+    private static final HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
+    private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
 
@@ -88,6 +88,7 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
     }
 
     private static class AwsSignerWithPrecomputedContentHash extends BaseAws4Signer {
+        @Override
         protected String calculateContentHash(SdkHttpFullRequest.Builder mutableRequest,
                                               Aws4SignerParams signerParams,
                                               SdkChecksum contentFlexibleChecksum) {
