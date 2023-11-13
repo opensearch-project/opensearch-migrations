@@ -49,7 +49,7 @@ public class TimeToResponseFulfillmentFutureMap {
     }
 
     private String formatBookends() {
-        if (timeToRunnableMap.size() == 0) {
+        if (timeToRunnableMap.isEmpty()) {
             return "";
         } else if (timeToRunnableMap.size() == 1) {
             return timeToRunnableMap.firstKey().toString();

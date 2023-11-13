@@ -123,7 +123,7 @@ public class KafkaProtobufConsumerLongTermTest {
         Assertions.assertEquals(TEST_RECORD_COUNT, sendCompleteCount.get());
         Assertions.assertThrows(TimeoutException.class, ()-> {
                 var rogueChunk = kafkaTrafficCaptureSource.readNextTrafficStreamChunk().get(1, TimeUnit.SECONDS);
-                if (rogueChunk.size() == 0) {
+                if (rogueChunk.isEmpty()) {
                     // TimeoutExceptions cannot be thrown by the supplier of the CompletableFuture today, BUT we
                     // could long-poll on the broker for longer than the timeout value supplied in the get() call above
                     throw new TimeoutException("read actually returned 0 items, but transforming this to a " +

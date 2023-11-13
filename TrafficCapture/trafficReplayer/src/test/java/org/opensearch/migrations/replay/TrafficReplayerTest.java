@@ -2,9 +2,11 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
@@ -22,7 +24,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -170,7 +171,13 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          RequestResponsePacketPair.ReconstructionStatus status,
+                                                          Instant when,
+                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
+
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -211,7 +218,12 @@ class TrafficReplayerTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          RequestResponsePacketPair.ReconstructionStatus status,
+                                                          Instant when,
+                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
                         }
                 );
         byte[] serializedChunks;
