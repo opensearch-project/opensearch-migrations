@@ -102,6 +102,12 @@ test('Test target cluster endpoint with no protocol throws error', () => {
     expect(validateAndFormatURL).toThrowError()
 })
 
+test('Test target cluster endpoint with path throws error', () => {
+    const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/indexes"
+    const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(validateAndFormatURL).toThrowError()
+})
+
 test('Test invalid target cluster endpoint throws error', () => {
     const inputTargetEndpoint = "vpc-domain-abcdef"
     const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)

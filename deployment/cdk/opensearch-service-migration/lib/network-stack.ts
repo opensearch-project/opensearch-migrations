@@ -25,6 +25,9 @@ export class NetworkStack extends Stack {
         if (url.protocol !== "http:" && url.protocol !== "https:") {
             throw new Error(`Invalid url protocol for target endpoint: ${urlString} was expecting 'http' or 'https'`)
         }
+        if (url.pathname !== "/") {
+            throw new Error(`Provided target endpoint: ${urlString} must not contain a path: ${url.pathname}`)
+        }
         // URLs that contain the default protocol port (e.g. 443, 80) will not show in the URL toString()
         let formattedUrlString = url.toString()
         if (formattedUrlString.endsWith("/")) {

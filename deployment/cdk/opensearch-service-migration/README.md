@@ -100,8 +100,8 @@ To be able to execute this command the user will need to have their AWS credenti
             "Effect": "Allow",
             "Action": "ecs:ExecuteCommand",
             "Resource": [
-                "arn:aws:ecs:*:12345678912:cluster/migration-<stage>-ecs-cluster",
-                "arn:aws:ecs:*:12345678912:task/migration-<stage>-ecs-cluster/*"
+                "arn:aws:ecs:<REGION>:<ACCOUNT-ID>:cluster/migration-<STAGE>-ecs-cluster",
+                "arn:aws:ecs:<REGION>:<ACCOUNT-ID>:task/migration-<STAGE>-ecs-cluster/*"
             ]
         }
     ]
@@ -139,22 +139,22 @@ For a Domain, there are typically two items that need to be configured to allow 
 #### OpenSearch Serverless
 A Collection, will need to configure a Network and Data Access policy to allow proper functioning of this solution
 1. The Collection should have a network policy that has a `VPC` access type by creating a VPC endpoint on the VPC used for this solution. This VPC endpoint should be configured for the private subnets of the VPC and attach the `osClusterAccessSG` security group.
-2. The data access policy needed should grant permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection, and use the task roles of the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration) as the principals for this data access policy. This could potentially be focused down to specific indexes or operations for sensitive cases, but should be monitored as this could prevent some historical-data/requests from being replayed to the Collection
+2. The data access policy needed should grant permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection, and use the task roles of the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration) as the principals for this data access policy.
 
-See [Configuring SigV4 Replayer Requests](#configuring-sigv4-replayer-requests) for details on enabling SigV4 requests from the Traffic Replayer to the target cluster after following the previous setup
+See [Configuring SigV4 Replayer Requests](#configuring-sigv4-replayer-requests) for details on enabling SigV4 requests from the Traffic Replayer to the target cluster
 
 ## Configuring SigV4 Replayer Requests
-With any [required setup](#importing-target-clusters) on the target cluster having been completed, a user can then use the `trafficReplayerExtraArgs` option to specify the Traffic Replayer argument for enabling SigV4 auth, which the below sections show. **Note**: The `trafficReplayerEnableClusterFGACAuth` option should not be used if enabling SigV4 auth for the Traffic Replayer as only one auth mechanism should be specified. See [here](#how-is-an-authorization-header-set-for-requests-from-the-replayer-to-the-target-cluster) for more details on how the Traffic Replayer sets its auth header.
+With the [required setup](#importing-target-clusters) on the target cluster having been completed, a user can then use the `trafficReplayerExtraArgs` option to specify the Traffic Replayer service argument for enabling SigV4 authentication, which the below sections show. **Note**: As only one authorization header can be specified, the `trafficReplayerEnableClusterFGACAuth` option should not be used if enabling SigV4 authentication for the Traffic Replayer. See [here](#how-is-an-authorization-header-set-for-requests-from-the-replayer-to-the-target-cluster) for more details on how the Traffic Replayer sets its authorization header.
 #### OpenSearch Service
 ```shell
 # e.g. --sigv4-auth-header-service-region es,us-east-1
-"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region es,<region>"
+"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region es,<REGION>"
 ```
 
 #### OpenSearch Serverless
 ```shell
 # e.g. --sigv4-auth-header-service-region aoss,us-east-1
-"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region aoss,<region>"
+"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region aoss,<REGION>"
 ```
 
 ## Kicking off Fetch Migration
