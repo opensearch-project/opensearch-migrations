@@ -32,7 +32,7 @@ public class ConnectionReplaySession {
 
     @Getter
     @Setter
-    private UniqueReplayerRequestKey currentConnectionId;
+    private ISourceTrafficChannelKey channelId;
 
     public ConnectionReplaySession(EventLoop eventLoop) {
         this.eventLoop = eventLoop;

@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -37,21 +38,21 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         log.info("incoming buffer refcnt="+nextRequestPacket.refCnt());
         var duplicatedPacket = nextRequestPacket.duplicate().retain();
-        return new DiagnosticTrackableCompletableFuture(CompletableFuture.runAsync(() -> {
+        return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.runAsync(() -> {
             try {
                 log.info("Running async future for " + nextRequestPacket);
                 Thread.sleep(consumeDuration.toMillis());
                 log.info("woke up from sleeping for " + nextRequestPacket);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
             try {
                 log.info("At the time of committing the buffer, refcnt="+duplicatedPacket.refCnt());
                 duplicatedPacket.readBytes(byteArrayOutputStream, nextRequestPacket.readableBytes());
                 duplicatedPacket.release();
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         }),
                 ()->"TestCapturePacketToHttpHandler.consumeBytes");

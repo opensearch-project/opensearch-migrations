@@ -90,7 +90,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
         var returnedObject = transformer.transformJson(httpJsonMessage);
         if (returnedObject != httpJsonMessage) {
             httpJsonMessage.clear();
-            httpJsonMessage = new HttpJsonMessageWithFaultingPayload((Map<String,Object>)returnedObject);
+            httpJsonMessage = new HttpJsonMessageWithFaultingPayload(returnedObject);
         }
         return httpJsonMessage;
     }

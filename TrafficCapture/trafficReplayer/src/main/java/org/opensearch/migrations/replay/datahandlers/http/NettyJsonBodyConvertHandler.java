@@ -4,8 +4,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
-import java.util.Map;
-
 public class NettyJsonBodyConvertHandler extends ChannelInboundHandlerAdapter {
     private final IJsonTransformer transformer;
 
@@ -17,7 +15,7 @@ public class NettyJsonBodyConvertHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
             var output = transformer.transformJson((HttpJsonMessageWithFaultingPayload)msg);
-            var newHttpJson = new HttpJsonMessageWithFaultingPayload(((Map<String,Object>)output));
+            var newHttpJson = new HttpJsonMessageWithFaultingPayload(output);
             ctx.fireChannelRead(newHttpJson);
         } else {
             super.channelRead(ctx, msg);

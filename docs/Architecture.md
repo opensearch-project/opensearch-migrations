@@ -82,14 +82,14 @@ A user is using a search/analytics data store to handle some “mission-critical
     1. Can be configured to replay at original rate or accelerated rate.
     2. The tool can be distributed to meet whatever replay rate is demanded.
     3. Allows for real-time and predetermined management of the replay (pause, stop, restart, speed up, etc).
-    4. Response logs can be shared for future processing by the Traffic Comparator (see #7).
+    4. Response logs can be shared for future processing by comparison tooling (see #7).
     5. The replay sequence for mutating requests (PUT, POST, DELETE, etc) is stable across replays.
     6. The replayer transforms source requests into appropriate requests for the target cluster.
     7. The replay stream can be edited to allow for overrides - newly inserted requests to backfill missing data, reordering specific events, and allowing for new/custom transformations.
     8. The replayer can do different degrees of sampling to reduce time/cost for various types of acid tests (only mutations on this index, no queries of the following pattern are to be rerun).
     9. The stream of results coming out of the replayer can be monitored by a control plane.  That control plane can be triggered by the progress on the streams, or by a UI to perform chaos testing.  The replay pace can be accelerated to put undo load on the cluster or by commands could be issued to the target to create stresses on the cluster (node taken offline, node is undergoing a b/g deployment, node is out of disk space, etc).
         1. ***This is a potential integration point/ask of the managed service.  A number of users complained about a lack of resiliency in their current clusters.  Giving users the ability to degrade their user’s performance in test environments in very well-understood ways would prepare users and lower Amazon’s operational burdens.***
-7. As the results from the replayer for all HTTP requests (including queries and control plane commands) are being logged, a **Traffic Comparator** tool compares the responses between the source requests and target requests.
+7. As the results from the replayer for all HTTP requests (including queries and control plane commands) are being logged, comparison tooling compares the responses between the source requests and target requests.
     1. Compares status codes, response content & performance data (latencies).
     2. Contents are normalized and specific types of differences can be ignored.
         1. These normalizations and settings are user-configurable.
@@ -146,10 +146,6 @@ Right now the plan is to greatly prefer #1 over #2.  While appealing, #3 likely 
 ### Replayer
 
 ![Replayer Components](diagrams/Replayer.svg)
-
-### Traffic Comparator
-
-![Traffic Comparator Components](diagrams/TrafficComparator.svg)
 
 ### Cutover
 
@@ -220,7 +216,7 @@ The following points by component list some of the main concerns that will need 
     * Probably via a multi-tenant control-plane managed by AWS.  An OpenSearch-Migrations Service Principal will likely call back into resources on the user’s account.
 * UI can leverage OpenSearch Dashboards.
     * Allows OpenSearch to eat our own dog food.
-    * OpenSearch is good at aggregation reports, making it a good consumer of the final output coming from the traffic comparator.
+    * OpenSearch is good at aggregation reports, making it a good consumer of the final output.
         * This might be expensive for the load that we could be sending in.
     * Will work well for a completely managed solution vs an OpenSource one.
     * We’ll have much more flexibility in look and feel and to add additional components.
@@ -236,7 +232,7 @@ This may have the largest impact to a production workflow.  It is also the one t
     1. When possible, can we allow the recorder mechanism to induce a performance hit for the source to guarantee that all requests are offloaded to logs?
         1. Notice that this doesn’t say, all requests that are processed successfully are offloaded.  Doing this, without deep support for a 2-phase commit approach, which is infeasible, means that some requests definitely logged will NOT have been processed correctly.  If the fault plane of the coordinating node and the logging are aligned (e.g. same process or machine), any failure in the coordinating node could create a false-positive.
         2. Notice that when a response is generated, our downstream systems can be entirely sure of whether the request was committed or not.  The ambiguity arises when a response isn’t found, which while relatively rare, still needs to be reconciled.  The only real advantage here is that discovery of missing items becomes much simpler.  There’s no risk of additional strain on the source cluster to find the missing mutation, which could be very expensive to track down in the case of an update (effectively, running a full-scan on an index’s documents).
-    2. The replayer and comparator will need to work to mitigate data gaps that may have occurred in the logs.
+    2. The replayer and comparison tooling will need to work to mitigate data gaps that may have occurred in the logs.
     3. Should all nodes issue wire logs for all requests to allow redundancy checks on responses to minimize the likelihood of error?  This would create a wider performance impact and a much greater cost in offloaded data processing, though the logged items could likely be quickly deduped in stream processing before the replayer.
     4. Is it sensible to bootstrap wire logs with additional normative information - like from the translog (or equivalent)?
 3. Source traffic that is in TLS creates a host of technical and security challenges.
@@ -333,14 +329,6 @@ Other concerns include...
     * A dedicated configuration update stream may make more sense than to embed an HTTP API.
 * Latencies will likely be measuring different values than the traffic logs did - are there additional calibration requests that should be made so that more representative values can be displayed to the user?
 * The Replayer may need to run at slower rates, though subsampling will likely be handled upstream in the streaming system.
-
-### Traffic Comparator - in progress
-
-* How do we run user code?  What should “user code” even be?
-* We can probably scope a fairly tight environment that is lazily loaded, like here are the mutating messages around n-seconds of this request.
-* Can we leverage DataPrepper’s models to parse requests?
-* Does a batch/hybrid solution make sense here, especially for rerunning comparisons after the normalization/comparison rules have been updated?  MapReduce could be a LOT more efficient than rerunning the stream.
-* Being able to explain in what ways things were different could be super valuable.  e.g. 33%
 
 ### Production Switchover
 

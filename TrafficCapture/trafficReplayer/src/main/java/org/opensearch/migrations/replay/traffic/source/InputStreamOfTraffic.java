@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.traffic.source;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -34,7 +35,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
                     throw new EOFException();
                 }
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
             var ts = builder.build();
             trafficStreamsRead.incrementAndGet();
@@ -42,7 +43,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
             return List.<ITrafficStreamWithKey>of(new TrafficStreamWithEmbeddedKey(ts));
         }).exceptionally(e->{
             var ecf = new CompletableFuture<List<ITrafficStreamWithKey>>();
-            ecf.completeExceptionally(e.getCause().getCause());
+            ecf.completeExceptionally(e.getCause());
             return ecf.join();
         });
     }

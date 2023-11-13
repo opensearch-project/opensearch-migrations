@@ -14,13 +14,13 @@ import java.time.Instant;
 import java.util.List;
 
 @Slf4j
-public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
+public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter {
 
-    private final IChannelConnectionCaptureSerializer trafficOffloader;
+    private final IChannelConnectionCaptureSerializer<T> trafficOffloader;
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpResponseHandler");
 
 
-    public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
+    public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
     }
 
@@ -71,11 +71,6 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         flush(ctx);
         super.handlerRemoved(ctx);
-    }
-
-    @Override
-    public void flush(ChannelHandlerContext ctx) throws Exception {
-        super.flush(ctx);
     }
 
     @Override

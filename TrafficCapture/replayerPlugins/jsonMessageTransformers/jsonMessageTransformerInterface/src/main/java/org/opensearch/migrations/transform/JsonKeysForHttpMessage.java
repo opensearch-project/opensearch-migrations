@@ -1,6 +1,9 @@
 package org.opensearch.migrations.transform;
 
 public class JsonKeysForHttpMessage {
+
+    private JsonKeysForHttpMessage() {}
+
     public static final String HTTP_MESSAGE_SCHEMA_VERSION_KEY = "transformerMessageVersion";
     public static final String METHOD_KEY = "method";
     public static final String URI_KEY = "URI";

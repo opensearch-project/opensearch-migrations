@@ -28,7 +28,7 @@ public class V0_1TrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
         public void add(TrafficStream incoming) {
             var list = incoming.getSubStreamList();
-            lastWasRead = list.size() == 0 ? lastWasRead :
+            lastWasRead = list.isEmpty() ? lastWasRead :
                     Optional.of(list.get(list.size()-1)).map(tso->tso.hasRead() || tso.hasReadSegment()).get();
             requestCount += list.stream().filter(tso->tso.hasRead()||tso.hasReadSegment()).count();
         }

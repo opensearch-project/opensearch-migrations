@@ -25,7 +25,10 @@ import java.util.stream.Stream;
 public class PruferTreeGenerator<T> {
     @Builder
     @ToString
-    private static class Link { int from; int to; }
+    private static class Link {
+        int from;
+        int to;
+    }
 
     public static class SimpleNode<T> {
         public final T value;
@@ -35,7 +38,7 @@ public class PruferTreeGenerator<T> {
         }
 
         List<SimpleNode<T>> children;
-        public boolean hasChildren() { return children != null && children.size() > 0; }
+        public boolean hasChildren() { return children != null && !children.isEmpty(); }
         public Stream<SimpleNode<T>> getChildren() { return children == null ? Stream.of() : children.stream(); }
     }
 
@@ -48,7 +51,7 @@ public class PruferTreeGenerator<T> {
         void popTreeNode(SimpleNode<T> node);
     }
 
-    public void preOrderVisitTree(SimpleNode<T> treeNode, Visitor visitor) {
+    public void preOrderVisitTree(SimpleNode<T> treeNode, Visitor<T> visitor) {
         visitor.pushTreeNode(treeNode);
         if (treeNode.hasChildren()) {
             treeNode.children.forEach(child->preOrderVisitTree(child, visitor));
@@ -62,24 +65,22 @@ public class PruferTreeGenerator<T> {
     }
 
     private SimpleNode<T> getMemoizedNode(TreeMap<Integer, SimpleNode<T>> nodeMap,
-                                          HashSet<SimpleNode> nodesWithoutParents,
+                                          HashSet<SimpleNode<T>> nodesWithoutParents,
                                           int key,
                                           IntFunction<T> valueGenerator) {
-        var node = nodeMap.get(key);
-        if (node == null) {
-            node = new SimpleNode<>(valueGenerator.apply(key));
-            nodesWithoutParents.add(node);
-            nodeMap.put(key, node);
-        }
-        return node;
+        return nodeMap.computeIfAbsent(key, k-> {
+                    var n = new SimpleNode<>(valueGenerator.apply(k));
+                    nodesWithoutParents.add(n);
+                    return n;
+                });
     }
 
     private SimpleNode<T> convertLinksToTree(NodeValueGenerator<T> valueGenerator, List<Link> edges) {
         var nodeMap = new TreeMap<Integer, SimpleNode<T>>();
-        var nodesWithoutParents = new HashSet<SimpleNode>();
+        var nodesWithoutParents = new HashSet<SimpleNode<T>>();
         edges.stream().forEach(e->{
-            var childNode = getMemoizedNode(nodeMap, nodesWithoutParents, e.from, x->valueGenerator.makeValue(x));
-            var parent = getMemoizedNode(nodeMap, nodesWithoutParents, e.to, x->valueGenerator.makeValue(x));
+            var childNode = getMemoizedNode(nodeMap, nodesWithoutParents, e.from, valueGenerator::makeValue);
+            var parent = getMemoizedNode(nodeMap, nodesWithoutParents, e.to, valueGenerator::makeValue);
             if (parent.children == null) {
                 parent.children = new ArrayList<>();
             }
@@ -103,7 +104,6 @@ public class PruferTreeGenerator<T> {
      * @return
      */
     private List<Link> makeLinks(final int[] pruferSequenceArray) {
-        //assert Arrays.stream(pruferSequenceArray).allMatch(x -> x<pruferSequenceArray.length+2);
         int pruferLen = pruferSequenceArray.length;
         List<Link> edges = new ArrayList<>();
         // ids are sequential integers.  We will map them to something else outside of this function.
@@ -150,7 +150,7 @@ public class PruferTreeGenerator<T> {
     }
 
     private static String arrayAsString(Map<Integer, Long> nodeDegrees) {
-        return nodeDegrees.entrySet().stream().map(kvp -> kvp.toString())
+        return nodeDegrees.entrySet().stream().map(Object::toString)
                 .collect(Collectors.joining(","));
     }
 

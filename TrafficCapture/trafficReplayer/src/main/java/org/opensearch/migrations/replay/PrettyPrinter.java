@@ -11,6 +11,7 @@ import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import lombok.SneakyThrows;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -46,14 +47,9 @@ public class PrettyPrinter {
         }
     }
 
+    @SneakyThrows
     public static <T> T setPrintStyleFor(PacketPrintFormat packetPrintFormat, Supplier<T> supplier) {
-        try {
-            return setPrintStyleForCallable(packetPrintFormat, (supplier::get));
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        return setPrintStyleForCallable(packetPrintFormat, (supplier::get));
     }
 
     public enum HttpMessageType { REQUEST, RESPONSE }
@@ -87,7 +83,7 @@ public class PrettyPrinter {
             case PARSED_HTTP:
                 return httpPacketsToPrettyPrintedString(msgType, byteBufStream);
             default:
-                throw new RuntimeException("Unknown PacketPrintFormat: " + printStyle.get());
+                throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
@@ -102,8 +98,8 @@ public class PrettyPrinter {
             } else if (httpMessage == null) {
                 return "[NULL]";
             } else {
-                throw new RuntimeException("Embedded channel with an HttpObjectAggregator returned an unexpected object " +
-                        "of type " + httpMessage.getClass() + ": " + httpMessage);
+                throw new IllegalStateException("Embedded channel with an HttpObjectAggregator returned an " +
+                        "unexpected object of type " + httpMessage.getClass() + ": " + httpMessage);
             }
         } finally {
             holderOp.ifPresent(bbh->bbh.content().release());

@@ -54,7 +54,7 @@ public class JsonAccumulatorTest {
                 return randomJsonGenerator.getRandomTreeFormattedAsString(false, 4, 2000, 400)
                         .getBytes(StandardCharsets.UTF_8);
             default:
-                throw new RuntimeException("Unknown key: "+key);
+                throw new IllegalStateException("Unknown key: "+key);
         }
     }
 

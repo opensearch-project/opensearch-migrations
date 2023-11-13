@@ -65,7 +65,7 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
 
     public void addCallback(Consumer<AggregatedRawResponse> callback) {
         if (aggregatedRawResponseBuilder == null) {
-            throw new RuntimeException("Callback was already triggered for the aggregated response");
+            throw new IllegalStateException("Callback was already triggered for the aggregated response");
         }
         if (doneReadingRequest) {
             log.trace("calling callback because we're done reading the request");

@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.traffic.source;
 import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Utils;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.slf4j.event.Level;
 
@@ -123,6 +124,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
                     +lastTimestampSecondsRef.get()).log();
         });
+    }
+
+    @Override
+    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
+        underlyingSource.commitTrafficStream(trafficStreamKey);
     }
 
     @Override

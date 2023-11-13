@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.IHttpMessage;
@@ -31,8 +32,8 @@ import software.amazon.awssdk.utils.BinaryUtils;
 
 @Slf4j
 public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransformer {
-    private final static HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
-    private final static HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
+    private static final HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
+    private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
 
@@ -75,7 +76,7 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
             try {
                 this.messageDigest = MessageDigest.getInstance("SHA-256");
             } catch (NoSuchAlgorithmException e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         }
         messageDigest.update(payloadChunk);
@@ -87,6 +88,7 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
     }
 
     private static class AwsSignerWithPrecomputedContentHash extends BaseAws4Signer {
+        @Override
         protected String calculateContentHash(SdkHttpFullRequest.Builder mutableRequest,
                                               Aws4SignerParams signerParams,
                                               SdkChecksum contentFlexibleChecksum) {

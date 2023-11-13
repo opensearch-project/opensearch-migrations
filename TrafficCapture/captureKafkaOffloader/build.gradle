@@ -9,7 +9,7 @@ repositories {
 }
 
 dependencies {
-    api 'io.netty:netty-buffer:4.1.89.Final'
+    api 'io.netty:netty-buffer:4.1.100.Final'
     implementation project(':captureOffloader')
     implementation project(':coreUtilities')
     implementation 'org.projectlombok:lombok:1.18.26'

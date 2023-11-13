@@ -27,7 +27,7 @@ public class TrafficCaptureSourceFactory {
         boolean isInputFileActive = appParams.inputFilename != null;
 
         if (isInputFileActive && isKafkaActive) {
-            throw new RuntimeException("Only one traffic source can be specified, detected options for input file as well as Kafka");
+            throw new IllegalArgumentException("Only one traffic source can be specified, detected options for input file as well as Kafka");
         }
 
         if (isKafkaActive) {

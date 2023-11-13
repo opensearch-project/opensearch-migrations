@@ -21,6 +21,8 @@ import java.util.stream.Stream;
 
 @Slf4j
 public class TransformationLoader {
+    public static final String WRONG_JSON_STRUCTURE_MESSAGE = "Must specify the top-level configuration list with a sequence of " +
+            "maps that have only one key each, where the key is the name of the transformer to be configured.";
     private final List<IJsonTransformerProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
 
@@ -62,10 +64,10 @@ public class TransformationLoader {
     private IJsonTransformer configureTransformerFromConfig(Map<String, Object> c) {
         var keys = c.keySet();
         if (keys.size() != 1) {
-            throw new IllegalArgumentException("Must specify the top-level configuration list with a sequence of " +
-                    "maps that have only one key each, where the key is the name of the transformer to be configured.");
+            throw new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE);
         }
-        var key = keys.stream().findFirst().get();
+        var key = keys.stream().findFirst()
+                .orElseThrow(()->new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE));
         for (var p : providers) {
             var className = p.getClass().getName();
             if (className.equals(key)) {
@@ -85,22 +87,21 @@ public class TransformationLoader {
             var loadedTransformers = getTransformerFactoryFromServiceLoader(fullConfig);
             return new JsonCompositeTransformer(Stream.concat(
                     loadedTransformers,
-                    Optional.ofNullable(newHostName).map(h->Stream.of(new HostTransformer(h))).orElse(Stream.of())
+                    Optional.ofNullable(newHostName).stream().map(HostTransformer::new)
             ).toArray(IJsonTransformer[]::new));
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Could not parse the transformer configuration as a json list", e);
         }
     }
 
-    private class HostTransformer implements IJsonTransformer {
+    private static class HostTransformer implements IJsonTransformer {
         private final String newHostName;
 
         @Override
         public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
-            var asMap = (Map<String, Object>) incomingJson;
-            var headers = (Map<String, Object>) asMap.get(JsonKeysForHttpMessage.HEADERS_KEY);
+            var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
             headers.replace("host", newHostName);
-            return asMap;
+            return incomingJson;
         }
 
         public HostTransformer(String newHostName) {

@@ -12,8 +12,6 @@ import {MSKUtilityStack} from "./msk-utility-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
-import {TrafficComparatorStack} from "./service-stacks/traffic-comparator-stack";
-import {TrafficComparatorJupyterStack} from "./service-stacks/traffic-comparator-jupyter-stack";
 import {CaptureProxyStack} from "./service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
 import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
@@ -147,8 +145,6 @@ export class StackComposer {
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
-        const trafficComparatorServiceEnabled = this.getContextForType('trafficComparatorServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const trafficComparatorJupyterServiceEnabled = this.getContextForType('trafficComparatorJupyterServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxySourceEndpoint = this.getContextForType('captureProxySourceEndpoint', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -284,7 +280,6 @@ export class StackComposer {
         if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
                 vpc: networkStack.vpc,
-                trafficComparatorEnabled: trafficComparatorServiceEnabled,
                 mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 mskRestrictPublicAccessTo: mskRestrictPublicAccessTo,
@@ -355,7 +350,6 @@ export class StackComposer {
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
                 extraArgs: trafficReplayerExtraArgs,
-                enableComparatorLink: trafficComparatorServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
@@ -373,34 +367,6 @@ export class StackComposer {
             }
             trafficReplayerStack.addDependency(networkStack)
             this.stacks.push(trafficReplayerStack)
-        }
-
-        let trafficComparatorStack
-        if (trafficComparatorServiceEnabled && networkStack && migrationStack) {
-            trafficComparatorStack = new TrafficComparatorStack(scope, "traffic-comparator", {
-                vpc: networkStack.vpc,
-                stackName: `OSMigrations-${stage}-${region}-TrafficComparator`,
-                description: "This stack contains resources for the Traffic Comparator ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            trafficComparatorStack.addDependency(migrationStack)
-            this.stacks.push(trafficComparatorStack)
-        }
-
-        let trafficComparatorJupyterStack
-        if (trafficComparatorJupyterServiceEnabled && networkStack && trafficComparatorStack) {
-            trafficComparatorJupyterStack = new TrafficComparatorJupyterStack(scope, "traffic-comparator-jupyter", {
-                vpc: networkStack.vpc,
-                stackName: `OSMigrations-${stage}-${region}-TrafficComparatorJupyter`,
-                description: "This stack contains resources for creating a Jupyter Notebook to perform analysis on Traffic Comparator output as an ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            trafficComparatorJupyterStack.addDependency(trafficComparatorStack)
-            this.stacks.push(trafficComparatorJupyterStack)
         }
 
         let elasticsearchStack
