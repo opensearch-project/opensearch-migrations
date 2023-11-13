@@ -21,7 +21,7 @@ sourceSets {
     }
 }
 dependencies {
-    api group: 'io.netty', name: 'netty-buffer', version: '4.1.89.Final'
+    api group: 'io.netty', name: 'netty-buffer', version: '4.1.100.Final'
 
     implementation project(':captureProtobufs')
     implementation "com.google.protobuf:protobuf-java:3.22.2"
