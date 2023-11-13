@@ -22,7 +22,6 @@ def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
         "migrationConsole": "migration_console",
         "opensearchDashboards": "opensearch_dashboards",
-        "otelcol": "otelcol"
 ]
 // Create the static docker files that aren't hosting migrations java code from this repo
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
@@ -69,7 +68,6 @@ task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
     dependsOn buildDockerImage_migrationConsole
     dependsOn buildDockerImage_opensearchDashboards
-    dependsOn buildDockerImage_otelcol
     
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer
