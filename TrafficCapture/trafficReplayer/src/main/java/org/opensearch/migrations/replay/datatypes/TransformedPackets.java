@@ -46,7 +46,7 @@ public class TransformedPackets implements AutoCloseable {
 
     @Override
     public String toString() {
-        if (data == null) {
+        if (isClosed()) {
             return "CLOSED";
         }
         return new StringJoiner(", ", TransformedPackets.class.getSimpleName() + "[", "]")
