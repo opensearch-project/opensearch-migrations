@@ -12,7 +12,6 @@ import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -57,11 +56,9 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     }
 
     public static class TupleToStreamConsumer implements Consumer<SourceTargetCaptureTuple> {
-        OutputStream outputStream;
         Logger tupleLogger = LogManager.getLogger("OutputTupleJsonLogger");
 
         public TupleToStreamConsumer(OutputStream outputStream){
-            this.outputStream = outputStream;
         }
 
         private JSONObject jsonFromHttpDataUnsafe(List<byte[]> data) throws IOException {
@@ -177,8 +174,6 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             JSONObject jsonObject = toJSONObject(triple);
 
             tupleLogger.info(jsonObject.toString());
-            outputStream.write((jsonObject.toString()+"\n").getBytes(StandardCharsets.UTF_8));
-            outputStream.flush();
         }
     }
 

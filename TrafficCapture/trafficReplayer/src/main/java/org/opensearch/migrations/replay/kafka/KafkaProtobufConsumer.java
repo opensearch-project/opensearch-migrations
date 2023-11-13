@@ -49,8 +49,6 @@ import java.util.stream.StreamSupport;
  * after the hour of waiting begins, Kakfa will notice that this application is no
  * longer calling poll and will kick the consumer out of the client group.  Other
  * consumers may connect, though they'll also be kicked out of the group shortly.
- * It may be fine to have this pattern of cascaded replayers waiting to send a
- * request, then all of them sending at about the same time....
  *
  * See
  * <a href="https://kafka.apache.org/21/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#failuredetection">...</a>
@@ -113,7 +111,8 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                 return Optional.empty();
             }
         }
-    };
+    }
+    
     private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
 
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
@@ -274,7 +273,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
             newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk);
             newHeadValue.ifPresent(o -> {
                 if (tracker.isEmpty()) {
-                    partitionToOffsetLifecycleTrackerMap.remove(tracker);
+                    partitionToOffsetLifecycleTrackerMap.remove(p);
                 }
                 nextSetOfCommitsMap.put(new TopicPartition(topic, p), new OffsetAndMetadata(o));
             });
