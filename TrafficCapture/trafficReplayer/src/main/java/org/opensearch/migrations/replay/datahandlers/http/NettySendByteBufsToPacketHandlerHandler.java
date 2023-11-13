@@ -66,22 +66,9 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
                             "expected in progress Boolean to be not null since null should signal that work was never started";
                     var transformationStatus = v1.booleanValue() ?
                             HttpRequestTransformationStatus.COMPLETED : HttpRequestTransformationStatus.ERROR;
-                    return packetReceiver.finalizeRequest().getDeferredFutureThroughHandle((v2, t2) -> {
-                                if (t1 != null) {
-                                    return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t1,
-                                            ()->"fixed failure from currentFuture.getDeferredFutureThroughHandle()");
-                                } else if (t2 != null) {
-                                    return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t2,
-                                            ()->"fixed failure from packetReceiver.finalizeRequest()");
-                                } else {
-                                    return StringTrackableCompletableFuture.completedFuture(Optional.ofNullable(v2)
-                                                    .map(r-> new TransformedOutputAndResult<R>(r,  transformationStatus,
-                                                            null))
-                                                    .orElse(null),
-                                            ()->"fixed value from packetReceiver.finalizeRequest()"
-                                            );
-                                }
-                            },
+                    return packetReceiver.finalizeRequest().getDeferredFutureThroughHandle((v2, t2) ->
+                                wrapFinalizedResultWithExceptionHandling(t1, v2, t2,
+                                        transformationStatus),
                             ()->"handlerRemoved: NettySendByteBufsToPacketHandlerHandler is setting the completed value for its " +
                                     "packetReceiverCompletionFuture, after the packets have been finalized " +
                                     "to the packetReceiver");
@@ -94,6 +81,25 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
         log.trace("HR: new currentFuture="+currentFuture);
         super.handlerRemoved(ctx);
+    }
+
+    private static <R> StringTrackableCompletableFuture<TransformedOutputAndResult<R>>
+    wrapFinalizedResultWithExceptionHandling(Throwable t1, R v2, Throwable t2,
+                                             HttpRequestTransformationStatus transformationStatus) {
+        if (t1 != null) {
+            return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t1,
+                    () -> "fixed failure from currentFuture.getDeferredFutureThroughHandle()");
+        } else if (t2 != null) {
+            return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t2,
+                    () -> "fixed failure from packetReceiver.finalizeRequest()");
+        } else {
+            return StringTrackableCompletableFuture.completedFuture(Optional.ofNullable(v2)
+                            .map(r -> new TransformedOutputAndResult<R>(r, transformationStatus,
+                                    null))
+                            .orElse(null),
+                    () -> "fixed value from packetReceiver.finalizeRequest()"
+            );
+        }
     }
 
     public DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>

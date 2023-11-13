@@ -148,7 +148,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
     private void activateChannelForThisConsumer() {
         if (channelIsInUse(channel)) {
-            throw new RuntimeException("Channel " + channel + "is being used elsewhere already!");
+            throw new IllegalStateException("Channel " + channel + "is being used elsewhere already!");
         }
         var pipeline = channel.pipeline();
         addLoggingHandler(pipeline, "B");

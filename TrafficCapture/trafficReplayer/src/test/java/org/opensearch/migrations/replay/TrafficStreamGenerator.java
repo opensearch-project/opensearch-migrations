@@ -1,8 +1,10 @@
 package org.opensearch.migrations.replay;
 
+import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.testutils.StreamInterleaver;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -99,7 +101,7 @@ public class TrafficStreamGenerator {
         } else if (trafficObservation.hasClose()) {
             return Optional.of(ObservationType.Close);
         } else {
-            throw new RuntimeException("unknown traffic observation: " + trafficObservation);
+            throw new IllegalStateException("unknown traffic observation: " + trafficObservation);
         }
     }
 
@@ -116,7 +118,7 @@ public class TrafficStreamGenerator {
                 case WriteSegment:
                     return ObservationType.EndOfWriteSegment;
                 default:
-                    throw new RuntimeException("previous observation type doesn't match expected possibilities: " +
+                    throw new IllegalStateException("previous observation type doesn't match expected possibilities: " +
                             lastObservationType);
             }
         });
@@ -145,7 +147,8 @@ public class TrafficStreamGenerator {
     }
 
     private static void addCommands(Random r, double flushLikelihood, int numPacketCommands,
-                                    List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> outgoingCommands, List<Integer> outgoingSizes,
+                                    List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> outgoingCommands,
+                                    List<Integer> outgoingSizes,
                                     Supplier<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> directiveSupplier) {
         int aggregateBufferSize = 0;
         for (var cmdCount = new AtomicInteger(numPacketCommands); cmdCount.get()>0;) {
@@ -172,7 +175,8 @@ public class TrafficStreamGenerator {
     }
 
     private static void fillCommandsAndSizes(int bufferSize, Random r, double flushLikelihood, int bufferBound,
-                                             List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands, List<Integer> sizes) {
+                                             List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands,
+                                             List<Integer> sizes) {
         var numTransactions = r.nextInt(MAX_COMMANDS_IN_CONNECTION);
         for (int i=numTransactions; i>0; --i) {
             addCommands(r, flushLikelihood, r.nextInt(MAX_READS_IN_REQUEST)+1, commands, sizes,
@@ -236,6 +240,27 @@ public class TrafficStreamGenerator {
         public final TrafficStream[] trafficStreams;
         public final int[] requestByteSizes;
         public final int[] responseByteSizes;
+    }
+
+    @AllArgsConstructor
+    public static class StreamAndExpectedSizes {
+        public final Stream<TrafficStream> stream;
+        public final int numHttpTransactions;
+    }
+
+    static StreamAndExpectedSizes
+    generateStreamAndSumOfItsTransactions(int count, boolean randomize) {
+        var generatedCases = count > 0 ?
+                generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
+                generateAllIndicativeRandomTrafficStreamsAndSizes();
+        var testCaseArr = generatedCases.toArray(RandomTrafficStreamAndTransactionSizes[]::new);
+        var aggregatedStreams = randomize ?
+                StreamInterleaver.randomlyInterleaveStreams(new Random(count),
+                        Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :
+                Arrays.stream(testCaseArr).flatMap(c->Arrays.stream(c.trafficStreams));
+
+        var numExpectedRequests = Arrays.stream(testCaseArr).mapToInt(c->c.requestByteSizes.length).sum();
+        return new StreamAndExpectedSizes(aggregatedStreams, numExpectedRequests);
     }
 
     public static Stream<RandomTrafficStreamAndTransactionSizes>

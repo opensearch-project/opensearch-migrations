@@ -7,6 +7,22 @@
  * in the user manual at https://docs.gradle.org/8.0.2/userguide/multi_project_builds.html
  */
 
+void addSubProjects(String path, File dir) {
+    if (dir.isDirectory() == false) return;
+    if (dir.name == 'buildSrc') return;
+    if (new File(dir, 'build.gradle').exists() == false) return;
+    if (findProject(dir) != null) return;
+
+    final String projectName = "${path}:${dir.name}"
+    include projectName
+    if (path.isEmpty() || path.startsWith(':example-plugins')) {
+        project(projectName).projectDir = dir
+    }
+    for (File subdir : dir.listFiles()) {
+        addSubProjects(projectName, subdir)
+    }
+}
+
 rootProject.name = 'TrafficCapture'
 include('captureKafkaOffloader',
         'captureOffloader',
@@ -19,3 +35,8 @@ include('captureKafkaOffloader',
         'dockerSolution',
         'trafficCaptureProxyServerTest'
 )
+
+addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
+include 'replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled'
+findProject(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled')?.name = 'untitled'
+

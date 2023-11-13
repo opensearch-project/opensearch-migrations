@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.datatypes;
 import io.netty.buffer.ByteBuf;
 
 import java.util.ArrayList;
+import java.util.StringJoiner;
 import java.util.stream.Stream;
 
 public class TransformedPackets implements AutoCloseable {
@@ -13,6 +14,8 @@ public class TransformedPackets implements AutoCloseable {
         return data.add(nextRequestPacket.retainedDuplicate());
     }
 
+    public boolean isClosed() { return data == null; }
+    public boolean isEmpty() { return data != null && data.isEmpty(); }
     public int size() { return data.size(); }
 
     public Stream<ByteBuf> streamUnretained() {
@@ -39,5 +42,15 @@ public class TransformedPackets implements AutoCloseable {
         // to how callers were handling this object
         data.clear();
         data = null;
+    }
+
+    @Override
+    public String toString() {
+        if (isClosed()) {
+            return "CLOSED";
+        }
+        return new StringJoiner(", ", TransformedPackets.class.getSimpleName() + "[", "]")
+                .add("data=" + data)
+                .toString();
     }
 }

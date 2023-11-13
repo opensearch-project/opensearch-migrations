@@ -105,8 +105,6 @@ async function invokeNextLambda(payload: any, functionName: string) {
         await lambdaClient.send(command).then(
             (data) => {
                 console.log("Invoke lambda response: " + JSON.stringify(data))
-                data.$metadata.httpStatusCode
-
             },
             (error) => {
                 console.error("Invoke lambda error: " + JSON.stringify(error))

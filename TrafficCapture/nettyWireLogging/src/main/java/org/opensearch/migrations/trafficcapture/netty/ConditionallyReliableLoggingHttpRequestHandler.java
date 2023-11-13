@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.netty;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.util.ReferenceCountUtil;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
@@ -33,7 +34,7 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
                     try {
                         super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
                     } catch (Exception e) {
-                        throw new RuntimeException(e);
+                        throw Lombok.sneakyThrow(e);
                     }
                 }
             });

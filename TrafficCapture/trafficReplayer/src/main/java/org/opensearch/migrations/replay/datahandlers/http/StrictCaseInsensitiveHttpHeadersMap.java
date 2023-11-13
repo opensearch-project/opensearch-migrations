@@ -15,7 +15,7 @@ import java.util.Set;
  * so that we can maintain that original order.  However, we add an extra ability to keep key values
  * (or header names) case insensitive.
  */
-@EqualsAndHashCode
+@EqualsAndHashCode(callSuper = false)
 public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List<String>> {
     protected LinkedHashMap<String, SimpleEntry<String, List<String>>> lowerCaseToUpperCaseAndValueMap;
 

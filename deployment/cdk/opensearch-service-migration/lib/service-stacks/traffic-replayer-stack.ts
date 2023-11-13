@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
+import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -14,9 +14,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly addOnMigrationId?: string,
     readonly customTargetEndpoint?: string,
     readonly customKafkaGroupId?: string,
-    readonly extraArgs?: string,
-    readonly enableComparatorLink?: boolean
-
+    readonly extraArgs?: string
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -101,7 +99,6 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
         }
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
-        replayerCommand = props.enableComparatorLink ? replayerCommand.concat(" | nc traffic-comparator 9220") : replayerCommand
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),

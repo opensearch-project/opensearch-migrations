@@ -44,6 +44,31 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
 
 export class MigrationServiceCore extends Stack {
 
+    // Use CDK escape hatch to modify the underlying CFN for the generated AWS::ServiceDiscovery::Service to allow
+    // multiple DnsRecords. GitHub issue can be found here: https://github.com/aws/aws-cdk/issues/18894
+    addServiceDiscoveryRecords(fargateService: FargateService, serviceDiscoveryPort: number|undefined) {
+        const multipleDnsRecords = {
+            DnsRecords: [
+                {
+                    TTL: 10,
+                    Type: "A"
+                },
+                {
+                    TTL: 10,
+                    Type: "SRV"
+                }
+            ]
+        }
+        const cloudMapCfn = fargateService.node.findChild("CloudmapService")
+        const cloudMapServiceCfn = cloudMapCfn.node.defaultChild as DiscoveryCfnService
+        cloudMapServiceCfn.addPropertyOverride("DnsConfig", multipleDnsRecords)
+
+        if (serviceDiscoveryPort) {
+            const fargateCfn = fargateService.node.defaultChild as FargateCfnService
+            fargateCfn.addPropertyOverride("ServiceRegistries.0.Port", serviceDiscoveryPort)
+        }
+    }
+
     createService(props: MigrationServiceCoreProps) {
         if ((!props.dockerFilePath && !props.dockerImageRegistryName) || (props.dockerFilePath && props.dockerImageRegistryName)) {
             throw new Error(`Exactly one option [dockerFilePath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
@@ -151,29 +176,9 @@ export class MigrationServiceCore extends Stack {
             },
             cloudMapOptions: cloudMapOptions
         });
-        // Use CDK escape hatch to modify the underlying CFN for the generated AWS::ServiceDiscovery::Service to allow
-        // multiple DnsRecords. GitHub issue can be found here: https://github.com/aws/aws-cdk/issues/18894
-        if (props.serviceDiscoveryEnabled) {
-            const multipleDnsRecords = {
-                DnsRecords: [
-                    {
-                        TTL: 10,
-                        Type: "A"
-                    },
-                    {
-                        TTL: 10,
-                        Type: "SRV"
-                    }
-                ]
-            }
-            const cloudMapCfn = fargateService.node.findChild("CloudmapService")
-            const cloudMapServiceCfn = cloudMapCfn.node.defaultChild as DiscoveryCfnService
-            cloudMapServiceCfn.addPropertyOverride("DnsConfig", multipleDnsRecords)
 
-            if (props.serviceDiscoveryPort) {
-                const fargateCfn = fargateService.node.defaultChild as FargateCfnService
-                fargateCfn.addPropertyOverride("ServiceRegistries.0.Port", props.serviceDiscoveryPort)
-            }
+        if (props.serviceDiscoveryEnabled) {
+            this.addServiceDiscoveryRecords(fargateService, props.serviceDiscoveryPort)
         }
     }
 

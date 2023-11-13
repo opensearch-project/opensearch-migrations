@@ -4,6 +4,6 @@ import lombok.EqualsAndHashCode;
 
 import java.util.ArrayList;
 
-@EqualsAndHashCode
+@EqualsAndHashCode(callSuper = true)
 public class RawPackets extends ArrayList<byte[]> {
 }

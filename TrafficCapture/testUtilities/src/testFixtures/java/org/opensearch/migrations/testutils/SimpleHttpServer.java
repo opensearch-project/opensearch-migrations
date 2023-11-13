@@ -4,6 +4,8 @@ import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsParameters;
 import com.sun.net.httpserver.HttpsServer;
+import lombok.Lombok;
+
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -30,7 +32,7 @@ public class SimpleHttpServer implements AutoCloseable {
             try {
                 testServerRef.set(new SimpleHttpServer(useTls, port, makeContext));
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         });
         return testServerRef.get();
@@ -126,7 +128,7 @@ public class SimpleHttpServer implements AutoCloseable {
         try {
             return new URI((useTls ? "https" : "http"), null, LOCALHOST, port(),"/",null, null);
         } catch (URISyntaxException e) {
-            throw new RuntimeException("Error building URI", e);
+            throw new IllegalArgumentException("Error building URI", e);
         }
     }
 

@@ -6,7 +6,7 @@ import io.netty.handler.codec.http.HttpHeaders;
 
 public class PassThruHttpHeaders extends DefaultHttpHeaders {
 
-    private static DefaultHttpHeaders HEADERS_TO_PRESERVE = makeHeadersToPreserve();
+    private static final DefaultHttpHeaders HEADERS_TO_PRESERVE = makeHeadersToPreserve();
 
     private static DefaultHttpHeaders makeHeadersToPreserve() {
         var h = new DefaultHttpHeaders(false);

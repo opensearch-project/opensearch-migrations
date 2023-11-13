@@ -110,7 +110,7 @@ public class JsonAccumulator {
                     return null;
                 case VALUE_EMBEDDED_OBJECT:
                 default:
-                    throw new RuntimeException("Unexpected value type: "+token);
+                    throw new IllegalStateException("Unexpected value type: "+token);
             }
         }
         return null;
@@ -124,7 +124,7 @@ public class JsonAccumulator {
             if (grandParent instanceof Map) {
                 ((Map) grandParent).put(fieldName, value);
             } else {
-                throw new RuntimeException("Stack mismatch, cannot push a value " + toString());
+                throw new IllegalStateException("Stack mismatch, cannot push a value " + toString());
             }
         } else if (topElement instanceof ArrayList) {
             ((ArrayList) topElement).add(value);

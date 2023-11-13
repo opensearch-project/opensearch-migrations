@@ -15,6 +15,7 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
@@ -83,7 +84,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         );
     }
 
-    private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ByteBuf msg) throws Exception {
+    private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ByteBuf msg)  {
         httpDecoderChannel.writeInbound(msg); // Consume this outright, up to the caller to know what else to do
         return getHandlerThatHoldsParsedHttpRequest().isDone ?
                 HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE :
@@ -92,11 +93,6 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
     private SimpleDecodedHttpRequestHandler getHandlerThatHoldsParsedHttpRequest() {
         return (SimpleDecodedHttpRequestHandler) httpDecoderChannel.pipeline().last();
-    }
-
-    @Override
-    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-        super.channelRegistered(ctx);
     }
 
     @Override
@@ -110,7 +106,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
                 try {
                     super.channelUnregistered(ctx);
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    throw Lombok.sneakyThrow(e);
                 }
             }
         });
@@ -125,20 +121,10 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
             try {
                 super.channelUnregistered(ctx);
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         });
         super.handlerRemoved(ctx);
-    }
-
-    @Override
-    public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        super.channelActive(ctx);
-    }
-
-    @Override
-    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        super.channelInactive(ctx);
     }
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
@@ -174,21 +160,6 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         } else {
             super.channelRead(ctx, msg);
         }
-    }
-
-    @Override
-    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-        super.channelReadComplete(ctx);
-    }
-
-    @Override
-    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-        super.userEventTriggered(ctx, evt);
-    }
-
-    @Override
-    public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
-        super.channelWritabilityChanged(ctx);
     }
 
     @Override

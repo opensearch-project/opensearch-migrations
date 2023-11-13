@@ -5,6 +5,7 @@ import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -202,6 +203,11 @@ class StreamChannelConnectionCaptureSerializerTest {
         Assertions.assertEquals(0, reconstitutedTrafficStreamPart2.getSubStream(0).getWrite().getData().size());
     }
 
+    private static class TestException extends RuntimeException {
+        public TestException(String message) {
+            super(message);}
+    }
+
     @Test
     public void testThatReadCanBeDeserialized() throws IOException, ExecutionException, InterruptedException {
         final var referenceTimestamp = Instant.now(Clock.systemUTC());
@@ -218,8 +224,8 @@ class StreamChannelConnectionCaptureSerializerTest {
         serializer.addReadEvent(referenceTimestamp, bb);
         bb.clear();
         serializer.addReadEvent(referenceTimestamp, bb);
-        serializer.addExceptionCaughtEvent(referenceTimestamp, new RuntimeException(FAKE_EXCEPTION_DATA));
-        serializer.addExceptionCaughtEvent(referenceTimestamp, new RuntimeException(""));
+        serializer.addExceptionCaughtEvent(referenceTimestamp, new TestException(FAKE_EXCEPTION_DATA));
+        serializer.addExceptionCaughtEvent(referenceTimestamp, new TestException(""));
         serializer.addEndOfFirstLineIndicator(17);
         serializer.addEndOfHeadersIndicator(72);
         serializer.commitEndOfHttpMessageIndicator(referenceTimestamp);
@@ -322,7 +328,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         @Override
         protected CompletableFuture<Object> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
             if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
-                throw new RuntimeException("Unknown outputStreamHolder sent back to StreamManager: " +
+                throw new IllegalStateException("Unknown outputStreamHolder sent back to StreamManager: " +
                         outputStreamHolder);
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
@@ -340,7 +346,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     log.trace("Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
                     outputBuffers.add(bb);
                 } catch (IOException e) {
-                    throw new RuntimeException(e);
+                    throw Lombok.sneakyThrow(e);
                 }
             }).thenApply(x->null);
         }

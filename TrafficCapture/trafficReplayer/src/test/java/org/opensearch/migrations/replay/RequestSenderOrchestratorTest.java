@@ -51,8 +51,8 @@ class RequestSenderOrchestratorTest {
             lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
         var closeFuture = senderOrchestrator.scheduleClose(
-                TestRequestKey.getTestConnectionRequestId(NUM_REQUESTS_TO_SCHEDULE),
-                lastEndTime.plus(Duration.ofMillis(100)));
+                TestRequestKey.getTestConnectionRequestId(NUM_REQUESTS_TO_SCHEDULE).trafficStreamKey,
+                NUM_REQUESTS_TO_SCHEDULE, lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
         for (int i=0; i<scheduledItems.size(); ++i) {

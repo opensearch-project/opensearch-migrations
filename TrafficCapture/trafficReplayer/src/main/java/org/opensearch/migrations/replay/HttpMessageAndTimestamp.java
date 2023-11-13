@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.Unpooled;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
@@ -82,7 +83,7 @@ public class HttpMessageAndTimestamp {
         try {
             currentSegmentBytes.write(data);
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw Lombok.sneakyThrow(e);
         }
     }
 

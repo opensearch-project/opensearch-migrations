@@ -7,6 +7,7 @@ import com.google.protobuf.CodedOutputStream;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -47,8 +48,8 @@ import static org.opensearch.migrations.coreutils.MetricsLogger.initializeOpenTe
 @Slf4j
 public class CaptureProxy {
 
-    private final static String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
-    public final static String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
+    private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
+    public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
 
     static class Parameters {
         @Parameter(required = false,
@@ -133,7 +134,7 @@ public class CaptureProxy {
         String otelCollectorEndpoint;
     }
 
-    public static @NonNull Parameters parseArgs(String[] args) {
+    static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
         try {
@@ -149,6 +150,7 @@ public class CaptureProxy {
             System.err.println(e.getMessage());
             System.err.println("Got args: "+ String.join("; ", args));
             jCommander.usage();
+            System.exit(2);
             return null;
         }
     }
@@ -171,10 +173,10 @@ public class CaptureProxy {
         return builder.build();
     }
 
-    private static IConnectionCaptureFactory getNullConnectionCaptureFactory() {
+    private static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
-        return connectionId -> new StreamChannelConnectionCaptureSerializer(null, connectionId,
-                new StreamLifecycleManager() {
+        return connectionId -> new StreamChannelConnectionCaptureSerializer<>(null, connectionId,
+                new StreamLifecycleManager<>() {
                     @Override
                     public CodedOutputStreamHolder createStream() {
                         return () -> CodedOutputStream.newInstance(NullOutputStream.getInstance());
@@ -223,7 +225,6 @@ public class CaptureProxy {
 
     private static IConnectionCaptureFactory getConnectionCaptureFactory(Parameters params) throws IOException {
         var nodeId = getNodeId();
-        // TODO - it might eventually be a requirement to do multiple types of offloading.
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
@@ -232,7 +233,7 @@ public class CaptureProxy {
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
         } else {
-            throw new RuntimeException("Must specify some connection capture factory options");
+            throw new IllegalStateException("Must specify some connection capture factory options");
         }
     }
 
@@ -249,13 +250,13 @@ public class CaptureProxy {
             return null;
         }
         if (serverUri.getPort() < 0) {
-            throw new RuntimeException("Port not present for URI: " + serverUri);
+            throw new IllegalArgumentException("Port not present for URI: " + serverUri);
         }
         if (serverUri.getHost() == null) {
-            throw new RuntimeException("Hostname not present for URI: " + serverUri);
+            throw new IllegalArgumentException("Hostname not present for URI: " + serverUri);
         }
         if (serverUri.getScheme() == null) {
-            throw new RuntimeException("Scheme (http|https) is not present for URI: " + serverUri);
+            throw new IllegalArgumentException("Scheme (http|https) is not present for URI: " + serverUri);
         }
         return serverUri;
     }
@@ -299,10 +300,9 @@ public class CaptureProxy {
             proxy.start(backsideConnectionPool, params.numThreads,
                     sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
                         try {
-                            var sslEngine = sks.createHTTPSSLEngine();
-                            return sslEngine;
+                            return sks.createHTTPSSLEngine();
                         } catch (Exception e) {
-                            throw new RuntimeException(e);
+                            throw Lombok.sneakyThrow(e);
                         }
                     }).orElse(null), getConnectionCaptureFactory(params));
         } catch (Exception e) {
