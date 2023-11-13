@@ -9,7 +9,7 @@ import {
   SecurityGroup,
   IVpc,
 } from "aws-cdk-lib/aws-ec2";
-import {MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
+import {MountPoint, PortMapping, Protocol, ServiceConnectService, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -17,6 +17,7 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {OpenSearchDomainStack} from "../opensearch-domain-stack";
 import {EngineVersion} from "aws-cdk-lib/aws-opensearchservice";
 import {EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
+import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 
 export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -44,11 +45,13 @@ export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly nodeToNodeEncryptionEnabled?: boolean,
 }
 
+const domainName = "migration-analytics-domain"
+
 // The MigrationAnalyticsStack consists of the OpenTelemetry Collector ECS container & an
 // OpenSearch cluster with dashboard.
 export class MigrationAnalyticsStack extends MigrationServiceCore {
 
-    openSearchAnalyticsStack: Stack
+    // openSearchAnalyticsStack: Stack
 
     constructor(scope: Construct, id: string, props: MigrationAnalyticsProps) {
         super(scope, id, props)
@@ -63,23 +66,12 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             securityGroupName: "analyticsDashboardBastionSecurityGroup",
           }
         );
-
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)),
             bastionSecurityGroup
         ]
-
         securityGroups[1].addIngressRule(bastionSecurityGroup, Port.tcp(443))
-
-        this.createService({
-            serviceName: `otel-collector`,
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelcol"),
-            securityGroups: securityGroups,
-            taskCpuUnits: 1024,
-            taskMemoryLimitMiB: 4096,
-            ...props
-        });
 
         // Bastion host to access Opensearch Dashboards
         new BastionHostLinux(this, "AnalyticsDashboardBastionHost", {
@@ -95,42 +87,48 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             },
           ],
         });
-    
-        this.openSearchAnalyticsStack = new OpenSearchDomainStack(scope, `analyticsDomainStack`,
-        {
-            stackName: `OSMigrations-${props.stage}-${props.region}-AnalyticsDomain`,
-            description: "This stack prepares the Migration Analytics OS Domain",
-            version: props.engineVersion,
-            domainName: "migration-analytics-domain",
-            dataNodeInstanceType: props.dataNodeInstanceType,
-            dataNodes: props.dataNodes,
-            dedicatedManagerNodeType: props.dedicatedManagerNodeType,
-            dedicatedManagerNodeCount: props.dedicatedManagerNodeCount,
-            warmInstanceType: props.warmInstanceType,
-            warmNodes: props.warmNodes,
-            enableDemoAdmin: false,
-            enforceHTTPS: props.enforceHTTPS,
-            ebsEnabled: props.ebsEnabled,
-            ebsIops: props.ebsIops,
-            ebsVolumeSize: props.ebsVolumeSize,
-            ebsVolumeType: props.ebsVolumeType,
-            encryptionAtRestEnabled: props.encryptionAtRestEnabled,
-            encryptionAtRestKmsKeyARN: props.encryptionAtRestKmsKeyARN,
-            appLogEnabled: props.appLogEnabled,
-            appLogGroup: props.appLogGroup,
-            nodeToNodeEncryptionEnabled: props.nodeToNodeEncryptionEnabled,
-            vpcSubnetIds: props.vpcSubnetIds,
-            vpcSecurityGroupIds: props.vpcSecurityGroupIds,
-            availabilityZoneCount: props.availabilityZoneCount,
-            domainAccessSecurityGroupParameter: "analyticsDomainSGId",
-            endpointParameterName: "analyticsDomainEndpoint",
-            // Note that the usual thing here would be `...props`, but that was somehow causing the
-            // stackName to be overridden, so both the general analytics stack & the analytics domain stack
-            // had the same stackName, which was causing a lot of CFN deployment issues. The necessary
-            // inhereted props (stage & defaultDeployId) are specified manually instead.
-            stage: props.stage,
-            defaultDeployId: props.defaultDeployId
-        })
+
+        // Port Mappings for collector and health check
+        const otelCollectorPort: PortMapping = {
+          name: "otel-collector-connect",
+          hostPort: 4317,
+          containerPort: 4317,
+          protocol: Protocol.TCP
+        }
+        const otelHealthCheckPort: PortMapping = {
+          name: "otel-healthcheck-connect",
+          hostPort: 13133,
+          containerPort: 13133,
+          protocol: Protocol.TCP
+        }
+        const serviceConnectServiceCollector: ServiceConnectService = {
+          portMappingName: "otel-collector-connect",
+          port: 4317,
+          dnsName: "otel-collector"
+        }
+        const serviceConnectServiceHealthCheck: ServiceConnectService = {
+          portMappingName: "otel-healthcheck-connect",
+          port: 13133,
+          dnsName: "otel-healthcheck"
+        }
+
+        const analyticsDomainEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainEndpoint`)
+
+        this.createService({
+            serviceName: `otel-collector`,
+            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelcol"),
+            securityGroups: securityGroups,
+            taskCpuUnits: 1024,
+            taskMemoryLimitMiB: 4096,
+            portMappings: [otelCollectorPort, otelHealthCheckPort],
+            serviceConnectServices: [serviceConnectServiceCollector, serviceConnectServiceHealthCheck],
+            environment: {
+              "ANALYTICS_DOMAIN_ENDPOINT": analyticsDomainEndpoint
+            },
+            ...props
+        });
+
+
     }
 
 }

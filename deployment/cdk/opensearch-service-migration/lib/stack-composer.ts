@@ -23,7 +23,6 @@ export interface StackPropsExt extends StackProps {
     readonly stage: string,
     readonly defaultDeployId: string
     readonly addOnMigrationDeployId?: string,
-    readonly region?: string
 }
 
 export interface StackComposerProps extends StackProps {
@@ -342,10 +341,51 @@ export class StackComposer {
             this.stacks.push(mskUtilityStack)
         }
 
-        let migrationAnalyticsStack
+        let migrationAnalyticsStack;
+        let analyticsDomainStack;
         if (migrationAnalyticsServiceEnabled && networkStack) {
-            migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
+            const analyticsDomainName = "migration-analytics-domain-2"
+            const openAccessPolicy = new PolicyStatement({
+                effect: Effect.ALLOW,
+                principals: [new AnyPrincipal()],
+                actions: ["es:*"],
+                resources: [`arn:aws:es:${region}:${account}:domain/${analyticsDomainName}/*`]
+            })
+            analyticsDomainStack = new OpenSearchDomainStack(scope, `analyticsDomainStack`,
+            {
+                stackName: `OSMigrations-${stage}-${region}-AnalyticsDomain`,
+                description: "This stack prepares the Migration Analytics OS Domain",
+                version: this.getEngineVersion(analyticsDomainEngineVersion ?? engineVersion),
+                domainName: analyticsDomainName,
+                // dataNodeInstanceType: props.dataNodeInstanceType,
+                dataNodes: analyticsDomainDataNodeCount ?? availabilityZoneCount,
+                // dedicatedManagerNodeType: props.dedicatedManagerNodeType,
+                // dedicatedManagerNodeCount: props.dedicatedManagerNodeCount,
+                // warmInstanceType: props.warmInstanceType,
+                enableDemoAdmin: false,
+                enforceHTTPS: true,
+                nodeToNodeEncryptionEnabled: true,
+                encryptionAtRestEnabled: true,
+                // ebsEnabled: props.ebsEnabled,
+                // ebsIops: props.ebsIops,
+                // ebsVolumeSize: props.ebsVolumeSize,
+                // ebsVolumeType: props.ebsVolumeType,
+                // encryptionAtRestKmsKeyARN: props.encryptionAtRestKmsKeyARN,
+                // appLogEnabled: props.appLogEnabled,
+                // appLogGroup: props.appLogGroup,
                 vpc: networkStack.vpc,
+                vpcSubnetIds: vpcSubnetIds,
+                vpcSecurityGroupIds: vpcSecurityGroupIds,
+                availabilityZoneCount: availabilityZoneCount,
+                domainAccessSecurityGroupParameter: "analyticsDomainSGId",
+                endpointParameterName: "analyticsDomainEndpoint",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                accessPolicies: [openAccessPolicy],
+                ...props
+            })
+            migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
+                vpc:networkStack.vpc,
                 vpcSubnetIds: vpcSubnetIds,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
                 availabilityZoneCount: availabilityZoneCount,
@@ -369,16 +409,17 @@ export class StackComposer {
                 appLogGroup: analyticsDomainLoggingAppLogGroupARN,
                 nodeToNodeEncryptionEnabled: analyticsDomainNoneToNodeEncryptionEnabled,
                 stage: stage,
-                region: region,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
+
             if (networkStack) {
-                migrationAnalyticsStack.openSearchAnalyticsStack.addDependency(networkStack)
+                analyticsDomainStack.addDependency(networkStack)
+                migrationAnalyticsStack.addDependency(networkStack)
             }
             // The general analytics stack (otel collector) is dependent on the analytics cluster being deployed first
-            this.stacks.push(migrationAnalyticsStack.openSearchAnalyticsStack)
-            migrationAnalyticsStack.addDependency(migrationAnalyticsStack.openSearchAnalyticsStack)
+            this.stacks.push(analyticsDomainStack)
+            migrationAnalyticsStack.addDependency(analyticsDomainStack)
             this.stacks.push(migrationAnalyticsStack)
         }
 
@@ -405,12 +446,17 @@ export class StackComposer {
         if (captureProxyESServiceEnabled && networkStack && mskUtilityStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
                 vpc: networkStack.vpc,
+                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
+            // This is necessary to ensure the otel collector is available (and can be found via service connect)
+            if (migrationAnalyticsStack) {
+                captureProxyESStack.addDependency(migrationAnalyticsStack)
+            }
             captureProxyESStack.addDependency(mskUtilityStack)
             this.stacks.push(captureProxyESStack)
         }
@@ -423,6 +469,7 @@ export class StackComposer {
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customTargetEndpoint: trafficReplayerTargetEndpoint,
                 customKafkaGroupId: trafficReplayerGroupId,
+                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 extraArgs: trafficReplayerExtraArgs,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
@@ -435,6 +482,10 @@ export class StackComposer {
             }
             if (migrationStack) {
                 trafficReplayerStack.addDependency(migrationStack)
+            }
+            // This is necessary to ensure the otel collector is available (and can be found via service connect)
+            if (migrationAnalyticsStack) {
+                trafficReplayerStack.addDependency(migrationAnalyticsStack)
             }
             trafficReplayerStack.addDependency(openSearchStack)
             trafficReplayerStack.addDependency(networkStack)
@@ -460,6 +511,7 @@ export class StackComposer {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
                 customSourceClusterEndpoint: captureProxySourceEndpoint,
+                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,
@@ -468,6 +520,10 @@ export class StackComposer {
             })
             if (elasticsearchStack) {
                 captureProxyStack.addDependency(elasticsearchStack)
+            }
+            // This is necessary to ensure the otel collector is available (and can be found via service connect)
+            if (migrationAnalyticsStack) {
+                captureProxyStack.addDependency(migrationAnalyticsStack)
             }
             captureProxyStack.addDependency(mskUtilityStack)
             this.stacks.push(captureProxyStack)
@@ -526,6 +582,9 @@ export class StackComposer {
             }
             if (fetchMigrationStack) {
                 migrationConsoleStack.addDependency(fetchMigrationStack)
+            }
+            if (migrationAnalyticsStack) {
+                migrationConsoleStack.addDependency(migrationAnalyticsStack)
             }
             migrationConsoleStack.addDependency(mskUtilityStack)
             migrationConsoleStack.addDependency(openSearchStack)

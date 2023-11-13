@@ -12,6 +12,7 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly customSourceClusterEndpoint?: string
+    readonly analyticsServiceEnabled?: boolean
 }
 
 /**
@@ -62,11 +63,13 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
         const sourceClusterEndpoint = props.customSourceClusterEndpoint ? props.customSourceClusterEndpoint : "https://elasticsearch:9200"
+        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        command = props.analyticsServiceEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
         this.createService({
             serviceName: "capture-proxy",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
             // TODO: add otel collector endpoint
-            dockerImageCommand: ['/bin/sh', '-c', `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`],
+            dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             taskRolePolicies: [mskClusterConnectPolicy, mskTopicProducerPolicy],
             portMappings: [servicePort],
