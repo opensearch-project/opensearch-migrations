@@ -1,7 +1,7 @@
 # HTTP Traffic Replayer
 
 This package consumes streams of IP packets that were previously recorded and replays the requests to another HTTP
-server, recording the packet traffic of the new interactions for future analysis (see the Comparator tools).
+server, recording the packet traffic of the new interactions for future analysis.
 
 ## Overview
 
