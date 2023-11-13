@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
@@ -335,10 +337,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private boolean handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
         var requestPacketBytes = accumulation.getRrPair().requestData;
-        metricsLogger.atSuccess()
-                .addKeyValue("requestId", accumulation.getRequestKey())
-                .addKeyValue("connectionId", accumulation.getRequestKey().getTrafficStreamKey().getConnectionId())
-                .setMessage("Full captured source request was accumulated").log();
+        metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, accumulation.getRequestKey().toString())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, accumulation.getRequestKey().getTrafficStreamKey().getConnectionId()).emit();
         assert (requestPacketBytes != null);
         assert (!requestPacketBytes.hasInProgressSegment());
         listener.onRequestReceived(accumulation.getRequestKey(), requestPacketBytes);
@@ -349,10 +350,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void handleEndOfResponse(Accumulation accumulation,
                                      RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
-        metricsLogger.atSuccess()
-                .addKeyValue("requestId", accumulation.getRequestKey())
-                .addKeyValue("connectionId", accumulation.getRequestKey().getTrafficStreamKey().getConnectionId())
-                .setMessage("Full captured source response was accumulated").log();
+        metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, accumulation.getRequestKey().toString())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, accumulation.getRequestKey().getTrafficStreamKey().getConnectionId()).emit();
         var rrPair = accumulation.getRrPair();
         rrPair.completionStatus = status;
         listener.onFullDataReceived(accumulation.getRequestKey(), rrPair);

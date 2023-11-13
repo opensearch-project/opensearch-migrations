@@ -63,6 +63,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.opensearch.migrations.coreutils.MetricsLogger.initializeOpenTelemetry;
+
 @Slf4j
 public class TrafficReplayer {
 
@@ -290,9 +292,15 @@ public class TrafficReplayer {
         String kafkaTrafficPropertyFile;
 
         @Parameter(required = false,
-        names = "--transformer-config",
-        arity = 1,
-        description = "Json configuration of message transformers.  Keys are the names of the loaded transformers " +
+                names = {"--otelCollectorEndpoint"},
+                arity = 1,
+                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
+                        "forwarded. If no value is provided, metrics will not be forwarded.")
+        String otelCollectorEndpoint;
+        @Parameter(required = false,
+                names = "--transformer-config",
+                arity = 1,
+                description = "Json configuration of message transformers.  Keys are the names of the loaded transformers " +
                 "(shortname or longname) and values are the configuration passed to each of the transformers.")
         String transformerConfig;
     }
@@ -312,7 +320,6 @@ public class TrafficReplayer {
         }
     }
 
-
     public static void main(String[] args)
             throws IOException, InterruptedException, ExecutionException, TerminationException
     {
@@ -327,6 +334,9 @@ public class TrafficReplayer {
             System.err.println(e.getMessage());
             System.exit(3);
             return;
+        }
+        if (params.otelCollectorEndpoint != null) {
+            initializeOpenTelemetry("traffic-replayer", params.otelCollectorEndpoint);
         }
 
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
