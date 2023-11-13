@@ -17,11 +17,10 @@ public class MultipleJMESPathScriptsTest {
             "  \"payload\": payload\n" +
             "}";
     private static final String EXCISE_SCRIPT =
-            "\"{\\n  \\\"method\\\": method,\\n  \\\"URI\\\": URI,\\n  \\\"headers\\\": headers,\\n  \\\"payload\\\": " +
-                    "{\\n    \\\"inlinedJsonBody\\\": {\\n      " +
-                    "\\\"mappings\\\": payload.inlinedJsonBody.mappings.oldType\\n    }\\n  }\\n}\"";
-    private static final String HOSTNAME_SCRIPT = "\"{\\n  \\\"method\\\": method,\\n  \\\"URI\\\": URI,\\n  " +
-            "\\\"headers\\\": {\\\"host\\\": \\\"localhost\\\"},\\n  \\\"payload\\\": payload\\n}\"";
+            "{\\\"method\\\": method,\\\"URI\\\": URI,\\\"headers\\\":headers,\\\"payload\\\":" +
+                    "{\\\"inlinedJsonBody\\\":{\\\"mappings\\\": payload.inlinedJsonBody.mappings.oldType}}}";
+    private static final String HOSTNAME_SCRIPT = "{\\n  \\\"method\\\": method,\\n  \\\"URI\\\": URI,\\n  " +
+            "\\\"headers\\\": {\\\"host\\\": \\\"localhost\\\"},\\n  \\\"payload\\\": payload\\n}";
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private static Map<String,Object> parseAsMap(String contents) throws Exception {
@@ -34,7 +33,7 @@ public class MultipleJMESPathScriptsTest {
         for (var script : new String[]{EXCISE_SCRIPT, HOSTNAME_SCRIPT}) {
             aggregateScriptJoiner.add(
                     "{\"org.opensearch.migrations.transform.JsonJMESPathTransformerProvider\": {" +
-                            " \"script\": " + script + "}}"
+                            " \"script\": \"" + script + "\"}}"
             );
         }
 
