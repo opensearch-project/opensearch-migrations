@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
+    public static final String OUTPUT_TUPLE_JSON_LOGGER = "OutputTupleJsonLogger";
     final UniqueSourceRequestKey uniqueRequestKey;
     final RequestResponsePacketPair sourcePair;
     final TransformedPackets targetRequestData;
@@ -56,9 +57,9 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     }
 
     public static class TupleToStreamConsumer implements Consumer<SourceTargetCaptureTuple> {
-        Logger tupleLogger = LogManager.getLogger("OutputTupleJsonLogger");
+        Logger tupleLogger = LogManager.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
 
-        public TupleToStreamConsumer(OutputStream outputStream){
+        public TupleToStreamConsumer() {
         }
 
         private JSONObject jsonFromHttpDataUnsafe(List<byte[]> data) throws IOException {
@@ -172,7 +173,6 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         @SneakyThrows
         public void accept(SourceTargetCaptureTuple triple) {
             JSONObject jsonObject = toJSONObject(triple);
-
             tupleLogger.info(jsonObject.toString());
         }
     }

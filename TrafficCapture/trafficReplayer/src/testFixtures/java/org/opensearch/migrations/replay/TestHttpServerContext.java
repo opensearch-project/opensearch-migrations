@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import lombok.Lombok;
 import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 
@@ -36,7 +37,7 @@ public class TestHttpServerContext {
             Thread.sleep(responseWaitTime.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
+            throw Lombok.sneakyThrow(e);
         }
         String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
         var payloadBytes = body.getBytes(StandardCharsets.UTF_8);

@@ -64,7 +64,7 @@ public class ReplayEngine {
         var bufferPeriodMs = contentTimeController.getBufferTimeWindow().dividedBy(BACKPRESSURE_UPDATE_FREQUENCY)
                 .toMillis();
         if (bufferPeriodMs == 0) {
-            throw new RuntimeException("Buffer window time is too small, make it at least " +
+            throw new IllegalStateException("Buffer window time is too small, make it at least " +
                     BACKPRESSURE_UPDATE_FREQUENCY + " " + TIME_UNIT_MILLIS.name());
         }
         return bufferPeriodMs;

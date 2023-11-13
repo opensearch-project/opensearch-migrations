@@ -120,7 +120,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                 offloader.flushCommitAndResetStream(false);
                 return;
             default:
-                throw new RuntimeException("Unknown directive type: " + directive.offloaderCommandType);
+                throw new IllegalStateException("Unknown directive type: " + directive.offloaderCommandType);
         }
     }
 

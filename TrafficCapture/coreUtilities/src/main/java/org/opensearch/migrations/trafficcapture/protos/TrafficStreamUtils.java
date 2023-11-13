@@ -6,6 +6,9 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class TrafficStreamUtils {
+
+    private TrafficStreamUtils() {}
+
     public static Instant instantFromProtoTimestamp(Timestamp timestampProto) {
         return Instant.ofEpochSecond(timestampProto.getSeconds(), timestampProto.getNanos());
     }

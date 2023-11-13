@@ -4,6 +4,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.google.protobuf.CodedOutputStream;
+import lombok.Lombok;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -149,13 +150,13 @@ public class KafkaPrinter {
                     codedOutputStream.writeUInt32NoTag(buffer.length);
                     codedOutputStream.writeRawBytes(buffer);
                 } catch (IOException e) {
-                    throw new RuntimeException(e);
+                    throw Lombok.sneakyThrow(e);
                 }
             });
             try {
                 codedOutputStream.flush();
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         };
     }

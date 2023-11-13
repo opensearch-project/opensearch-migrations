@@ -101,7 +101,7 @@ public class TrafficStreamGenerator {
         } else if (trafficObservation.hasClose()) {
             return Optional.of(ObservationType.Close);
         } else {
-            throw new RuntimeException("unknown traffic observation: " + trafficObservation);
+            throw new IllegalStateException("unknown traffic observation: " + trafficObservation);
         }
     }
 
@@ -118,7 +118,7 @@ public class TrafficStreamGenerator {
                 case WriteSegment:
                     return ObservationType.EndOfWriteSegment;
                 default:
-                    throw new RuntimeException("previous observation type doesn't match expected possibilities: " +
+                    throw new IllegalStateException("previous observation type doesn't match expected possibilities: " +
                             lastObservationType);
             }
         });

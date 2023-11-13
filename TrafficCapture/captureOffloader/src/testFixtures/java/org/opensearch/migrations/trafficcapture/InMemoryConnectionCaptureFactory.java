@@ -70,7 +70,7 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
                     try {
                         return TrafficStream.parseFrom(rts.data);
                     } catch (InvalidProtocolBufferException e) {
-                        throw new RuntimeException(e);
+                        throw new IllegalStateException(e);
                     }
                 });
     }

@@ -43,7 +43,7 @@ public class TimeShifter {
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
         // realtime = systemTimeStart + rateMultiplier * (sourceTime-sourceTimeStart)
         if (sourceTimeStart.get() == null) {
-            throw new RuntimeException("setFirstTimestamp has not yet been called");
+            throw new IllegalStateException("setFirstTimestamp has not yet been called");
         }
         return systemTimeStart.get()
                 .plus(Duration.ofMillis((long)
