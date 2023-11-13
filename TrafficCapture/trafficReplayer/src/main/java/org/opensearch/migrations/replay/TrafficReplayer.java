@@ -299,8 +299,8 @@ public class TrafficReplayer {
                 names = {"--otelCollectorEndpoint"},
                 arity = 1,
                 description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
-                        "forwarded. The default value is http://otel-collector:4137.")
-        String otelCollectorEndpoint = "http://otel-collector:4137";
+                        "forwarded. If no value is provided, metrics will not be forwarded.")
+        String otelCollectorEndpoint;
     }
 
     public static Parameters parseArgs(String[] args) {
@@ -333,8 +333,9 @@ public class TrafficReplayer {
             System.exit(3);
             return;
         }
-
-        initializeOpenTelemetry("traffic-replayer", params.otelCollectorEndpoint);
+        if (params.otelCollectorEndpoint != null) {
+            initializeOpenTelemetry("traffic-replayer", params.otelCollectorEndpoint);
+        }
 
         try (OutputStream outputStream = params.outputFilename == null ? System.out :
                 new FileOutputStream(params.outputFilename, true);
