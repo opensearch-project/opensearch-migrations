@@ -172,8 +172,6 @@ export class StackComposer {
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
 
         const migrationAnalyticsServiceEnabled = this.getContextForType('migrationAnalyticsServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const otelConfigFilePath = this.getContextForType('otelConfigFilePath', 'string', defaultValues, contextJSON)
-
         const analyticsDomainEngineVersion = this.getContextForType('analyticsDomainEngineVersion', 'string', defaultValues, contextJSON)
         const analyticsDomainDataNodeType = this.getContextForType('analyticsDomainDataNodeType', 'string', defaultValues, contextJSON)
         const analyticsDomainDataNodeCount = this.getContextForType('analyticsDomainDataNodeCount', 'number', defaultValues, contextJSON)
@@ -181,10 +179,6 @@ export class StackComposer {
         const analyticsDomainDedicatedManagerNodeCount = this.getContextForType('analyticsDomainDedicatedManagerNodeCount', 'number', defaultValues, contextJSON)
         const analyticsDomainWarmNodeType = this.getContextForType('analyticsDomainWarmNodeType', 'string', defaultValues, contextJSON)
         const analyticsDomainWarmNodeCount = this.getContextForType('analyticsDomainWarmNodeCount', 'number', defaultValues, contextJSON)
-        // const analyticsDomainUseUnsignedBasicAuth = this.getContextForType('analyticsDomainUseUnsignedBasicAuth', 'boolean')
-        // const analyticsDomainFineGrainedManagerUserARN = this.getContextForType('analyticsDomainFineGrainedManagerUserARN', 'string')
-        // const analyticsDomainFineGrainedManagerUserName = this.getContextForType('analyticsDomainFineGrainedManagerUserName', 'string')
-        // const analyticsDomainFineGrainedManagerUserSecretManagerKeyARN = this.getContextForType('analyticsDomainFineGrainedManagerUserSecretManagerKeyARN', 'string')
         const analyticsDomainEnforceHTTPS = this.getContextForType('analyticsDomainEnforceHTTPS', 'boolean', defaultValues, contextJSON)
         const analyticsDomainEbsEnabled = this.getContextForType('analyticsDomainEbsEnabled', 'boolean', defaultValues, contextJSON)
         const analyticsDomainEbsIops = this.getContextForType('analyticsDomainEbsIops', 'number', defaultValues, contextJSON)
@@ -344,7 +338,7 @@ export class StackComposer {
         let migrationAnalyticsStack;
         let analyticsDomainStack;
         if (migrationAnalyticsServiceEnabled && networkStack) {
-            const analyticsDomainName = "migration-analytics-domain-2"
+            const analyticsDomainName = "migration-analytics-domain"
             const openAccessPolicy = new PolicyStatement({
                 effect: Effect.ALLOW,
                 principals: [new AnyPrincipal()],
@@ -355,59 +349,39 @@ export class StackComposer {
             {
                 stackName: `OSMigrations-${stage}-${region}-AnalyticsDomain`,
                 description: "This stack prepares the Migration Analytics OS Domain",
-                version: this.getEngineVersion(analyticsDomainEngineVersion ?? engineVersion),
+                domainAccessSecurityGroupParameter: "analyticsDomainSGId",
+                endpointParameterName: "analyticsDomainEndpoint",
+                version: this.getEngineVersion(analyticsDomainEngineVersion ?? engineVersion),  // If no analytics version is specified, use the same as the target cluster
                 domainName: analyticsDomainName,
-                // dataNodeInstanceType: props.dataNodeInstanceType,
-                dataNodes: analyticsDomainDataNodeCount ?? availabilityZoneCount,
-                // dedicatedManagerNodeType: props.dedicatedManagerNodeType,
-                // dedicatedManagerNodeCount: props.dedicatedManagerNodeCount,
-                // warmInstanceType: props.warmInstanceType,
-                enableDemoAdmin: false,
-                enforceHTTPS: true,
-                nodeToNodeEncryptionEnabled: true,
-                encryptionAtRestEnabled: true,
-                // ebsEnabled: props.ebsEnabled,
-                // ebsIops: props.ebsIops,
-                // ebsVolumeSize: props.ebsVolumeSize,
-                // ebsVolumeType: props.ebsVolumeType,
-                // encryptionAtRestKmsKeyARN: props.encryptionAtRestKmsKeyARN,
-                // appLogEnabled: props.appLogEnabled,
-                // appLogGroup: props.appLogGroup,
                 vpc: networkStack.vpc,
                 vpcSubnetIds: vpcSubnetIds,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
                 availabilityZoneCount: availabilityZoneCount,
-                domainAccessSecurityGroupParameter: "analyticsDomainSGId",
-                endpointParameterName: "analyticsDomainEndpoint",
+                dataNodeInstanceType: analyticsDomainDataNodeType,
+                dataNodes: analyticsDomainDataNodeCount ?? availabilityZoneCount,  // There's probably a better way to do this, but the node count must be >= the zone count, and possibly must be the same even/odd as zone count
+                dedicatedManagerNodeType: analyticsDomainDedicatedManagerNodeType,
+                dedicatedManagerNodeCount: analyticsDomainDedicatedManagerNodeCount,
+                warmInstanceType: analyticsDomainWarmNodeType,
+                warmNodes: analyticsDomainWarmNodeCount,
+                enableDemoAdmin: false,
+                enforceHTTPS: true,
+                nodeToNodeEncryptionEnabled: true,
+                encryptionAtRestEnabled: true,
+                encryptionAtRestKmsKeyARN: analyticsDomainEncryptionAtRestKmsKeyARN,
+                appLogEnabled: analyticsDomainLoggingAppLogEnabled,
+                appLogGroup: analyticsDomainLoggingAppLogGroupARN,
+                ebsEnabled: analyticsDomainEbsEnabled,
+                ebsIops: analyticsDomainEbsIops,
+                ebsVolumeSize: analyticsDomainEbsVolumeSize,
+                ebsVolumeType: analyticsDomainEbsVolumeType,
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 accessPolicies: [openAccessPolicy],
                 ...props
             })
             migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
-                vpc:networkStack.vpc,
-                vpcSubnetIds: vpcSubnetIds,
-                vpcSecurityGroupIds: vpcSecurityGroupIds,
-                availabilityZoneCount: availabilityZoneCount,
                 stackName: `OSMigrations-${stage}-${region}-MigrationAnalytics`,
-                description: "This stack contains resources for the Open Telemetry Collector and Analytics OS Cluster",
-                engineVersion: this.getEngineVersion(analyticsDomainEngineVersion ?? engineVersion), // if no analytics version is specified, use the same as the target cluster
-                dataNodeInstanceType: analyticsDomainDataNodeType,
-                dataNodes: analyticsDomainDataNodeCount ?? availabilityZoneCount, // There's probably a better way to do this, but the node count must be >= the zone count, and possibly must be the same even/odd as zone count
-                dedicatedManagerNodeType: analyticsDomainDedicatedManagerNodeType,
-                dedicatedManagerNodeCount: analyticsDomainDedicatedManagerNodeCount,
-                warmInstanceType: analyticsDomainWarmNodeType,
-                warmNodes: analyticsDomainWarmNodeCount,
-                enforceHTTPS: analyticsDomainEnforceHTTPS,
-                ebsEnabled: analyticsDomainEbsEnabled,
-                ebsIops: analyticsDomainEbsIops,
-                ebsVolumeSize: analyticsDomainEbsVolumeSize,
-                ebsVolumeType: analyticsDomainEbsVolumeType,
-                encryptionAtRestEnabled: analyticsDomainEncryptionAtRestEnabled,
-                encryptionAtRestKmsKeyARN: analyticsDomainEncryptionAtRestKmsKeyARN,
-                appLogEnabled: analyticsDomainLoggingAppLogEnabled,
-                appLogGroup: analyticsDomainLoggingAppLogGroupARN,
-                nodeToNodeEncryptionEnabled: analyticsDomainNoneToNodeEncryptionEnabled,
+                vpc:networkStack.vpc,
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,

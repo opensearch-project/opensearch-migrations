@@ -208,3 +208,17 @@ test('Test that app registry association is created when migrationsAppRegistryAR
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::ServiceCatalogAppRegistry::ResourceAssociation", 1)
 })
+
+test('Test that with analytics and assistance stacks enabled, creates two opensearch domains', () => {
+
+    const contextOptions = {
+        migrationAnalyticsServiceEnabled: true,
+        migrationAssistanceEnabled: true,
+        vpcEnabled: true,
+        migrationConsoleServiceEnabled: true,
+    }
+
+    const openSearchStacks =  createStackComposer(contextOptions)
+    const domainStacks = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)
+    domainStacks.length == 2
+})

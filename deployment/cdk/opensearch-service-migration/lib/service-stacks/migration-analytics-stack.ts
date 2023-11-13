@@ -1,57 +1,25 @@
-import {Stack} from "aws-cdk-lib";
 import {StackPropsExt} from "../stack-composer";
 import {
   BastionHostLinux,
   BlockDeviceVolume,
   MachineImage,
-  Peer,
   Port,
   SecurityGroup,
   IVpc,
 } from "aws-cdk-lib/aws-ec2";
-import {MountPoint, PortMapping, Protocol, ServiceConnectService, Volume} from "aws-cdk-lib/aws-ecs";
+import {PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import {OpenSearchDomainStack} from "../opensearch-domain-stack";
-import {EngineVersion} from "aws-cdk-lib/aws-opensearchservice";
-import {EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
-import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 
 export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly vpcSubnetIds?: string[],
-    readonly vpcSecurityGroupIds?: string[],
-    readonly availabilityZoneCount?: number,
-
-    readonly extraArgs?: string,
-    readonly engineVersion: EngineVersion,
-    readonly dataNodeInstanceType?: string,
-    readonly dataNodes?: number,
-    readonly dedicatedManagerNodeType?: string,
-    readonly dedicatedManagerNodeCount?: number,
-    readonly warmInstanceType?: string,
-    readonly warmNodes?: number,
-    readonly enforceHTTPS?: boolean,
-    readonly ebsEnabled?: boolean,
-    readonly ebsIops?: number,
-    readonly ebsVolumeSize?: number,
-    readonly ebsVolumeType?: EbsDeviceVolumeType,
-    readonly encryptionAtRestEnabled?: boolean,
-    readonly encryptionAtRestKmsKeyARN?: string,
-    readonly appLogEnabled?: boolean,
-    readonly appLogGroup?: string,
-    readonly nodeToNodeEncryptionEnabled?: boolean,
 }
 
-const domainName = "migration-analytics-domain"
-
 // The MigrationAnalyticsStack consists of the OpenTelemetry Collector ECS container & an
-// OpenSearch cluster with dashboard.
+// Bastion host to allow access to the opensearch dashboard.
 export class MigrationAnalyticsStack extends MigrationServiceCore {
-
-    // openSearchAnalyticsStack: Stack
 
     constructor(scope: Construct, id: string, props: MigrationAnalyticsProps) {
         super(scope, id, props)
