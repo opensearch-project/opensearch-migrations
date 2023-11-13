@@ -39,11 +39,8 @@ import software.amazon.awssdk.arns.Arn;
 import software.amazon.awssdk.regions.Region;
 
 import javax.net.ssl.SSLException;
-import java.io.BufferedOutputStream;
 import java.io.EOFException;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.time.Duration;
@@ -238,12 +235,6 @@ public class TrafficReplayer {
                 description = "input file to read the request/response traces for the source cluster")
         String inputFilename;
         @Parameter(required = false,
-                names = {"-o", "--output"},
-                arity=1,
-                description = "output file to hold the request/response traces for the source and target cluster")
-        String outputFilename;
-
-        @Parameter(required = false,
                 names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME},
                 arity = 1,
                 description = "assume that connections were terminated after this many " +
@@ -338,17 +329,14 @@ public class TrafficReplayer {
             return;
         }
 
-        try (OutputStream outputStream = params.outputFilename == null ? System.out :
-                new FileOutputStream(params.outputFilename, true);
-             var bufferedOutputStream = new BufferedOutputStream(outputStream);
-             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
+        try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
             var tr = new TrafficReplayer(uri, params.transformerConfig, authTransformer,
                     params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer(bufferedOutputStream);
+            var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer();
             var timeShifter = new TimeShifter(params.speedupFactor);
             tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(params.observedPacketConnectionTimeout),
                     blockingTrafficSource, timeShifter, tupleWriter);
