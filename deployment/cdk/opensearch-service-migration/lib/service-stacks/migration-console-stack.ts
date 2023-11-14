@@ -76,14 +76,21 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "kafka-cluster:*"
             ]
         })
-
+        const allReplayerServiceArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:service/migration-${props.stage}-ecs-cluster/migration-${props.stage}-traffic-replayer*`
+        const updateReplayerServicePolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [allReplayerServiceArn],
+            actions: [
+                "ecs:UpdateService"
+            ]
+        })
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
-        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy]
+        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy]
 
         if (props.fetchMigrationEnabled) {
             environment["FETCH_MIGRATION_COMMAND"] = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`)

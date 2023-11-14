@@ -108,6 +108,15 @@ To be able to execute this command the user will need to have their AWS credenti
 }
 ```
 
+## Starting the Traffic Replayer
+When the Migration solution is deployed, the Traffic Replayer does not immediately begin replaying. This is designed to allow users time to do any historical backfill (e.g. Fetch Migration service) that is needed as well as setup the Capture Proxy on their source coordinating nodes. When the user is ready they can then run the following command from the Migration Console service and begin replaying the traffic that has been captured by the Capture Proxy
+
+```shell
+aws ecs update-service --cluster migration-<STAGE>-ecs-cluster --service migration-<STAGE>-traffic-replayer-default --desired-count 1
+```
+
+With this same command, a user could stop replaying capture traffic by removing the Traffic Replayer instance if they set `--desired-count 0` 
+
 ## Testing the deployed solution
 
 Once the solution is deployed, the easiest way to test the solution is to access the `migration-console` service container and run an opensearch-benchmark workload through to simulate incoming traffic, as the following steps illustrate
