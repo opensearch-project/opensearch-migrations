@@ -43,6 +43,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import static org.opensearch.migrations.coreutils.MetricsLogger.initializeOpenTelemetry;
+
 @Slf4j
 public class CaptureProxy {
 
@@ -124,6 +126,12 @@ public class CaptureProxy {
                         "how long after connection should the be recycled " +
                         "(closed with a new connection taking its place)")
         String destinationConnectionPoolTimeout = "PT30S";
+        @Parameter(required = false,
+        names = {"--otelCollectorEndpoint"},
+        arity = 1,
+        description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded." +
+                "If this is not provided, metrics will not be sent to a collector.")
+        String otelCollectorEndpoint;
     }
 
     static Parameters parseArgs(String[] args) {
@@ -272,6 +280,10 @@ public class CaptureProxy {
 
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
+
+        if (params.otelCollectorEndpoint != null) {
+            initializeOpenTelemetry("capture-proxy", params.otelCollectorEndpoint);
+        }
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),

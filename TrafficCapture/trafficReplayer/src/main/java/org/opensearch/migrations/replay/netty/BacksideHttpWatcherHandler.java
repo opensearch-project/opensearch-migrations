@@ -5,6 +5,8 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.log4j.Log4j2;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
@@ -28,10 +30,9 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
         doneReadingRequest = true;
         triggerResponseCallbackAndRemoveCallback();
 //      TODO: Add requestId to this metrics log entry
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .addKeyValue("httpStatus", msg.status().toString())
-                .setMessage("Full response received").log();
+        metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_RESPONSE)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
+                .setAttribute(MetricsAttributeKey.HTTP_STATUS, msg.status().toString()).emit();
         super.channelReadComplete(ctx);
     }
 
@@ -45,9 +46,8 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         aggregatedRawResponseBuilder.addErrorCause(cause);
 //      TODO: Add requestId to this metrics log entry
-        metricsLogger.atError(cause)
-                .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .setMessage("Failed to receive full response").log();
+        metricsLogger.atError(MetricsEvent.RECEIVING_FULL_HTTP_RESPONSE_FAILED, cause)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         triggerResponseCallbackAndRemoveCallback();
         super.exceptionCaught(ctx, cause);
     }

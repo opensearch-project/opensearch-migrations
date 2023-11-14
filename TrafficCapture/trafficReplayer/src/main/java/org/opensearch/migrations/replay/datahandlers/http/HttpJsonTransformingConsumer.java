@@ -4,6 +4,8 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
@@ -139,19 +141,18 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                         if (t instanceof NoContentException) {
                             return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                         } else {
-                            metricsLogger.atError(t)
-                                    .addKeyValue("requestId", requestKeyForMetricsLogging)
-                                    .addKeyValue("connectionId", requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                                    .addKeyValue("channelId", channel.id().asLongText())
-                                    .setMessage("Request failed to be transformed").log();
+                            metricsLogger.atError(MetricsEvent.TRANSFORMING_REQUEST_FAILED, t)
+                                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging.toString())
+                                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                                    .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
+//                                    .setMessage("Request failed to be transformed").log();
                             throw new CompletionException(t);
                         }
                     } else {
-                        metricsLogger.atSuccess()
-                                .addKeyValue("requestId", requestKeyForMetricsLogging)
-                                .addKeyValue("connectionId", requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                                .addKeyValue("channelId", channel.id().asLongText())
-                                .setMessage("Request was transformed").log();
+                        metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
+                                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging)
+                                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
                         return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                     }
                 }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
@@ -179,11 +180,11 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         DiagnosticTrackableCompletableFuture<String,R> finalizedFuture =
                 consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
-        metricsLogger.atError(reason)
-                .addKeyValue("requestId", requestKeyForMetricsLogging)
-                .addKeyValue("connectionId", requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                .addKeyValue("channelId", channel.id().asLongText())
-                .setMessage("Request was redriven without transformation").log();
+        metricsLogger.atError(MetricsEvent.REQUEST_REDRIVEN_WITHOUT_TRANSFORMATION, reason)
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging)
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
+//                .setMessage("Request was redriven without transformation").log();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.SKIPPED, null) :
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.ERROR, reason)),

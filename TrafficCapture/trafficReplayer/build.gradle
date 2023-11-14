@@ -40,7 +40,7 @@ dependencies {
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
     implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    implementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
@@ -60,6 +60,7 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
     implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.20.127'
     implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.9'
+    implementation 'org.apache.commons:commons-compress:1.24.0'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
@@ -98,6 +99,9 @@ configurations.all {
                 details.useVersion targetVersion
             }
         }
+        if (details.requested.group == 'io.netty') {
+            details.useVersion '4.1.100.Final'
+        }
     }
 }
 
@@ -133,6 +137,20 @@ task longTest(type: Test) {
     mustRunAfter test
 }
 
-task allTests {
+task longTestSansDocker(type: Test) {
+    systemProperty 'disableMemoryLeakTests', 'false'
+    useJUnitPlatform {
+        includeTags 'longTest'
+        excludeTags 'requiresDocker'
+    }
+    mustRunAfter test
+}
+
+task allTest {
     dependsOn test, longTest
 }
+
+// Make an alias with plural versions just to reduce cognitive load
+task longTests(dependsOn: 'longTest') {}
+task longTestsSansDocker(dependsOn: 'longTestSansDocker') {}
+task allsTest(dependsOn: 'allTest') {}
