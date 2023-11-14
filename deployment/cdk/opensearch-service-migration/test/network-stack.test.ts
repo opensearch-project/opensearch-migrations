@@ -60,3 +60,56 @@ test('Test if addOnMigrationDeployId is provided, stack does not create VPC or S
     networkTemplate.resourceCountIs("AWS::EC2::VPC", 0)
     networkTemplate.resourceCountIs("AWS::EC2::SecurityGroup", 0)
 })
+
+test('Test valid https imported target cluster endpoint with port is formatted correctly', () => {
+    const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+    const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+    const actualFormatted = NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+})
+
+test('Test valid https imported target cluster endpoint with no port is formatted correctly', () => {
+    const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com"
+    const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+    const actualFormatted = NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+})
+
+test('Test valid http imported target cluster endpoint with no port is formatted correctly', () => {
+    const inputTargetEndpoint = "http://vpc-domain-abcdef.us-east-1.es.amazonaws.com"
+    const expectedFormattedEndpoint = "http://vpc-domain-abcdef.us-east-1.es.amazonaws.com:80"
+    const actualFormatted = NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+})
+
+test('Test valid imported target cluster endpoint ending in slash is formatted correctly', () => {
+    const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com/"
+    const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+    const actualFormatted = NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+})
+
+test('Test valid imported target cluster endpoint having port and ending in slash is formatted correctly', () => {
+    const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/"
+    const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+    const actualFormatted = NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+})
+
+test('Test target cluster endpoint with no protocol throws error', () => {
+    const inputTargetEndpoint = "vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/"
+    const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(validateAndFormatURL).toThrowError()
+})
+
+test('Test target cluster endpoint with path throws error', () => {
+    const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/indexes"
+    const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(validateAndFormatURL).toThrowError()
+})
+
+test('Test invalid target cluster endpoint throws error', () => {
+    const inputTargetEndpoint = "vpc-domain-abcdef"
+    const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+    expect(validateAndFormatURL).toThrowError()
+})

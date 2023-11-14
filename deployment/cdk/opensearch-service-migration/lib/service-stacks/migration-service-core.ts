@@ -14,10 +14,11 @@ import {
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {createDefaultECSTaskRole} from "../common-utilities";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -79,25 +80,7 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpc
         })
 
-        const serviceTaskRole = new Role(this, `${props.serviceName}-TaskRole`, {
-            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
-            description: 'ECS Service Task Role'
-        });
-        // Add default Task Role policy to allow exec and writing logs
-        serviceTaskRole.addToPolicy(new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: ['*'],
-            actions: [
-                "logs:CreateLogStream",
-                "logs:DescribeLogGroups",
-                "logs:DescribeLogStreams",
-                "logs:PutLogEvents",
-                "ssmmessages:CreateControlChannel",
-                "ssmmessages:CreateDataChannel",
-                "ssmmessages:OpenControlChannel",
-                "ssmmessages:OpenDataChannel"
-            ]
-        }))
+        const serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
         props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {

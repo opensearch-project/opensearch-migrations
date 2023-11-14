@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Testcontainers
+@Tag("requiresDocker")
 public class KafkaProtobufConsumerLongTermTest {
 
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
