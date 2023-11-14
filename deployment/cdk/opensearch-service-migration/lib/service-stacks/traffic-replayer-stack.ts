@@ -14,6 +14,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly addOnMigrationId?: string,
     readonly customTargetEndpoint?: string,
     readonly customKafkaGroupId?: string,
+    readonly userAgentSuffix?: string,
     readonly extraArgs?: string
 }
 
@@ -97,6 +98,9 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         if (props.enableClusterFGACAuth) {
             const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
+        }
+        if (props.userAgentSuffix) {
+            replayerCommand = replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`)
         }
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
         this.createService({
