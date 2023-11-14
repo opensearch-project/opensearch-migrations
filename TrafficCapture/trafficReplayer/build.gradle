@@ -98,6 +98,9 @@ configurations.all {
                 details.useVersion targetVersion
             }
         }
+        if (details.requested.group == 'io.netty') {
+            details.useVersion '4.1.100.Final'
+        }
     }
 }
 
