@@ -109,7 +109,11 @@ public class TransformationLoader {
             var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
             var oldVal = headers.get(USER_AGENT);
             if (oldVal != null) {
-                headers.put(USER_AGENT, oldVal + "; " + userAgent);
+                if (oldVal instanceof List) {
+                    // see https://www.rfc-editor.org/rfc/rfc9110.html#name-field-lines-and-combined-fi
+                    oldVal = String.join(", ", (List<String>) oldVal);
+                }
+                headers.replace(USER_AGENT, oldVal + "; " + userAgent);
             } else {
                 headers.put(USER_AGENT, userAgent);
             }
