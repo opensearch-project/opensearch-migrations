@@ -68,7 +68,6 @@ export class CaptureProxyStack extends MigrationServiceCore {
         this.createService({
             serviceName: "capture-proxy",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
-            // TODO: add otel collector endpoint
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             taskRolePolicies: [mskClusterConnectPolicy, mskTopicProducerPolicy],

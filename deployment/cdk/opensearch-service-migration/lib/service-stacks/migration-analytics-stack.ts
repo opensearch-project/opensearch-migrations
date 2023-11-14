@@ -24,27 +24,12 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: MigrationAnalyticsProps) {
         super(scope, id, props)
 
-        // Bastion Security Group
-        const bastionSecurityGroup = new SecurityGroup(
-          this,
-          "analyticsDashboardBastionSecurityGroup",
-          {
-            vpc: props.vpc,
-            allowAllOutbound: true,
-            securityGroupName: "analyticsDashboardBastionSecurityGroup",
-          }
-        );
-        let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)),
-            bastionSecurityGroup
-        ]
-        securityGroups[1].addIngressRule(bastionSecurityGroup, Port.tcp(443))
+        const migrationAnalyticsSecurityGroup = SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`))
 
         // Bastion host to access Opensearch Dashboards
         new BastionHostLinux(this, "AnalyticsDashboardBastionHost", {
           vpc: props.vpc,
-          securityGroup: bastionSecurityGroup,
+          securityGroup: migrationAnalyticsSecurityGroup,
           machineImage: MachineImage.latestAmazonLinux2023(),
           blockDevices: [
             {
@@ -82,6 +67,10 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
 
         const analyticsDomainEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainEndpoint`)
 
+        let securityGroups = [
+          SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+          migrationAnalyticsSecurityGroup
+      ]
         this.createService({
             serviceName: `otel-collector`,
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelcol"),

@@ -22,7 +22,7 @@ import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
     readonly defaultDeployId: string
-    readonly addOnMigrationDeployId?: string,
+    readonly addOnMigrationDeployId?: string
 }
 
 export interface StackComposerProps extends StackProps {
@@ -65,26 +65,6 @@ export class StackComposer {
             throw new Error(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
         }
         return option
-    }
-
-    private parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
-        let accessPolicies: PolicyStatement[] = []
-        const statements = jsonObject['Statement']
-        if (!statements || statements.length < 1) {
-            throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
-        }
-        // Access policies can provide a single Statement block or an array of Statement blocks
-        if (Array.isArray(statements)) {
-            for (let statementBlock of statements) {
-                const statement = PolicyStatement.fromJson(statementBlock)
-                accessPolicies.push(statement)
-            }
-        }
-        else {
-            const statement = PolicyStatement.fromJson(statements)
-            accessPolicies.push(statement)
-        }
-        return accessPolicies
     }
 
 
@@ -136,6 +116,7 @@ export class StackComposer {
         const enforceHTTPS = this.getContextForType('enforceHTTPS', 'boolean', defaultValues, contextJSON)
         const ebsEnabled = this.getContextForType('ebsEnabled', 'boolean', defaultValues, contextJSON)
         const ebsIops = this.getContextForType('ebsIops', 'number', defaultValues, contextJSON)
+        const ebsVolumeTypeName = this.getContextForType('ebsVolumeType', 'string', defaultValues, contextJSON)
         const ebsVolumeSize = this.getContextForType('ebsVolumeSize', 'number', defaultValues, contextJSON)
         const encryptionAtRestEnabled = this.getContextForType('encryptionAtRestEnabled', 'boolean', defaultValues, contextJSON)
         const encryptionAtRestKmsKeyARN = this.getContextForType("encryptionAtRestKmsKeyARN", 'string', defaultValues, contextJSON)
@@ -147,6 +128,7 @@ export class StackComposer {
         const vpcSecurityGroupIds = this.getContextForType('vpcSecurityGroupIds', 'object', defaultValues, contextJSON)
         const vpcSubnetIds = this.getContextForType('vpcSubnetIds', 'object', defaultValues, contextJSON)
         const openAccessPolicyEnabled = this.getContextForType('openAccessPolicyEnabled', 'boolean', defaultValues, contextJSON)
+        const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
         const availabilityZoneCount = this.getContextForType('availabilityZoneCount', 'number', defaultValues, contextJSON)
         const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
         const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
@@ -179,15 +161,13 @@ export class StackComposer {
         const analyticsDomainDedicatedManagerNodeCount = this.getContextForType('analyticsDomainDedicatedManagerNodeCount', 'number', defaultValues, contextJSON)
         const analyticsDomainWarmNodeType = this.getContextForType('analyticsDomainWarmNodeType', 'string', defaultValues, contextJSON)
         const analyticsDomainWarmNodeCount = this.getContextForType('analyticsDomainWarmNodeCount', 'number', defaultValues, contextJSON)
-        const analyticsDomainEnforceHTTPS = this.getContextForType('analyticsDomainEnforceHTTPS', 'boolean', defaultValues, contextJSON)
         const analyticsDomainEbsEnabled = this.getContextForType('analyticsDomainEbsEnabled', 'boolean', defaultValues, contextJSON)
         const analyticsDomainEbsIops = this.getContextForType('analyticsDomainEbsIops', 'number', defaultValues, contextJSON)
         const analyticsDomainEbsVolumeSize = this.getContextForType('analyticsDomainEbsVolumeSize', 'number', defaultValues, contextJSON)
-        const analyticsDomainEncryptionAtRestEnabled = this.getContextForType('analyticsDomainEncryptionAtRestEnabled', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainEbsVolumeTypeName = this.getContextForType('analyticsDomainEbsVolumeType', 'string', defaultValues, contextJSON)
         const analyticsDomainEncryptionAtRestKmsKeyARN = this.getContextForType("analyticsDomainEncryptionAtRestKmsKeyARN", 'string', defaultValues, contextJSON)
         const analyticsDomainLoggingAppLogEnabled = this.getContextForType('analyticsDomainLoggingAppLogEnabled', 'boolean', defaultValues, contextJSON)
         const analyticsDomainLoggingAppLogGroupARN = this.getContextForType('analyticsDomainLoggingAppLogGroupARN', 'string', defaultValues, contextJSON)
-        const analyticsDomainNoneToNodeEncryptionEnabled = this.getContextForType('analyticsDomainNodeToNodeEncryptionEnabled', 'boolean', defaultValues, contextJSON)
 
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
@@ -202,35 +182,10 @@ export class StackComposer {
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         version = this.getEngineVersion(engineVersion)
 
-        if (openAccessPolicyEnabled) {
-            const openPolicy = new PolicyStatement({
-                effect: Effect.ALLOW,
-                principals: [new AnyPrincipal()],
-                actions: ["es:*"],
-                resources: [`arn:aws:es:${region}:${account}:domain/${domainName}/*`]
-            })
-            accessPolicies = [openPolicy]
-        } else {
-            const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
-            accessPolicies = accessPolicyJson ? this.parseAccessPolicies(accessPolicyJson) : undefined
-        }
-
         const tlsSecurityPolicyName = this.getContextForType('tlsSecurityPolicy', 'string', defaultValues, contextJSON)
         const tlsSecurityPolicy: TLSSecurityPolicy|undefined = tlsSecurityPolicyName ? TLSSecurityPolicy[tlsSecurityPolicyName as keyof typeof TLSSecurityPolicy] : undefined
         if (tlsSecurityPolicyName && !tlsSecurityPolicy) {
             throw new Error("Provided tlsSecurityPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_opensearchservice.TLSSecurityPolicy.html")
-        }
-
-        const ebsVolumeTypeName = this.getContextForType('ebsVolumeType', 'string', defaultValues, contextJSON)
-        const ebsVolumeType: EbsDeviceVolumeType|undefined = ebsVolumeTypeName ? EbsDeviceVolumeType[ebsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
-        if (ebsVolumeTypeName && !ebsVolumeType) {
-            throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
-        }
-
-        const analyticsDomainEbsVolumeTypeName = this.getContextForType('analyticsDomainEbsVolumeType', 'string', defaultValues, contextJSON)
-        const analyticsDomainEbsVolumeType: EbsDeviceVolumeType|undefined = analyticsDomainEbsVolumeTypeName ? EbsDeviceVolumeType[analyticsDomainEbsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
-        if (analyticsDomainEbsVolumeTypeName && !analyticsDomainEbsVolumeType) {
-            throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
         }
 
         const domainRemovalPolicyName = this.getContextForType('domainRemovalPolicy', 'string', defaultValues, contextJSON)
@@ -267,7 +222,8 @@ export class StackComposer {
             dedicatedManagerNodeCount: dedicatedManagerNodeCount,
             warmInstanceType: warmNodeType,
             warmNodes: warmNodeCount,
-            accessPolicies: accessPolicies,
+            openAccessPolicyEnabled: openAccessPolicyEnabled,
+            accessPolicyJson: accessPolicyJson,
             useUnsignedBasicAuth: useUnsignedBasicAuth,
             fineGrainedManagerUserARN: fineGrainedManagerUserARN,
             fineGrainedManagerUserName: fineGrainedManagerUserName,
@@ -278,7 +234,7 @@ export class StackComposer {
             ebsEnabled: ebsEnabled,
             ebsIops: ebsIops,
             ebsVolumeSize: ebsVolumeSize,
-            ebsVolumeType: ebsVolumeType,
+            ebsVolumeTypeName: ebsVolumeTypeName,
             encryptionAtRestEnabled: encryptionAtRestEnabled,
             encryptionAtRestKmsKeyARN: encryptionAtRestKmsKeyARN,
             appLogEnabled: loggingAppLogEnabled,
@@ -373,10 +329,10 @@ export class StackComposer {
                 ebsEnabled: analyticsDomainEbsEnabled,
                 ebsIops: analyticsDomainEbsIops,
                 ebsVolumeSize: analyticsDomainEbsVolumeSize,
-                ebsVolumeType: analyticsDomainEbsVolumeType,
+                ebsVolumeTypeName: analyticsDomainEbsVolumeTypeName,
                 stage: stage,
                 defaultDeployId: defaultDeployId,
-                accessPolicies: [openAccessPolicy],
+                openAccessPolicyEnabled: true,
                 ...props
             })
             migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {

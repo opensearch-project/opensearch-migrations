@@ -94,7 +94,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint : `https://${cdkDomainEndpoint}:443`
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
-        // TODO: add otel collector endpoint
+
         let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth`
         if (props.enableClusterFGACAuth) {
             const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
