@@ -13,7 +13,37 @@ allprojects {
         if (project.hasProperty('excludeTests')) {
             exclude project.property('excludeTests')
         }
+        systemProperty 'disableMemoryLeakTests', 'true'
+        useJUnitPlatform {
+            excludeTags 'longTest'
+        }
         jvmArgs '-ea'
+    }
+    task slowTest(type: Test) {
+        // Provide way to exclude particular tests from CLI
+        // e.g. ./gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
+        if (project.hasProperty('excludeTests')) {
+            exclude project.property('excludeTests')
+        }
+        jvmArgs '-ea'
+        systemProperty 'disableMemoryLeakTests', 'false'
+        useJUnitPlatform {
+            includeTags 'longTest'
+        }
+        mustRunAfter test
+    }
+    task slowTestSansDocker(type: Test) {
+        // Provide way to exclude particular tests from CLI
+        // e.g. ./gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
+        if (project.hasProperty('excludeTests')) {
+            exclude project.property('excludeTests')
+        }
+        jvmArgs '-ea'
+        systemProperty 'disableMemoryLeakTests', 'false'
+        useJUnitPlatform {
+            includeTags 'longTest'
+        }
+        mustRunAfter test
     }
 
     // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
@@ -28,6 +58,8 @@ allprojects {
         reports {
             xml.required = true
             xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+            html.required = true
+            html.destination file("${buildDir}/reports/jacoco/test/html")
         }
     }
 }

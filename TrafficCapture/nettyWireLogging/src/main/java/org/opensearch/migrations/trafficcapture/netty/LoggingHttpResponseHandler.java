@@ -26,10 +26,6 @@ public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter
         this.trafficOffloader = trafficOffloader;
     }
 
-    public HttpCaptureSerializerUtil.HttpProcessedState onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
-        return HttpCaptureSerializerUtil.addRelevantHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
-    }
-
     @Override
     public void bind(ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) throws Exception {
         trafficOffloader.addBindEvent(Instant.now(), localAddress);
