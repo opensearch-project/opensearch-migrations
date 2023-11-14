@@ -138,6 +138,9 @@ To run only one transformer without any configuration, the `--transformer-config
 be set to the classname of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
 without quotes or any json surrounding it).
 
+The user can also specify a file to read the transformations from using the `--transformer-config-file`, but can't use
+both transformer options.
+
 Some simple transformations are included to change headers to add compression or to force an HTTP message payload to 
 be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../replayerPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),
 is a work-in-progress to excise type mapping references from URIs and message payloads since versions of OpenSource
