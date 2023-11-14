@@ -10,12 +10,6 @@ import java.util.Map;
 import java.util.StringJoiner;
 
 public class MultipleJMESPathScriptsTest {
-    static final String HOSTNAME_SCRIPT_TO_INLINE = "{\n" +
-            "  \"method\": method,\n" +
-            "  \"URI\": URI,\n" +
-            "  \"headers\": {\"host\": \"localhost\"},\n" +
-            "  \"payload\": payload\n" +
-            "}";
     private static final String EXCISE_SCRIPT =
             "{\\\"method\\\": method,\\\"URI\\\": URI,\\\"headers\\\":headers,\\\"payload\\\":" +
                     "{\\\"inlinedJsonBody\\\":{\\\"mappings\\\": payload.inlinedJsonBody.mappings.oldType}}}";
@@ -32,14 +26,13 @@ public class MultipleJMESPathScriptsTest {
         var aggregateScriptJoiner = new StringJoiner(",\n", "[", "]");
         for (var script : new String[]{EXCISE_SCRIPT, HOSTNAME_SCRIPT}) {
             aggregateScriptJoiner.add(
-                    "{\"JsonJMESPathTransformerProvider\": {" +
-                            " \"script\": \"" + script + "\"}}"
+                    "{\"JsonJMESPathTransformerProvider\": { \"script\": \"" + script + "\"}}"
             );
         }
 
         var aggregateScriptString = aggregateScriptJoiner.toString();
         var toNewHostTransformer = new TransformationLoader().getTransformerFactoryLoader("localhost",
-                aggregateScriptString);
+                null, aggregateScriptString);
         var origDoc = JsonTransformerTest.parseStringAsJson(mapper, JsonTransformerTest.TEST_INPUT_REQUEST);
         var newDoc = toNewHostTransformer.transformJson(origDoc);
 

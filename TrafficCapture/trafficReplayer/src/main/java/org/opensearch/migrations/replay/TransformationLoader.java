@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -79,22 +80,44 @@ public class TransformationLoader {
         }
         throw new IllegalArgumentException("Could not find a provider named: " + key);
     }
+
     public IJsonTransformer getTransformerFactoryLoader(String newHostName) {
-        return getTransformerFactoryLoader(newHostName, null);
+        return getTransformerFactoryLoader(newHostName, null, null);
     }
 
-    public IJsonTransformer getTransformerFactoryLoader(String newHostName, String fullConfig) {
+    public IJsonTransformer getTransformerFactoryLoader(String newHostName, String userAgent, String fullConfig) {
         try {
             var loadedTransformers = getTransformerFactoryFromServiceLoader(fullConfig);
             return new JsonCompositeTransformer(Stream.concat(
                     loadedTransformers,
-                    Optional.ofNullable(newHostName).stream().map(HostTransformer::new)
+                    Stream.concat(
+                            Optional.ofNullable(userAgent).stream().map(UserAgentTransformer::new),
+                            Optional.ofNullable(newHostName).stream().map(HostTransformer::new))
             ).toArray(IJsonTransformer[]::new));
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Could not parse the transformer configuration as a json list", e);
         }
     }
 
+    @AllArgsConstructor
+    private static class UserAgentTransformer implements IJsonTransformer {
+        public static final String USER_AGENT = "user-agent";
+        private final String userAgent;
+
+        @Override
+        public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
+            var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
+            var oldVal = headers.get(USER_AGENT);
+            if (oldVal != null) {
+                headers.put(USER_AGENT, oldVal + "; " + userAgent);
+            } else {
+                headers.put(USER_AGENT, userAgent);
+            }
+            return incomingJson;
+        }
+    }
+
+    @AllArgsConstructor
     private static class HostTransformer implements IJsonTransformer {
         private final String newHostName;
 
@@ -104,10 +127,5 @@ public class TransformationLoader {
             headers.replace("host", newHostName);
             return incomingJson;
         }
-
-        public HostTransformer(String newHostName) {
-            this.newHostName = newHostName;
-        }
-
     }
 }
