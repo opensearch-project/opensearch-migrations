@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -93,18 +95,16 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
                 // Async request to Kafka cluster
                 producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId));
-                metricsLogger.atSuccess()
-                        .addKeyValue("channelId", connectionId)
-                        .addKeyValue("topicName", topicNameForTraffic)
-                        .addKeyValue("sizeInBytes", kafkaRecord.value().length)
-                        .addKeyValue("diagnosticId", recordId)
-                        .setMessage("Sent message to Kafka").log();
+                metricsLogger.atSuccess(MetricsEvent.RECORD_SENT_TO_KAFKA)
+                        .setAttribute(MetricsAttributeKey.CHANNEL_ID, connectionId)
+                        .setAttribute(MetricsAttributeKey.TOPIC_NAME, topicNameForTraffic)
+                        .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, kafkaRecord.value().length)
+                        .setAttribute(MetricsAttributeKey.REQUEST_ID, recordId).emit();
                 return cf;
             } catch (Exception e) {
-                metricsLogger.atError(e)
-                        .addKeyValue("channelId", connectionId)
-                        .addKeyValue("topicName", topicNameForTraffic)
-                        .setMessage("Sending message to Kafka failed.").log();
+                metricsLogger.atError(MetricsEvent.RECORD_FAILED_TO_KAFKA, e)
+                        .setAttribute(MetricsAttributeKey.CHANNEL_ID, connectionId)
+                        .setAttribute(MetricsAttributeKey.TOPIC_NAME, topicNameForTraffic).emit();
                 throw e;
             }
         }

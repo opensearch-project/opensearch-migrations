@@ -40,7 +40,7 @@ dependencies {
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
     implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    implementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
@@ -97,6 +97,9 @@ configurations.all {
             if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
                 details.useVersion targetVersion
             }
+        }
+        if (details.requested.group == 'io.netty') {
+            details.useVersion '4.1.100.Final'
         }
     }
 }
