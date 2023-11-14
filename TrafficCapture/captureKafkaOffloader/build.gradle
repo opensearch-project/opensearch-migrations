@@ -2,6 +2,7 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id("io.freefair.lombok") version "8.0.1"
+    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
 repositories {
@@ -24,4 +25,5 @@ dependencies {
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
     testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    implementation 'com.squareup.okio:okio-jvm:3.4.0'
 }
