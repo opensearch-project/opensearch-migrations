@@ -28,4 +28,28 @@ public class TransformationLoaderTest {
         Assertions.assertNotEquals(origDocStr, docWithNewHostnameStr);
     }
 
+    @Test
+    public void testThatSimpleNoopTransformerLoads() throws Exception {
+        var noopTransformer = new TransformationLoader()
+                .getTransformerFactoryLoader("localhost", "NoopTransformerProvider");
+        var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
+        var output = noopTransformer.transformJson(origDoc);
+        Assertions.assertEquals(mapper.writeValueAsString(origDoc), mapper.writeValueAsString(output));
+    }
+
+    @Test
+    public void testMisconfiguration() throws Exception {
+        Assertions.assertThrows(IllegalArgumentException.class, () -> new TransformationLoader()
+                .getTransformerFactoryLoader("localhost", "Not right"));
+    }
+
+    @Test
+    public void testThatNoConfigMeansNoThrow() throws Exception {
+        var transformer = Assertions.assertDoesNotThrow(()->new TransformationLoader()
+                .getTransformerFactoryLoader("localhost", null));
+        Assertions.assertNotNull(transformer);
+        var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
+        Assertions.assertNotNull(transformer.transformJson(origDoc));
+    }
+
 }

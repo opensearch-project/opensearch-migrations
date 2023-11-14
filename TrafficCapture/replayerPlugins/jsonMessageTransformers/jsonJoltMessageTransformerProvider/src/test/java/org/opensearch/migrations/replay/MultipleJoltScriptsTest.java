@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import java.io.InputStream;
@@ -22,7 +21,7 @@ public class MultipleJoltScriptsTest {
     @Test
     public void testAddGzip() throws Exception {
         final var addGzip =
-                "[{\"org.opensearch.migrations.transform.JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }}]";
+                "[{\"JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }}]";
         var toNewHostTransformer = new TransformationLoader().getTransformerFactoryLoader("testhostname",
                 addGzip);
         var origDocStr = SampleContents.loadSampleJsonRequestAsString();
@@ -37,8 +36,8 @@ public class MultipleJoltScriptsTest {
     @Test
     public void testAddGzipAndCustom() throws Exception {
         final var addGzip = "[" +
-                "{\"org.opensearch.migrations.transform.JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }}," +
-                "{ \"org.opensearch.migrations.transform.JsonJoltTransformerProvider\":" +
+                "{\"JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }}," +
+                "{ \"JsonJoltTransformerProvider\":" +
                 "  {\"script\": \n" +
                 "    { \"operation\": \"modify-overwrite-beta\", \"spec\": " +
                 "      { \"headers\": {\"newHeader\": \"newValue\"}}}}}" +

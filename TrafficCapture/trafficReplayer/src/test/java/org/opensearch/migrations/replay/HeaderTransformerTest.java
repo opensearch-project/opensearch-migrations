@@ -113,7 +113,7 @@ public class HeaderTransformerTest {
 
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME,
-                        "[{\"org.opensearch.migrations.transform.JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
+                        "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
                 null, testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestId(0));
 
         Random r = new Random(2);

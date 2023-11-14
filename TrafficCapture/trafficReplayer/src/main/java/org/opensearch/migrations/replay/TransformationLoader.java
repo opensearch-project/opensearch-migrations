@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceLoader;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -23,6 +24,7 @@ import java.util.stream.Stream;
 public class TransformationLoader {
     public static final String WRONG_JSON_STRUCTURE_MESSAGE = "Must specify the top-level configuration list with a sequence of " +
             "maps that have only one key each, where the key is the name of the transformer to be configured.";
+    public static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[a-zA-Z_$][a-zA-Z\\d_$]*$");
     private final List<IJsonTransformerProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
 
@@ -40,23 +42,22 @@ public class TransformationLoader {
     }
 
     List<Map<String, Object>> parseFullConfig(String fullConfig) throws JsonProcessingException {
-        return objMapper.readValue(fullConfig, new TypeReference<>() {});
+        if (CLASS_NAME_PATTERN.matcher(fullConfig).matches()) {
+            return List.of(Collections.singletonMap(fullConfig, null));
+        } else {
+            return objMapper.readValue(fullConfig, new TypeReference<>() {
+            });
+        }
     }
 
     protected Stream<IJsonTransformer> getTransformerFactoryFromServiceLoader(String fullConfig)
             throws JsonProcessingException {
         var configList = fullConfig == null ? List.of() : parseFullConfig(fullConfig);
-        if (providers.size() > 1 && configList.isEmpty()) {
-            throw new IllegalArgumentException("Must provide a configuration when multiple IJsonTransformerProvider " +
-                    "are loaded (" + providers.stream().map(p -> p.getClass().toString())
-                    .collect(Collectors.joining(",")) + ")");
-        } else if (providers.isEmpty()) {
+        if (configList.isEmpty() || providers.isEmpty()) {
+            log.warn("No transformer configuration specified.  No custom transformations will be performed");
             return Stream.of();
-        } else if (!configList.isEmpty()) {
+        }else {
             return configList.stream().map(c -> configureTransformerFromConfig((Map<String, Object>) c));
-        } else {
-            // send in Optional.empty because we would have hit the other case in the previous branch
-            return Stream.of(providers.get(0).createTransformer(Optional.empty()));
         }
     }
 
@@ -69,7 +70,7 @@ public class TransformationLoader {
         var key = keys.stream().findFirst()
                 .orElseThrow(()->new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE));
         for (var p : providers) {
-            var className = p.getClass().getName();
+            var className = p.getClass().getSimpleName();
             if (className.equals(key)) {
                 var configuration = c.get(key);
                 log.atInfo().setMessage(()->"Creating a transformer with configuration="+configuration).log();

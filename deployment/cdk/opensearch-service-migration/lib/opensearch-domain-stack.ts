@@ -100,7 +100,7 @@ export class OpenSearchDomainStack extends Stack {
     new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
       description: 'OpenSearch migration parameter for OpenSearch endpoint',
       parameterName: `/migration/${stage}/${deployId}/${endpointParameter}`,
-      stringValue: domain.domainEndpoint
+      stringValue: `https://${domain.domainEndpoint}:443`
     });
     
     if (domain.masterUserPassword && !adminUserSecret) {

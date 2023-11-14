@@ -6,13 +6,13 @@ import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {createOpenSearchIAMAccessPolicy, createOpenSearchServerlessIAMAccessPolicy} from "../common-utilities";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly enableClusterFGACAuth: boolean,
     readonly addOnMigrationId?: string,
-    readonly customTargetEndpoint?: string,
     readonly customKafkaGroupId?: string,
     readonly extraArgs?: string,
     readonly analyticsServiceEnabled?: boolean
@@ -88,10 +88,11 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "secretsmanager:DescribeSecret"
             ]
         })
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
 
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
-        const cdkDomainEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
-        const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint : `https://${cdkDomainEndpoint}:443`
+        const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
 
@@ -109,7 +110,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
-            taskRolePolicies: [mskClusterConnectPolicy, mskTopicConsumerPolicy, mskConsumerGroupPolicy, replayerOutputMountPolicy, secretAccessPolicy],
+            taskRolePolicies: [mskClusterConnectPolicy, mskTopicConsumerPolicy, mskConsumerGroupPolicy, replayerOutputMountPolicy, secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy],
             environment: {
                 "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
             },

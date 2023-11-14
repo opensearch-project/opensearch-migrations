@@ -25,3 +25,12 @@ dependencies {
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
     testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 }
+
+
+configurations.all {
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.group == 'io.netty') {
+            details.useVersion '4.1.100.Final'
+        }
+    }
+}

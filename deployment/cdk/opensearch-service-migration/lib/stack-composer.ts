@@ -141,7 +141,6 @@ export class StackComposer {
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
-        const trafficReplayerTargetEndpoint = this.getContextForType('trafficReplayerTargetEndpoint', 'string', defaultValues, contextJSON)
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
         const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -149,6 +148,7 @@ export class StackComposer {
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaZookeeperServiceEnabled = this.getContextForType('kafkaZookeeperServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
@@ -202,6 +202,7 @@ export class StackComposer {
             networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
                 availabilityZoneCount: availabilityZoneCount,
+                targetClusterEndpoint: targetClusterEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 stage: stage,
@@ -213,50 +214,55 @@ export class StackComposer {
             this.stacks.push(networkStack)
         }
 
-        const openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
-            version: version,
-            domainName: domainName,
-            dataNodeInstanceType: dataNodeType,
-            dataNodes: dataNodeCount,
-            dedicatedManagerNodeType: dedicatedManagerNodeType,
-            dedicatedManagerNodeCount: dedicatedManagerNodeCount,
-            warmInstanceType: warmNodeType,
-            warmNodes: warmNodeCount,
-            openAccessPolicyEnabled: openAccessPolicyEnabled,
-            accessPolicyJson: accessPolicyJson,
-            useUnsignedBasicAuth: useUnsignedBasicAuth,
-            fineGrainedManagerUserARN: fineGrainedManagerUserARN,
-            fineGrainedManagerUserName: fineGrainedManagerUserName,
-            fineGrainedManagerUserSecretManagerKeyARN: fineGrainedManagerUserSecretManagerKeyARN,
-            enableDemoAdmin: enableDemoAdmin,
-            enforceHTTPS: enforceHTTPS,
-            tlsSecurityPolicy: tlsSecurityPolicy,
-            ebsEnabled: ebsEnabled,
-            ebsIops: ebsIops,
-            ebsVolumeSize: ebsVolumeSize,
-            ebsVolumeTypeName: ebsVolumeTypeName,
-            encryptionAtRestEnabled: encryptionAtRestEnabled,
-            encryptionAtRestKmsKeyARN: encryptionAtRestKmsKeyARN,
-            appLogEnabled: loggingAppLogEnabled,
-            appLogGroup: loggingAppLogGroupARN,
-            nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
-            vpc: networkStack ? networkStack.vpc : undefined,
-            vpcSubnetIds: vpcSubnetIds,
-            vpcSecurityGroupIds: vpcSecurityGroupIds,
-            availabilityZoneCount: availabilityZoneCount,
-            domainRemovalPolicy: domainRemovalPolicy,
-            stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
-            description: "This stack contains resources to create/manage an OpenSearch Service domain",
-            stage: stage,
-            defaultDeployId: defaultDeployId,
-            addOnMigrationDeployId: addOnMigrationDeployId,
-            ...props,
-        });
+        // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
+        // created cluster like below or an imported one
+        let openSearchStack
+        if (!targetClusterEndpoint) {
+            openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
+                version: version,
+                domainName: domainName,
+                dataNodeInstanceType: dataNodeType,
+                dataNodes: dataNodeCount,
+                dedicatedManagerNodeType: dedicatedManagerNodeType,
+                dedicatedManagerNodeCount: dedicatedManagerNodeCount,
+                warmInstanceType: warmNodeType,
+                warmNodes: warmNodeCount,
+                accessPolicyJson: accessPolicyJson,
+                openAccessPolicyEnabled: openAccessPolicyEnabled,
+                useUnsignedBasicAuth: useUnsignedBasicAuth,
+                fineGrainedManagerUserARN: fineGrainedManagerUserARN,
+                fineGrainedManagerUserName: fineGrainedManagerUserName,
+                fineGrainedManagerUserSecretManagerKeyARN: fineGrainedManagerUserSecretManagerKeyARN,
+                enableDemoAdmin: enableDemoAdmin,
+                enforceHTTPS: enforceHTTPS,
+                tlsSecurityPolicy: tlsSecurityPolicy,
+                ebsEnabled: ebsEnabled,
+                ebsIops: ebsIops,
+                ebsVolumeSize: ebsVolumeSize,
+                ebsVolumeTypeName: ebsVolumeTypeName,
+                encryptionAtRestEnabled: encryptionAtRestEnabled,
+                encryptionAtRestKmsKeyARN: encryptionAtRestKmsKeyARN,
+                appLogEnabled: loggingAppLogEnabled,
+                appLogGroup: loggingAppLogGroupARN,
+                nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
+                vpc: networkStack ? networkStack.vpc : undefined,
+                vpcSubnetIds: vpcSubnetIds,
+                vpcSecurityGroupIds: vpcSecurityGroupIds,
+                availabilityZoneCount: availabilityZoneCount,
+                domainRemovalPolicy: domainRemovalPolicy,
+                stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
+                description: "This stack contains resources to create/manage an OpenSearch Service domain",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                addOnMigrationDeployId: addOnMigrationDeployId,
+                ...props,
+            });
 
-        if (networkStack) {
-            openSearchStack.addDependency(networkStack)
+            if (networkStack) {
+                openSearchStack.addDependency(networkStack)
+            }
+            this.stacks.push(openSearchStack)
         }
-        this.stacks.push(openSearchStack)
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
         let migrationStack
@@ -295,12 +301,6 @@ export class StackComposer {
         let analyticsDomainStack;
         if (migrationAnalyticsServiceEnabled && networkStack) {
             const analyticsDomainName = "migration-analytics-domain"
-            const openAccessPolicy = new PolicyStatement({
-                effect: Effect.ALLOW,
-                principals: [new AnyPrincipal()],
-                actions: ["es:*"],
-                resources: [`arn:aws:es:${region}:${account}:domain/${analyticsDomainName}/*`]
-            })
             analyticsDomainStack = new OpenSearchDomainStack(scope, `analyticsDomainStack`,
             {
                 stackName: `OSMigrations-${stage}-${region}-AnalyticsDomain`,
@@ -356,7 +356,7 @@ export class StackComposer {
         // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
         // TODO: Future work to provide orchestration between fetch migration and migration assistance
         let fetchMigrationStack
-        if (fetchMigrationEnabled && networkStack && openSearchStack && migrationStack) {
+        if (fetchMigrationEnabled && networkStack && migrationStack) {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,
@@ -367,7 +367,9 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            fetchMigrationStack.addDependency(openSearchStack)
+            if (openSearchStack) {
+                fetchMigrationStack.addDependency(openSearchStack)
+            }
             fetchMigrationStack.addDependency(migrationStack)
             this.stacks.push(fetchMigrationStack)
         }
@@ -392,12 +394,11 @@ export class StackComposer {
         }
 
         let trafficReplayerStack
-        if ((trafficReplayerServiceEnabled && networkStack && openSearchStack && migrationStack && mskUtilityStack) || (addOnMigrationDeployId && networkStack)) {
+        if ((trafficReplayerServiceEnabled && networkStack && migrationStack && mskUtilityStack) || (addOnMigrationDeployId && networkStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpc: networkStack.vpc,
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
                 addOnMigrationDeployId: addOnMigrationDeployId,
-                customTargetEndpoint: trafficReplayerTargetEndpoint,
                 customKafkaGroupId: trafficReplayerGroupId,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 extraArgs: trafficReplayerExtraArgs,
@@ -417,7 +418,9 @@ export class StackComposer {
             if (migrationAnalyticsStack) {
                 trafficReplayerStack.addDependency(migrationAnalyticsStack)
             }
-            trafficReplayerStack.addDependency(openSearchStack)
+            if (openSearchStack) {
+                trafficReplayerStack.addDependency(openSearchStack)
+            }
             trafficReplayerStack.addDependency(networkStack)
             this.stacks.push(trafficReplayerStack)
         }
@@ -488,7 +491,7 @@ export class StackComposer {
         }
 
         let migrationConsoleStack
-        if (migrationConsoleServiceEnabled && networkStack && openSearchStack && mskUtilityStack) {
+        if (migrationConsoleServiceEnabled && networkStack && mskUtilityStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
                 fetchMigrationEnabled: fetchMigrationEnabled,
@@ -515,15 +518,17 @@ export class StackComposer {
             }
             if (migrationAnalyticsStack) {
                 migrationConsoleStack.addDependency(migrationAnalyticsStack)
+            if (openSearchStack) {
+                migrationConsoleStack.addDependency(openSearchStack)
             }
             migrationConsoleStack.addDependency(mskUtilityStack)
-            migrationConsoleStack.addDependency(openSearchStack)
             this.stacks.push(migrationConsoleStack)
         }
 
         if (props.migrationsAppRegistryARN) {
             this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
         }
+    }
 
     }
 }

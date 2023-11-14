@@ -33,7 +33,7 @@ class JsonTransformerTest {
 
     @SneakyThrows
     private Map<String, Object> parseSampleRequestFromResource(String path) {
-        try (InputStream inputStream = JsonJoltTransformBuilder.class.getResourceAsStream("/requests/"+path)) {
+        try (InputStream inputStream = JsonTransformerTest.class.getResourceAsStream("/requests/"+path)) {
             return mapper.readValue(inputStream, TYPE_REFERENCE_FOR_MAP_TYPE);
         }
     }

@@ -31,7 +31,7 @@ exporters:
   opensearch:
     namespace: migrations
     http:
-      endpoint: "https://${ANALYTICS_DOMAIN_ENDPOINT}"
+      endpoint: "${ANALYTICS_DOMAIN_ENDPOINT}"
   logging:
     verbosity: detailed
   debug:

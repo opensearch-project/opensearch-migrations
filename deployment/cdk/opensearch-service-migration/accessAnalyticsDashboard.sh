@@ -7,7 +7,7 @@ region=$2
 
 export AWS_DEFAULT_REGION=$region
 
-bastion_id=$(aws ec2 describe-instances --filter Name=tag-key,Values=migration_deployment --filter Name=tag:Name,Values=BastionHost --filter Name=tag:aws:cloudformation:stack-name,Values=OSMigrations-${stage}-${region}-MigrationAnalytics | jq --raw-output '.Reservations[0].Instances[0].InstanceId')
+bastion_id=$(aws ec2 describe-instances --filters Name=instance-state-name,Values=running Name=tag-key,Values=migration_deployment Name=tag:Name,Values=BastionHost Name=tag:aws:cloudformation:stack-name,Values=OSMigrations-${stage}-${region}-MigrationAnalytics | jq --raw-output '.Reservations[0].Instances[0].InstanceId')
 
 domain_endpoint=$(aws opensearch describe-domains --domain-names migration-analytics-domain | jq --raw-output '.DomainStatusList[0].Endpoints.vpc')
 

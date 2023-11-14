@@ -59,9 +59,6 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     public static class TupleToStreamConsumer implements Consumer<SourceTargetCaptureTuple> {
         Logger tupleLogger = LogManager.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
 
-        public TupleToStreamConsumer() {
-        }
-
         private JSONObject jsonFromHttpDataUnsafe(List<byte[]> data) throws IOException {
             SequenceInputStream collatedStream = ReplayUtils.byteArraysToInputStream(data);
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
