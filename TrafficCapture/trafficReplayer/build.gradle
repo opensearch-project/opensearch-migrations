@@ -136,6 +136,20 @@ task longTest(type: Test) {
     mustRunAfter test
 }
 
-task allTests {
+task longTestSansDocker(type: Test) {
+    systemProperty 'disableMemoryLeakTests', 'false'
+    useJUnitPlatform {
+        includeTags 'longTest'
+        excludeTags 'requiresDocker'
+    }
+    mustRunAfter test
+}
+
+task allTest {
     dependsOn test, longTest
 }
+
+// Make an alias with plural versions just to reduce cognitive load
+task longTests(dependsOn: 'longTest') {}
+task longTestsSansDocker(dependsOn: 'longTestSansDocker') {}
+task allsTest(dependsOn: 'allTest') {}
