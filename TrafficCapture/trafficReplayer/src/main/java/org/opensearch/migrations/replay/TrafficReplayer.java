@@ -39,6 +39,9 @@ import software.amazon.awssdk.arns.Arn;
 import software.amazon.awssdk.regions.Region;
 
 import javax.net.ssl.SSLException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.io.EOFException;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
@@ -306,6 +309,11 @@ public class TrafficReplayer {
                         "For json, keys are the (simple) names of the loaded transformers and values are the " +
                         "configuration passed to each of the transformers.")
         String transformerConfig;
+        @Parameter(required = false,
+                names = "--transformer-config-file",
+                arity = 1,
+                description = "Path to the JSON configuration file of message transformers.")
+        String transformerConfigFile;
     }
 
     private static Parameters parseArgs(String[] args) {
@@ -346,8 +354,23 @@ public class TrafficReplayer {
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
-            var tr = new TrafficReplayer(uri, params.transformerConfig, authTransformer,
-                    params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
+            if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank() && params.transformerConfig != null && !params.transformerConfig.isBlank()) {
+                System.err.println("Specify either --transformer-config or --transformer-config-file, not both.");
+                System.exit(4);
+            }
+            String configContent = null;
+            if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank()) {
+                try {
+                    configContent = Files.readString(Paths.get(params.transformerConfigFile), StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    System.err.println("Error reading transformer configuration file: " + e.getMessage());
+                    System.exit(5);
+                }
+            } else if (params.transformerConfig != null && !params.transformerConfig.isBlank()) {
+                configContent = params.transformerConfig;
+            }
+            var tr = new TrafficReplayer(uri, configContent, authTransformer,
+                    params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer();
             var timeShifter = new TimeShifter(params.speedupFactor);
