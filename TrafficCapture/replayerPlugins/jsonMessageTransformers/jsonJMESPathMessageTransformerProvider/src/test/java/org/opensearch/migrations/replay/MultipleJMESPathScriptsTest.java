@@ -32,7 +32,7 @@ public class MultipleJMESPathScriptsTest {
         var aggregateScriptJoiner = new StringJoiner(",\n", "[", "]");
         for (var script : new String[]{EXCISE_SCRIPT, HOSTNAME_SCRIPT}) {
             aggregateScriptJoiner.add(
-                    "{\"org.opensearch.migrations.transform.JsonJMESPathTransformerProvider\": {" +
+                    "{\"JsonJMESPathTransformerProvider\": {" +
                             " \"script\": \"" + script + "\"}}"
             );
         }

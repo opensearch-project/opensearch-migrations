@@ -127,12 +127,16 @@ transform to add GZIP encoding and another to apply a new header would be config
 
 ```
 [
-{"org.opensearch.migrations.transform.JsonJMESPathTransformerProvider": { "script": 
+{"JsonJMESPathTransformerProvider": { "script": 
     "{\"method\": method,\"URI\": URI,\"headers\":headers,\"payload\":{\"inlinedJsonBody\":{\"mappings\": payload.inlinedJsonBody.mappings.oldType}}}"}},
-{"org.opensearch.migrations.transform.JsonJoltTransformerProvider": { "canned": "ADD_GZIP" }},
-{ "org.opensearch.migrations.transform.JsonJoltTransformerProvider":  {"script": 
+{"JsonJoltTransformerProvider": { "canned": "ADD_GZIP" }},
+{"JsonJoltTransformerProvider":  {"script": 
     { "operation": "modify-overwrite-beta", "spec":       { "headers": {"newHeader": "newValue"}}}}}]
 ```
+
+To run only one transformer without any configuration, the `--transformer-config` argument can simply 
+be set to the classname of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
+without quotes or any json surrounding it).
 
 Some simple transformations are included to change headers to add compression or to force an HTTP message payload to 
 be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../replayerPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),
