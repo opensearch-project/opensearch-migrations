@@ -40,7 +40,7 @@ dependencies {
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
     implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    implementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
