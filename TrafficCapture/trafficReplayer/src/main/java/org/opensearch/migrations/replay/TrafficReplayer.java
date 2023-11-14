@@ -300,8 +300,11 @@ public class TrafficReplayer {
         @Parameter(required = false,
                 names = "--transformer-config",
                 arity = 1,
-                description = "Json configuration of message transformers.  Keys are the names of the loaded transformers " +
-                "(shortname or longname) and values are the configuration passed to each of the transformers.")
+                description = "Configuration of message transformers.  Either as a string that identifies the " +
+                        "transformer that should be run (with default settings) or as json to specify options " +
+                        "as well as multiple transformers to run in sequence.  " +
+                        "For json, keys are the (simple) names of the loaded transformers and values are the " +
+                        "configuration passed to each of the transformers.")
         String transformerConfig;
     }
 
