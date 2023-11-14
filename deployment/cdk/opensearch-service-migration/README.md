@@ -158,6 +158,17 @@ echo $FETCH_MIGRATION_COMMAND
 
 The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
 
+## Accessing the Migration Analytics Domain
+
+The analytics domain receives metrics and events from the Capture Proxy and Replayer (if configured) and allows a user to visualize the progress and success of their migration.
+The domain & dashboard are only accessible from within the VPC, but a BastionHost is set up within the VPC that allows a user to use Session Manager to make the dashboard avaiable locally via port forwarding.
+
+Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/_dashboards to view your dashboard.
+```shell
+# ./accessAnalyticsDashboard.sh STAGE REGION
+./accessAnalyticsDashboard.sh dev us-east-1
+```
+
 
 ## Tearing down CDK
 To remove all the CDK stack(s) which get created during a deployment we can execute a command similar to below
