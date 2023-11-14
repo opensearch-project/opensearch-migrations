@@ -38,6 +38,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 @Testcontainers
+@Tag("requiresDocker")
 public class KafkaRestartingTrafficReplayerTest {
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
