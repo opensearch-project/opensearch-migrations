@@ -3,7 +3,6 @@ import {
   BastionHostLinux,
   BlockDeviceVolume,
   MachineImage,
-  Port,
   SecurityGroup,
   IVpc,
 } from "aws-cdk-lib/aws-ec2";
@@ -15,6 +14,7 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly bastionHostEnabled?: boolean
 }
 
 // The MigrationAnalyticsStack consists of the OpenTelemetry Collector ECS container & an
@@ -26,20 +26,22 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
 
         const migrationAnalyticsSecurityGroup = SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`))
 
-        // Bastion host to access Opensearch Dashboards
-        new BastionHostLinux(this, "AnalyticsDashboardBastionHost", {
-          vpc: props.vpc,
-          securityGroup: migrationAnalyticsSecurityGroup,
-          machineImage: MachineImage.latestAmazonLinux2023(),
-          blockDevices: [
-            {
-              deviceName: "/dev/xvda",
-              volume: BlockDeviceVolume.ebs(10, {
-                encrypted: true,
-              }),
-            },
-          ],
-        });
+        if (props.bastionHostEnabled) {
+          // Bastion host to access Opensearch Analytics Dashboard
+          new BastionHostLinux(this, "AnalyticsDashboardBastionHost", {
+            vpc: props.vpc,
+            securityGroup: migrationAnalyticsSecurityGroup,
+            machineImage: MachineImage.latestAmazonLinux2023(),
+            blockDevices: [
+              {
+                deviceName: "/dev/xvda",
+                volume: BlockDeviceVolume.ebs(10, {
+                  encrypted: true,
+                }),
+              },
+            ],
+          });
+        }
 
         // Port Mappings for collector and health check
         const otelCollectorPort: PortMapping = {
@@ -84,8 +86,6 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             },
             ...props
         });
-
-
     }
 
 }

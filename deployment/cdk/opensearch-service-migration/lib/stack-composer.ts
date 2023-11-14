@@ -154,6 +154,7 @@ export class StackComposer {
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
 
         const migrationAnalyticsServiceEnabled = this.getContextForType('migrationAnalyticsServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const migrationAnalyticsBastionHostEnabled = this.getContextForType('migrationAnalyticsBastionEnabled', 'boolean', defaultValues, contextJSON)
         const analyticsDomainEngineVersion = this.getContextForType('analyticsDomainEngineVersion', 'string', defaultValues, contextJSON)
         const analyticsDomainDataNodeType = this.getContextForType('analyticsDomainDataNodeType', 'string', defaultValues, contextJSON)
         const analyticsDomainDataNodeCount = this.getContextForType('analyticsDomainDataNodeCount', 'number', defaultValues, contextJSON)
@@ -337,6 +338,8 @@ export class StackComposer {
             })
             migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
                 stackName: `OSMigrations-${stage}-${region}-MigrationAnalytics`,
+                description: "This stack contains the OpenTelemetry Collector and Bastion Host",
+                bastionHostEnabled: migrationAnalyticsBastionHostEnabled,
                 vpc:networkStack.vpc,
                 stage: stage,
                 defaultDeployId: defaultDeployId,

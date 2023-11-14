@@ -180,7 +180,10 @@ The pipeline configuration file can be viewed (and updated) via AWS Secrets Mana
 ## Accessing the Migration Analytics Domain
 
 The analytics domain receives metrics and events from the Capture Proxy and Replayer (if configured) and allows a user to visualize the progress and success of their migration.
-The domain & dashboard are only accessible from within the VPC, but a BastionHost is set up within the VPC that allows a user to use Session Manager to make the dashboard avaiable locally via port forwarding.
+
+The domain & dashboard are only accessible from within the VPC, but a BastionHost is optionally set up within the VPC that allows a user to use Session Manager to make the dashboard avaiable locally via port forwarding.
+
+For the Bastion Host to be available, add `"migrationAnalyticsBastionEnabled": true` to cdk.context.json and redeploy at least the MigrationAnalytics stack.
 
 Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/_dashboards to view your dashboard.
 ```shell
