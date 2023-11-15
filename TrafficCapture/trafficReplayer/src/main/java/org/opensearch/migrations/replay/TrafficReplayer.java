@@ -379,6 +379,10 @@ public class TrafficReplayer {
              var authTransformer = buildAuthTransformerFactory(params))
         {
             String transformerConfig = getTransformerConfig(params);
+            if (transformerConfig != null)
+            {
+                log.info("Transformations config string: ", transformerConfig);
+            }
             var tr = new TrafficReplayer(uri, transformerConfig, authTransformer,
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
             setupShutdownHookForReplayer(tr);
