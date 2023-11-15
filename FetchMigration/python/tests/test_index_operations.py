@@ -99,6 +99,25 @@ class TestIndexOperations(unittest.TestCase):
         doc_count_result = index_operations.doc_count(test_indices, EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(total_docs, doc_count_result.total)
 
+    @responses.activate
+    def test_doc_count_error(self):
+        test_indices = {test_constants.INDEX1_NAME, test_constants.INDEX2_NAME}
+        expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search?size=0"
+        responses.get(expected_count_endpoint, body=requests.Timeout())
+        self.assertRaises(RuntimeError, index_operations.doc_count, test_indices,
+                          EndpointInfo(test_constants.SOURCE_ENDPOINT))
+
+    @responses.activate
+    def test_get_request_errors(self):
+        # Set up list of error types to test
+        test_errors = [requests.ConnectionError(), requests.HTTPError(), requests.Timeout(),
+                       requests.exceptions.MissingSchema()]
+        # Verify that each error is wrapped in a RuntimeError
+        for e in test_errors:
+            responses.get(test_constants.SOURCE_ENDPOINT + "*", body=e)
+            self.assertRaises(RuntimeError, index_operations.fetch_all_indices,
+                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
+
 
 if __name__ == '__main__':
     unittest.main()

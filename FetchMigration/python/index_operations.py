@@ -7,6 +7,8 @@
 # compatible open source license.
 #
 
+from typing import Optional
+
 import jsonpath_ng
 import requests
 
@@ -28,23 +30,45 @@ __INDEX_COUNT_JSONPATH = jsonpath_ng.parse("$.aggregations.count.buckets")
 __BUCKET_INDEX_NAME_KEY = "key"
 __BUCKET_DOC_COUNT_KEY = "doc_count"
 __INTERNAL_SETTINGS_KEYS = ["creation_date", "uuid", "provided_name", "version", "store"]
+__TIMEOUT_SECONDS = 10
+
+
+def __send_get_request(url: str, endpoint: EndpointInfo, payload: Optional[dict] = None) -> requests.Response:
+    try:
+        resp = requests.get(url, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(), json=payload,
+                            timeout=__TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        return resp
+    except requests.ConnectionError:
+        raise RuntimeError(f"ConnectionError on GET request to cluster endpoint: {endpoint.get_url()}")
+    except requests.HTTPError as e:
+        raise RuntimeError(f"HTTPError on GET request to cluster endpoint: {endpoint.get_url()} - {e!s}")
+    except requests.Timeout:
+        # TODO retry mechanism
+        raise RuntimeError(f"Timed out on GET request to cluster endpoint: {endpoint.get_url()}")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"GET request failure to cluster endpoint: {endpoint.get_url()} - {e!s}")
 
 
 def fetch_all_indices(endpoint: EndpointInfo) -> dict:
     all_indices_url: str = endpoint.add_path(__ALL_INDICES_ENDPOINT)
-    resp = requests.get(all_indices_url, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
-    result = dict(resp.json())
-    for index in list(result.keys()):
-        # Remove system indices
-        if index.startswith("."):
-            del result[index]
-        # Remove internal settings
-        else:
-            for setting in __INTERNAL_SETTINGS_KEYS:
-                index_settings = result[index][SETTINGS_KEY]
-                if __INDEX_KEY in index_settings:
-                    index_settings[__INDEX_KEY].pop(setting, None)
-    return result
+    try:
+        # raises RuntimeError in case of any request errors
+        resp = __send_get_request(all_indices_url, endpoint)
+        result = dict(resp.json())
+        for index in list(result.keys()):
+            # Remove system indices
+            if index.startswith("."):
+                del result[index]
+            # Remove internal settings
+            else:
+                for setting in __INTERNAL_SETTINGS_KEYS:
+                    index_settings = result[index][SETTINGS_KEY]
+                    if __INDEX_KEY in index_settings:
+                        index_settings[__INDEX_KEY].pop(setting, None)
+        return result
+    except RuntimeError as e:
+        raise RuntimeError(f"Failed to fetch metadata from cluster endpoint: {e!s}")
 
 
 def create_indices(indices_data: dict, endpoint: EndpointInfo):
@@ -66,13 +90,15 @@ def create_indices(indices_data: dict, endpoint: EndpointInfo):
 def doc_count(indices: set, endpoint: EndpointInfo) -> IndexDocCount:
     count_endpoint_suffix: str = ','.join(indices) + __SEARCH_COUNT_PATH
     doc_count_endpoint: str = endpoint.add_path(count_endpoint_suffix)
-    resp = requests.get(doc_count_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(),
-                        json=__SEARCH_COUNT_PAYLOAD)
-    # TODO Handle resp.status_code for non successful requests
-    result = dict(resp.json())
-    total: int = __TOTAL_COUNT_JSONPATH.find(result)[0].value
-    counts_list: list = __INDEX_COUNT_JSONPATH.find(result)[0].value
-    count_map = dict()
-    for entry in counts_list:
-        count_map[entry[__BUCKET_INDEX_NAME_KEY]] = entry[__BUCKET_DOC_COUNT_KEY]
-    return IndexDocCount(total, count_map)
+    try:
+        # raises RuntimeError in case of any request errors
+        resp = __send_get_request(doc_count_endpoint, endpoint, __SEARCH_COUNT_PAYLOAD)
+        result = dict(resp.json())
+        total: int = __TOTAL_COUNT_JSONPATH.find(result)[0].value
+        counts_list: list = __INDEX_COUNT_JSONPATH.find(result)[0].value
+        count_map = dict()
+        for entry in counts_list:
+            count_map[entry[__BUCKET_INDEX_NAME_KEY]] = entry[__BUCKET_DOC_COUNT_KEY]
+        return IndexDocCount(total, count_map)
+    except RuntimeError as e:
+        raise RuntimeError(f"Failed to fetch doc_count: {e!s}")

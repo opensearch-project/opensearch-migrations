@@ -137,9 +137,15 @@ if __name__ == '__main__':  # pragma no cover
     arg_parser.add_argument("--createonly", "-c", action="store_true",
                             help="Skips data migration and only creates indices on the target cluster")
     cli_args = arg_parser.parse_args()
-    params = FetchOrchestratorParams(os.path.expandvars(cli_args.data_prepper_path),
-                                     os.path.expandvars(cli_args.pipeline_file_path),
-                                     port=cli_args.port, insecure=cli_args.insecure,
+    dp_path = os.path.expandvars(cli_args.data_prepper_path)
+    if not os.path.isdir(dp_path):
+        raise ValueError("Path to Data Prepper installation is not a directory")
+    elif not os.path.exists(dp_path + __DP_EXECUTABLE_SUFFIX):
+        raise ValueError(f"Could not find {__DP_EXECUTABLE_SUFFIX} executable under Data Prepper install location")
+    pipeline_file = os.path.expandvars(cli_args.pipeline_file_path)
+    if not os.path.exists(pipeline_file):
+        raise ValueError("Data Prepper pipeline file does not exist")
+    params = FetchOrchestratorParams(dp_path, pipeline_file, port=cli_args.port, insecure=cli_args.insecure,
                                      dryrun=cli_args.dryrun, create_only=cli_args.createonly)
     return_code = run(params)
     if return_code == 0:
