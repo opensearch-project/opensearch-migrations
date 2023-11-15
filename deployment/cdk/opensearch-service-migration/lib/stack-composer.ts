@@ -521,6 +521,7 @@ export class StackComposer {
             }
             if (migrationAnalyticsStack) {
                 migrationConsoleStack.addDependency(migrationAnalyticsStack)
+            }
             if (openSearchStack) {
                 migrationConsoleStack.addDependency(openSearchStack)
             }
@@ -531,7 +532,5 @@ export class StackComposer {
         if (props.migrationsAppRegistryARN) {
             this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
         }
-    }
-
     }
 }
