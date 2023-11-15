@@ -20,9 +20,7 @@ plugins {
     id 'org.opensearch.migrations.java-library-conventions'
 //    id "com.github.spotbugs" version "4.7.3"
 //    id 'checkstyle'
-    id 'org.owasp.dependencycheck' version '8.2.1'
     id "io.freefair.lombok" version "8.0.1"
-
     id 'java'
 }
 
