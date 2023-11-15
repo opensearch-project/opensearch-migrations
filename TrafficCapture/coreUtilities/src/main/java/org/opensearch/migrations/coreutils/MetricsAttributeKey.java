@@ -21,7 +21,6 @@ public enum MetricsAttributeKey {
     HTTP_STATUS("http.status"),
 
     EXCEPTION_MESSAGE("exception.message"),
-    EXCEPTION_STACKTRACE("exception.stacktrace"),
     EXCEPTION_TYPE( "exception.type");
 
     private String keyName;
