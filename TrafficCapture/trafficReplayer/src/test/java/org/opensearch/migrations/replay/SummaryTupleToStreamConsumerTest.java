@@ -12,10 +12,11 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.MockMetricsBuilder;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -27,6 +28,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
@@ -78,7 +80,7 @@ class SummaryTupleToStreamConsumerTest {
                 new UniqueReplayerRequestKey(new PojoTrafficStreamKey(NODE_ID,"c",0), 0, 0),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new SummaryTupleToStreamConsumer();
+            var consumer = new TupleParserChainConsumer(null, new SummaryTupleToStreamConsumer());
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -95,7 +97,7 @@ class SummaryTupleToStreamConsumerTest {
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new SummaryTupleToStreamConsumer();
+            var consumer = new TupleParserChainConsumer(null, new SummaryTupleToStreamConsumer());
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -224,6 +226,7 @@ class SummaryTupleToStreamConsumerTest {
         testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT);
     }
 
+    @Test
     private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
         var trafficStreamKey = new PojoTrafficStreamKey(NODE_ID,"c",0);
         var sourcePair = new RequestResponsePacketPair(trafficStreamKey);
@@ -240,8 +243,22 @@ class SummaryTupleToStreamConsumerTest {
         var tuple = new SourceTargetCaptureTuple(
                 new UniqueReplayerRequestKey(trafficStreamKey, 0, 0),
                 sourcePair, targetRequest, targetResponse, HttpRequestTransformationStatus.SKIPPED, null, Duration.ofMillis(267));
+        var streamConsumer = new SummaryTupleToStreamConsumer();
+        // we don't have an interface on MetricsLogger yet, so it's a challenge to test that directly.
+        // Assuming that it's going to use Slf/Log4J are really brittle.  I'd rather miss a couple lines that
+        // should be getting tested elsewhere and be immune to those changes down the line
+        BiConsumer<SourceTargetCaptureTuple, ParsedHttpMessagesAsDicts> metricsHardWayCheckConsumer = (t,p) -> {
+            var metricsBuilder = new MockMetricsBuilder();
+            metricsBuilder = (MockMetricsBuilder) p.buildStatusCodeMetrics(metricsBuilder,
+                    new PojoUniqueSourceRequestKey(trafficStreamKey, 0));
+            Assertions.assertEquals("REQUEST_ID:c.0|SOURCE_HTTP_STATUS:200|TARGET_HTTP_STATUS:200|HTTP_STATUS_MATCH:1",
+                    metricsBuilder.getLoggedAttributes());
+        };
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new SummaryTupleToStreamConsumer();
+            var consumer = new TupleParserChainConsumer(null, (a,b)->{
+                streamConsumer.accept(a,b);
+                metricsHardWayCheckConsumer.accept(a,b);
+            });
             consumer.accept(tuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
