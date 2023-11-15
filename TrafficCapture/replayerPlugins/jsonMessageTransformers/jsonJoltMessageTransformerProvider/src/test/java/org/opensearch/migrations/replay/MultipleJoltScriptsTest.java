@@ -23,7 +23,7 @@ public class MultipleJoltScriptsTest {
         final var addGzip =
                 "[{\"JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }}]";
         var toNewHostTransformer = new TransformationLoader().getTransformerFactoryLoader("testhostname",
-                addGzip);
+                null, addGzip);
         var origDocStr = SampleContents.loadSampleJsonRequestAsString();
         var origDoc = parseAsMap(origDocStr);
         var newDoc = toNewHostTransformer.transformJson(origDoc);
@@ -43,7 +43,7 @@ public class MultipleJoltScriptsTest {
                 "      { \"headers\": {\"newHeader\": \"newValue\"}}}}}" +
                 "]";
         var toNewHostTransformer = new TransformationLoader().getTransformerFactoryLoader("testhostname",
-                addGzip);
+                null, addGzip);
         var origDocStr = SampleContents.loadSampleJsonRequestAsString();
         var origDoc = parseAsMap(origDocStr);
         var newDoc = toNewHostTransformer.transformJson(origDoc);
