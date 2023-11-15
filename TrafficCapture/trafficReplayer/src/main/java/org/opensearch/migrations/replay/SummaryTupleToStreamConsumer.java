@@ -2,12 +2,7 @@ package org.opensearch.migrations.replay;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Lombok;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogBuilder;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 @Slf4j
 public class SummaryTupleToStreamConsumer implements BiConsumer<SourceTargetCaptureTuple, ParsedHttpMessagesAsDicts> {

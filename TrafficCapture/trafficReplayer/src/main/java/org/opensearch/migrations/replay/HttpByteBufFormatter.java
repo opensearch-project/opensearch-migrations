@@ -14,7 +14,6 @@ import io.netty.handler.codec.http.HttpServerCodec;
 import lombok.SneakyThrows;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -62,7 +61,7 @@ public class HttpByteBufFormatter {
     public static String httpPacketBytesToString(HttpMessageType msgType, Stream<byte[]> byteArrStream) {
         // This isn't memory efficient,
         // but stringifying byte bufs through a full parse and reserializing them was already really slow!
-        return httpPacketBufsToString(msgType, byteArrStream.map(bArr -> Unpooled.wrappedBuffer(bArr)), true);
+        return httpPacketBufsToString(msgType, byteArrStream.map(Unpooled::wrappedBuffer), true);
     }
 
     public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
