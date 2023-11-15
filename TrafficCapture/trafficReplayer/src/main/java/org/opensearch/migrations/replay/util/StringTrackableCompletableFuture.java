@@ -13,10 +13,6 @@ public class StringTrackableCompletableFuture<T>
         super(future, diagnosticSupplier);
     }
 
-    public StringTrackableCompletableFuture(@NonNull CompletableFuture<T> future, String label) {
-        super(future, ()->label);
-    }
-
     public static <T> StringTrackableCompletableFuture<T>
     failedFuture(Throwable e, Supplier<String> diagnosticSupplier) {
         return new StringTrackableCompletableFuture<>(CompletableFuture.failedFuture(e), diagnosticSupplier);

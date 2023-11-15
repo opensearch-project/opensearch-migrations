@@ -20,13 +20,6 @@ public class TrafficStreamUtils {
                 Optional.empty();
     }
 
-    public static Optional<Instant> getLastTimestamp(TrafficStream ts) {
-        var substream = ts.getSubStreamList();
-        return substream != null && !substream.isEmpty() ?
-                Optional.of(instantFromProtoTimestamp(substream.get(substream.size()-1).getTs())) :
-                Optional.empty();
-    }
-
     public static String summarizeTrafficStream(TrafficStream ts) {
         var listSummaryStr = ts.getSubStreamList().stream()
                 .map(tso->instantFromProtoTimestamp(tso.getTs()) + ": " + captureCaseToString(tso.getCaptureCase()))
