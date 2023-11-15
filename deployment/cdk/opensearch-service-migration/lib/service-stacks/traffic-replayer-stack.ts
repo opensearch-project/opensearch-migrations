@@ -14,6 +14,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly enableClusterFGACAuth: boolean,
     readonly addOnMigrationId?: string,
     readonly customKafkaGroupId?: string,
+    readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
     readonly analyticsServiceEnabled?: boolean
 }
@@ -101,6 +102,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
         }
+        replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
         replayerCommand = props.analyticsServiceEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
         this.createService({

@@ -8,6 +8,7 @@ import {MigrationConsoleStack} from "../lib/service-stacks/migration-console-sta
 import {KafkaBrokerStack} from "../lib/service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "../lib/service-stacks/kafka-zookeeper-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
+import {MigrationAnalyticsStack} from "../lib/service-stacks/migration-analytics-stack";
 
 // Mock using local Dockerfile (which may not exist and would fail synthesis) with the intent of using a "fake-image" from a public registry
 jest.mock("aws-cdk-lib/aws-ecr-assets")
@@ -31,13 +32,14 @@ test('Test all migration services get created when enabled', () => {
         "captureProxyServiceEnabled": true,
         "elasticsearchServiceEnabled": true,
         "kafkaBrokerServiceEnabled": true,
-        "kafkaZookeeperServiceEnabled": true
+        "kafkaZookeeperServiceEnabled": true,
+        "migrationAnalyticsServiceEnabled": true
     }
 
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack]
+        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack, MigrationAnalyticsStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)
@@ -63,13 +65,14 @@ test('Test no migration services get deployed when disabled', () => {
         "captureProxyServiceEnabled": false,
         "elasticsearchServiceEnabled": false,
         "kafkaBrokerServiceEnabled": false,
-        "kafkaZookeeperServiceEnabled": false
+        "kafkaZookeeperServiceEnabled": false,
+        "migrationAnalyticsServiceEnabled": false
     }
 
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack]
+        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack, MigrationAnalyticsStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         expect(stack).toBeUndefined()
