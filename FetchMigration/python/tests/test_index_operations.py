@@ -47,6 +47,23 @@ class TestIndexOperations(unittest.TestCase):
         index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
 
     @responses.activate
+    def test_create_indices_empty_alias(self):
+        aliases_key = "aliases"
+        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
+        del test_data[test_constants.INDEX2_NAME]
+        del test_data[test_constants.INDEX3_NAME]
+        # Setup expected create payload without "aliases"
+        expected_payload = copy.deepcopy(test_data[test_constants.INDEX1_NAME])
+        del expected_payload[aliases_key]
+        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX1_NAME,
+                      match=[matchers.json_params_matcher(expected_payload)])
+        # Empty "aliases" should be stripped
+        index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        # Index without "aliases" should not fail
+        del test_data[test_constants.INDEX1_NAME][aliases_key]
+        index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+
+    @responses.activate
     def test_create_indices_exception(self):
         # Set up expected PUT calls with a mock response status
         test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
