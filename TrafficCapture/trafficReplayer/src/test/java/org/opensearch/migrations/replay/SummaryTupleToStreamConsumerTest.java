@@ -12,17 +12,14 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -30,13 +27,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
-class SourceTargetCaptureTupleTest {
+class SummaryTupleToStreamConsumerTest {
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
@@ -45,14 +39,14 @@ class SourceTargetCaptureTupleTest {
         List<String> logEvents = new ArrayList<>();
         AbstractAppender testAppender;
         public CloseableLogSetup() {
-            testAppender = new AbstractAppender(SourceTargetCaptureTuple.OUTPUT_TUPLE_JSON_LOGGER,
+            testAppender = new AbstractAppender(SummaryTupleToStreamConsumer.OUTPUT_TUPLE_JSON_LOGGER,
                     null, null, false, null) {
                 @Override
                 public void append(LogEvent event) {
                     logEvents.add(event.getMessage().getFormattedMessage());
                 }
             };
-            var tupleLogger = (Logger) LogManager.getLogger(SourceTargetCaptureTuple.OUTPUT_TUPLE_JSON_LOGGER);
+            var tupleLogger = (Logger) LogManager.getLogger(SummaryTupleToStreamConsumer.OUTPUT_TUPLE_JSON_LOGGER);
             tupleLogger.setLevel(Level.ALL);
             testAppender.start();
             tupleLogger.setAdditive(false);
@@ -62,7 +56,7 @@ class SourceTargetCaptureTupleTest {
 
         @Override
         public void close() {
-            var tupleLogger = (Logger) LogManager.getLogger(SourceTargetCaptureTuple.OUTPUT_TUPLE_JSON_LOGGER);
+            var tupleLogger = (Logger) LogManager.getLogger(SummaryTupleToStreamConsumer.OUTPUT_TUPLE_JSON_LOGGER);
             tupleLogger.removeAppender(testAppender);
             testAppender.stop();
         }
@@ -84,7 +78,7 @@ class SourceTargetCaptureTupleTest {
                 new UniqueReplayerRequestKey(new PojoTrafficStreamKey(NODE_ID,"c",0), 0, 0),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new SourceTargetCaptureTuple.TupleToStreamConsumer();
+            var consumer = new SummaryTupleToStreamConsumer();
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -101,7 +95,7 @@ class SourceTargetCaptureTupleTest {
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new SourceTargetCaptureTuple.TupleToStreamConsumer();
+            var consumer = new SummaryTupleToStreamConsumer();
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -112,7 +106,7 @@ class SourceTargetCaptureTupleTest {
     }
 
     public static byte[] loadResourceAsBytes(String path) throws IOException {
-        try (InputStream inputStream = SourceTargetCaptureTupleTest.class.getResourceAsStream(path)) {
+        try (InputStream inputStream = SummaryTupleToStreamConsumerTest.class.getResourceAsStream(path)) {
             return inputStream.readAllBytes();
         }
     }
@@ -247,7 +241,7 @@ class SourceTargetCaptureTupleTest {
                 new UniqueReplayerRequestKey(trafficStreamKey, 0, 0),
                 sourcePair, targetRequest, targetResponse, HttpRequestTransformationStatus.SKIPPED, null, Duration.ofMillis(267));
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new SourceTargetCaptureTuple.TupleToStreamConsumer();
+            var consumer = new SummaryTupleToStreamConsumer();
             consumer.accept(tuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
