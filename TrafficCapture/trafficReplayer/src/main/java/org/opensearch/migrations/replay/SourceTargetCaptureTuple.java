@@ -8,6 +8,10 @@ import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
+import org.opensearch.migrations.coreutils.MetricsLogBuilder;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
@@ -29,6 +33,7 @@ import java.util.stream.Stream;
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
     public static final String OUTPUT_TUPLE_JSON_LOGGER = "OutputTupleJsonLogger";
+    private static final MetricsLogger metricsLogger = new MetricsLogger("SourceTargetCaptureTuple");
     private static final ObjectMapper PLAIN_MAPPER = new ObjectMapper();
 
     final UniqueSourceRequestKey uniqueRequestKey;
@@ -115,26 +120,61 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
 
         private Map<String,Object> toJSONObject(SourceTargetCaptureTuple tuple) {
             var tupleMap = new LinkedHashMap<String,Object>();
-            Optional.ofNullable(tuple.sourcePair).ifPresent(p-> {
+            var sourcePairOp = Optional.ofNullable(tuple.sourcePair);
+            final Optional<Map<String,Object>> sourceRequestOp = sourcePairOp.flatMap(p->
                 Optional.ofNullable(p.requestData).flatMap(d -> Optional.ofNullable(d.packetBytes))
-                        .ifPresent(d -> tupleMap.put("sourceRequest", convertRequest(d)));
+                        .map(d -> convertRequest(d)));
+            sourceRequestOp.ifPresent(r->tupleMap.put("sourceRequest", r));
+            final Optional<Map<String,Object>> sourceResponseOp = sourcePairOp.flatMap(p->
                 Optional.ofNullable(p.responseData).flatMap(d -> Optional.ofNullable(d.packetBytes))
-                        .ifPresent(d -> tupleMap.put("sourceResponse", convertResponse(d,
+                        .map(d -> convertResponse(d,
                                 // TODO: These durations are not measuring the same values!
                                 Duration.between(tuple.sourcePair.requestData.getLastPacketTimestamp(),
                                         tuple.sourcePair.responseData.getLastPacketTimestamp()))));
-            });
+            sourceResponseOp.ifPresent(r->tupleMap.put("sourceResponse", r));
 
-            Optional.ofNullable(tuple.targetRequestData)
+            var targetRequestOp = Optional.ofNullable(tuple.targetRequestData)
                     .map(d->d.asByteArrayStream())
-                    .ifPresent(d->tupleMap.put("targetRequest", convertRequest(d.collect(Collectors.toList()))));
+                    .map(d->convertRequest(d.collect(Collectors.toList())));
+            targetRequestOp.ifPresent(r->tupleMap.put("targetRequest", r));
 
-            Optional.ofNullable(tuple.targetResponseData)
+            var targetResponseOp = Optional.ofNullable(tuple.targetResponseData)
                     .filter(r->!r.isEmpty())
-                    .ifPresent(d-> tupleMap.put("targetResponse", convertResponse(d, tuple.targetResponseDuration)));
+                    .map(d-> convertResponse(d, tuple.targetResponseDuration));
+            targetResponseOp.ifPresent(r->tupleMap.put("targetResponse", r));
+
             tupleMap.put("connectionId", formatUniqueRequestKey(tuple.uniqueRequestKey));
             Optional.ofNullable(tuple.errorCause).ifPresent(e->tupleMap.put("error", e.toString()));
+
+            emitStatusCodeMetrics(tuple.uniqueRequestKey, sourceResponseOp, targetResponseOp);
+
             return tupleMap;
+        }
+
+        private static void emitStatusCodeMetrics(UniqueSourceRequestKey requestKey,
+                                                Optional<Map<String, Object>> sourceResponseOp,
+                                                Optional<Map<String, Object>> targetResponseOp) {
+            var sourceStatus = sourceResponseOp.map(r->((Map<String,Object>)r).get("Status-Code"));
+            var targetStatus = targetResponseOp.map(r->((Map<String,Object>)r).get("Status-Code"));
+            var builder = metricsLogger.atSuccess(MetricsEvent.STATUS_CODE_COMPARISON)
+                    .setAttribute(MetricsAttributeKey.REQUEST_ID,
+                            requestKey.getTrafficStreamKey().getConnectionId() + "." + requestKey.getSourceRequestIndex());
+            builder = addMetricIfPresent(builder, MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceStatus);
+            builder = addMetricIfPresent(builder, MetricsAttributeKey.TARGET_HTTP_STATUS, targetStatus);
+            builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_STATUS_MATCH,
+                            sourceStatus.flatMap(ss->targetStatus.map(ts->ss.equals(ts)))
+                                    .filter(x->x).map(b->(Object)1).or(()->Optional.<Object>of(Integer.valueOf(0))));
+            builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_METHOD,
+                    sourceResponseOp.map(r->r.get("Method")));
+            builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_ENDPOINT,
+                    sourceResponseOp.map(r->r.get("Request-URI")));
+
+            builder.emit();
+        }
+
+        private static MetricsLogBuilder addMetricIfPresent(MetricsLogBuilder metricBuilder,
+                                                            MetricsAttributeKey key, Optional<Object> value) {
+            return value.map(k->metricBuilder.setAttribute(key, value)).orElse(metricBuilder);
         }
 
         /**

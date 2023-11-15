@@ -20,6 +20,10 @@ public enum MetricsAttributeKey {
     HTTP_ENDPOINT("http.endpoint"),
     HTTP_STATUS("http.status"),
 
+    SOURCE_HTTP_STATUS("source_http_status"),
+    TARGET_HTTP_STATUS("target_http_status"),
+    HTTP_STATUS_MATCH("http_status_match"),
+
     EXCEPTION_MESSAGE("exception.message"),
     EXCEPTION_TYPE( "exception.type");
 
