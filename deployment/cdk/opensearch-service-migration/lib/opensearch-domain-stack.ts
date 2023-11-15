@@ -9,7 +9,7 @@ import {
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
 import {RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
 import {IKey, Key} from "aws-cdk-lib/aws-kms";
-import {PolicyStatement} from "aws-cdk-lib/aws-iam";
+import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
@@ -25,7 +25,8 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly dedicatedManagerNodeCount?: number,
   readonly warmInstanceType?: string,
   readonly warmNodes?: number
-  readonly accessPolicies?: PolicyStatement[],
+  readonly accessPolicyJson?: object,
+  readonly openAccessPolicyEnabled?: boolean
   readonly useUnsignedBasicAuth?: boolean,
   readonly fineGrainedManagerUserARN?: string,
   readonly fineGrainedManagerUserName?: string,
@@ -36,7 +37,7 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly ebsEnabled?: boolean,
   readonly ebsIops?: number,
   readonly ebsVolumeSize?: number,
-  readonly ebsVolumeType?: EbsDeviceVolumeType,
+  readonly ebsVolumeTypeName?: string,
   readonly encryptionAtRestEnabled?: boolean,
   readonly encryptionAtRestKmsKeyARN?: string,
   readonly appLogEnabled?: boolean,
@@ -46,19 +47,62 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly vpcSubnetIds?: string[],
   readonly vpcSecurityGroupIds?: string[],
   readonly availabilityZoneCount?: number,
-  readonly domainRemovalPolicy?: RemovalPolicy
+  readonly domainRemovalPolicy?: RemovalPolicy,
+  readonly domainAccessSecurityGroupParameter?: string,
+  readonly endpointParameterName?: string
+
 }
 
 
 export class OpenSearchDomainStack extends Stack {
 
-  createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
+  getEbsVolumeType(ebsVolumeTypeName: string) : EbsDeviceVolumeType|undefined {
+    const ebsVolumeType: EbsDeviceVolumeType|undefined = ebsVolumeTypeName ? EbsDeviceVolumeType[ebsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
+        if (ebsVolumeTypeName && !ebsVolumeType) {
+            throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
+        }
+    return ebsVolumeType
+  }
+
+  createOpenAccessPolicy(domainName: string) {
+      const openPolicy = new PolicyStatement({
+          effect: Effect.ALLOW,
+          principals: [new AnyPrincipal()],
+          actions: ["es:*"],
+          resources: [`arn:aws:es:${this.region}:${this.account}:domain/${domainName}/*`]
+      })
+      return openPolicy
+    }
+
+    parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
+      let accessPolicies: PolicyStatement[] = []
+      const statements = jsonObject['Statement']
+      if (!statements || statements.length < 1) {
+          throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
+      }
+      // Access policies can provide a single Statement block or an array of Statement blocks
+      if (Array.isArray(statements)) {
+          for (let statementBlock of statements) {
+              const statement = PolicyStatement.fromJson(statementBlock)
+              accessPolicies.push(statement)
+          }
+      }
+      else {
+          const statement = PolicyStatement.fromJson(statements)
+          accessPolicies.push(statement)
+      }
+      return accessPolicies
+  }
+
+  createSSMParameters(domain: Domain, endpointParameterName: string|undefined, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
+    
+    const endpointParameter = endpointParameterName ?? "osClusterEndpoint"
     new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
       description: 'OpenSearch migration parameter for OpenSearch endpoint',
-      parameterName: `/migration/${stage}/${deployId}/osClusterEndpoint`,
+      parameterName: `/migration/${stage}/${deployId}/${endpointParameter}`,
       stringValue: `https://${domain.domainEndpoint}:443`
     });
-
+    
     if (domain.masterUserPassword && !adminUserSecret) {
       console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
     }
@@ -82,15 +126,14 @@ export class OpenSearchDomainStack extends Stack {
     let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
         Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
 
-
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
+    const domainAccessSecurityGroupParameter = props.domainAccessSecurityGroupParameter ?? "osAccessSecurityGroupId"
     const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
-        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`))
+        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/${domainAccessSecurityGroupParameter}`))
 
     // Map objects from props
-
     let adminUserName: string|undefined = props.fineGrainedManagerUserName
     // Enable demo mode setting
     if (props.enableDemoAdmin) {
@@ -123,10 +166,19 @@ export class OpenSearchDomainStack extends Stack {
       }
     }
 
+    const ebsVolumeType = props.ebsVolumeTypeName ? this.getEbsVolumeType(props.ebsVolumeTypeName) : undefined
+
+    let accessPolicies: PolicyStatement[] | undefined
+    if (props.openAccessPolicyEnabled) {
+      accessPolicies = [this.createOpenAccessPolicy(props.domainName)]
+  } else {
+      accessPolicies = props.accessPolicyJson ? this.parseAccessPolicies(props.accessPolicyJson) : undefined
+  }
+
     const domain = new Domain(this, 'Domain', {
       version: props.version,
       domainName: props.domainName,
-      accessPolicies: props.accessPolicies,
+      accessPolicies: accessPolicies,
       useUnsignedBasicAuth: props.useUnsignedBasicAuth,
       capacity: {
         dataNodeInstanceType: props.dataNodeInstanceType,
@@ -152,7 +204,7 @@ export class OpenSearchDomainStack extends Stack {
         enabled: props.ebsEnabled,
         iops: props.ebsIops,
         volumeSize: props.ebsVolumeSize,
-        volumeType: props.ebsVolumeType
+        volumeType: ebsVolumeType
       },
       logging: {
         appLogEnabled: props.appLogEnabled,
@@ -165,6 +217,7 @@ export class OpenSearchDomainStack extends Stack {
       removalPolicy: props.domainRemovalPolicy
     });
 
-    this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
+    this.createSSMParameters(domain, props.endpointParameterName, adminUserName, adminUserSecret, props.stage, deployId)
+
   }
 }
