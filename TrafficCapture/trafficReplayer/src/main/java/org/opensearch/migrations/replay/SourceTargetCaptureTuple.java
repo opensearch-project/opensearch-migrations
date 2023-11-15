@@ -9,6 +9,7 @@ import org.json.HTTP;
 import org.json.JSONObject;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
+import org.opensearch.migrations.coreutils.MetricsLogBuilder;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
@@ -125,20 +126,24 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             meta.put("connectionId", tuple.uniqueRequestKey);
             Optional.ofNullable(tuple.errorCause).ifPresent(e->meta.put("error", e));
 
-            if (tuple.targetRequestData != null && tuple.sourcePair.responseData != null) {
+            if (meta.has("sourceResponse") && meta.has("targetResponse")) {
                 String sourceResponseStatus = (String) meta.getJSONObject("sourceResponse").get("Status-Code");
                 String targetResponseStatus = (String) meta.getJSONObject("targetResponse").get("Status-Code");
-                String httpMethod = (String) meta.getJSONObject("sourceRequest").get("Method");
-                String endpoint = (String) meta.getJSONObject("sourceRequest").get("Request-URI");
-
-                metricsLogger.atSuccess(MetricsEvent.STATUS_CODE_COMPARISON)
-                        .setAttribute(MetricsAttributeKey.REQUEST_ID, tuple.uniqueRequestKey.toString())
-                        .setAttribute(MetricsAttributeKey.HTTP_METHOD, httpMethod)
-                        .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, endpoint)
+                MetricsLogBuilder metric = metricsLogger.atSuccess(MetricsEvent.STATUS_CODE_COMPARISON)
+                        .setAttribute(MetricsAttributeKey.REQUEST_ID,
+                                tuple.uniqueRequestKey.getTrafficStreamKey().getConnectionId() + "." + tuple.uniqueRequestKey.getSourceRequestIndex())
                         .setAttribute(MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceResponseStatus)
                         .setAttribute(MetricsAttributeKey.TARGET_HTTP_STATUS, targetResponseStatus)
-                        .setAttribute(MetricsAttributeKey.HTTP_STATUS_MATCH, sourceResponseStatus.equals(targetResponseStatus))
-                        .emit();
+                        .setAttribute(MetricsAttributeKey.HTTP_STATUS_MATCH,
+                                sourceResponseStatus.equals(targetResponseStatus) ? 1 : 0);
+
+                if (meta.has("sourceRequest")) {
+                    String httpMethod = (String) meta.getJSONObject("sourceRequest").get("Method");
+                    String endpoint = (String) meta.getJSONObject("sourceRequest").get("Request-URI");
+                    metric = metric.setAttribute(MetricsAttributeKey.HTTP_METHOD, httpMethod)
+                            .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, endpoint);
+                }
+                metric.emit();
             }
             return meta;
         }
