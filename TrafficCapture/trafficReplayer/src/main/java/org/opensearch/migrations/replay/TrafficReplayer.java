@@ -39,6 +39,9 @@ import software.amazon.awssdk.arns.Arn;
 import software.amazon.awssdk.regions.Region;
 
 import javax.net.ssl.SSLException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.io.EOFException;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
@@ -310,6 +313,11 @@ public class TrafficReplayer {
                         "configuration passed to each of the transformers.")
         String transformerConfig;
         @Parameter(required = false,
+                names = "--transformer-config-file",
+                arity = 1,
+                description = "Path to the JSON configuration file of message transformers.")
+        String transformerConfigFile;
+        @Parameter(required = false,
                 names = "--user-agent",
                 arity = 1,
                 description = "For HTTP requests to the target cluster, append this string (after \"; \") to" +
@@ -330,6 +338,30 @@ public class TrafficReplayer {
             System.exit(2);
             return null;
         }
+    }
+
+    private static String getTransformerConfig(Parameters params)
+    {
+        if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank() &&
+                params.transformerConfig != null && !params.transformerConfig.isBlank()) {
+            System.err.println("Specify either --transformer-config or --transformer-config-file, not both.");
+            System.exit(4);
+        }
+
+        if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank()) {
+            try {
+                return Files.readString(Paths.get(params.transformerConfigFile), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                System.err.println("Error reading transformer configuration file: " + e.getMessage());
+                System.exit(5);
+            }
+        }
+
+        if (params.transformerConfig != null && !params.transformerConfig.isBlank()) {
+            return params.transformerConfig;
+        }
+
+        return null;
     }
 
     public static void main(String[] args)
@@ -355,8 +387,14 @@ public class TrafficReplayer {
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
-            var tr = new TrafficReplayer(uri, params.transformerConfig, authTransformer, params.userAgent,
-                    params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
+            String transformerConfig = getTransformerConfig(params);
+            if (transformerConfig != null)
+            {
+                log.info("Transformations config string: ", transformerConfig);
+            }
+            var tr = new TrafficReplayer(uri, transformerConfig, authTransformer, params.userAgent,
+                    params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
+
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer();
             var timeShifter = new TimeShifter(params.speedupFactor);
