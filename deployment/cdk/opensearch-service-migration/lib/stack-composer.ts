@@ -2,8 +2,6 @@ import {Construct} from "constructs";
 import {RemovalPolicy, Stack, StackProps} from "aws-cdk-lib";
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
-import {EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
-import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
@@ -32,7 +30,7 @@ export interface StackComposerProps extends StackProps {
 export class StackComposer {
     public stacks: Stack[] = [];
 
-    private addStacksToAppRegistry(scope: Construct, appRegistryAppARN: string, allStacks: Stack[]) {
+    private addStacksToAppRegistry(appRegistryAppARN: string, allStacks: Stack[]) {
         for (let stack of allStacks) {
             const appRegistryApp = Application.fromApplicationArn(stack, 'AppRegistryApplicationImport', appRegistryAppARN)
             appRegistryApp.associateApplicationWithStack(stack)
@@ -84,7 +82,6 @@ export class StackComposer {
     constructor(scope: Construct, props: StackComposerProps) {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
-        const account = props.env?.account
         const region = props.env?.region
         const defaultDeployId = 'default'
 
@@ -99,7 +96,6 @@ export class StackComposer {
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         let version: EngineVersion
-        let accessPolicies: PolicyStatement[]|undefined
 
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
@@ -142,6 +138,7 @@ export class StackComposer {
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
+        const trafficReplayerUserAgentSuffix = this.getContextForType('trafficReplayerUserAgentSuffix', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
         const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxySourceEndpoint = this.getContextForType('captureProxySourceEndpoint', 'string', defaultValues, contextJSON)
@@ -336,6 +333,9 @@ export class StackComposer {
                 openAccessPolicyEnabled: true,
                 ...props
             })
+            analyticsDomainStack.addDependency(networkStack)
+            this.stacks.push(analyticsDomainStack)
+
             migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
                 stackName: `OSMigrations-${stage}-${region}-MigrationAnalytics`,
                 description: "This stack contains the OpenTelemetry Collector and Bastion Host",
@@ -345,13 +345,8 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-
-            if (networkStack) {
-                analyticsDomainStack.addDependency(networkStack)
-                migrationAnalyticsStack.addDependency(networkStack)
-            }
+            migrationAnalyticsStack.addDependency(networkStack)
             // The general analytics stack (otel collector) is dependent on the analytics cluster being deployed first
-            this.stacks.push(analyticsDomainStack)
             migrationAnalyticsStack.addDependency(analyticsDomainStack)
             this.stacks.push(migrationAnalyticsStack)
         }
@@ -403,8 +398,9 @@ export class StackComposer {
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
-                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
+                userAgentSuffix: trafficReplayerUserAgentSuffix,
                 extraArgs: trafficReplayerExtraArgs,
+                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
@@ -530,7 +526,7 @@ export class StackComposer {
         }
 
         if (props.migrationsAppRegistryARN) {
-            this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
+            this.addStacksToAppRegistry(props.migrationsAppRegistryARN, this.stacks)
         }
     }
 }

@@ -8,7 +8,6 @@
   "vpcEnabled": true,
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
-  "captureProxyESServiceEnabled": true,
   "trafficReplayerServiceEnabled": true,
   "migrationAnalyticsServiceEnabled": true,
   "migrationAnalyticsBastionEnabled": false,

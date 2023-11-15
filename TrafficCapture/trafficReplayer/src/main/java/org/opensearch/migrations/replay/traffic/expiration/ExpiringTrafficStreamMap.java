@@ -136,17 +136,6 @@ public class ExpiringTrafficStreamMap {
         );
     }
 
-    public Accumulation get(ITrafficStreamKey trafficStreamKey, Instant timestamp) {
-        var accumulation = connectionAccumulationMap.get(makeKey(trafficStreamKey));
-        if (accumulation == null) {
-            return null;
-        }
-        if (!updateExpirationTrackers(trafficStreamKey, new EpochMillis(timestamp), accumulation, 0)) {
-            return null;
-        }
-        return accumulation;
-    }
-
     public Accumulation getOrCreateWithoutExpiration(
             ITrafficStreamKey trafficStreamKey,
             Function<ITrafficStreamKey, Accumulation> accumulationGenerator) {
@@ -181,10 +170,6 @@ public class ExpiringTrafficStreamMap {
 
     public Stream<Accumulation> values() {
         return connectionAccumulationMap.values().stream();
-    }
-
-    public Stream<Map.Entry<ScopedConnectionIdKey, Accumulation>> entries() {
-        return connectionAccumulationMap.entrySet().stream();
     }
 
     public void clear() {

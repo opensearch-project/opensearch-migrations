@@ -74,12 +74,6 @@ public class RequestResponsePacketPair {
                 Collections.unmodifiableList(trafficStreamKeysBeingHeld);
     }
 
-    public Optional<Instant> getLastTimestamp() {
-        return Optional.ofNullable(responseData)
-                .or(()->Optional.ofNullable(requestData))
-                .map(d->d.getLastPacketTimestamp());
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

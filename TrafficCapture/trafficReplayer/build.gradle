@@ -13,7 +13,6 @@ plugins {
     id 'org.opensearch.migrations.java-application-conventions'
 //    id "com.github.spotbugs" version "4.7.3"
 //    id 'checkstyle'
-    id 'org.owasp.dependencycheck' version '8.2.1'
     id "io.freefair.lombok" version "8.0.1"
     id 'java-test-fixtures'
 }
@@ -118,43 +117,3 @@ jar {
         attributes 'Main-Class': application.mainClass
     }
 }
-
-test {
-    useJUnitPlatform()
-
-    systemProperty 'disableMemoryLeakTests', 'true'
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    // remove these comments to show the test logs
-//    testLogging {
-//        events 'PASSED', 'FAILED', 'SKIPPED'
-//        showStandardStreams = true
-//    }
-}
-
-task longTest(type: Test) {
-    systemProperty 'disableMemoryLeakTests', 'false'
-    useJUnitPlatform {
-        includeTags 'longTest'
-    }
-    mustRunAfter test
-}
-
-task longTestSansDocker(type: Test) {
-    systemProperty 'disableMemoryLeakTests', 'false'
-    useJUnitPlatform {
-        includeTags 'longTest'
-        excludeTags 'requiresDocker'
-    }
-    mustRunAfter test
-}
-
-task allTest {
-    dependsOn test, longTest
-}
-
-// Make an alias with plural versions just to reduce cognitive load
-task longTests(dependsOn: 'longTest') {}
-task longTestsSansDocker(dependsOn: 'longTestSansDocker') {}
-task allsTest(dependsOn: 'allTest') {}

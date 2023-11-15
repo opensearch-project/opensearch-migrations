@@ -220,5 +220,5 @@ test('Test that with analytics and assistance stacks enabled, creates two opense
 
     const openSearchStacks =  createStackComposer(contextOptions)
     const domainStacks = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)
-    domainStacks.length == 2
+    expect(domainStacks.length).toEqual(2)
 })

@@ -17,7 +17,7 @@ export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly bastionHostEnabled?: boolean
 }
 
-// The MigrationAnalyticsStack consists of the OpenTelemetry Collector ECS container & an
+// The MigrationAnalyticsStack consists of the OpenTelemetry Collector ECS container & a
 // Bastion host to allow access to the opensearch dashboard.
 export class MigrationAnalyticsStack extends MigrationServiceCore {
 

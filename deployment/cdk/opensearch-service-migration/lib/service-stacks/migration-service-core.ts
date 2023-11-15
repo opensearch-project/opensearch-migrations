@@ -144,7 +144,7 @@ export class MigrationServiceCore extends Stack {
             cluster: ecsCluster,
             taskDefinition: serviceTaskDef,
             assignPublicIp: true,
-            desiredCount: props.taskInstanceCount ? props.taskInstanceCount : 1,
+            desiredCount: props.taskInstanceCount,
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
             // This should be confirmed to be a requirement for Service Connect communication, otherwise be Private

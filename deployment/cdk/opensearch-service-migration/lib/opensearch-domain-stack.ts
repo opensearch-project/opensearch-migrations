@@ -1,7 +1,8 @@
 import {Construct} from "constructs";
 import {
   EbsDeviceVolumeType,
-  ISecurityGroup, IVpc,
+  ISecurityGroup,
+  IVpc,
   SecurityGroup,
   SubnetFilter,
   SubnetSelection
@@ -58,44 +59,42 @@ export class OpenSearchDomainStack extends Stack {
 
   getEbsVolumeType(ebsVolumeTypeName: string) : EbsDeviceVolumeType|undefined {
     const ebsVolumeType: EbsDeviceVolumeType|undefined = ebsVolumeTypeName ? EbsDeviceVolumeType[ebsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
-        if (ebsVolumeTypeName && !ebsVolumeType) {
-            throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
-        }
+    if (ebsVolumeTypeName && !ebsVolumeType) {
+        throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
+    }
     return ebsVolumeType
   }
 
   createOpenAccessPolicy(domainName: string) {
-      const openPolicy = new PolicyStatement({
-          effect: Effect.ALLOW,
-          principals: [new AnyPrincipal()],
-          actions: ["es:*"],
-          resources: [`arn:aws:es:${this.region}:${this.account}:domain/${domainName}/*`]
+    return new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [new AnyPrincipal()],
+        actions: ["es:*"],
+        resources: [`arn:aws:es:${this.region}:${this.account}:domain/${domainName}/*`]
       })
-      return openPolicy
-    }
+  }
 
-    parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
-      let accessPolicies: PolicyStatement[] = []
-      const statements = jsonObject['Statement']
-      if (!statements || statements.length < 1) {
-          throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
-      }
-      // Access policies can provide a single Statement block or an array of Statement blocks
-      if (Array.isArray(statements)) {
-          for (let statementBlock of statements) {
-              const statement = PolicyStatement.fromJson(statementBlock)
-              accessPolicies.push(statement)
-          }
-      }
-      else {
-          const statement = PolicyStatement.fromJson(statements)
-          accessPolicies.push(statement)
-      }
-      return accessPolicies
+  parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
+    let accessPolicies: PolicyStatement[] = []
+    const statements = jsonObject['Statement']
+    if (!statements || statements.length < 1) {
+        throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
+    }
+    // Access policies can provide a single Statement block or an array of Statement blocks
+    if (Array.isArray(statements)) {
+        for (let statementBlock of statements) {
+            const statement = PolicyStatement.fromJson(statementBlock)
+            accessPolicies.push(statement)
+        }
+    }
+    else {
+        const statement = PolicyStatement.fromJson(statements)
+        accessPolicies.push(statement)
+    }
+    return accessPolicies
   }
 
   createSSMParameters(domain: Domain, endpointParameterName: string|undefined, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
-    
     const endpointParameter = endpointParameterName ?? "osClusterEndpoint"
     new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
       description: 'OpenSearch migration parameter for OpenSearch endpoint',
@@ -171,9 +170,9 @@ export class OpenSearchDomainStack extends Stack {
     let accessPolicies: PolicyStatement[] | undefined
     if (props.openAccessPolicyEnabled) {
       accessPolicies = [this.createOpenAccessPolicy(props.domainName)]
-  } else {
+    } else {
       accessPolicies = props.accessPolicyJson ? this.parseAccessPolicies(props.accessPolicyJson) : undefined
-  }
+    }
 
     const domain = new Domain(this, 'Domain', {
       version: props.version,
