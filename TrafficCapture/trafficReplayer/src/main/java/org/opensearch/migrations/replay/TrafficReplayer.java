@@ -331,6 +331,30 @@ public class TrafficReplayer {
         }
     }
 
+    private static String getTransformerConfig(Parameters params)
+    {
+        if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank() &&
+                params.transformerConfig != null && !params.transformerConfig.isBlank()) {
+            System.err.println("Specify either --transformer-config or --transformer-config-file, not both.");
+            System.exit(4);
+        }
+
+        if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank()) {
+            try {
+                return Files.readString(Paths.get(params.transformerConfigFile), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                System.err.println("Error reading transformer configuration file: " + e.getMessage());
+                System.exit(5);
+            }
+        }
+
+        if (params.transformerConfig != null && !params.transformerConfig.isBlank()) {
+            return params.transformerConfig;
+        }
+
+        return null;
+    }
+
     public static void main(String[] args)
             throws IOException, InterruptedException, ExecutionException, TerminationException
     {
@@ -354,22 +378,8 @@ public class TrafficReplayer {
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
-            if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank() && params.transformerConfig != null && !params.transformerConfig.isBlank()) {
-                System.err.println("Specify either --transformer-config or --transformer-config-file, not both.");
-                System.exit(4);
-            }
-            String configContent = null;
-            if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank()) {
-                try {
-                    configContent = Files.readString(Paths.get(params.transformerConfigFile), StandardCharsets.UTF_8);
-                } catch (IOException e) {
-                    System.err.println("Error reading transformer configuration file: " + e.getMessage());
-                    System.exit(5);
-                }
-            } else if (params.transformerConfig != null && !params.transformerConfig.isBlank()) {
-                configContent = params.transformerConfig;
-            }
-            var tr = new TrafficReplayer(uri, configContent, authTransformer,
+            String transformerConfig = getTransformerConfig(params);
+            var tr = new TrafficReplayer(uri, transformerConfig, authTransformer,
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer();
