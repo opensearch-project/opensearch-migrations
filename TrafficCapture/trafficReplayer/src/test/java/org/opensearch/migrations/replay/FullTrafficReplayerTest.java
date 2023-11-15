@@ -92,7 +92,6 @@ public class FullTrafficReplayerTest {
     })
     @Tag("longTest")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
-        Assume.assumeTrue(false);
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response->TestHttpServerContext.makeResponse(random,response));

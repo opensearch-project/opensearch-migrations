@@ -96,7 +96,6 @@ public class KafkaProtobufConsumerLongTermTest {
     @Test
     @Tag("longTest")
     public void testTrafficCaptureSource() throws Exception {
-        Assume.assumeTrue(false);
         String testTopicName = "TEST_TOPIC";
 
         var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),

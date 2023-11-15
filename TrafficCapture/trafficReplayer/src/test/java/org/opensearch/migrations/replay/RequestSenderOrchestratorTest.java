@@ -31,7 +31,6 @@ class RequestSenderOrchestratorTest {
     @Test
     @Tag("longTest")
     public void testThatSchedulingWorks() throws Exception {
-        Assume.assumeTrue(false);
         var httpServer = SimpleHttpServer.makeServer(false,
                 r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)));
         var testServerUri = httpServer.localhostEndpoint();
