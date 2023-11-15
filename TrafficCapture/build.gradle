@@ -1,3 +1,11 @@
+plugins {
+    id 'jacoco'
+}
+
+repositories {
+    mavenCentral()
+}
+
 allprojects {
     apply plugin: 'java'
     apply plugin: 'jacoco'
@@ -7,6 +15,11 @@ allprojects {
             languageVersion = JavaLanguageVersion.of(11)
         }
     }
+
+    jacoco {
+        toolVersion = '0.8.9'
+    }
+
     test {
         // Provide way to exclude particular tests from CLI
         // e.g. ./gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
@@ -18,32 +31,27 @@ allprojects {
             excludeTags 'longTest'
         }
         jvmArgs '-ea'
+
+        jacoco {
+            enabled = false
+        }
     }
+
     task slowTest(type: Test) {
+        dependsOn test
         // Provide way to exclude particular tests from CLI
         // e.g. ./gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
         if (project.hasProperty('excludeTests')) {
             exclude project.property('excludeTests')
         }
-        jvmArgs '-ea'
         systemProperty 'disableMemoryLeakTests', 'false'
         useJUnitPlatform {
-            includeTags 'longTest'
-        }
-        mustRunAfter test
-    }
-    task slowTestSansDocker(type: Test) {
-        // Provide way to exclude particular tests from CLI
-        // e.g. ./gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
-        if (project.hasProperty('excludeTests')) {
-            exclude project.property('excludeTests')
         }
         jvmArgs '-ea'
-        systemProperty 'disableMemoryLeakTests', 'false'
-        useJUnitPlatform {
-            includeTags 'longTest'
+
+        jacoco {
+            enabled = true
         }
-        mustRunAfter test
     }
 
     // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
@@ -53,13 +61,28 @@ allprojects {
         from configurations.runtimeClasspath
         into "${buildDir}/dependencies"
     }
+}
 
-    jacocoTestReport {
-        reports {
-            xml.required = true
-            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
-            html.required = true
-            html.destination file("${buildDir}/reports/jacoco/test/html")
-        }
+jacocoTestReport {
+    dependsOn subprojects*.slowTest
+    additionalSourceDirs.from(files(subprojects.sourceSets.main.allSource.srcDirs))
+    sourceDirectories.from(files(subprojects.sourceSets.main.allSource.srcDirs))
+    classDirectories.from(files(subprojects.sourceSets.main.output))
+    executionData.from(subprojects.collect {
+        "${it.buildDir}/jacoco/slowTest.exec"
+    })
+
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: ['**/protos/**', '**/JMeterLoadTest**'])
+        }))
+    }
+
+    reports {
+        println("Builddir=${buildDir}...${classDirectories}")
+        xml.required = true
+        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        html.required = true
+        html.destination file("${buildDir}/reports/jacoco/test/html")
     }
 }
