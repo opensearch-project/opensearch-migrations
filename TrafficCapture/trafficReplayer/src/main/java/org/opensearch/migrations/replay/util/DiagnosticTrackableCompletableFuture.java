@@ -59,15 +59,6 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
             return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.completedFuture(v), diagnosticSupplier,
                     null);
         }
-
-        public static <D> DiagnosticTrackableCompletableFuture<D, Void>
-        allOf(@NonNull DiagnosticTrackableCompletableFuture<D,Void>[] allRemainingWorkArray,
-              @NonNull Supplier<D> diagnosticSupplier) {
-            return new DiagnosticTrackableCompletableFuture<>(
-                    CompletableFuture.allOf(Arrays.stream(allRemainingWorkArray)
-                            .map(tcf->tcf.future).toArray(CompletableFuture[]::new)),
-                    diagnosticSupplier, null);
-        }
     }
 
     private DiagnosticTrackableCompletableFuture(
