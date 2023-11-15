@@ -14,7 +14,9 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly enableClusterFGACAuth: boolean,
     readonly addOnMigrationId?: string,
     readonly customKafkaGroupId?: string,
-    readonly extraArgs?: string
+    readonly userAgentSuffix?: string,
+    readonly extraArgs?: string,
+    readonly analyticsServiceEnabled?: boolean
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -94,14 +96,18 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
+
         let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth`
         if (props.enableClusterFGACAuth) {
             const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
         }
+        replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
+        replayerCommand = props.analyticsServiceEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
+            taskInstanceCount: 0,
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
             dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
             securityGroups: securityGroups,

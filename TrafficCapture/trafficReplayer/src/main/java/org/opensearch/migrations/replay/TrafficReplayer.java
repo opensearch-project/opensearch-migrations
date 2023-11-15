@@ -121,19 +121,22 @@ public class TrafficReplayer {
                            IAuthTransformerFactory authTransformerFactory,
                            boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, fullTransformerConfig, authTransformerFactory, allowInsecureConnections, 0, 1024);
+        this(serverUri, fullTransformerConfig, authTransformerFactory, null, allowInsecureConnections,
+                0, 1024);
     }
 
 
     public TrafficReplayer(URI serverUri,
                            String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
+                           String userAgent,
                            boolean allowInsecureConnections,
                            int numSendingThreads, int maxConcurrentOutstandingRequests)
             throws SSLException {
         this(serverUri, authTransformerFactory, allowInsecureConnections,
                 numSendingThreads, maxConcurrentOutstandingRequests,
-                new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost(), fullTransformerConfig)
+                new TransformationLoader()
+                        .getTransformerFactoryLoader(serverUri.getHost(), userAgent, fullTransformerConfig)
         );
     }
     
@@ -314,6 +317,12 @@ public class TrafficReplayer {
                 arity = 1,
                 description = "Path to the JSON configuration file of message transformers.")
         String transformerConfigFile;
+        @Parameter(required = false,
+                names = "--user-agent",
+                arity = 1,
+                description = "For HTTP requests to the target cluster, append this string (after \"; \") to" +
+                        "the existing user-agent field or if the field wasn't present, simply use this value")
+        String userAgent;
     }
 
     private static Parameters parseArgs(String[] args) {
@@ -383,8 +392,9 @@ public class TrafficReplayer {
             {
                 log.info("Transformations config string: ", transformerConfig);
             }
-            var tr = new TrafficReplayer(uri, transformerConfig, authTransformer,
+            var tr = new TrafficReplayer(uri, transformerConfig, authTransformer, params.userAgent,
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
+
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer();
             var timeShifter = new TimeShifter(params.speedupFactor);

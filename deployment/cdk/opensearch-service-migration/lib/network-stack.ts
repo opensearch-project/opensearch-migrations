@@ -9,8 +9,9 @@ import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface NetworkStackProps extends StackPropsExt {
-    readonly vpcId?: string,
-    readonly availabilityZoneCount?: number,
+    readonly vpcId?: string
+    readonly availabilityZoneCount?: number
+    readonly migrationAnalyticsEnabled?: boolean
     readonly targetClusterEndpoint?: string
 }
 
@@ -104,6 +105,19 @@ export class NetworkStack extends Stack {
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
                 stringValue: defaultSecurityGroup.securityGroupId
             });
+
+            if (props.migrationAnalyticsEnabled) {
+                const analyticsSecurityGroup = new SecurityGroup(this, 'migrationAnalyticsSG', {
+                    vpc: this.vpc
+                });
+                analyticsSecurityGroup.addIngressRule(analyticsSecurityGroup, Port.allTraffic());
+
+                new StringParameter(this, 'SSMParameterMigrationAnalyticsSGId', {
+                    description: 'Migration Assistant parameter for analytics domain access security group id',
+                    parameterName: `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`,
+                    stringValue: analyticsSecurityGroup.securityGroupId
+                });
+            }
         }
 
         if (props.targetClusterEndpoint) {

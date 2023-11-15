@@ -108,6 +108,15 @@ To be able to execute this command the user will need to have their AWS credenti
 }
 ```
 
+## Starting the Traffic Replayer
+When the Migration solution is deployed, the Traffic Replayer does not immediately begin replaying. This is designed to allow users time to do any historical backfill (e.g. Fetch Migration service) that is needed as well as setup the Capture Proxy on their source coordinating nodes. When the user is ready they can then run the following command from the Migration Console service and begin replaying the traffic that has been captured by the Capture Proxy
+
+```shell
+aws ecs update-service --cluster migration-<STAGE>-ecs-cluster --service migration-<STAGE>-traffic-replayer-default --desired-count 1
+```
+
+With this same command, a user could stop replaying capture traffic by removing the Traffic Replayer instance if they set `--desired-count 0` 
+
 ## Testing the deployed solution
 
 Once the solution is deployed, the easiest way to test the solution is to access the `migration-console` service container and run an opensearch-benchmark workload through to simulate incoming traffic, as the following steps illustrate
@@ -176,6 +185,20 @@ echo $FETCH_MIGRATION_COMMAND
 ```
 
 The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
+
+## Accessing the Migration Analytics Domain
+
+The analytics domain receives metrics and events from the Capture Proxy and Replayer (if configured) and allows a user to visualize the progress and success of their migration.
+
+The domain & dashboard are only accessible from within the VPC, but a BastionHost is optionally set up within the VPC that allows a user to use Session Manager to make the dashboard avaiable locally via port forwarding.
+
+For the Bastion Host to be available, add `"migrationAnalyticsBastionEnabled": true` to cdk.context.json and redeploy at least the MigrationAnalytics stack.
+
+Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/_dashboards to view your dashboard.
+```shell
+# ./accessAnalyticsDashboard.sh STAGE REGION
+./accessAnalyticsDashboard.sh dev us-east-1
+```
 
 
 ## Tearing down CDK
