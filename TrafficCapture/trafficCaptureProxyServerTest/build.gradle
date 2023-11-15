@@ -4,7 +4,6 @@ plugins {
     //The 'com.bmushcko.docker-remote-api' line IS required (due to the remaining DockerBuildImage tasks) but W/O
     // a specified version. The version is managed within the buildSrc/build.gradle file.
     id 'com.bmuschko.docker-remote-api'
-    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 import org.opensearch.migrations.common.CommonUtils
 import org.opensearch.migrations.common.CommonConfigurations
