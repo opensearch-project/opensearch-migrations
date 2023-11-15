@@ -60,8 +60,8 @@ class RequestSenderOrchestratorTest {
             var arr = cf.get();
             Assertions.assertEquals(null, arr.error);
             Assertions.assertTrue(arr.responseSizeInBytes > 0);
-            var httpMessage = PrettyPrinter.parseHttpMessageFromBufs(PrettyPrinter.HttpMessageType.RESPONSE,
-                    arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())));
+            var httpMessage = HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
+                    arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())), false);
             try {
                 var response = (FullHttpResponse) httpMessage;
                 Assertions.assertEquals(200, response.status().code());
