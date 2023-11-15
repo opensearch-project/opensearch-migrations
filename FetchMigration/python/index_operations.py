@@ -8,6 +8,7 @@ from index_doc_count import IndexDocCount
 
 SETTINGS_KEY = "settings"
 MAPPINGS_KEY = "mappings"
+ALIASES_KEY = "aliases"
 COUNT_KEY = "count"
 __INDEX_KEY = "index"
 __ALL_INDICES_ENDPOINT = "*"
@@ -43,6 +44,8 @@ def create_indices(indices_data: dict, endpoint: EndpointInfo):
         data_dict = dict()
         data_dict[SETTINGS_KEY] = indices_data[index][SETTINGS_KEY]
         data_dict[MAPPINGS_KEY] = indices_data[index][MAPPINGS_KEY]
+        if ALIASES_KEY in indices_data[index] and len(indices_data[index][ALIASES_KEY]) > 0:
+            data_dict[ALIASES_KEY] = indices_data[index][ALIASES_KEY]
         try:
             resp = requests.put(index_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(),
                                 json=data_dict)

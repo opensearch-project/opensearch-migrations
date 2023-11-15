@@ -10,11 +10,13 @@ INDEX2_NAME = "index2"
 INDEX3_NAME = "index3"
 SETTINGS_KEY = "settings"
 MAPPINGS_KEY = "mappings"
+ALIASES_KEY = "aliases"
 INDEX_KEY = "index"
 NUM_SHARDS_SETTING = "number_of_shards"
 NUM_REPLICAS_SETTING = "number_of_replicas"
 BASE_INDICES_DATA = {
     INDEX1_NAME: {
+        ALIASES_KEY: {},
         SETTINGS_KEY: {
             INDEX_KEY: {
                 # Internal data
@@ -31,6 +33,9 @@ BASE_INDICES_DATA = {
         }
     },
     INDEX2_NAME: {
+        ALIASES_KEY: {
+            "alias2": {}
+        },
         SETTINGS_KEY: {
             INDEX_KEY: {
                 NUM_SHARDS_SETTING: 2,
@@ -42,6 +47,9 @@ BASE_INDICES_DATA = {
         }
     },
     INDEX3_NAME: {
+        ALIASES_KEY: {
+            "alias3": {"filter": {"term": {"id": "test"}}}
+        },
         SETTINGS_KEY: {
             INDEX_KEY: {
                 NUM_SHARDS_SETTING: 1,
