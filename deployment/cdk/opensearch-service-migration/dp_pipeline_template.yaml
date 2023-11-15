@@ -7,8 +7,6 @@ historical-data-migration:
       # unless the file is being used outside of the CDK
       hosts:
       - <SOURCE_CLUSTER_HOST>
-      # Uncomment the following line to disable TLS
-      #insecure: true
       # Example configuration on how to disable authentication (default: false)
       disable_authentication: true
       indices:
