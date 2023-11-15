@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Create index
-echo -e "\nCreating an example index\n"
+echo -e "Creating an example index"
 curl -X PUT "https://localhost:19200/test" -u admin:admin --insecure --header 'Content-Type: application/json' -d'
 {
   "settings" : {
@@ -12,7 +12,7 @@ curl -X PUT "https://localhost:19200/test" -u admin:admin --insecure --header 'C
 '
 
 # Index a doc
-echo -e "\nIndexing an example document\n"
+echo -e "\n\nIndexing an example document"
 curl -X POST "https://localhost:19200/test/_doc/1" -u admin:admin --insecure --header 'Content-Type: application/json' -d'
 {
   "field": "old_value",
@@ -21,7 +21,7 @@ curl -X POST "https://localhost:19200/test/_doc/1" -u admin:admin --insecure --h
 '
 
 # Create snapshot repo on source
-echo -e "\nCreating snapshot repo on source cluster\n"
+echo -e "\n\nCreating snapshot repo on source cluster"
 curl -X PUT "https://localhost:19200/_snapshot/my_backup" -u admin:admin --insecure --header 'Content-Type: application/json' -d'
 {
   "type": "fs",
@@ -33,17 +33,17 @@ curl -X PUT "https://localhost:19200/_snapshot/my_backup" -u admin:admin --insec
 '
 
 # Create snapshot
-echo -e "\nCreating snapshot on source cluster\n"
+echo -e "\n\nCreating snapshot on source cluster"
 curl -X PUT "https://localhost:19200/_snapshot/my_backup/snapshot_1?wait_for_completion=true" -u admin:admin --insecure --header 'Content-Type: application/json'
 
 # Copy snapshots files from ES to OS through local environment #TODO: move through cloud?
 echo -e "\nCopying snapshot files from source cluster to target cluster\n"
-docker cp $(docker ps --format="{{.ID}}" --filter name=elasticsearch):/usr/share/elasticsearch/snapshots .
-docker cp snapshots $(docker ps --format="{{.ID}}" --filter name=opensearch):/usr/share/opensearch/snapshots
+docker cp $(docker ps --format="{{.ID}}" --filter name=capture-proxy-es):/usr/share/elasticsearch/snapshots .
+docker cp snapshots $(docker ps --format="{{.ID}}" --filter name=opensearchtarget):/usr/share/opensearch/snapshots
 
 
 # Create snapshot repo on target
-echo -e "\nCreating snapshot repo on target cluster\n"
+echo -e "\n\nCreating snapshot repo on target cluster"
 curl -X PUT "https://localhost:29200/_snapshot/my_backup" -u admin:admin --insecure --header 'Content-Type: application/json' -d'
 {
   "type": "fs",
@@ -55,18 +55,18 @@ curl -X PUT "https://localhost:29200/_snapshot/my_backup" -u admin:admin --insec
 '
 
 # Restore snapshot
-echo -e "\nRestoring from snapshot\n"
+echo -e "\n\nRestoring from snapshot"
 curl -X POST "https://localhost:29200/_snapshot/my_backup/snapshot_1/_restore" -u admin:admin --insecure --header 'Content-Type: application/json'
 
 # Wait for a moment to ensure restore completes
 sleep 10
 
 # See how document looks like now
-echo -e "\nChecking how document looks like BEFORE the conflict resolution script is ran.\n"
+echo -e "\n\nChecking how document looks like BEFORE the conflict resolution script is ran."
 curl -X GET "https://localhost:29200/test/_doc/1" -u admin:admin --insecure
 
 # Run conflict resolution script with new data
-echo -e "\nRunning conflict resolution script with new data\n"
+echo -e "\n\nRunning conflict resolution script with new data"
 curl -X POST "https://localhost:29200/test/_update/1" -u admin:admin --insecure --header 'Content-Type: application/json' -d'
 {
     "script" : {
@@ -85,10 +85,10 @@ curl -X POST "https://localhost:29200/test/_update/1" -u admin:admin --insecure 
 
 
 # See how document looks like after it was updated with script.
-echo -e "\nChecking how document looks like AFTER it was updated with script.\n"
+echo -e "\n\nChecking how document looks like AFTER it was updated with script."
 curl -X GET "https://localhost:29200/test/_doc/1" -u admin:admin --insecure
 
-echo -e "\nTesting with a document that doesn't have a newer timestamp\n"
+echo -e "\n\nTesting with a document that doesn't have a newer timestamp"
 curl -X POST "https://localhost:29200/test/_update/1" -u admin:admin --insecure --header 'Content-Type: application/json' -d'
 {
     "script" : {
@@ -104,5 +104,5 @@ curl -X POST "https://localhost:29200/test/_update/1" -u admin:admin --insecure 
 }
 '
 
-echo -e "\nChecking if document got updated after the script was ran.\n"
+echo -e "\n\nChecking if document got updated after the script was ran."
 curl -X GET "https://localhost:29200/test/_doc/1" -u admin:admin --insecure
