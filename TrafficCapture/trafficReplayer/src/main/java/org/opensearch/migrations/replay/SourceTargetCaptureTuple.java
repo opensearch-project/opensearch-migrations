@@ -7,6 +7,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.HTTP;
 import org.json.JSONObject;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
@@ -27,6 +30,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
     public static final String OUTPUT_TUPLE_JSON_LOGGER = "OutputTupleJsonLogger";
+    private static final MetricsLogger metricsLogger = new MetricsLogger("SourceTargetCaptureTuple");
+
     final UniqueSourceRequestKey uniqueRequestKey;
     final RequestResponsePacketPair sourcePair;
     final TransformedPackets targetRequestData;
@@ -119,6 +124,18 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
                     .ifPresent(d-> meta.put("targetResponse", jsonFromHttpData(d, tuple.targetResponseDuration)));
             meta.put("connectionId", tuple.uniqueRequestKey);
             Optional.ofNullable(tuple.errorCause).ifPresent(e->meta.put("error", e));
+
+            if (tuple.targetRequestData != null && tuple.sourcePair.responseData != null) {
+                String sourceResponseStatus = (String) meta.getJSONObject("sourceResponse").get("Status-Code");
+                String targetResponseStatus = (String) meta.getJSONObject("targetREsponse").get("Status-Code");
+
+                metricsLogger.atSuccess(MetricsEvent.STATUS_CODE_COMPARISON)
+                        .setAttribute(MetricsAttributeKey.REQUEST_ID, tuple.uniqueRequestKey.toString())
+                        .setAttribute(MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceResponseStatus)
+                        .setAttribute(MetricsAttributeKey.TARGET_HTTP_STATUS, targetResponseStatus)
+                        .setAttribute(MetricsAttributeKey.HTTP_STATUS_MATCH, sourceResponseStatus.equals(targetResponseStatus))
+                        .emit();
+            }
             return meta;
         }
 
