@@ -6,11 +6,13 @@ import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
+import {createOpenSearchIAMAccessPolicy, createOpenSearchServerlessIAMAccessPolicy} from "../common-utilities";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly fetchMigrationEnabled: boolean
+    readonly fetchMigrationEnabled: boolean,
+    readonly migrationAnalyticsEnabled: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -21,8 +23,12 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
+            SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`)),
         ]
+        if (props.migrationAnalyticsEnabled) {
+            securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)))
+        }
+
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
 
@@ -75,12 +81,21 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "kafka-cluster:*"
             ]
         })
-
+        const allReplayerServiceArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:service/migration-${props.stage}-ecs-cluster/migration-${props.stage}-traffic-replayer*`
+        const updateReplayerServicePolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [allReplayerServiceArn],
+            actions: [
+                "ecs:UpdateService"
+            ]
+        })
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
         }
-        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy]
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy]
 
         if (props.fetchMigrationEnabled) {
             environment["FETCH_MIGRATION_COMMAND"] = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`)

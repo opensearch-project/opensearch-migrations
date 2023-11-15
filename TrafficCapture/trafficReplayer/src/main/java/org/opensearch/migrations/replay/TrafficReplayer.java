@@ -118,19 +118,22 @@ public class TrafficReplayer {
                            IAuthTransformerFactory authTransformerFactory,
                            boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, fullTransformerConfig, authTransformerFactory, allowInsecureConnections, 0, 1024);
+        this(serverUri, fullTransformerConfig, authTransformerFactory, null, allowInsecureConnections,
+                0, 1024);
     }
 
 
     public TrafficReplayer(URI serverUri,
                            String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
+                           String userAgent,
                            boolean allowInsecureConnections,
                            int numSendingThreads, int maxConcurrentOutstandingRequests)
             throws SSLException {
         this(serverUri, authTransformerFactory, allowInsecureConnections,
                 numSendingThreads, maxConcurrentOutstandingRequests,
-                new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost(), fullTransformerConfig)
+                new TransformationLoader()
+                        .getTransformerFactoryLoader(serverUri.getHost(), userAgent, fullTransformerConfig)
         );
     }
     
@@ -300,9 +303,18 @@ public class TrafficReplayer {
         @Parameter(required = false,
                 names = "--transformer-config",
                 arity = 1,
-                description = "Json configuration of message transformers.  Keys are the names of the loaded transformers " +
-                "(shortname or longname) and values are the configuration passed to each of the transformers.")
+                description = "Configuration of message transformers.  Either as a string that identifies the " +
+                        "transformer that should be run (with default settings) or as json to specify options " +
+                        "as well as multiple transformers to run in sequence.  " +
+                        "For json, keys are the (simple) names of the loaded transformers and values are the " +
+                        "configuration passed to each of the transformers.")
         String transformerConfig;
+        @Parameter(required = false,
+                names = "--user-agent",
+                arity = 1,
+                description = "For HTTP requests to the target cluster, append this string (after \"; \") to" +
+                        "the existing user-agent field or if the field wasn't present, simply use this value")
+        String userAgent;
     }
 
     private static Parameters parseArgs(String[] args) {
@@ -343,7 +355,7 @@ public class TrafficReplayer {
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
-            var tr = new TrafficReplayer(uri, params.transformerConfig, authTransformer,
+            var tr = new TrafficReplayer(uri, params.transformerConfig, authTransformer, params.userAgent,
                     params.allowInsecureConnections, params.numClientThreads,  params.maxConcurrentRequests);
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer();

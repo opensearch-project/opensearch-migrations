@@ -9,10 +9,13 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.junit.Assume;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.opensearch.migrations.AssumeDockerIsAvailableExtension;
 import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -38,6 +41,8 @@ import java.util.stream.Stream;
 
 @Slf4j
 @Testcontainers
+@ExtendWith(AssumeDockerIsAvailableExtension.class)
+@Tag("requiresDocker")
 public class KafkaRestartingTrafficReplayerTest {
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
@@ -52,7 +57,8 @@ public class KafkaRestartingTrafficReplayerTest {
     @Container
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
     private KafkaContainer embeddedKafkaBroker
-             = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));;
+             = AssumeDockerIsAvailableExtension.assumeNoThrow(
+                     ()->new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0")));
 
     private static class CounterLimitedReceiverFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
         AtomicInteger nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);

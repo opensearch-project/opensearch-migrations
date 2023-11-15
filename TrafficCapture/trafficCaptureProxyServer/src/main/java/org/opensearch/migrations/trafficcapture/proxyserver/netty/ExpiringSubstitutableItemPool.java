@@ -255,11 +255,6 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         return durationTrackingDecoratedItem.apply(itemSupplier.get(), "FRESH: ");
     }
 
-    public void close() {
-        inactivityTimeout = Duration.ZERO;
-        expireItems();
-    }
-
     private void scheduleItemLoadsRecurse(int itemsToLoad, Duration gapBetweenLoads) {
         eventLoop.schedule(()-> {
             beginLoadingNewItemIfNecessary();

@@ -25,7 +25,8 @@ class HttpJsonTransformingConsumerTest {
                 new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler =
-                new HttpJsonTransformingConsumer<AggregatedRawResponse>(new TransformationLoader().getTransformerFactoryLoader(null, null),
+                new HttpJsonTransformingConsumer<AggregatedRawResponse>(new TransformationLoader()
+                        .getTransformerFactoryLoader(null),
                         null, testPacketCapture, "TEST",
                         TestRequestKey.getTestConnectionRequestId(0));
         byte[] testBytes;

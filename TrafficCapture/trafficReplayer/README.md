@@ -115,16 +115,28 @@ host header of every HTTP message to use the target domain-name rather than the 
 all loaded/specified transformations.
 
 Currently, there are multiple, nascent implementations included in the repository.  The 
+[JsonJMESPathTransformerProvider](../replayerPlugins/jsonMessageTransformers/jsonJMESPathMessageTransformerProvider) 
+package uses JMESPath expressions to transform requests and the
 [jsonJoltMessageTransformerProvider](../replayerPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider)
-package uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms.  That transformer can be configured to apply a full script or to use
-a "canned" transform whose script is already included with the library.  Examples of using a built-in transform to 
-add GZIP encoding and another to apply a new header would be configured with the following.
+package uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms.  The JMESPathTransformer takes an inlined script as shown below.
+The Jolt transformer can be configured to apply a full script or to use a "canned" transform whose script is 
+already included with the library.  
+
+The following is an examples that uses a JMESPath transformation to excise "oldType", followed by a built-in
+transform to add GZIP encoding and another to apply a new header would be configured with the following.
 
 ```
-[{"org.opensearch.migrations.transform.JsonJoltTransformerProvider": { "canned": "ADD_GZIP" }},
-{ "org.opensearch.migrations.transform.JsonJoltTransformerProvider":  {"script": 
+[
+{"JsonJMESPathTransformerProvider": { "script": 
+    "{\"method\": method,\"URI\": URI,\"headers\":headers,\"payload\":{\"inlinedJsonBody\":{\"mappings\": payload.inlinedJsonBody.mappings.oldType}}}"}},
+{"JsonJoltTransformerProvider": { "canned": "ADD_GZIP" }},
+{"JsonJoltTransformerProvider":  {"script": 
     { "operation": "modify-overwrite-beta", "spec":       { "headers": {"newHeader": "newValue"}}}}}]
 ```
+
+To run only one transformer without any configuration, the `--transformer-config` argument can simply 
+be set to the classname of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
+without quotes or any json surrounding it).
 
 Some simple transformations are included to change headers to add compression or to force an HTTP message payload to 
 be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../replayerPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),

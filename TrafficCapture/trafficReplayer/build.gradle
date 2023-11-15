@@ -40,7 +40,9 @@ dependencies {
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
     implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    implementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
@@ -60,6 +62,7 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
     implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.20.127'
     implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.9'
+    implementation 'org.apache.commons:commons-compress:1.24.0'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
@@ -73,6 +76,9 @@ dependencies {
     testImplementation project(':captureOffloader')
     testImplementation testFixtures(project(path: ':captureOffloader'))
     testImplementation testFixtures(project(path: ':testUtilities'))
+    testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
+    testImplementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.x.x'
@@ -98,6 +104,9 @@ configurations.all {
                 details.useVersion targetVersion
             }
         }
+        if (details.requested.group == 'io.netty') {
+            details.useVersion '4.1.100.Final'
+        }
     }
 }
 
@@ -109,30 +118,4 @@ jar {
     manifest {
         attributes 'Main-Class': application.mainClass
     }
-}
-
-test {
-    useJUnitPlatform()
-
-    systemProperty 'disableMemoryLeakTests', 'true'
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    // remove these comments to show the test logs
-//    testLogging {
-//        events 'PASSED', 'FAILED', 'SKIPPED'
-//        showStandardStreams = true
-//    }
-}
-
-task longTest(type: Test) {
-    systemProperty 'disableMemoryLeakTests', 'false'
-    useJUnitPlatform {
-        includeTags 'longTest'
-    }
-    mustRunAfter test
-}
-
-task allTests {
-    dependsOn test, longTest
 }
