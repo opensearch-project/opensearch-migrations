@@ -71,7 +71,8 @@ def fetch_all_indices(endpoint: EndpointInfo) -> dict:
         raise RuntimeError(f"Failed to fetch metadata from cluster endpoint: {e!s}")
 
 
-def create_indices(indices_data: dict, endpoint: EndpointInfo):
+def create_indices(indices_data: dict, endpoint: EndpointInfo) -> dict:
+    failed_indices = dict()
     for index in indices_data:
         index_endpoint = endpoint.add_path(index)
         data_dict = dict()
@@ -81,10 +82,12 @@ def create_indices(indices_data: dict, endpoint: EndpointInfo):
             data_dict[ALIASES_KEY] = indices_data[index][ALIASES_KEY]
         try:
             resp = requests.put(index_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(),
-                                json=data_dict)
+                                json=data_dict, timeout=__TIMEOUT_SECONDS)
             resp.raise_for_status()
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Failed to create index [{index}] - {e!s}")
+            failed_indices[index] = e
+    # Loop completed, return failures if any
+    return failed_indices
 
 
 def doc_count(indices: set, endpoint: EndpointInfo) -> IndexDocCount:
