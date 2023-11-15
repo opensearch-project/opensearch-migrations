@@ -40,6 +40,8 @@ dependencies {
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
     implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
@@ -74,6 +76,9 @@ dependencies {
     testImplementation project(':captureOffloader')
     testImplementation testFixtures(project(path: ':captureOffloader'))
     testImplementation testFixtures(project(path: ':testUtilities'))
+    testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
+    testImplementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.x.x'
@@ -114,43 +119,3 @@ jar {
         attributes 'Main-Class': application.mainClass
     }
 }
-
-test {
-    useJUnitPlatform()
-
-    systemProperty 'disableMemoryLeakTests', 'true'
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    // remove these comments to show the test logs
-//    testLogging {
-//        events 'PASSED', 'FAILED', 'SKIPPED'
-//        showStandardStreams = true
-//    }
-}
-
-task longTest(type: Test) {
-    systemProperty 'disableMemoryLeakTests', 'false'
-    useJUnitPlatform {
-        includeTags 'longTest'
-    }
-    mustRunAfter test
-}
-
-task longTestSansDocker(type: Test) {
-    systemProperty 'disableMemoryLeakTests', 'false'
-    useJUnitPlatform {
-        includeTags 'longTest'
-        excludeTags 'requiresDocker'
-    }
-    mustRunAfter test
-}
-
-task allTest {
-    dependsOn test, longTest
-}
-
-// Make an alias with plural versions just to reduce cognitive load
-task longTests(dependsOn: 'longTest') {}
-task longTestsSansDocker(dependsOn: 'longTestSansDocker') {}
-task allsTest(dependsOn: 'allTest') {}

@@ -137,7 +137,7 @@ public class TrafficReplayerRunner {
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
         log.info("Starting a new replayer and running it");
         var tr = new TrafficReplayer(endpoint, null,
-                new StaticAuthTransformerFactory("TEST"),
+                new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10*1024);
 
         try (var os = new NullOutputStream();

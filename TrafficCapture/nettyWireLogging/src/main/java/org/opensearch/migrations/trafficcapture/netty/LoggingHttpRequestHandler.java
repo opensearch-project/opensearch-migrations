@@ -1,7 +1,6 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -84,11 +83,11 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         );
     }
 
-    private HttpCaptureSerializerUtil.HttpProcessedState parseHttpMessageParts(ByteBuf msg)  {
+    private HttpProcessedState parseHttpMessageParts(ByteBuf msg)  {
         httpDecoderChannel.writeInbound(msg); // Consume this outright, up to the caller to know what else to do
         return getHandlerThatHoldsParsedHttpRequest().isDone ?
-                HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE :
-                HttpCaptureSerializerUtil.HttpProcessedState.ONGOING;
+                HttpProcessedState.FULL_MESSAGE :
+                HttpProcessedState.ONGOING;
     }
 
     private SimpleDecodedHttpRequestHandler getHandlerThatHoldsParsedHttpRequest() {
@@ -138,7 +137,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         var timestamp = Instant.now();
-        HttpCaptureSerializerUtil.HttpProcessedState httpProcessedState;
+        HttpProcessedState httpProcessedState;
         {
             var bb = ((ByteBuf) msg).retainedDuplicate();
             trafficOffloader.addReadEvent(timestamp, bb);
@@ -147,7 +146,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
             httpProcessedState = parseHttpMessageParts(bb); // bb is consumed/release by this method
         }
-        if (httpProcessedState == HttpCaptureSerializerUtil.HttpProcessedState.FULL_MESSAGE) {
+        if (httpProcessedState == HttpProcessedState.FULL_MESSAGE) {
             var httpRequest = getHandlerThatHoldsParsedHttpRequest().resetCurrentRequest();
             var decoderResultLoose = httpRequest.decoderResult();
             if (decoderResultLoose instanceof HttpMessageDecoderResult) {

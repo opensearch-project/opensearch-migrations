@@ -10,10 +10,6 @@ public class PojoTrafficStreamKey implements ITrafficStreamKey {
     private final String connectionId;
     private final int trafficStreamIndex;
 
-    public PojoTrafficStreamKey(ITrafficStreamKey orig) {
-        this(orig.getNodeId(), orig.getConnectionId(), orig.getTrafficStreamIndex());
-    }
-
     public PojoTrafficStreamKey(TrafficStream stream) {
         this(stream.getNodeId(), stream.getConnectionId(), TrafficStreamUtils.getTrafficStreamIndex(stream));
     }

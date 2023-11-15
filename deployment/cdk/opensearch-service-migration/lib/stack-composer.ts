@@ -9,6 +9,7 @@ import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {FetchMigrationStack} from "./fetch-migration-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
+import {MigrationAnalyticsStack} from "./service-stacks/migration-analytics-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
@@ -66,24 +67,18 @@ export class StackComposer {
         return option
     }
 
-    private parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
-        let accessPolicies: PolicyStatement[] = []
-        const statements = jsonObject['Statement']
-        if (!statements || statements.length < 1) {
-            throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
+
+    private getEngineVersion(engineVersionString: string) : EngineVersion {
+        let version: EngineVersion
+        if (engineVersionString && engineVersionString.startsWith("OS_")) {
+            // Will accept a period delimited version string (i.e. 1.3) and return a proper EngineVersion
+            version = EngineVersion.openSearch(engineVersionString.substring(3))
+        } else if (engineVersionString && engineVersionString.startsWith("ES_")) {
+            version = EngineVersion.elasticsearch(engineVersionString.substring(3))
+        } else {
+            throw new Error("Engine version is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9")
         }
-        // Access policies can provide a single Statement block or an array of Statement blocks
-        if (Array.isArray(statements)) {
-            for (let statementBlock of statements) {
-                const statement = PolicyStatement.fromJson(statementBlock)
-                accessPolicies.push(statement)
-            }
-        }
-        else {
-            const statement = PolicyStatement.fromJson(statements)
-            accessPolicies.push(statement)
-        }
-        return accessPolicies
+        return version
     }
 
     constructor(scope: Construct, props: StackComposerProps) {
@@ -105,6 +100,7 @@ export class StackComposer {
 
         let version: EngineVersion
         let accessPolicies: PolicyStatement[]|undefined
+
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
         const dataNodeCount = this.getContextForType('dataNodeCount', 'number', defaultValues, contextJSON)
@@ -120,6 +116,7 @@ export class StackComposer {
         const enforceHTTPS = this.getContextForType('enforceHTTPS', 'boolean', defaultValues, contextJSON)
         const ebsEnabled = this.getContextForType('ebsEnabled', 'boolean', defaultValues, contextJSON)
         const ebsIops = this.getContextForType('ebsIops', 'number', defaultValues, contextJSON)
+        const ebsVolumeTypeName = this.getContextForType('ebsVolumeType', 'string', defaultValues, contextJSON)
         const ebsVolumeSize = this.getContextForType('ebsVolumeSize', 'number', defaultValues, contextJSON)
         const encryptionAtRestEnabled = this.getContextForType('encryptionAtRestEnabled', 'boolean', defaultValues, contextJSON)
         const encryptionAtRestKmsKeyARN = this.getContextForType("encryptionAtRestKmsKeyARN", 'string', defaultValues, contextJSON)
@@ -131,6 +128,7 @@ export class StackComposer {
         const vpcSecurityGroupIds = this.getContextForType('vpcSecurityGroupIds', 'object', defaultValues, contextJSON)
         const vpcSubnetIds = this.getContextForType('vpcSubnetIds', 'object', defaultValues, contextJSON)
         const openAccessPolicyEnabled = this.getContextForType('openAccessPolicyEnabled', 'boolean', defaultValues, contextJSON)
+        const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
         const availabilityZoneCount = this.getContextForType('availabilityZoneCount', 'number', defaultValues, contextJSON)
         const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
         const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
@@ -156,6 +154,23 @@ export class StackComposer {
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
 
+        const migrationAnalyticsServiceEnabled = this.getContextForType('migrationAnalyticsServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const migrationAnalyticsBastionHostEnabled = this.getContextForType('migrationAnalyticsBastionEnabled', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainEngineVersion = this.getContextForType('analyticsDomainEngineVersion', 'string', defaultValues, contextJSON)
+        const analyticsDomainDataNodeType = this.getContextForType('analyticsDomainDataNodeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainDataNodeCount = this.getContextForType('analyticsDomainDataNodeCount', 'number', defaultValues, contextJSON)
+        const analyticsDomainDedicatedManagerNodeType = this.getContextForType('analyticsDomainDedicatedManagerNodeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainDedicatedManagerNodeCount = this.getContextForType('analyticsDomainDedicatedManagerNodeCount', 'number', defaultValues, contextJSON)
+        const analyticsDomainWarmNodeType = this.getContextForType('analyticsDomainWarmNodeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainWarmNodeCount = this.getContextForType('analyticsDomainWarmNodeCount', 'number', defaultValues, contextJSON)
+        const analyticsDomainEbsEnabled = this.getContextForType('analyticsDomainEbsEnabled', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainEbsIops = this.getContextForType('analyticsDomainEbsIops', 'number', defaultValues, contextJSON)
+        const analyticsDomainEbsVolumeSize = this.getContextForType('analyticsDomainEbsVolumeSize', 'number', defaultValues, contextJSON)
+        const analyticsDomainEbsVolumeTypeName = this.getContextForType('analyticsDomainEbsVolumeType', 'string', defaultValues, contextJSON)
+        const analyticsDomainEncryptionAtRestKmsKeyARN = this.getContextForType("analyticsDomainEncryptionAtRestKmsKeyARN", 'string', defaultValues, contextJSON)
+        const analyticsDomainLoggingAppLogEnabled = this.getContextForType('analyticsDomainLoggingAppLogEnabled', 'boolean', defaultValues, contextJSON)
+        const analyticsDomainLoggingAppLogGroupARN = this.getContextForType('analyticsDomainLoggingAppLogGroupARN', 'string', defaultValues, contextJSON)
+
         if (!stage) {
             throw new Error("Required context field 'stage' is not present")
         }
@@ -167,38 +182,12 @@ export class StackComposer {
         }
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
-        if (engineVersion && engineVersion.startsWith("OS_")) {
-            // Will accept a period delimited version string (i.e. 1.3) and return a proper EngineVersion
-            version = EngineVersion.openSearch(engineVersion.substring(3))
-        } else if (engineVersion && engineVersion.startsWith("ES_")) {
-            version = EngineVersion.elasticsearch(engineVersion.substring(3))
-        } else {
-            throw new Error("Engine version is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9")
-        }
-
-        if (openAccessPolicyEnabled) {
-            const openPolicy = new PolicyStatement({
-                effect: Effect.ALLOW,
-                principals: [new AnyPrincipal()],
-                actions: ["es:*"],
-                resources: [`arn:aws:es:${region}:${account}:domain/${domainName}/*`]
-            })
-            accessPolicies = [openPolicy]
-        } else {
-            const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
-            accessPolicies = accessPolicyJson ? this.parseAccessPolicies(accessPolicyJson) : undefined
-        }
+        version = this.getEngineVersion(engineVersion)
 
         const tlsSecurityPolicyName = this.getContextForType('tlsSecurityPolicy', 'string', defaultValues, contextJSON)
         const tlsSecurityPolicy: TLSSecurityPolicy|undefined = tlsSecurityPolicyName ? TLSSecurityPolicy[tlsSecurityPolicyName as keyof typeof TLSSecurityPolicy] : undefined
         if (tlsSecurityPolicyName && !tlsSecurityPolicy) {
             throw new Error("Provided tlsSecurityPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_opensearchservice.TLSSecurityPolicy.html")
-        }
-
-        const ebsVolumeTypeName = this.getContextForType('ebsVolumeType', 'string', defaultValues, contextJSON)
-        const ebsVolumeType: EbsDeviceVolumeType|undefined = ebsVolumeTypeName ? EbsDeviceVolumeType[ebsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
-        if (ebsVolumeTypeName && !ebsVolumeType) {
-            throw new Error("Provided ebsVolumeType does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ec2.EbsDeviceVolumeType.html")
         }
 
         const domainRemovalPolicyName = this.getContextForType('domainRemovalPolicy', 'string', defaultValues, contextJSON)
@@ -221,6 +210,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 addOnMigrationDeployId: addOnMigrationDeployId,
+                migrationAnalyticsEnabled: migrationAnalyticsServiceEnabled,
                 ...props,
             })
             this.stacks.push(networkStack)
@@ -239,7 +229,8 @@ export class StackComposer {
                 dedicatedManagerNodeCount: dedicatedManagerNodeCount,
                 warmInstanceType: warmNodeType,
                 warmNodes: warmNodeCount,
-                accessPolicies: accessPolicies,
+                accessPolicyJson: accessPolicyJson,
+                openAccessPolicyEnabled: openAccessPolicyEnabled,
                 useUnsignedBasicAuth: useUnsignedBasicAuth,
                 fineGrainedManagerUserARN: fineGrainedManagerUserARN,
                 fineGrainedManagerUserName: fineGrainedManagerUserName,
@@ -250,7 +241,7 @@ export class StackComposer {
                 ebsEnabled: ebsEnabled,
                 ebsIops: ebsIops,
                 ebsVolumeSize: ebsVolumeSize,
-                ebsVolumeType: ebsVolumeType,
+                ebsVolumeTypeName: ebsVolumeTypeName,
                 encryptionAtRestEnabled: encryptionAtRestEnabled,
                 encryptionAtRestKmsKeyARN: encryptionAtRestKmsKeyARN,
                 appLogEnabled: loggingAppLogEnabled,
@@ -308,6 +299,64 @@ export class StackComposer {
             this.stacks.push(mskUtilityStack)
         }
 
+        let migrationAnalyticsStack;
+        let analyticsDomainStack;
+        if (migrationAnalyticsServiceEnabled && networkStack) {
+            const analyticsDomainName = "migration-analytics-domain"
+            analyticsDomainStack = new OpenSearchDomainStack(scope, `analyticsDomainStack`,
+            {
+                stackName: `OSMigrations-${stage}-${region}-AnalyticsDomain`,
+                description: "This stack prepares the Migration Analytics OS Domain",
+                domainAccessSecurityGroupParameter: "analyticsDomainSGId",
+                endpointParameterName: "analyticsDomainEndpoint",
+                version: this.getEngineVersion(analyticsDomainEngineVersion ?? engineVersion),  // If no analytics version is specified, use the same as the target cluster
+                domainName: analyticsDomainName,
+                vpc: networkStack.vpc,
+                vpcSubnetIds: vpcSubnetIds,
+                vpcSecurityGroupIds: vpcSecurityGroupIds,
+                availabilityZoneCount: availabilityZoneCount,
+                dataNodeInstanceType: analyticsDomainDataNodeType,
+                dataNodes: analyticsDomainDataNodeCount ?? availabilityZoneCount,  // There's probably a better way to do this, but the node count must be >= the zone count, and possibly must be the same even/odd as zone count
+                dedicatedManagerNodeType: analyticsDomainDedicatedManagerNodeType,
+                dedicatedManagerNodeCount: analyticsDomainDedicatedManagerNodeCount,
+                warmInstanceType: analyticsDomainWarmNodeType,
+                warmNodes: analyticsDomainWarmNodeCount,
+                enableDemoAdmin: false,
+                enforceHTTPS: true,
+                nodeToNodeEncryptionEnabled: true,
+                encryptionAtRestEnabled: true,
+                encryptionAtRestKmsKeyARN: analyticsDomainEncryptionAtRestKmsKeyARN,
+                appLogEnabled: analyticsDomainLoggingAppLogEnabled,
+                appLogGroup: analyticsDomainLoggingAppLogGroupARN,
+                ebsEnabled: analyticsDomainEbsEnabled,
+                ebsIops: analyticsDomainEbsIops,
+                ebsVolumeSize: analyticsDomainEbsVolumeSize,
+                ebsVolumeTypeName: analyticsDomainEbsVolumeTypeName,
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                openAccessPolicyEnabled: true,
+                ...props
+            })
+            migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
+                stackName: `OSMigrations-${stage}-${region}-MigrationAnalytics`,
+                description: "This stack contains the OpenTelemetry Collector and Bastion Host",
+                bastionHostEnabled: migrationAnalyticsBastionHostEnabled,
+                vpc:networkStack.vpc,
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+
+            if (networkStack) {
+                analyticsDomainStack.addDependency(networkStack)
+                migrationAnalyticsStack.addDependency(networkStack)
+            }
+            // The general analytics stack (otel collector) is dependent on the analytics cluster being deployed first
+            this.stacks.push(analyticsDomainStack)
+            migrationAnalyticsStack.addDependency(analyticsDomainStack)
+            this.stacks.push(migrationAnalyticsStack)
+        }
+
         // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
         // TODO: Future work to provide orchestration between fetch migration and migration assistance
         let fetchMigrationStack
@@ -333,12 +382,17 @@ export class StackComposer {
         if (captureProxyESServiceEnabled && networkStack && mskUtilityStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
                 vpc: networkStack.vpc,
+                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
+            // This is necessary to ensure the otel collector is available (and can be found via service connect)
+            if (migrationAnalyticsStack) {
+                captureProxyESStack.addDependency(migrationAnalyticsStack)
+            }
             captureProxyESStack.addDependency(mskUtilityStack)
             this.stacks.push(captureProxyESStack)
         }
@@ -352,6 +406,7 @@ export class StackComposer {
                 customKafkaGroupId: trafficReplayerGroupId,
                 userAgentSuffix: trafficReplayerUserAgentSuffix,
                 extraArgs: trafficReplayerExtraArgs,
+                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
@@ -363,6 +418,10 @@ export class StackComposer {
             }
             if (migrationStack) {
                 trafficReplayerStack.addDependency(migrationStack)
+            }
+            // This is necessary to ensure the otel collector is available (and can be found via service connect)
+            if (migrationAnalyticsStack) {
+                trafficReplayerStack.addDependency(migrationAnalyticsStack)
             }
             if (openSearchStack) {
                 trafficReplayerStack.addDependency(openSearchStack)
@@ -390,6 +449,7 @@ export class StackComposer {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
                 customSourceClusterEndpoint: captureProxySourceEndpoint,
+                analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,
@@ -398,6 +458,10 @@ export class StackComposer {
             })
             if (elasticsearchStack) {
                 captureProxyStack.addDependency(elasticsearchStack)
+            }
+            // This is necessary to ensure the otel collector is available (and can be found via service connect)
+            if (migrationAnalyticsStack) {
+                captureProxyStack.addDependency(migrationAnalyticsStack)
             }
             captureProxyStack.addDependency(mskUtilityStack)
             this.stacks.push(captureProxyStack)
@@ -436,6 +500,7 @@ export class StackComposer {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
                 fetchMigrationEnabled: fetchMigrationEnabled,
+                migrationAnalyticsEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
@@ -456,6 +521,9 @@ export class StackComposer {
             if (fetchMigrationStack) {
                 migrationConsoleStack.addDependency(fetchMigrationStack)
             }
+            if (migrationAnalyticsStack) {
+                migrationConsoleStack.addDependency(migrationAnalyticsStack)
+            }
             if (openSearchStack) {
                 migrationConsoleStack.addDependency(openSearchStack)
             }
@@ -466,6 +534,5 @@ export class StackComposer {
         if (props.migrationsAppRegistryARN) {
             this.addStacksToAppRegistry(scope, props.migrationsAppRegistryARN, this.stacks)
         }
-
     }
 }
