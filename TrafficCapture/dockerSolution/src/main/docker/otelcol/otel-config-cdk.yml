@@ -1,0 +1,48 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+processors:
+  batch:
+  attributes:
+    # This processor is currently renaming two attributes
+    # that are prefixed with `log4j.context_data.` to the base attribute name
+    # to make queries within OpenSearch clearer. Both the `insert from_attribute`
+    # and the `delete` actions will fail silently if the attribute is not present,
+    # which means that these are safe for events that both do and don't have these
+    # attributes. This pattern should be extended to all of our standard attributes.
+    actions:
+      - key: event
+        from_attribute: log4j.context_data.event
+        action: insert
+      - key: log4j.context_data.event
+        action: delete
+      - key: channel_id
+        from_attribute: log4j.context_data.channel_id
+        action: insert
+      - key: log4j.context_data.channel_id
+        action: delete
+
+extensions:
+  health_check:
+
+exporters:
+  opensearch:
+    namespace: migrations
+    http:
+      endpoint: "${ANALYTICS_DOMAIN_ENDPOINT}"
+  logging:
+    verbosity: detailed
+  debug:
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: "debug"
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [attributes]
+      exporters: [logging, debug, opensearch]

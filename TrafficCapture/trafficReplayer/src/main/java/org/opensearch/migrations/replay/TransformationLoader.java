@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceLoader;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -23,6 +25,7 @@ import java.util.stream.Stream;
 public class TransformationLoader {
     public static final String WRONG_JSON_STRUCTURE_MESSAGE = "Must specify the top-level configuration list with a sequence of " +
             "maps that have only one key each, where the key is the name of the transformer to be configured.";
+    public static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[a-zA-Z_$][a-zA-Z\\d_$]*$");
     private final List<IJsonTransformerProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
 
@@ -40,23 +43,22 @@ public class TransformationLoader {
     }
 
     List<Map<String, Object>> parseFullConfig(String fullConfig) throws JsonProcessingException {
-        return objMapper.readValue(fullConfig, new TypeReference<>() {});
+        if (CLASS_NAME_PATTERN.matcher(fullConfig).matches()) {
+            return List.of(Collections.singletonMap(fullConfig, null));
+        } else {
+            return objMapper.readValue(fullConfig, new TypeReference<>() {
+            });
+        }
     }
 
     protected Stream<IJsonTransformer> getTransformerFactoryFromServiceLoader(String fullConfig)
             throws JsonProcessingException {
         var configList = fullConfig == null ? List.of() : parseFullConfig(fullConfig);
-        if (providers.size() > 1 && configList.isEmpty()) {
-            throw new IllegalArgumentException("Must provide a configuration when multiple IJsonTransformerProvider " +
-                    "are loaded (" + providers.stream().map(p -> p.getClass().toString())
-                    .collect(Collectors.joining(",")) + ")");
-        } else if (providers.isEmpty()) {
+        if (configList.isEmpty() || providers.isEmpty()) {
+            log.warn("No transformer configuration specified.  No custom transformations will be performed");
             return Stream.of();
-        } else if (!configList.isEmpty()) {
+        }else {
             return configList.stream().map(c -> configureTransformerFromConfig((Map<String, Object>) c));
-        } else {
-            // send in Optional.empty because we would have hit the other case in the previous branch
-            return Stream.of(providers.get(0).createTransformer(Optional.empty()));
         }
     }
 
@@ -69,7 +71,7 @@ public class TransformationLoader {
         var key = keys.stream().findFirst()
                 .orElseThrow(()->new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE));
         for (var p : providers) {
-            var className = p.getClass().getName();
+            var className = p.getClass().getSimpleName();
             if (className.equals(key)) {
                 var configuration = c.get(key);
                 log.atInfo().setMessage(()->"Creating a transformer with configuration="+configuration).log();
@@ -78,22 +80,48 @@ public class TransformationLoader {
         }
         throw new IllegalArgumentException("Could not find a provider named: " + key);
     }
+
     public IJsonTransformer getTransformerFactoryLoader(String newHostName) {
-        return getTransformerFactoryLoader(newHostName, null);
+        return getTransformerFactoryLoader(newHostName, null, null);
     }
 
-    public IJsonTransformer getTransformerFactoryLoader(String newHostName, String fullConfig) {
+    public IJsonTransformer getTransformerFactoryLoader(String newHostName, String userAgent, String fullConfig) {
         try {
             var loadedTransformers = getTransformerFactoryFromServiceLoader(fullConfig);
             return new JsonCompositeTransformer(Stream.concat(
                     loadedTransformers,
-                    Optional.ofNullable(newHostName).stream().map(HostTransformer::new)
+                    Stream.concat(
+                            Optional.ofNullable(userAgent).stream().map(UserAgentTransformer::new),
+                            Optional.ofNullable(newHostName).stream().map(HostTransformer::new))
             ).toArray(IJsonTransformer[]::new));
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Could not parse the transformer configuration as a json list", e);
         }
     }
 
+    @AllArgsConstructor
+    private static class UserAgentTransformer implements IJsonTransformer {
+        public static final String USER_AGENT = "user-agent";
+        private final String userAgent;
+
+        @Override
+        public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
+            var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
+            var oldVal = headers.get(USER_AGENT);
+            if (oldVal != null) {
+                if (oldVal instanceof List) {
+                    // see https://www.rfc-editor.org/rfc/rfc9110.html#name-field-lines-and-combined-fi
+                    oldVal = String.join(", ", (List<String>) oldVal);
+                }
+                headers.replace(USER_AGENT, oldVal + "; " + userAgent);
+            } else {
+                headers.put(USER_AGENT, userAgent);
+            }
+            return incomingJson;
+        }
+    }
+
+    @AllArgsConstructor
     private static class HostTransformer implements IJsonTransformer {
         private final String newHostName;
 
@@ -103,10 +131,5 @@ public class TransformationLoader {
             headers.replace("host", newHostName);
             return incomingJson;
         }
-
-        public HostTransformer(String newHostName) {
-            this.newHostName = newHostName;
-        }
-
     }
 }
