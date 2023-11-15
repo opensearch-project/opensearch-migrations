@@ -127,10 +127,14 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
 
             if (tuple.targetRequestData != null && tuple.sourcePair.responseData != null) {
                 String sourceResponseStatus = (String) meta.getJSONObject("sourceResponse").get("Status-Code");
-                String targetResponseStatus = (String) meta.getJSONObject("targetREsponse").get("Status-Code");
+                String targetResponseStatus = (String) meta.getJSONObject("targetResponse").get("Status-Code");
+                String httpMethod = (String) meta.getJSONObject("sourceRequest").get("Method");
+                String endpoint = (String) meta.getJSONObject("sourceRequest").get("Request-URI");
 
                 metricsLogger.atSuccess(MetricsEvent.STATUS_CODE_COMPARISON)
                         .setAttribute(MetricsAttributeKey.REQUEST_ID, tuple.uniqueRequestKey.toString())
+                        .setAttribute(MetricsAttributeKey.HTTP_METHOD, httpMethod)
+                        .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, endpoint)
                         .setAttribute(MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceResponseStatus)
                         .setAttribute(MetricsAttributeKey.TARGET_HTTP_STATUS, targetResponseStatus)
                         .setAttribute(MetricsAttributeKey.HTTP_STATUS_MATCH, sourceResponseStatus.equals(targetResponseStatus))
