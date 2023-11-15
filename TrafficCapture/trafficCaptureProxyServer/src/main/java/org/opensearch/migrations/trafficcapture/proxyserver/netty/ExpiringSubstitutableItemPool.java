@@ -178,9 +178,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         this.itemSupplier = () -> {
             var startTime = Instant.now();
             var rval = itemSupplier.get();
-            rval.addListener(v->{
-                stats.itemBuilt(Duration.between(startTime, Instant.now()));
-            });
+            rval.addListener(v -> stats.itemBuilt(Duration.between(startTime, Instant.now())));
             return rval;
         };
         // store this as a field so that we can remove the listener once the inProgress item has been
@@ -189,7 +187,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         f -> {
             inProgressItems.remove(f);
             if (f.isSuccess()) {
-                readyItems.add(new Entry(f));
+                readyItems.add(new Entry<>(f));
                 scheduleNextExpirationSweep(inactivityTimeout);
             } else {
                 // the calling context should track failures too - no reason to log
@@ -210,13 +208,6 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         log.atTrace()
                 .setMessage(()->"Got copied value of (" + System.identityHashCode(copiedStats) + ")="+copiedStats).log();
         return copiedStats;
-    }
-
-    public int reduceCapacity(int delta) {
-        assert delta >= 0 : "expected capacity delta to be >= 0";
-        poolSize -= delta;
-        assert poolSize >= 0 : "expected pool size to remain >= 0";
-        return poolSize;
     }
 
     public int increaseCapacity(int itemsToLoad) {
@@ -262,11 +253,6 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
             return durationTrackingDecoratedItem.apply(firstItem, "IN_PROGRESS: ");
         }
         return durationTrackingDecoratedItem.apply(itemSupplier.get(), "FRESH: ");
-    }
-
-    public void close() {
-        inactivityTimeout = Duration.ZERO;
-        expireItems();
     }
 
     private void scheduleItemLoadsRecurse(int itemsToLoad, Duration gapBetweenLoads) {

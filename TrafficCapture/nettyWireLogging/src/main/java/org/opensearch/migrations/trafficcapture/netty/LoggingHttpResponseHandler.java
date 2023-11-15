@@ -5,6 +5,8 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
@@ -14,18 +16,14 @@ import java.time.Instant;
 import java.util.List;
 
 @Slf4j
-public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
+public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter {
 
-    private final IChannelConnectionCaptureSerializer trafficOffloader;
+    private final IChannelConnectionCaptureSerializer<T> trafficOffloader;
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpResponseHandler");
 
 
-    public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer trafficOffloader) {
+    public LoggingHttpResponseHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
-    }
-
-    public HttpCaptureSerializerUtil.HttpProcessedState onHttpObjectsDecoded(List<Object> parsedMsgs) throws IOException {
-        return HttpCaptureSerializerUtil.addRelevantHttpMessageIndicatorEvents(trafficOffloader, parsedMsgs);
     }
 
     @Override
@@ -61,9 +59,8 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         trafficOffloader.addWriteEvent(Instant.now(), (ByteBuf) msg);
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", ctx.channel().id().asLongText())
-                .setMessage("Component of response received").log();
+        metricsLogger.atSuccess(MetricsEvent.RECEIVED_RESPONSE_COMPONENT)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         super.write(ctx, msg, promise);
     }
 
@@ -71,11 +68,6 @@ public class LoggingHttpResponseHandler extends ChannelOutboundHandlerAdapter {
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         flush(ctx);
         super.handlerRemoved(ctx);
-    }
-
-    @Override
-    public void flush(ChannelHandlerContext ctx) throws Exception {
-        super.flush(ctx);
     }
 
     @Override

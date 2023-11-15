@@ -7,12 +7,12 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Stack;
-import java.util.stream.Collectors;
 
 /**
  * Consume data, building the json object tree as it goes.  This returns null until the top-level
@@ -29,10 +29,10 @@ public class JsonAccumulator {
      * be popped and added to the object that is situated directly above the Field
      * Name in the stack.
      */
-    private final Stack<Object> jsonObjectStack;
+    private final Deque<Object> jsonObjectStack;
 
     public JsonAccumulator() throws IOException {
-        jsonObjectStack = new Stack<>();
+        jsonObjectStack = new ArrayDeque<>();
         JsonFactory factory = new JsonFactory();
         parser = factory.createNonBlockingByteBufferParser();
     }
@@ -70,7 +70,7 @@ public class JsonAccumulator {
                 case END_ARRAY: {
                     var array = ((ArrayList) jsonObjectStack.pop()).toArray();
                     pushCompletedValue(array);
-                    if (jsonObjectStack.empty()) {
+                    if (jsonObjectStack.isEmpty()) {
                         return array;
                     }
                     break;
@@ -80,7 +80,7 @@ public class JsonAccumulator {
                     break;
                 case END_OBJECT: {
                     var popped = jsonObjectStack.pop();
-                    if (jsonObjectStack.empty()) {
+                    if (jsonObjectStack.isEmpty()) {
                         return popped;
                     } else {
                         pushCompletedValue(popped);
@@ -110,7 +110,7 @@ public class JsonAccumulator {
                     return null;
                 case VALUE_EMBEDDED_OBJECT:
                 default:
-                    throw new RuntimeException("Unexpected value type: "+token);
+                    throw new IllegalStateException("Unexpected value type: "+token);
             }
         }
         return null;
@@ -124,7 +124,7 @@ public class JsonAccumulator {
             if (grandParent instanceof Map) {
                 ((Map) grandParent).put(fieldName, value);
             } else {
-                throw new RuntimeException("Stack mismatch, cannot push a value " + toString());
+                throw new IllegalStateException("Stack mismatch, cannot push a value " + toString());
             }
         } else if (topElement instanceof ArrayList) {
             ((ArrayList) topElement).add(value);
@@ -133,9 +133,8 @@ public class JsonAccumulator {
 
     @Override
     public String toString() {
-        var jsonStackString = ""+jsonObjectStack.size();//jsonObjectStack.stream().map(s->s.toString()).collect(Collectors.joining("|"));
+        var jsonStackString = ""+jsonObjectStack.size();
         final StringBuilder sb = new StringBuilder("JsonAccumulator{");
-        //sb.append("parser=").append(parser);
         sb.append(", jsonObjectStack=").append(jsonStackString);
         sb.append('}');
         return sb.toString();

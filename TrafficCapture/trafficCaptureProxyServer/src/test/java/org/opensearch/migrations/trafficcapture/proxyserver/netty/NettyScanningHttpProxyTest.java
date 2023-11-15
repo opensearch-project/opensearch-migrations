@@ -1,5 +1,6 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -175,25 +176,32 @@ class NettyScanningHttpProxyTest {
         var upstreamTestServer = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                upstreamTestServer.set(new SimpleHttpServer(false, port.intValue(),
+                upstreamTestServer.set(new SimpleHttpServer(false, port,
                         NettyScanningHttpProxyTest::makeContext));
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         });
         var underlyingPort = upstreamTestServer.get().port();
 
-        PortFinder.retryWithNewPortUntilNoThrow(port -> {
-            nshp.set(new NettyScanningHttpProxy(port.intValue()));
-            try {
-                URI testServerUri = new URI("http", null, SimpleHttpServer.LOCALHOST, underlyingPort,
+        URI testServerUri;
+        try {
+            testServerUri = new URI("http", null, SimpleHttpServer.LOCALHOST, underlyingPort,
                     null, null, null);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException(e);
+        }
+
+        PortFinder.retryWithNewPortUntilNoThrow(port -> {
+            nshp.set(new NettyScanningHttpProxy(port));
+            try {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null,
                         10, Duration.ofSeconds(10));
-                nshp.get().start(connectionPool,1, null, connectionCaptureFactory);
-                System.out.println("proxy port = "+port.intValue());
-            } catch (InterruptedException | URISyntaxException e) {
-                throw new RuntimeException(e);
+                nshp.get().start(connectionPool, 1, null, connectionCaptureFactory);
+                System.out.println("proxy port = " + port);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw Lombok.sneakyThrow(e);
             }
         });
         return new Tuple<>(nshp.get(), underlyingPort);

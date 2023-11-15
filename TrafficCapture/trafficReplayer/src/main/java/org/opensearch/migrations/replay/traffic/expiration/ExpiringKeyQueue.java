@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.traffic.expiration;
 
+import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -14,6 +15,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
  * than all items within all maps that preceded it.
  */
 @Slf4j
+@EqualsAndHashCode(callSuper = true)
 class ExpiringKeyQueue extends
         ConcurrentSkipListMap<EpochMillis, ConcurrentHashMap<String, Boolean>> {
     private final Duration granularity;

@@ -13,6 +13,11 @@ import {join} from "path";
 import {readFileSync} from "fs"
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {
+    createDefaultECSTaskRole,
+    createOpenSearchIAMAccessPolicy,
+    createOpenSearchServerlessIAMAccessPolicy
+} from "./common-utilities";
 
 export interface FetchMigrationProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -26,7 +31,7 @@ export class FetchMigrationStack extends Stack {
         super(scope, id, props);
 
         // Import required values
-        const targetClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
+        const targetClusterEndpoint = StringParameter.fromStringParameterName(this, "targetClusterEndpoint", `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const domainAccessGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)
         // This SG allows outbound access for ECR access as well as communication with other services in the cluster
         const serviceConnectGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)
@@ -36,10 +41,18 @@ export class FetchMigrationStack extends Stack {
             vpc: props.vpc
         })
 
+        const serviceName = "fetch-migration"
+        const ecsTaskRole = createDefaultECSTaskRole(this, serviceName)
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        ecsTaskRole.addToPolicy(openSearchPolicy)
+        ecsTaskRole.addToPolicy(openSearchServerlessPolicy)
         // ECS Task Definition
         const fetchMigrationFargateTask = new FargateTaskDefinition(this, "fetchMigrationFargateTask", {
-            memoryLimitMiB: 2048,
-            cpu: 512
+            family: `migration-${props.stage}-${serviceName}`,
+            memoryLimitMiB: 4096,
+            cpu: 1024,
+            taskRole: ecsTaskRole
         });
 
         new StringParameter(this, 'SSMParameterFetchMigrationTaskDefArn', {
@@ -61,14 +74,14 @@ export class FetchMigrationStack extends Stack {
         // Create Fetch Migration Container
         const fetchMigrationContainer = fetchMigrationFargateTask.addContainer("fetchMigrationContainer", {
             image: ContainerImage.fromAsset(join(__dirname, "../../../..", "FetchMigration")),
-            containerName: "fetch-migration",
+            containerName: serviceName,
             logging: LogDrivers.awsLogs({ streamPrefix: 'fetch-migration-lg', logRetention: 30 })
         });
 
         // Create DP pipeline config from template file
         let dpPipelineData: string = readFileSync(props.dpPipelineTemplatePath, 'utf8');
+        // Replace only source cluster host - target host will be overridden by inline env var
         dpPipelineData = dpPipelineData.replace("<SOURCE_CLUSTER_HOST>", props.sourceEndpoint);
-        dpPipelineData = dpPipelineData.replace("<TARGET_CLUSTER_HOST>", targetClusterEndpoint);
         // Base64 encode
         let encodedPipeline = Buffer.from(dpPipelineData).toString("base64");
 
@@ -77,9 +90,12 @@ export class FetchMigrationStack extends Stack {
             secretName: `${props.stage}-${props.defaultDeployId}-${fetchMigrationContainer.containerName}-pipelineConfig`,
             secretStringValue: SecretValue.unsafePlainText(encodedPipeline)
         });
-        // Add secret to container
+        // Add secrets to container
         fetchMigrationContainer.addSecret("INLINE_PIPELINE",
             ECSSecret.fromSecretsManager(dpPipelineConfigSecret)
+        );
+        fetchMigrationContainer.addSecret("INLINE_TARGET_HOST",
+            ECSSecret.fromSsmParameter(targetClusterEndpoint)
         );
 
         let networkConfigJson = {

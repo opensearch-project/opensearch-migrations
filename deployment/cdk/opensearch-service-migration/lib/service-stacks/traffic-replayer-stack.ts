@@ -1,22 +1,22 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
+import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {createOpenSearchIAMAccessPolicy, createOpenSearchServerlessIAMAccessPolicy} from "../common-utilities";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly enableClusterFGACAuth: boolean,
     readonly addOnMigrationId?: string,
-    readonly customTargetEndpoint?: string,
     readonly customKafkaGroupId?: string,
+    readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
-    readonly enableComparatorLink?: boolean
-
+    readonly analyticsServiceEnabled?: boolean
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -89,27 +89,31 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "secretsmanager:DescribeSecret"
             ]
         })
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
 
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
-        const cdkDomainEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
-        const osClusterEndpoint = props.customTargetEndpoint ? props.customTargetEndpoint : `https://${cdkDomainEndpoint}:443`
+        const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
+
         let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth`
         if (props.enableClusterFGACAuth) {
             const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
         }
+        replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
+        replayerCommand = props.analyticsServiceEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
-        replayerCommand = props.enableComparatorLink ? replayerCommand.concat(" | nc traffic-comparator 9220") : replayerCommand
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
+            taskInstanceCount: 0,
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
             dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
-            taskRolePolicies: [mskClusterConnectPolicy, mskTopicConsumerPolicy, mskConsumerGroupPolicy, replayerOutputMountPolicy, secretAccessPolicy],
+            taskRolePolicies: [mskClusterConnectPolicy, mskTopicConsumerPolicy, mskConsumerGroupPolicy, replayerOutputMountPolicy, secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy],
             environment: {
                 "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
             },

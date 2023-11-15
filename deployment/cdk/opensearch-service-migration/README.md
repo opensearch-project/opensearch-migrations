@@ -9,7 +9,7 @@ This directory contains the infrastructure-as-code CDK solution for deploying an
 ###### Docker
 Docker is used by CDK to build container images. If not installed, follow the steps [here](https://docs.docker.com/engine/install/) to set up. Later versions are recommended.
 ###### Git
-Git is used by the opensearch-migrations repo to fetch associated repositories (such as the traffic-comparator repo) for constructing their respective Dockerfiles. Steps to set up can be found [here](https://github.com/git-guides/install-git).
+Git is used by the opensearch-migrations repo to fetch associated repositories. Steps to set up can be found [here](https://github.com/git-guides/install-git).
 ###### Java 11
 Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 11.
 
@@ -29,7 +29,7 @@ More details can be found [here](../../../TrafficCapture/dockerSolution/README.m
 
 5- There is a known issue where service linked roles fail to get applied when deploying certain AWS services for the first time in an account. This can be resolved by simply deploying again (for each failing role) or avoided entirely by creating the service linked role initially like seen below:
 ```shell
-aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com && aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com; aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
 ```
 
 ### First time using CDK in this region?
@@ -41,7 +41,7 @@ If this is your first experience with CDK, follow the steps below to get started
 npm install -g aws-cdk
 ```
 
-2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command from the `opensearch-service-migration` directory to set up a small CloudFormation stack of resources that CDK needs to function within your account
+2- **Bootstrap CDK**: if you have not run CDK previously in the configured region of you account, it is necessary to run the following command from the same directory as this README to set up a small CloudFormation stack of resources that CDK needs to function within your account
 
 ```shell
 # Execute from the deployment/cdk/opensearch-service-migration directory
@@ -91,7 +91,7 @@ Once a service has been deployed, a command shell can be opened for that service
 # ./accessContainer.sh <service-name> <stage> <region>
 ./accessContainer.sh migration-console dev us-east-1
 ```
-To be able to execute this command the user will need to have their AWS credentials configured for their environment. It is also worth noting that the identity used should have permissions to `ecs:ExecuteCommand` on both the cluster and the given container task. The IAM policy needed could look similar to the below:
+To be able to execute this command the user will need to have their AWS credentials configured for their environment. It is also worth noting that the identity used should have permissions to `ecs:ExecuteCommand` on both the ECS cluster and the given container task, for which an Administrator or Deployment role may already have. An example IAM policy that could be added, which allows accessing any of the containers on the ECS cluster, can be seen below:
 ```shell
 {
     "Version": "2012-10-17",
@@ -100,13 +100,22 @@ To be able to execute this command the user will need to have their AWS credenti
             "Effect": "Allow",
             "Action": "ecs:ExecuteCommand",
             "Resource": [
-                "arn:aws:ecs:*:12345678912:cluster/migration-<stage>-ecs-cluster",
-                "arn:aws:ecs:*:12345678912:task/migration-<stage>-ecs-cluster/*"
+                "arn:aws:ecs:<REGION>:<ACCOUNT-ID>:cluster/migration-<STAGE>-ecs-cluster",
+                "arn:aws:ecs:<REGION>:<ACCOUNT-ID>:task/migration-<STAGE>-ecs-cluster/*"
             ]
         }
     ]
 }
 ```
+
+## Starting the Traffic Replayer
+When the Migration solution is deployed, the Traffic Replayer does not immediately begin replaying. This is designed to allow users time to do any historical backfill (e.g. Fetch Migration service) that is needed as well as setup the Capture Proxy on their source coordinating nodes. When the user is ready they can then run the following command from the Migration Console service and begin replaying the traffic that has been captured by the Capture Proxy
+
+```shell
+aws ecs update-service --cluster migration-<STAGE>-ecs-cluster --service migration-<STAGE>-traffic-replayer-default --desired-count 1
+```
+
+With this same command, a user could stop replaying capture traffic by removing the Traffic Replayer instance if they set `--desired-count 0` 
 
 ## Testing the deployed solution
 
@@ -124,6 +133,37 @@ After the benchmark has been run, the indices and documents of the source and ta
 ```shell
 # Check doc counts and indices for both source and target cluster
 ./catIndices.sh
+```
+
+## Importing Target Clusters
+By default, if a `targetClusterEndpoint` option isn't provided, this CDK will create an OpenSearch Service Domain (using provided options) to be the target cluster of this solution. While setting up this Domain, the CDK will also configure a relevant security group and allows options to configure an access policy on the Domain (`accessPolicies` and `openAccessPolicyEnabled` options) such that the Domain is fully setup for use at deployment. 
+
+In the case of an imported target cluster, there are normally some modifications that need to be made on the existing target cluster to allow proper functioning of this solution after deployment which the below subsections elaborate on.
+
+#### OpenSearch Service
+For a Domain, there are typically two items that need to be configured to allow proper functioning of this solution
+1. The Domain should have a security group that allows communication from the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration). This CDK will automatically create an `osClusterAccessSG` security group, which has already been applied to the Migration services, that a user should then add to their existing Domain to allow this access.
+2. The access policy on the Domain should be an open access policy that allows all access or an access policy that at least allows the IAM task roles for the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration)
+
+#### OpenSearch Serverless
+A Collection, will need to configure a Network and Data Access policy to allow proper functioning of this solution
+1. The Collection should have a network policy that has a `VPC` access type by creating a VPC endpoint on the VPC used for this solution. This VPC endpoint should be configured for the private subnets of the VPC and attach the `osClusterAccessSG` security group.
+2. The data access policy needed should grant permission to perform all [index operations](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-data-access.html#serverless-data-supported-permissions) (`aoss:*`) for all indexes in the given collection, and use the task roles of the applicable Migration services (Traffic Replayer, Migration Console, Fetch Migration) as the principals for this data access policy.
+
+See [Configuring SigV4 Replayer Requests](#configuring-sigv4-replayer-requests) for details on enabling SigV4 requests from the Traffic Replayer to the target cluster
+
+## Configuring SigV4 Replayer Requests
+With the [required setup](#importing-target-clusters) on the target cluster having been completed, a user can then use the `trafficReplayerExtraArgs` option to specify the Traffic Replayer service argument for enabling SigV4 authentication, which the below sections show. **Note**: As only one authorization header can be specified, the `trafficReplayerEnableClusterFGACAuth` option should not be used if enabling SigV4 authentication for the Traffic Replayer. See [here](#how-is-an-authorization-header-set-for-requests-from-the-replayer-to-the-target-cluster) for more details on how the Traffic Replayer sets its authorization header.
+#### OpenSearch Service
+```shell
+# e.g. --sigv4-auth-header-service-region es,us-east-1
+"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region es,<REGION>"
+```
+
+#### OpenSearch Serverless
+```shell
+# e.g. --sigv4-auth-header-service-region aoss,us-east-1
+"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region aoss,<REGION>"
 ```
 
 ## Kicking off Fetch Migration
@@ -145,6 +185,20 @@ echo $FETCH_MIGRATION_COMMAND
 ```
 
 The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
+
+## Accessing the Migration Analytics Domain
+
+The analytics domain receives metrics and events from the Capture Proxy and Replayer (if configured) and allows a user to visualize the progress and success of their migration.
+
+The domain & dashboard are only accessible from within the VPC, but a BastionHost is optionally set up within the VPC that allows a user to use Session Manager to make the dashboard avaiable locally via port forwarding.
+
+For the Bastion Host to be available, add `"migrationAnalyticsBastionEnabled": true` to cdk.context.json and redeploy at least the MigrationAnalytics stack.
+
+Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/_dashboards to view your dashboard.
+```shell
+# ./accessAnalyticsDashboard.sh STAGE REGION
+./accessAnalyticsDashboard.sh dev us-east-1
+```
 
 
 ## Tearing down CDK

@@ -19,6 +19,8 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -38,8 +40,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
-    private final static Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
-    private final static MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
+    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+    private static final MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     /**
@@ -136,17 +138,17 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var pipeline = c.pipeline();
         var lastHandler = pipeline.last();
         if (lastHandler == null || lastHandler instanceof SslHandler) {
-            assert c.config().isAutoRead() == false;
+            assert !c.config().isAutoRead();
             return false;
         } else {
-            assert c.config().isAutoRead() == true;
+            assert c.config().isAutoRead();
             return true;
         }
     }
 
     private void activateChannelForThisConsumer() {
         if (channelIsInUse(channel)) {
-            throw new RuntimeException("Channel " + channel + "is being used elsewhere already!");
+            throw new IllegalStateException("Channel " + channel + "is being used elsewhere already!");
         }
         var pipeline = channel.pipeline();
         addLoggingHandler(pipeline, "B");
@@ -191,7 +193,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 log.atWarn().setMessage(()->diagnosticLabel + "outbound channel was not set up successfully, " +
                         "NOT writing bytes hash=" + System.identityHashCode(packetData)).log();
                 channel.close();
-                return StringTrackableCompletableFuture.factory.failedFuture(channelInitException, ()->"");
+                return DiagnosticTrackableCompletableFuture.Factory.failedFuture(channelInitException, ()->"");
             }
         }, ()->"consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
         log.atTrace().setMessage(()->"Setting up write of packetData["+packetData+"] hash=" +
@@ -226,24 +228,22 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     } else {
                         log.atInfo().setMessage(()->"Signaling previously returned CompletableFuture packet write had an exception : "
                                 + packetData + " hash=" + System.identityHashCode(packetData)).log();
-                        metricsLogger.atError(cause)
-                                .addKeyValue("channelId", channel.id().asLongText())
-                                .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
-                                .addKeyValue("connectionId",
-                                        uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                                .setMessage("Failed to write component of request").log();
+                        metricsLogger.atError(MetricsEvent.WRITING_REQUEST_COMPONENT_FAILED, cause)
+                                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
+                                .setAttribute(MetricsAttributeKey.REQUEST_ID, uniqueRequestKeyForMetricsLogging)
+                                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
+                                        uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId()).emit();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
                     }
                 });
         log.atTrace().setMessage(()->"Writing packet data=" + packetData +
                 ".  Created future for writing data="+completableFuture).log();
-        metricsLogger.atSuccess()
-                .addKeyValue("channelId", channel.id().asLongText())
-                .addKeyValue("requestId", uniqueRequestKeyForMetricsLogging)
-                .addKeyValue("connectionId", uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                .addKeyValue("sizeInBytes", readableBytes)
-                .setMessage("Component of request written to target").log();
+        metricsLogger.atSuccess(MetricsEvent.WROTE_REQUEST_COMPONENT)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, uniqueRequestKeyForMetricsLogging)
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, readableBytes).emit();
         return completableFuture;
     }
 
@@ -251,7 +251,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
-                    var future = new CompletableFuture();
+                    var future = new CompletableFuture<AggregatedRawResponse>();
                     var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,
                             ()->"NettyPacketToHttpConsumer.finalizeRequest()");
                     if (t == null) {

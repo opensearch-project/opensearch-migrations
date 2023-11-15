@@ -11,7 +11,7 @@ import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
-import lombok.extern.slf4j.Slf4j;
+import lombok.SneakyThrows;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -26,8 +26,8 @@ import java.util.stream.Stream;
 
 public class PrettyPrinter {
 
-    private static final ThreadLocal<PacketPrintFormat> printStyle =
-            ThreadLocal.withInitial(() -> PacketPrintFormat.TRUNCATED);
+    private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle =
+            ThreadLocal.withInitial(Optional::empty);
 
     public enum PacketPrintFormat {
         TRUNCATED, FULL_BYTES, PARSED_HTTP
@@ -35,33 +35,28 @@ public class PrettyPrinter {
 
     public static <T> T setPrintStyleForCallable(PacketPrintFormat packetPrintFormat, Callable<T> r) throws Exception {
         var oldStyle = printStyle.get();
-        printStyle.set(packetPrintFormat);
+        printStyle.set(Optional.of(packetPrintFormat));
         try {
             return r.call();
         } finally {
-            printStyle.set(oldStyle);
+            if (oldStyle.isPresent()) {
+                printStyle.set(oldStyle);
+            } else {
+                printStyle.remove();
+            }
         }
     }
 
+    @SneakyThrows
     public static <T> T setPrintStyleFor(PacketPrintFormat packetPrintFormat, Supplier<T> supplier) {
-        try {
-            return setPrintStyleForCallable(packetPrintFormat, (() -> supplier.get()));
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        return setPrintStyleForCallable(packetPrintFormat, (supplier::get));
     }
 
-    public static void setPrintStyleFor(PacketPrintFormat packetPrintFormat, Runnable r) {
-        setPrintStyleFor(packetPrintFormat, () -> null);
-    }
-
-    public enum HttpMessageType {Request, Response}
+    public enum HttpMessageType { REQUEST, RESPONSE }
 
     public static String httpPacketBytesToString(HttpMessageType msgType, List<byte[]> byteArrStream) {
-        return httpPacketBytesToString(msgType, Optional.ofNullable(byteArrStream).map(p -> p.stream())
-                .orElse(null));
+        return httpPacketBytesToString(msgType,
+                Optional.ofNullable(byteArrStream).map(p -> p.stream()).orElse(Stream.of()));
     }
 
     public static String httpPacketBytesToString(HttpMessageType msgType, Stream<byte[]> byteArrStream) {
@@ -80,7 +75,7 @@ public class PrettyPrinter {
     }
 
     public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
-        switch (printStyle.get()) {
+        switch (printStyle.get().orElse(PacketPrintFormat.TRUNCATED)) {
             case TRUNCATED:
                 return httpPacketBufsToString(byteBufStream, Utils.MAX_BYTES_SHOWN_FOR_TO_STRING);
             case FULL_BYTES:
@@ -88,7 +83,7 @@ public class PrettyPrinter {
             case PARSED_HTTP:
                 return httpPacketsToPrettyPrintedString(msgType, byteBufStream);
             default:
-                throw new RuntimeException("Unknown PacketPrintFormat: " + printStyle.get());
+                throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
@@ -103,8 +98,8 @@ public class PrettyPrinter {
             } else if (httpMessage == null) {
                 return "[NULL]";
             } else {
-                throw new RuntimeException("Embedded channel with an HttpObjectAggregator returned an unexpected object " +
-                        "of type " + httpMessage.getClass() + ": " + httpMessage);
+                throw new IllegalStateException("Embedded channel with an HttpObjectAggregator returned an " +
+                        "unexpected object of type " + httpMessage.getClass() + ": " + httpMessage);
             }
         } finally {
             holderOp.ifPresent(bbh->bbh.content().release());
@@ -141,14 +136,12 @@ public class PrettyPrinter {
      */
     static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
         EmbeddedChannel channel = new EmbeddedChannel(
-                msgType == HttpMessageType.Request ? new HttpServerCodec() : new HttpClientCodec(),
+                msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
                 new HttpContentDecompressor(),
                 new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
         );
 
-        byteBufStream.forEach(b -> {
-            channel.writeInbound(b.retainedDuplicate());
-        });
+        byteBufStream.forEach(b -> channel.writeInbound(b.retainedDuplicate()));
 
         return channel.readInbound();
     }

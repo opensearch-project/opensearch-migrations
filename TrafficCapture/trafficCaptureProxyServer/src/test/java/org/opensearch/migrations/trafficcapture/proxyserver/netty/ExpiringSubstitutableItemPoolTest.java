@@ -4,6 +4,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -73,9 +74,10 @@ class ExpiringSubstitutableItemPoolTest {
                     try {
                         expiredItems.add(item.get());
                     } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
+                        Thread.currentThread().interrupt();
+                        throw Lombok.sneakyThrow(e);
                     } catch (ExecutionException e) {
-                        throw new RuntimeException(e);
+                        throw Lombok.sneakyThrow(e);
                     }
                 });
         for (int i = 0; i<NUM_POOLED_ITEMS; ++i) {

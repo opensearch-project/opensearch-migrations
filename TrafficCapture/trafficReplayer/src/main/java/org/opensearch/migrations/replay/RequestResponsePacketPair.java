@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import com.google.common.base.Objects;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
@@ -15,15 +16,25 @@ import java.util.Optional;
 public class RequestResponsePacketPair {
 
     public enum ReconstructionStatus {
-        Complete,
-        ExpiredPrematurely,
-        ClosedPrematurely
+        COMPLETE,
+        EXPIRED_PREMATURELY,
+        CLOSED_PREMATURELY
     }
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
+
+    public RequestResponsePacketPair(ITrafficStreamKey startingAtTrafficStreamKey) {
+        this.trafficStreamKeysBeingHeld = new ArrayList<>();
+        this.trafficStreamKeysBeingHeld.add(startingAtTrafficStreamKey);
+    }
+
+    @NonNull ITrafficStreamKey getBeginningTrafficStreamKey() {
+        assert trafficStreamKeysBeingHeld != null && !trafficStreamKeysBeingHeld.isEmpty();
+        return trafficStreamKeysBeingHeld.get(0);
+    }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
         if (log.isTraceEnabled()) {
@@ -51,19 +62,16 @@ public class RequestResponsePacketPair {
         if (trafficStreamKeysBeingHeld == null) {
             trafficStreamKeysBeingHeld = new ArrayList<>();
         }
-        trafficStreamKeysBeingHeld.add(trafficStreamKey);
+        if (trafficStreamKeysBeingHeld.isEmpty() ||
+                trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size()-1)) {
+            trafficStreamKeysBeingHeld.add(trafficStreamKey);
+        }
     }
 
     private static final List<ITrafficStreamKey> emptyUnmodifiableList = List.of();
     public List<ITrafficStreamKey> getTrafficStreamsHeld() {
         return (trafficStreamKeysBeingHeld == null) ? emptyUnmodifiableList :
                 Collections.unmodifiableList(trafficStreamKeysBeingHeld);
-    }
-
-    public Optional<Instant> getLastTimestamp() {
-        return Optional.ofNullable(responseData)
-                .or(()->Optional.ofNullable(requestData))
-                .map(d->d.getLastPacketTimestamp());
     }
 
     @Override

@@ -4,6 +4,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -18,6 +19,7 @@ import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TestRequestKey;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
@@ -27,7 +29,6 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
@@ -86,7 +87,7 @@ class NettyPacketToHttpConsumerTest {
             try {
                 s.close();
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         });
     }
@@ -150,7 +151,7 @@ class NettyPacketToHttpConsumerTest {
         var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new JsonJoltTransformBuilder().build(), null);
+                new TransformationLoader().getTransformerFactoryLoader(null), null);
         var timeShifter = new TimeShifter();
         timeShifter.setFirstTimestamp(Instant.now());
         var sendingFactory = new ReplayEngine(

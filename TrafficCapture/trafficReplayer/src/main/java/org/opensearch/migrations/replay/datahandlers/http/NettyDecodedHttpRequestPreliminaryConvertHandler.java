@@ -5,6 +5,8 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsAttributeKey;
+import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
@@ -18,19 +20,19 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInboundHandlerAdapter {
+public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends ChannelInboundHandlerAdapter {
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD = 32;
 
-    final RequestPipelineOrchestrator requestPipelineOrchestrator;
+    final RequestPipelineOrchestrator<R> requestPipelineOrchestrator;
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
     private UniqueReplayerRequestKey requestKeyForMetricsLogging;
-    final static MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
+    static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
-                                                            RequestPipelineOrchestrator requestPipelineOrchestrator,
+                                                            RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
                                                             String diagnosticLabel,
                                                             UniqueReplayerRequestKey requestKeyForMetricsLogging) {
         this.transformer = transformer;
@@ -52,16 +54,14 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
                     .append(" ")
                     .append(request.protocolVersion().text())
                     .toString());
-            metricsLogger.atSuccess()
-                    .addKeyValue("requestId", requestKeyForMetricsLogging)
-                    .addKeyValue("connectionId", requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
-                    .addKeyValue("httpMethod", request.method())
-                    .addKeyValue("httpEndpoint", request.uri())
-                    .setMessage("Captured request parsed to HTTP").log();
+            metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
+                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging)
+                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                    .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
+                    .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));
-            var pipeline = ctx.pipeline();
             var originalHttpJsonMessage = parseHeadersIntoMessage(request);
             IAuthTransformer authTransformer =
                     requestPipelineOrchestrator.authTransfomerFactory.getAuthTransformer(originalHttpJsonMessage);
@@ -91,7 +91,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
         var returnedObject = transformer.transformJson(httpJsonMessage);
         if (returnedObject != httpJsonMessage) {
             httpJsonMessage.clear();
-            httpJsonMessage = new HttpJsonMessageWithFaultingPayload((Map<String,Object>)returnedObject);
+            httpJsonMessage = new HttpJsonMessageWithFaultingPayload(returnedObject);
         }
         return httpJsonMessage;
     }
@@ -135,7 +135,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
 
     private static HttpJsonMessageWithFaultingPayload
     handleAuthHeaders(HttpJsonMessageWithFaultingPayload httpJsonMessage, IAuthTransformer authTransformer) {
-        if (authTransformer != null && authTransformer instanceof IAuthTransformer.HeadersOnlyTransformer) {
+        if (authTransformer instanceof IAuthTransformer.HeadersOnlyTransformer) {
             ((IAuthTransformer.HeadersOnlyTransformer) authTransformer).rewriteHeaders(httpJsonMessage);
         }
         return httpJsonMessage;
@@ -163,20 +163,20 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
 
     private static HttpJsonMessageWithFaultingPayload parseHeadersIntoMessage(HttpRequest request) {
         var jsonMsg = new HttpJsonMessageWithFaultingPayload();
-        jsonMsg.setPath(request.uri().toString());
+        jsonMsg.setPath(request.uri());
         jsonMsg.setMethod(request.method().toString());
         jsonMsg.setProtocol(request.protocolVersion().text());
         var headers = request.headers().entries().stream()
-                .collect(Collectors.groupingBy(kvp -> kvp.getKey(),
-                        () -> new StrictCaseInsensitiveHttpHeadersMap(),
+                .collect(Collectors.groupingBy(Map.Entry::getKey,
+                        StrictCaseInsensitiveHttpHeadersMap::new,
                         Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
         jsonMsg.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(headers));
         jsonMsg.setPayloadFaultMap(new PayloadAccessFaultingMap(headers));
         return jsonMsg;
     }
 
-    private List<String> nullIfEmpty(List list) {
-        return list != null && list.size() == 0 ? null : list;
+    private List<String> nullIfEmpty(List<String> list) {
+        return list != null && list.isEmpty() ? null : list;
     }
 
     private boolean headerFieldIsIdentical(String headerName, HttpRequest request,
@@ -185,10 +185,8 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler extends ChannelInb
         var newValue = nullIfEmpty(httpJsonMessage.headers().asStrictMap().get(headerName));
         if (originalValue != null && newValue != null) {
             return originalValue.equals(newValue);
-        } else if (originalValue == null && newValue == null) {
-            return true;
         } else {
-            return false;
+            return (originalValue == null && newValue == null);
         }
     }
 

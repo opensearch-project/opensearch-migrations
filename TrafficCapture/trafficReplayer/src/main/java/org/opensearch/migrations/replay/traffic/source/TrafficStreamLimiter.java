@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.traffic.source;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.Semaphore;
@@ -23,7 +24,8 @@ public class TrafficStreamLimiter {
             log.atDebug().setMessage(()->"Acquired liveTrafficStreamCostGate (available=" +
                     liveTrafficStreamCostGate.availablePermits()+")").log();
         } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            Thread.currentThread().interrupt();
+            throw Lombok.sneakyThrow(e);
         }
     }
 

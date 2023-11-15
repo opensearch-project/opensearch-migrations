@@ -7,7 +7,6 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.transform.JsonJoltTransformer;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import java.time.Duration;
@@ -17,6 +16,7 @@ import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -33,10 +33,8 @@ public class HeaderTransformerTest {
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 17, null,
                 null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var jsonHandler = JsonJoltTransformer.newBuilder()
-                .addHostSwitchOperation(SILLY_TARGET_CLUSTER_NAME)
-                .build();
-        var transformingHandler = new HttpJsonTransformingConsumer(jsonHandler, null, testPacketCapture,
+        var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
+        var transformingHandler = new HttpJsonTransformingConsumer(transformer, null, testPacketCapture,
                 "TEST", TestRequestKey.getTestConnectionRequestId(0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
@@ -47,7 +45,7 @@ public class HeaderTransformerTest {
     private void runRandomPayloadWithTransformer(HttpJsonTransformingConsumer<AggregatedRawResponse> transformingHandler,
                                                  AggregatedRawResponse dummyAggregatedResponse,
                                                  TestCapturePacketToHttpHandler testPacketCapture,
-                                                 Function<Integer,String> makeHeaders)
+                                                 IntFunction<String> makeHeaders)
             throws ExecutionException, InterruptedException
     {
         Random r = new Random(2);
@@ -70,9 +68,9 @@ public class HeaderTransformerTest {
             Assertions.assertNotNull(aggregatedRawResponse);
             // do nothing but check connectivity between the layers in the bottom most handler
             innermostFinalizeCallCount.incrementAndGet();
-            Assertions.assertEquals(dummyAggregatedResponse, aggregatedRawResponse);
-        }), ()->"HeaderTransformerTest.runRandomPayloadWithTransformer.assertionCheck");
-        finalizationFuture.get();
+            Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED,
+                    aggregatedRawResponse.transformationStatus);
+        }), ()->"HeaderTransformerTest.runRandomPayloadWithTransformer.assertionCheck").get();
         Assertions.assertEquals(TestUtils.resolveReferenceString(referenceStringBuilder,
                         List.of(new AbstractMap.SimpleEntry(SOURCE_CLUSTER_NAME, SILLY_TARGET_CLUSTER_NAME))),
                 testPacketCapture.getCapturedAsString());
@@ -88,7 +86,7 @@ public class HeaderTransformerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
-                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
+                new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
                 httpBasicAuthTransformer, testPacketCapture, "TEST", 
                 TestRequestKey.getTestConnectionRequestId(0));
 
@@ -112,8 +110,10 @@ public class HeaderTransformerTest {
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 12, null,
                 null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+
         var transformingHandler = new HttpJsonTransformingConsumer(
-                TrafficReplayer.buildDefaultJsonTransformer(SILLY_TARGET_CLUSTER_NAME),
+                new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME, null,
+                        "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
                 null, testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestId(0));
 
         Random r = new Random(2);

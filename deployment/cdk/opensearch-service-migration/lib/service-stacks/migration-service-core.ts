@@ -14,10 +14,11 @@ import {
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {createDefaultECSTaskRole} from "../common-utilities";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -44,6 +45,31 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
 
 export class MigrationServiceCore extends Stack {
 
+    // Use CDK escape hatch to modify the underlying CFN for the generated AWS::ServiceDiscovery::Service to allow
+    // multiple DnsRecords. GitHub issue can be found here: https://github.com/aws/aws-cdk/issues/18894
+    addServiceDiscoveryRecords(fargateService: FargateService, serviceDiscoveryPort: number|undefined) {
+        const multipleDnsRecords = {
+            DnsRecords: [
+                {
+                    TTL: 10,
+                    Type: "A"
+                },
+                {
+                    TTL: 10,
+                    Type: "SRV"
+                }
+            ]
+        }
+        const cloudMapCfn = fargateService.node.findChild("CloudmapService")
+        const cloudMapServiceCfn = cloudMapCfn.node.defaultChild as DiscoveryCfnService
+        cloudMapServiceCfn.addPropertyOverride("DnsConfig", multipleDnsRecords)
+
+        if (serviceDiscoveryPort) {
+            const fargateCfn = fargateService.node.defaultChild as FargateCfnService
+            fargateCfn.addPropertyOverride("ServiceRegistries.0.Port", serviceDiscoveryPort)
+        }
+    }
+
     createService(props: MigrationServiceCoreProps) {
         if ((!props.dockerFilePath && !props.dockerImageRegistryName) || (props.dockerFilePath && props.dockerImageRegistryName)) {
             throw new Error(`Exactly one option [dockerFilePath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
@@ -54,25 +80,7 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpc
         })
 
-        const serviceTaskRole = new Role(this, `${props.serviceName}-TaskRole`, {
-            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
-            description: 'ECS Service Task Role'
-        });
-        // Add default Task Role policy to allow exec and writing logs
-        serviceTaskRole.addToPolicy(new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: ['*'],
-            actions: [
-                "logs:CreateLogStream",
-                "logs:DescribeLogGroups",
-                "logs:DescribeLogStreams",
-                "logs:PutLogEvents",
-                "ssmmessages:CreateControlChannel",
-                "ssmmessages:CreateDataChannel",
-                "ssmmessages:OpenControlChannel",
-                "ssmmessages:OpenDataChannel"
-            ]
-        }))
+        const serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
         props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
@@ -136,7 +144,7 @@ export class MigrationServiceCore extends Stack {
             cluster: ecsCluster,
             taskDefinition: serviceTaskDef,
             assignPublicIp: true,
-            desiredCount: props.taskInstanceCount ? props.taskInstanceCount : 1,
+            desiredCount: props.taskInstanceCount,
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
             // This should be confirmed to be a requirement for Service Connect communication, otherwise be Private
@@ -151,29 +159,9 @@ export class MigrationServiceCore extends Stack {
             },
             cloudMapOptions: cloudMapOptions
         });
-        // Use CDK escape hatch to modify the underlying CFN for the generated AWS::ServiceDiscovery::Service to allow
-        // multiple DnsRecords. GitHub issue can be found here: https://github.com/aws/aws-cdk/issues/18894
-        if (props.serviceDiscoveryEnabled) {
-            const multipleDnsRecords = {
-                DnsRecords: [
-                    {
-                        TTL: 10,
-                        Type: "A"
-                    },
-                    {
-                        TTL: 10,
-                        Type: "SRV"
-                    }
-                ]
-            }
-            const cloudMapCfn = fargateService.node.findChild("CloudmapService")
-            const cloudMapServiceCfn = cloudMapCfn.node.defaultChild as DiscoveryCfnService
-            cloudMapServiceCfn.addPropertyOverride("DnsConfig", multipleDnsRecords)
 
-            if (props.serviceDiscoveryPort) {
-                const fargateCfn = fargateService.node.defaultChild as FargateCfnService
-                fargateCfn.addPropertyOverride("ServiceRegistries.0.Port", props.serviceDiscoveryPort)
-            }
+        if (props.serviceDiscoveryEnabled) {
+            this.addServiceDiscoveryRecords(fargateService, props.serviceDiscoveryPort)
         }
     }
 

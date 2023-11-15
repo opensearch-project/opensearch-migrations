@@ -1,12 +1,10 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 
@@ -50,41 +48,49 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            bufferedJsonMessage = (HttpJsonMessageWithFaultingPayload) msg;
-            var transferEncoding =
-                    bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
-            streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE)) ?
-                    MODE.CHUNKED : MODE.FIXED;
-            if (streamMode == MODE.CHUNKED) {
-                bufferedJsonMessage.headers().asStrictMap().remove(CONTENT_LENGTH_HEADER_NAME);
-                ctx.fireChannelRead(bufferedJsonMessage);
-            } else {
-                bufferedContents = ctx.alloc().compositeHeapBuffer();
-            }
+            handleReadJsonMessageObject(ctx, (HttpJsonMessageWithFaultingPayload) msg);
         } else if (msg instanceof HttpContent) {
-            boolean lastContent = (msg instanceof LastHttpContent);
-            var dataByteBuf = ((HttpContent) msg).content();
-            contentBytesReceived += dataByteBuf.readableBytes();
-            switch (streamMode) {
-                case CHUNKED:
-                    if (dataByteBuf.readableBytes() > 0) {
-                        handleAsChunked(ctx, dataByteBuf);
-                    }
-                    if (lastContent) {
-                        sendEndChunk(ctx);
-                    }
-                    break;
-                case FIXED:
-                    bufferedContents.addComponents(true, dataByteBuf);
-                    if (lastContent) {
-                        finalizeFixedContentStream(ctx);
-                    }
-                    break;
-                default:
-                    throw new RuntimeException("Unknown transfer encoding mode " + streamMode);
-            }
+            handleReadBody(ctx, (HttpContent) msg);
         } else {
             super.channelRead(ctx, msg);
+        }
+    }
+
+    private void handleReadBody(ChannelHandlerContext ctx, HttpContent msg) {
+        boolean lastContent = (msg instanceof LastHttpContent);
+        var dataByteBuf = msg.content();
+        contentBytesReceived += dataByteBuf.readableBytes();
+        switch (streamMode) {
+            case CHUNKED:
+                if (dataByteBuf.readableBytes() > 0) {
+                    handleAsChunked(ctx, dataByteBuf);
+                }
+                if (lastContent) {
+                    sendEndChunk(ctx);
+                }
+                break;
+            case FIXED:
+                bufferedContents.addComponents(true, dataByteBuf);
+                if (lastContent) {
+                    finalizeFixedContentStream(ctx);
+                }
+                break;
+            default:
+                throw new IllegalStateException("Unknown transfer encoding mode " + streamMode);
+        }
+    }
+
+    private void handleReadJsonMessageObject(ChannelHandlerContext ctx, HttpJsonMessageWithFaultingPayload msg) {
+        bufferedJsonMessage = msg;
+        var transferEncoding =
+                bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
+        streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE)) ?
+                MODE.CHUNKED : MODE.FIXED;
+        if (streamMode == MODE.CHUNKED) {
+            bufferedJsonMessage.headers().asStrictMap().remove(CONTENT_LENGTH_HEADER_NAME);
+            ctx.fireChannelRead(bufferedJsonMessage);
+        } else {
+            bufferedContents = ctx.alloc().compositeHeapBuffer();
         }
     }
 
@@ -102,7 +108,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
         // make this a singleton
         var lastChunkByteBuf = Unpooled.wrappedBuffer("0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
         ctx.fireChannelRead(lastChunkByteBuf);
-        ctx.fireChannelRead(DefaultLastHttpContent.EMPTY_LAST_CONTENT);
+        ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
     }
 
     private void finalizeFixedContentStream(ChannelHandlerContext ctx) {
@@ -110,6 +116,6 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
         ctx.fireChannelRead(bufferedJsonMessage);
         bufferedJsonMessage = null;
         ctx.fireChannelRead(bufferedContents);
-        ctx.fireChannelRead(DefaultLastHttpContent.EMPTY_LAST_CONTENT);
+        ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
     }
 }

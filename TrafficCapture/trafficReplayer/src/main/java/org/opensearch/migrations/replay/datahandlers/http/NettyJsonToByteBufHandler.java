@@ -52,7 +52,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
             writeHeadersIntoByteBufs(ctx, (HttpJsonMessageWithFaultingPayload) msg);
         } else if (msg instanceof ByteBuf) {
-            ctx.fireChannelRead((ByteBuf) msg);
+            ctx.fireChannelRead(msg);
         } else if (msg instanceof HttpContent) {
             writeContentsIntoByteBufs(ctx, (HttpContent) msg);
             if (msg instanceof LastHttpContent) {

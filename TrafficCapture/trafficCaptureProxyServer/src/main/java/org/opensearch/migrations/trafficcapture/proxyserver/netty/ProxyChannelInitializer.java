@@ -15,12 +15,12 @@ import java.util.function.Supplier;
 
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
 
-    private final IConnectionCaptureFactory connectionCaptureFactory;
+    private final IConnectionCaptureFactory<T> connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
     private final BacksideConnectionPool backsideConnectionPool;
 
     public ProxyChannelInitializer(BacksideConnectionPool backsideConnectionPool, Supplier<SSLEngine> sslEngineSupplier,
-                                   IConnectionCaptureFactory connectionCaptureFactory) {
+                                   IConnectionCaptureFactory<T> connectionCaptureFactory) {
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;

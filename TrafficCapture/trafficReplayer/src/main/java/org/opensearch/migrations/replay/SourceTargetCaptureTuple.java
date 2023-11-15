@@ -12,19 +12,21 @@ import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Scanner;
+import java.util.StringJoiner;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
+    public static final String OUTPUT_TUPLE_JSON_LOGGER = "OutputTupleJsonLogger";
     final UniqueSourceRequestKey uniqueRequestKey;
     final RequestResponsePacketPair sourcePair;
     final TransformedPackets targetRequestData;
@@ -33,7 +35,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     final Throwable errorCause;
     Duration targetResponseDuration;
 
-    public SourceTargetCaptureTuple(UniqueSourceRequestKey uniqueRequestKey,
+    public SourceTargetCaptureTuple(@NonNull UniqueSourceRequestKey uniqueRequestKey,
                                     RequestResponsePacketPair sourcePair,
                                     TransformedPackets targetRequestData,
                                     List<byte[]> targetResponseData,
@@ -51,26 +53,21 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
 
     @Override
     public void close() {
-        targetRequestData.close();
+        Optional.ofNullable(targetRequestData).ifPresent(d->d.close());
     }
 
-    public static class TupleToFileWriter implements Consumer<SourceTargetCaptureTuple> {
-        OutputStream outputStream;
-        Logger tupleLogger = LogManager.getLogger("OutputTupleJsonLogger");
-
-        public TupleToFileWriter(OutputStream outputStream){
-            this.outputStream = outputStream;
-        }
+    public static class TupleToStreamConsumer implements Consumer<SourceTargetCaptureTuple> {
+        Logger tupleLogger = LogManager.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
 
         private JSONObject jsonFromHttpDataUnsafe(List<byte[]> data) throws IOException {
             SequenceInputStream collatedStream = ReplayUtils.byteArraysToInputStream(data);
             Scanner scanner = new Scanner(collatedStream, StandardCharsets.UTF_8);
             scanner.useDelimiter("\r\n\r\n");  // The headers are seperated from the body with two newlines.
             String head = scanner.next();
-            int header_length = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
+            int headerLength = head.getBytes(StandardCharsets.UTF_8).length + 4; // The extra 4 bytes accounts for the two newlines.
             // SequenceInputStreams cannot be reset, so it's recreated from the original data.
             SequenceInputStream bodyStream = ReplayUtils.byteArraysToInputStream(data);
-            bodyStream.skip(header_length);
+            for (int leftToSkip = headerLength; leftToSkip > 0; leftToSkip -= bodyStream.skip(leftToSkip)) {}
 
             // There are several limitations introduced by using the HTTP.toJSONObject call.
             // 1. We need to replace "\r\n" with "\n" which could mask differences in the responses.
@@ -78,7 +75,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             //    We deal with this in the code that reads these JSONs, but it's a more brittle and error-prone format
             //    than it would be otherwise.
             // TODO: Refactor how messages are converted to JSON and consider using a more sophisticated HTTP parsing strategy.
-            JSONObject message = HTTP.toJSONObject(head.replaceAll("\r\n", "\n"));
+            JSONObject message = HTTP.toJSONObject(head.replace("\r\n", "\n"));
             String base64body = Base64.getEncoder().encodeToString(bodyStream.readAllBytes());
             message.put("body", base64body);
             return message;
@@ -100,22 +97,28 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             return message;
         }
 
-        private JSONObject toJSONObject(SourceTargetCaptureTuple triple) throws IOException {
+        private JSONObject toJSONObject(SourceTargetCaptureTuple tuple) {
             // TODO: Use Netty to parse the packets as HTTP rather than json.org (we can also remove it as a dependency)
             JSONObject meta = new JSONObject();
-            meta.put("sourceRequest", jsonFromHttpData(triple.sourcePair.requestData.packetBytes));
-            meta.put("targetRequest", jsonFromHttpData(triple.targetRequestData.asByteArrayStream()
-                    .collect(Collectors.toList())));
-            //log.warn("TODO: These durations are not measuring the same values!");
-            if (triple.sourcePair.responseData != null) {
-                meta.put("sourceResponse", jsonFromHttpData(triple.sourcePair.responseData.packetBytes,
-                        Duration.between(triple.sourcePair.requestData.getLastPacketTimestamp(),
-                                triple.sourcePair.responseData.getLastPacketTimestamp())));
-            }
-            if (triple.targetResponseData != null && !triple.targetResponseData.isEmpty()) {
-                meta.put("targetResponse", jsonFromHttpData(triple.targetResponseData, triple.targetResponseDuration));
-            }
-            meta.put("connectionId", triple.uniqueRequestKey);
+            Optional.ofNullable(tuple.sourcePair).ifPresent(p-> {
+                Optional.ofNullable(p.requestData).flatMap(d -> Optional.ofNullable(d.packetBytes))
+                        .ifPresent(d -> meta.put("sourceRequest", jsonFromHttpData(d)));
+                Optional.ofNullable(p.responseData).flatMap(d -> Optional.ofNullable(d.packetBytes))
+                        .ifPresent(d -> meta.put("sourceResponse", jsonFromHttpData(d,
+                                // TODO: These durations are not measuring the same values!
+                                Duration.between(tuple.sourcePair.requestData.getLastPacketTimestamp(),
+                                        tuple.sourcePair.responseData.getLastPacketTimestamp()))));
+            });
+
+            Optional.ofNullable(tuple.targetRequestData)
+                    .map(d->d.asByteArrayStream())
+                    .ifPresent(d->meta.put("targetRequest", jsonFromHttpData(d.collect(Collectors.toList()))));
+
+            Optional.ofNullable(tuple.targetResponseData)
+                    .filter(r->!r.isEmpty())
+                    .ifPresent(d-> meta.put("targetResponse", jsonFromHttpData(d, tuple.targetResponseDuration)));
+            meta.put("connectionId", tuple.uniqueRequestKey);
+            Optional.ofNullable(tuple.errorCause).ifPresent(e->meta.put("error", e));
             return meta;
         }
 
@@ -167,28 +170,25 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         @SneakyThrows
         public void accept(SourceTargetCaptureTuple triple) {
             JSONObject jsonObject = toJSONObject(triple);
-
-            tupleLogger.info(jsonObject.toString());
-            outputStream.write((jsonObject.toString()+"\n").getBytes(StandardCharsets.UTF_8));
-            outputStream.flush();
+            tupleLogger.info(()->jsonObject.toString());
         }
     }
 
     @Override
     public String toString() {
         return PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.TRUNCATED, () -> {
-            final StringBuilder sb = new StringBuilder("SourceTargetCaptureTuple{");
-            sb.append("\n diagnosticLabel=").append(uniqueRequestKey);
-            sb.append("\n sourcePair=").append(sourcePair);
-            sb.append("\n targetResponseDuration=").append(targetResponseDuration);
-            sb.append("\n targetRequestData=")
-                    .append(PrettyPrinter.httpPacketBufsToString(PrettyPrinter.HttpMessageType.Request, targetRequestData.streamUnretained()));
-            sb.append("\n targetResponseData=")
-                    .append(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.Response, targetResponseData));
-            sb.append("\n transformStatus=").append(transformationStatus);
-            sb.append("\n errorCause=").append(errorCause == null ? "null" : errorCause.toString());
-            sb.append('}');
-            return sb.toString();
+            final StringJoiner sj = new StringJoiner("\n ", "SourceTargetCaptureTuple{","}");
+            sj.add("diagnosticLabel=").add(uniqueRequestKey.toString());
+            if (sourcePair != null) { sj.add("sourcePair=").add(sourcePair.toString()); }
+            if (targetResponseDuration != null) { sj.add("targetResponseDuration=").add(targetResponseDuration+""); }
+            Optional.ofNullable(targetRequestData).ifPresent(d-> sj.add("targetRequestData=")
+                    .add(d.isClosed() ? "CLOSED" : PrettyPrinter.httpPacketBufsToString(
+                            PrettyPrinter.HttpMessageType.REQUEST, d.streamUnretained())));
+            Optional.ofNullable(targetResponseData).filter(d->!d.isEmpty()).ifPresent(d -> sj.add("targetResponseData=")
+                    .add(PrettyPrinter.httpPacketBytesToString(PrettyPrinter.HttpMessageType.RESPONSE, d)));
+            sj.add("transformStatus=").add(transformationStatus+"");
+            sj.add("errorCause=").add(errorCause == null ? "none" : errorCause.toString());
+            return sj.toString();
         });
     }
 }

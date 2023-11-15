@@ -1,8 +1,10 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datahandlers.http.IHttpMessage;
+import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import java.util.AbstractMap;
 import java.util.AbstractSet;
@@ -18,10 +20,9 @@ import java.util.Set;
  * the paylaod (unzip, parse, etc).  If a transform DOES require the payload to be present, get()
  *
  */
+@EqualsAndHashCode(callSuper = false)
 @Slf4j
 public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
-
-    public static final String INLINED_JSON_BODY_DOCUMENT_KEY = "inlinedJsonBody";
 
     private final boolean isJson;
     private Object onlyValue;
@@ -34,7 +35,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     @Override
     public Object get(Object key) {
-        if (!INLINED_JSON_BODY_DOCUMENT_KEY.equals(key) || !isJson) { return null; }
+        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key) || !isJson) { return null; }
         if (onlyValue == null) {
             throw PayloadNotLoadedException.getInstance();
         } else {
@@ -45,7 +46,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     @Override
     public Set<Entry<String, Object>> entrySet() {
         if (onlyValue != null) {
-            return Set.of(new SimpleEntry<>(INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue));
+            return Set.of(new SimpleEntry<>(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue));
         } else {
             return new AbstractSet<Entry<String, Object>>() {
                 @Override
@@ -62,7 +63,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
                             if (isJson && count == 0) {
                                 ++count;
                                 if (onlyValue != null) {
-                                    return new SimpleEntry(INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue);
+                                    return new SimpleEntry<>(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue);
                                 } else {
                                     throw PayloadNotLoadedException.getInstance();
                                 }
@@ -83,7 +84,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     @Override
     public Object put(String key, Object value) {
-        if (!INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) { return null; }
+        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) { return null; }
         Object old = onlyValue;
         onlyValue = value;
         return old;

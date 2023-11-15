@@ -23,6 +23,7 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -69,9 +70,9 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         var testServerRef = new AtomicReference<SimpleNettyHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                testServerRef.set(new SimpleNettyHttpServer(useTls, port.intValue(), readTimeout, makeContext));
+                testServerRef.set(new SimpleNettyHttpServer(useTls, port, readTimeout, makeContext));
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
         });
         return testServerRef.get();
@@ -173,7 +174,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         try {
             return new URI((useTls ? "https" : "http"), null, LOCALHOST, port(),"/",null, null);
         } catch (URISyntaxException e) {
-            throw new RuntimeException("Error building URI", e);
+            throw new IllegalArgumentException("Error building URI", e);
         }
     }
 

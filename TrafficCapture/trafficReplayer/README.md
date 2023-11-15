@@ -1,7 +1,7 @@
 # HTTP Traffic Replayer
 
 This package consumes streams of IP packets that were previously recorded and replays the requests to another HTTP
-server, recording the packet traffic of the new interactions for future analysis (see the Comparator tools).
+server, recording the packet traffic of the new interactions for future analysis.
 
 ## Overview
 
@@ -64,7 +64,7 @@ which has comments throughout it to indicate how data percolates and is converte
 ## Handlers
 
 With the exception of the preparation around JSON model and its transformation, all the other handlers (compression,
-chunked, and JSON parsing/serialzation), use streaming data models via mostly custom handlers. This should minimize the
+chunked, and JSON parsing/serialization), use streaming data models via mostly custom handlers. This should minimize the
 memory load (working set size, cache misses, etc). However, attempts have not yet been made to reduce the number of
 allocations. Those optimization may not have extremely high value, especially when JSON parsing will need to create
 multitudes more objects.
@@ -76,12 +76,77 @@ target URI.
 
 ## Transformations
 
-Transformations are performed via a simple class defined by
-[IJsonTransformer](../trafficReplayer/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java). Currently,
-this class uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms that are composed of modular
-operations that are defined in the [resources](../trafficReplayer/src/main/resources/jolt/operations) associated with
-the package. Future work will include adding more JSON transformations and other potential JSON transformation tools
-(like [JMESPath](https://jmespath.org/)).
+Transformations are performed via a simple interface defined by
+[IJsonTransformer](../replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java) ('transformer').  They are loaded dynamically and are designed to allow for easy extension
+of the TrafficReplayer to support a diverse set of needs.
+
+The input to the transformer will be an HTTP message represented as a json-like `Map<String,Object>` with
+top-level key-value pairs defined in
+[JsonKeysForHttpMessage.java](../replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonKeysForHttpMessage.java).
+Only bodies that are json-formatted will be accessible, and they will be accessible as a fully-parsed Map (at 
+the keypath `'payload'->'inlinedJsonBody'`).  Transformers have the option to rewrite none, or any of the keys and
+values within the original message.  The transformer can return either the original message or a completely new message.
+Transformers may be used simultaneously from concurrent threads over the lifetime of the replayer.  However, 
+a message will only be processed by one transformer at a time.
+
+Transformer implementations are loaded via [Java's ServiceLoader](https://docs.oracle.com/javase/8/docs/api/java/util/ServiceLoader.html)
+by loading a jarfile that implements the [IJsonTransformerProvider](../replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformerProvider.java).
+That jarfile will be loaded by specifying the provider jarfile (and any of its dependencies) in the classpath.
+For the ServiceLoader to load the IJsonTransformerProvider, the provided jarfile needs
+to supply a _provider-configuration_ file (`META-INF/services/org.opensearch.migrations.transform.IJsonTransformerProvider`)
+with the fully qualified class name of the IJsonTransformerProvider implementation that should be loaded.  The contents
+of that file must be in plain text with a single class on a line.
+
+If multiple IJsonTransformerProviders are loaded, or if the provider/transformer require additional configuration 
+parameters, the user must specify additional configuration to the TrafficReplayer via the "--transformer-config" 
+argument.  This argument must be a json formatted list of maps.  The order of the list will define the order that
+the transformations are run.  Within each map is a single key-value pair whose name is the fully-qualified classname
+of the IJsonTransformerProvider.  The value of that key is then passed to the provider to fully instantiate an 
+IJsonTransformer object.  If only one IJsonTransformerProvider was loaded, configuration may be excluded.  Note that
+when the transformer-config is specified, it will control which of the loaded IJsonTransformerProviders will be 
+created, how they'll be created, and what order they will run in.
+
+The base [jsonJoltMessageTransformerProvider](../replayerPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider) 
+package includes [JsonCompositeTransformer.java]
+(../replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonCompositeTransformer.java),
+which run transformers in serial.  That composite transformer is also utilized by the TrafficReplayer to combine the
+list of loaded transformations with a transformer to rewrite the 'Host' header.  That host transformation changes the 
+host header of every HTTP message to use the target domain-name rather than the source's.  That will be run after
+all loaded/specified transformations.
+
+Currently, there are multiple, nascent implementations included in the repository.  The 
+[JsonJMESPathTransformerProvider](../replayerPlugins/jsonMessageTransformers/jsonJMESPathMessageTransformerProvider) 
+package uses JMESPath expressions to transform requests and the
+[jsonJoltMessageTransformerProvider](../replayerPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider)
+package uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms.  The JMESPathTransformer takes an inlined script as shown below.
+The Jolt transformer can be configured to apply a full script or to use a "canned" transform whose script is 
+already included with the library.  
+
+The following is an examples that uses a JMESPath transformation to excise "oldType", followed by a built-in
+transform to add GZIP encoding and another to apply a new header would be configured with the following.
+
+```
+[
+{"JsonJMESPathTransformerProvider": { "script": 
+    "{\"method\": method,\"URI\": URI,\"headers\":headers,\"payload\":{\"inlinedJsonBody\":{\"mappings\": payload.inlinedJsonBody.mappings.oldType}}}"}},
+{"JsonJoltTransformerProvider": { "canned": "ADD_GZIP" }},
+{"JsonJoltTransformerProvider":  {"script": 
+    { "operation": "modify-overwrite-beta", "spec":       { "headers": {"newHeader": "newValue"}}}}}]
+```
+
+To run only one transformer without any configuration, the `--transformer-config` argument can simply 
+be set to the classname of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
+without quotes or any json surrounding it).
+
+Some simple transformations are included to change headers to add compression or to force an HTTP message payload to 
+be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../replayerPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),
+is a work-in-progress to excise type mapping references from URIs and message payloads since versions of OpenSource
+greater than 2.3 do not support them.
+
+When these transformations are enabled, they will be run on each message.  If a transformation should only be run
+for certain request types, that is the responsibility of the transformer implementation.  While a transformer doesn't
+have the ability to return control information to a next transformer, it does send back and entire HTTP message that 
+can be augmented however it may choose.
 
 
 ## Authorization Header for Replayed Requests

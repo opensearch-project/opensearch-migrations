@@ -1,6 +1,8 @@
 import {Template} from "aws-cdk-lib/assertions";
 import {OpenSearchDomainStack} from "../lib/opensearch-domain-stack";
 import {createStackComposer} from "./test-utils";
+import {App} from "aws-cdk-lib";
+import {StackComposer} from "../lib/stack-composer";
 
 test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
 
@@ -183,4 +185,40 @@ test('Test invalid domain removal policy type throws error', () => {
     const createStackFunc = () => createStackComposer(contextOptions)
 
     expect(createStackFunc).toThrowError()
+})
+
+test('Test that app registry association is created when migrationsAppRegistryARN is provided', () => {
+
+    const contextOptions = {
+        stage: "unit-test"
+    }
+
+    const app = new App({
+        context: {
+            contextId: "unit-test-config",
+            "unit-test-config": contextOptions
+        }
+    })
+    const stacks = new StackComposer(app, {
+        migrationsAppRegistryARN: "arn:aws:servicecatalog:us-west-2:12345678912:/applications/12345abcdef",
+        env: {account: "test-account", region: "us-east-1"}
+    })
+
+    const domainStack = stacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
+    const domainTemplate = Template.fromStack(domainStack)
+    domainTemplate.resourceCountIs("AWS::ServiceCatalogAppRegistry::ResourceAssociation", 1)
+})
+
+test('Test that with analytics and assistance stacks enabled, creates two opensearch domains', () => {
+
+    const contextOptions = {
+        migrationAnalyticsServiceEnabled: true,
+        migrationAssistanceEnabled: true,
+        vpcEnabled: true,
+        migrationConsoleServiceEnabled: true,
+    }
+
+    const openSearchStacks =  createStackComposer(contextOptions)
+    const domainStacks = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)
+    expect(domainStacks.length).toEqual(2)
 })

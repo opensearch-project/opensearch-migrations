@@ -1,14 +1,7 @@
 package org.opensearch.migrations.replay.util;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.ToIntFunction;
-import java.util.stream.Stream;
 
 /**
  * This class is a convenience wrapper for OnlineRadixSorter where the items will intrinsically

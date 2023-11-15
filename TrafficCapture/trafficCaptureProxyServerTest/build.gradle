@@ -4,6 +4,7 @@ plugins {
     //The 'com.bmushcko.docker-remote-api' line IS required (due to the remaining DockerBuildImage tasks) but W/O
     // a specified version. The version is managed within the buildSrc/build.gradle file.
     id 'com.bmuschko.docker-remote-api'
+    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 import org.opensearch.migrations.common.CommonUtils
 import org.opensearch.migrations.common.CommonConfigurations
@@ -27,9 +28,9 @@ dependencies {
 
     testCompileOnly 'org.projectlombok:lombok:1.18.28'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.28'
-    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.5', withoutBom
-    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.5', withoutBom
-    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.5', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.6.2', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.6.2', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.6.2', withoutBom
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
 
     constraints {
@@ -54,9 +55,6 @@ dependencies {
         implementation('org.apache.tika:tika-core:1.28.4') {
             because 'mend security issue'
         }
-        implementation('com.github.jtidy:jtidy:1.0.4') {
-            because 'mend security issue'
-        }
     }
 }
 
@@ -64,6 +62,8 @@ CommonConfigurations.applyCommonConfigurations(project)
 configurations {
     all {
         exclude group: 'org.apache.logging.log4j', module: 'log4j-slf4j-impl'
+        exclude group: 'net.sf.jtidy', module: 'jtidy'
+
     }
 }
 

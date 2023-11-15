@@ -10,12 +10,15 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.CompositeByteBuf;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Stack;
@@ -30,7 +33,7 @@ import java.util.function.Supplier;
 @Slf4j
 public class JsonEmitter implements AutoCloseable {
 
-    public final static int NUM_SEGMENT_THRESHOLD = 256;
+    public static final int NUM_SEGMENT_THRESHOLD = 256;
 
     @Getter
     public static class PartialOutputAndContinuation {
@@ -51,11 +54,11 @@ public class JsonEmitter implements AutoCloseable {
             this.supplier = supplier;
         }
     }
-    private static class LevelContext {
-        public final Iterator<Object> iterator;
+    private static class LevelContext<T> {
+        public final Iterator<T> iterator;
         public final Runnable onPopContinuation;
 
-        public LevelContext(Iterator<Object> iterator, Runnable onPopContinuation) {
+        public LevelContext(Iterator<T> iterator, Runnable onPopContinuation) {
             this.iterator = iterator;
             this.onPopContinuation = onPopContinuation;
         }
@@ -93,7 +96,7 @@ public class JsonEmitter implements AutoCloseable {
             try {
                 super.close();
             } catch (IOException e) {
-                throw new RuntimeException("Expected OutputStream::close() to be empty as per docs in Java 11");
+                throw new IllegalStateException("Expected OutputStream::close() to be empty as per docs in Java 11");
             }
         }
 
@@ -109,17 +112,17 @@ public class JsonEmitter implements AutoCloseable {
         }
     }
 
-    private JsonGenerator jsonGenerator;
-    private ChunkingByteBufOutputStream outputStream;
-    private ObjectMapper objectMapper;
-    private Stack<LevelContext> cursorStack;
+    private final JsonGenerator jsonGenerator;
+    private final ChunkingByteBufOutputStream outputStream;
+    private final ObjectMapper objectMapper;
+    private final Deque<LevelContext<? extends Object>> cursorStack;
 
     @SneakyThrows
     public JsonEmitter(ByteBufAllocator byteBufAllocator) {
         outputStream = new ChunkingByteBufOutputStream(byteBufAllocator);
         jsonGenerator = new JsonFactory().createGenerator(outputStream, JsonEncoding.UTF8);
         objectMapper = new ObjectMapper();
-        cursorStack = new Stack<>();
+        cursorStack = new ArrayDeque<>();
     }
 
     @Override
@@ -175,7 +178,7 @@ public class JsonEmitter implements AutoCloseable {
             try {
                 flush();
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw Lombok.sneakyThrow(e);
             }
             var byteBuf = outputStream.recycleByteBufRetained();
             log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + null");
@@ -187,7 +190,7 @@ public class JsonEmitter implements AutoCloseable {
     }
 
     private FragmentSupplier processStack() {
-        if (cursorStack.empty()) {
+        if (cursorStack.isEmpty()) {
             return null;
         }
         var currentCursor = cursorStack.peek();
@@ -200,8 +203,8 @@ public class JsonEmitter implements AutoCloseable {
         return processStack();
     }
 
-    private void push(Iterator it, Runnable onPopContinuation) {
-        cursorStack.push(new LevelContext(it, onPopContinuation));
+    private void push(Iterator<? extends Object> it, Runnable onPopContinuation) {
+        cursorStack.push(new LevelContext<>(it, onPopContinuation));
     }
 
     /**
@@ -226,20 +229,20 @@ public class JsonEmitter implements AutoCloseable {
             return walkTreeWithContinuations(kvp.getValue());
         } else if (o instanceof Map) {
             writeStartObject();
-            push(((Map<String,Object>) o).entrySet().iterator(), () -> writeEndObject());
+            push(((Map<String,Object>) o).entrySet().iterator(), this::writeEndObject);
         } else if (o instanceof ObjectNode) {
             writeStartObject();
-            push(((ObjectNode) o).fields(), () -> writeEndObject());
+            push(((ObjectNode) o).fields(), this::writeEndObject);
         } else if (o.getClass().isArray()) {
             writeStartArray();
-            push(Arrays.stream((Object[]) o).iterator(), () -> writeEndArray());
+            push(Arrays.stream((Object[]) o).iterator(), this::writeEndArray);
         } else if (o instanceof ArrayNode) {
             writeStartArray();
-            push(((ArrayNode) o).iterator(), () -> writeEndArray());
+            push(((ArrayNode) o).iterator(), this::writeEndArray);
         } else {
             writeValue(o);
         }
-        return new FragmentSupplier(() -> processStack());
+        return new FragmentSupplier(this::processStack);
     }
 
     @SneakyThrows

@@ -6,7 +6,7 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.SneakyThrows;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
-import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 /**
  * This accumulates HttpContent messages through a JsonAccumulator and eventually fires off a
@@ -35,7 +35,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         } else if (msg instanceof HttpContent) {
             var jsonObject = jsonAccumulator.consumeByteBuffer(((HttpContent)msg).content().nioBuffer());
             if (jsonObject != null) {
-                capturedHttpJsonMessage.payload().put(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY, jsonObject);
+                capturedHttpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, jsonObject);
                 ctx.fireChannelRead(capturedHttpJsonMessage);
             } else if (msg instanceof LastHttpContent) {
                 throw new IncompleteJsonBodyException();

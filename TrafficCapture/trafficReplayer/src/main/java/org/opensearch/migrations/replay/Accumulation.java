@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 
@@ -20,20 +21,20 @@ public class Accumulation {
         ACCUMULATING_WRITES
     }
 
-    public final ITrafficStreamKey trafficStreamKey;
+    public final ISourceTrafficChannelKey trafficChannelKey;
     private RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
     State state;
     AtomicInteger numberOfResets;
     final int startingSourceRequestIndex;
 
-    public Accumulation(@NonNull ITrafficStreamKey trafficStreamKey, int startingSourceRequestIndex) {
-        this(trafficStreamKey, startingSourceRequestIndex, false);
+    public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey, int startingSourceRequestIndex) {
+        this(trafficChannelKey, startingSourceRequestIndex, false);
     }
 
-    public Accumulation(@NonNull ITrafficStreamKey trafficStreamKey,
+    public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey,
                         int startingSourceRequestIndex, boolean dropObservationsLeftoverFromPrevious) {
-        this.trafficStreamKey = trafficStreamKey;
+        this.trafficChannelKey = trafficChannelKey;
         numberOfResets = new AtomicInteger();
         this.newestPacketTimestampInMillis = new AtomicLong(0);
         this.startingSourceRequestIndex = startingSourceRequestIndex;
@@ -41,15 +42,17 @@ public class Accumulation {
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
     }
 
-    public RequestResponsePacketPair getOrCreateTransactionPair() {
+    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
         if (rrPair != null) {
             return rrPair;
         }
-        return rrPair = new RequestResponsePacketPair();
+        rrPair = new RequestResponsePacketPair(forTrafficStreamKey);
+        return rrPair;
     }
 
     public UniqueReplayerRequestKey getRequestKey() {
-        return new UniqueReplayerRequestKey(trafficStreamKey, startingSourceRequestIndex, getIndexOfCurrentRequest());
+        return new UniqueReplayerRequestKey(getRrPair().getBeginningTrafficStreamKey(),
+                startingSourceRequestIndex, getIndexOfCurrentRequest());
     }
 
     public boolean hasSignaledRequests() {

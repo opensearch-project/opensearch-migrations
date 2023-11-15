@@ -20,7 +20,7 @@ jobs:
         working-directory: TrafficCapture
 
       - name: Run Tests with Coverage
-        run: ./gradlew allTests jacocoTestReport --info
+        run: ./gradlew jacocoTestReport --info
         working-directory: TrafficCapture
 
       - name: Upload to Codecov

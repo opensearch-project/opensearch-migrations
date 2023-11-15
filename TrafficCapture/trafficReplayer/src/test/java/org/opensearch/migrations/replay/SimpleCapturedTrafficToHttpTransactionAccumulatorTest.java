@@ -4,11 +4,13 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -118,7 +120,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                 offloader.flushCommitAndResetStream(false);
                 return;
             default:
-                throw new RuntimeException("Unknown directive type: " + directive.offloaderCommandType);
+                throw new IllegalStateException("Unknown directive type: " + directive.offloaderCommandType);
         }
     }
 
@@ -196,7 +198,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                             public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair fullPair) {
                                 var sourceIdx = requestKey.getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
-                                        RequestResponsePacketPair.ReconstructionStatus.ClosedPrematurely) {
+                                        RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
                                     return;
                                 }
                                 fullPair.getTrafficStreamsHeld().stream()
@@ -216,7 +218,13 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(UniqueReplayerRequestKey key, Instant when) {}
+                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          RequestResponsePacketPair.ReconstructionStatus status,
+                                                          Instant when,
+                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
+
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();

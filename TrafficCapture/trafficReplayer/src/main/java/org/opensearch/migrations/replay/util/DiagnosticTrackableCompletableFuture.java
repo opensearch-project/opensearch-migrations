@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -18,7 +19,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 /**
  * This class wraps CompletableFutures into traceable and identifiable pieces so that when
@@ -38,11 +38,16 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     protected final Supplier<D> diagnosticSupplier;
     protected final DiagnosticTrackableCompletableFuture<D, ?> dependencyDiagnosticFuture;
 
+    private DiagnosticTrackableCompletableFuture() {
+        throw new IllegalCallerException();
+    }
+
     /**
      * This factory class is here so that subclasses can write their own versions that return objects
      * of their own subclass.
      */
-    public static class factory {
+    public static class Factory {
+        private Factory() {}
         public static <T, D> DiagnosticTrackableCompletableFuture<D, T>
         failedFuture(@NonNull Throwable e, @NonNull Supplier<D> diagnosticSupplier) {
             return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.failedFuture(e),
@@ -54,21 +59,12 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
             return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.completedFuture(v), diagnosticSupplier,
                     null);
         }
-
-        public static <D> DiagnosticTrackableCompletableFuture<D, Void>
-        allOf(@NonNull DiagnosticTrackableCompletableFuture<D,Void>[] allRemainingWorkArray,
-              @NonNull Supplier<D> diagnosticSupplier) {
-            return new DiagnosticTrackableCompletableFuture<>(
-                    CompletableFuture.allOf(Arrays.stream(allRemainingWorkArray)
-                            .map(tcf->tcf.future).toArray(CompletableFuture[]::new)),
-                    diagnosticSupplier, null);
-        }
     }
 
     private DiagnosticTrackableCompletableFuture(
             @NonNull CompletableFuture<T> future,
             @NonNull Supplier<D> diagnosticSupplier,
-            DiagnosticTrackableCompletableFuture parentFuture) {
+            DiagnosticTrackableCompletableFuture<D,?> parentFuture) {
         this.future = future;
         this.diagnosticSupplier = diagnosticSupplier;
         this.dependencyDiagnosticFuture = parentFuture;
@@ -137,7 +133,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     public <U> DiagnosticTrackableCompletableFuture<D, U>
     handle(@NonNull BiFunction<? super T, Throwable, ? extends U> fn,
                              @NonNull  Supplier<D> diagnosticSupplier) {
-        CompletableFuture<U> newCf = this.future.handle((v, t)->fn.apply(v,t));
+        CompletableFuture<U> newCf = this.future.handle(fn::apply);
         return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
     }
 
@@ -151,17 +147,6 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         return future.get(millis, TimeUnit.MILLISECONDS);
     }
 
-    public Stream<AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture,Supplier<D>>> diagnosticStream() {
-        var chainHeadReference = new AtomicReference<>((DiagnosticTrackableCompletableFuture)this);
-        return IntStream.generate(()->chainHeadReference.get()!=null?1:0)
-                .takeWhile(x->x==1)
-                .mapToObj(i->{
-                    var dcf = chainHeadReference.get();
-                    chainHeadReference.set(dcf.dependencyDiagnosticFuture);
-                    return new AbstractMap.SimpleEntry(dcf, dcf.diagnosticSupplier);
-                });
-    }
-
     public boolean isDone() { return future.isDone(); }
 
     @Override
@@ -169,16 +154,24 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         return formatAsString(x->null);
     }
 
-    public String formatAsString(@NonNull Function<DiagnosticTrackableCompletableFuture,String> resultFormatter) {
-        var strList = diagnosticStream().map(kvp->formatFutureWithDiagnostics(kvp, resultFormatter))
+    public String formatAsString(@NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
+        AtomicReference<DiagnosticTrackableCompletableFuture<D,?>> chainHeadReference =
+                new AtomicReference<>(this);
+        var strList = IntStream.generate(() -> chainHeadReference.get() != null ? 1 : 0)
+                .takeWhile(x -> x == 1)
+                .<AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture<D, ?>, Supplier<D>>>mapToObj(i -> {
+                    var dcf = chainHeadReference.get();
+                    chainHeadReference.set(dcf.dependencyDiagnosticFuture);
+                    return new AbstractMap.SimpleEntry<>(dcf, dcf.diagnosticSupplier);
+                }).map(kvp->formatFutureWithDiagnostics(kvp, resultFormatter))
                 .collect(Collectors.toList());
         return strList.stream().collect(Collectors.joining("<-"));
     }
 
     @SneakyThrows
     protected String formatFutureWithDiagnostics(
-            @NonNull AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture, Supplier<D>> kvp,
-            @NonNull Function<DiagnosticTrackableCompletableFuture,String> resultFormatter) {
+            @NonNull AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture<D,?>, Supplier<D>> kvp,
+            @NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
         var diagnosticInfo = kvp.getValue().get();
         var isDone = kvp.getKey().isDone();
         return "[" + System.identityHashCode(kvp.getKey()) + "] " + diagnosticInfo +
@@ -187,18 +180,18 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     }
 
     private static <D> String
-    getPendingString(AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture, Supplier<D>> kvp,
-                     Function<DiagnosticTrackableCompletableFuture, String> resultFormatter) {
+    getPendingString(AbstractMap.SimpleEntry<DiagnosticTrackableCompletableFuture<D,?>, Supplier<D>> kvp,
+                     Function<DiagnosticTrackableCompletableFuture<D,?>, String> resultFormatter) {
         return Optional.ofNullable(kvp.getKey().innerComposedPendingCompletableFutureReference)
                 .map(r -> (DiagnosticTrackableCompletableFuture<D, ?>) r.get())
-                .filter(df -> df != null)
+                .filter(Objects::nonNull)
                 .map(df -> " --[[" + df.formatAsString(resultFormatter) + " ]] ")
                 .orElse("[…]");
     }
 
     private static <D> String formatWithDefault(
-            @NonNull Function<DiagnosticTrackableCompletableFuture,String> formatter,
-            DiagnosticTrackableCompletableFuture df) {
+            @NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> formatter,
+            DiagnosticTrackableCompletableFuture<D,?> df) {
         var str = formatter.apply(df);
         return "[" + (str == null ? "^" : str) + "]";
     }

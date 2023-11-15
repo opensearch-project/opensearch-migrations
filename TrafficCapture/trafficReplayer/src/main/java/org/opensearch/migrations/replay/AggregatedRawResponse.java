@@ -1,22 +1,21 @@
 package org.opensearch.migrations.replay;
 
-
-import io.netty.buffer.ByteBuf;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
 @Slf4j
-public class AggregatedRawResponse implements Serializable {
+public class AggregatedRawResponse {
 
+    @Getter
     protected final int responseSizeInBytes;
     @Getter
     protected final Duration responseDuration;
@@ -30,7 +29,7 @@ public class AggregatedRawResponse implements Serializable {
 
     public byte[][] getCopyOfPackets() {
             return responsePackets.stream()
-                    .map(kvp->kvp.getValue())
+                    .map(Map.Entry::getValue)
                     .map(x->Arrays.copyOf(x,x.length))
                     .toArray(byte[][]::new);
     }
@@ -75,12 +74,6 @@ public class AggregatedRawResponse implements Serializable {
         this.error = error;
     }
 
-    int getResponseSizeInBytes() {
-        return this.responseSizeInBytes;
-    }
-    Duration getResponseDuration() {
-        return this.responseDuration;
-    }
     Stream<AbstractMap.SimpleEntry<Instant, byte[]>> getReceiptTimeAndResponsePackets() {
         return Optional.ofNullable(this.responsePackets).map(rp->rp.stream()).orElse(Stream.empty());
     }
@@ -90,12 +83,14 @@ public class AggregatedRawResponse implements Serializable {
         final StringBuilder sb = new StringBuilder("IResponseSummary{");
         sb.append("responseSizeInBytes=").append(responseSizeInBytes);
         sb.append(", responseDuration=").append(responseDuration);
-        sb.append(", # of responsePackets=").append(""+
-                (this.responsePackets==null ? "-1" : "" + this.responsePackets.size()));
+        sb.append(", # of responsePackets=").append("" +
+                (this.responsePackets == null ? "-1" : "" + this.responsePackets.size()));
         addSubclassInfoForToString(sb);
         sb.append('}');
         return sb.toString();
     }
 
-    protected void addSubclassInfoForToString(StringBuilder sb) {}
+    protected void addSubclassInfoForToString(StringBuilder sb) {
+        // do nothing by default, let subclasses fill this in
+    }
 }

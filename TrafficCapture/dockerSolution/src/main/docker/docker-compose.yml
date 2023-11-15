@@ -1,6 +1,40 @@
 version: '3.7'
 services:
 
+  # Run combined instance of Capture Proxy and Elasticsearch
+  capture-proxy-es:
+    image: 'migrations/capture_proxy:latest'
+    networks:
+      - migrations
+    ports:
+      - "9200:9200"
+      - "19200:19200"
+    environment:
+      - http.port=19200
+    # Run processes for elasticsearch and capture proxy, and exit if either one ends
+    command: /bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection kafka:9092 --destinationUri  https://localhost:19200  --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml --otelCollectorEndpoint http://otel-collector:4317 & wait -n 1'
+    depends_on:
+      - kafka
+
+# Run separate instances of Capture Proxy and Elasticsearch
+#  capture-proxy:
+#    image: 'migrations/capture_proxy:latest'
+#    networks:
+#      - migrations
+#    ports:
+#      - "9200:9200"
+#    command: /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection kafka:9092 --destinationUri  https://elasticsearch:9200  --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
+#    depends_on:
+#      - kafka
+#      - elasticsearch
+#
+#  elasticsearch:
+#    image: 'migrations/elasticsearch_searchguard:latest'
+#    networks:
+#      - migrations
+#    ports:
+#      - '19200:9200'
+
   zookeeper:
     image: docker.io/bitnami/zookeeper:3.8
     networks:
@@ -43,9 +77,7 @@ services:
         condition: service_started
       opensearchtarget:
         condition: service_started
-      trafficcomparator:
-        condition: service_healthy
-    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group | nc trafficcomparator 9220"
+    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --otelCollectorEndpoint http://otel-collector:4317"
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:latest'
@@ -60,32 +92,41 @@ services:
       - data01:/usr/share/opensearch/data
       - ./snapshot-repository:/usr/share/opensearch/snapshots
 
-  trafficcomparator:
-    image: 'migrations/traffic_comparator:latest'
-    networks:
-      - migrations
-    ports:
-      - "9220:9220"
-    healthcheck:
-      test: "lsof -i -P -n"
-    volumes:
-      - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
-      - sharedComparatorSqlResults:/shared
-    command: /bin/sh -c "cd trafficComparator && pip3 install --editable . && nc -v -l -p 9220 | tee /dev/stderr | trafficcomparator -vv stream | trafficcomparator dump-to-sqlite --db /shared/comparisons.db"
-
-  jupyter-notebook:
-    image: 'migrations/jupyter_notebook:latest'
-    networks:
-      - migrations
-    ports:
-      - "8888:8888"
-    volumes:
-      - ${TRAFFIC_COMPARATOR_DIRECTORY}:/trafficComparator
-      - sharedComparatorSqlResults:/shared
+  opensearchanalytics:
+    image: 'opensearchproject/opensearch:latest'
     environment:
-      # this needs to match the output db that traffic_comparator writes to
-      - COMPARISONS_DB_LOCATION=/shared/comparisons.db
-    command: /bin/sh -c 'cd trafficComparator && pip3 install --editable ".[data]" && jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root'
+      - discovery.type=single-node
+    networks:
+      - migrations
+    ports:
+      - "39200:9200"
+
+  opensearch-dashboards:
+    image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
+    container_name: opensearch-dashboards
+    ports:
+      - "5601:5601" # Map host port 5601 to container port 5601
+    expose:
+      - "5601" # Expose port 5601 for web access to OpenSearch Dashboards
+    networks:
+      - migrations
+    volumes:
+      - ./opensearchDashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
+    depends_on:
+      - opensearchanalytics
+
+  otel-collector:
+    image: public.ecr.aws/a0w2c5q7/otelcol-with-opensearch:latest
+    container_name: otel-collector
+    ports:
+      - "4317:4317"
+      - "13133:13133"
+    volumes:
+      - ./otelcol/otel-config.yml:/etc/otel-config.yml
+    networks:
+      - migrations
+    depends_on:
+      - opensearchanalytics
 
   migration-console:
     image: 'migrations/migration_console:latest'

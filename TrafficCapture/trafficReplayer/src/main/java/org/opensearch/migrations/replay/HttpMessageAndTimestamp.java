@@ -1,8 +1,9 @@
 package org.opensearch.migrations.replay;
 
-import com.google.common.base.Objects;
 import io.netty.buffer.Unpooled;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
@@ -14,6 +15,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 @Slf4j
+@EqualsAndHashCode(exclude = "currentSegmentBytes")
 public class HttpMessageAndTimestamp {
 
     public static class Request extends HttpMessageAndTimestamp {
@@ -22,7 +24,7 @@ public class HttpMessageAndTimestamp {
         }
         @Override
         public String toString() {
-            return super.format(Optional.of(PrettyPrinter.HttpMessageType.Request));
+            return super.format(Optional.of(PrettyPrinter.HttpMessageType.REQUEST));
         }
     }
 
@@ -32,7 +34,7 @@ public class HttpMessageAndTimestamp {
         }
         @Override
         public String toString() {
-            return super.format(Optional.of(PrettyPrinter.HttpMessageType.Request));
+            return super.format(Optional.of(PrettyPrinter.HttpMessageType.REQUEST));
         }
     }
 
@@ -64,7 +66,7 @@ public class HttpMessageAndTimestamp {
 
     public String format(Optional<PrettyPrinter.HttpMessageType> messageTypeOp) {
         var packetBytesAsStr = messageTypeOp.map(mt-> PrettyPrinter.httpPacketBytesToString(mt, packetBytes))
-                .orElseGet(()-> PrettyPrinter.httpPacketBufsToString(packetBytes.stream().map(b-> Unpooled.wrappedBuffer(b)),
+                .orElseGet(()-> PrettyPrinter.httpPacketBufsToString(packetBytes.stream().map(Unpooled::wrappedBuffer),
                         Utils.MAX_PAYLOAD_SIZE_TO_PRINT));
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);
@@ -81,7 +83,7 @@ public class HttpMessageAndTimestamp {
         try {
             currentSegmentBytes.write(data);
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw Lombok.sneakyThrow(e);
         }
     }
 
@@ -89,19 +91,6 @@ public class HttpMessageAndTimestamp {
         packetBytes.add(currentSegmentBytes.toByteArray());
         this.lastPacketTimestamp = timestamp;
         currentSegmentBytes = null;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        HttpMessageAndTimestamp that = (HttpMessageAndTimestamp) o;
-        return Objects.equal(firstPacketTimestamp, that.firstPacketTimestamp) && Objects.equal(lastPacketTimestamp, that.lastPacketTimestamp) && Objects.equal(packetBytes, that.packetBytes);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(firstPacketTimestamp, lastPacketTimestamp, packetBytes);
     }
 
     @Override

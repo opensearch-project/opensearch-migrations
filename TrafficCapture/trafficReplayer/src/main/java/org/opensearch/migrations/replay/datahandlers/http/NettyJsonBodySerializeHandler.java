@@ -6,7 +6,7 @@ import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
-import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import java.io.IOException;
 import java.util.Map;
@@ -15,18 +15,16 @@ import java.util.Map;
 public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter {
     public static final int NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING = 1024;
 
-    public NettyJsonBodySerializeHandler() {
-    }
-
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
             var jsonMessage = (HttpJsonMessageWithFaultingPayload) msg;
             var payload = jsonMessage.payload();
             jsonMessage.setPayloadFaultMap(null);
-            var payloadContents = (Map<String, Object>) payload.get(PayloadAccessFaultingMap.INLINED_JSON_BODY_DOCUMENT_KEY);
+            var payloadContents =
+                    (Map<String, Object>) payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY);
             ctx.fireChannelRead(msg);
-            if (payload != null && payloadContents != null) {
+            if (payloadContents != null) {
                 serializePayload(ctx, payloadContents);
             }
         } else {

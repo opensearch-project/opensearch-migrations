@@ -1,24 +1,28 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import lombok.EqualsAndHashCode;
+
+@EqualsAndHashCode(callSuper = true)
 public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
-    public final ITrafficStreamKey trafficStreamKey;
-    public final int sourceRequestIndexOffsetAtFirstObservation;
+    public final ISourceTrafficChannelKey trafficStreamKey;
+    public final int sourceRequestIndexOffsetAtStartOfAccumulation;
     public final int replayerRequestIndex;
 
-    public UniqueReplayerRequestKey(ITrafficStreamKey streamKey, int sourceOffset, int replayerIndex) {
+    public UniqueReplayerRequestKey(ISourceTrafficChannelKey streamKey, int sourceOffsetAtStartOfAccumulation,
+                                    int replayerIndex) {
         this.trafficStreamKey = streamKey;
-        this.sourceRequestIndexOffsetAtFirstObservation = sourceOffset;
+        this.sourceRequestIndexOffsetAtStartOfAccumulation = sourceOffsetAtStartOfAccumulation;
         this.replayerRequestIndex = replayerIndex;
     }
 
     @Override
-    public ITrafficStreamKey getTrafficStreamKey() {
+    public ISourceTrafficChannelKey getTrafficStreamKey() {
         return trafficStreamKey;
     }
 
     @Override
     public int getSourceRequestIndex() {
-        return replayerRequestIndex + sourceRequestIndexOffsetAtFirstObservation;
+        return replayerRequestIndex + sourceRequestIndexOffsetAtStartOfAccumulation;
     }
 
     public int getReplayerRequestIndex() {
@@ -41,7 +45,7 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
         //
         // That code currently resides in CapturedTrafficToHttpTransactionAccumulator.
         return trafficStreamKey + "." + getSourceRequestIndex() +
-                (sourceRequestIndexOffsetAtFirstObservation == 0 ? "" :
-                        "(offset: "+sourceRequestIndexOffsetAtFirstObservation+")");
+                (sourceRequestIndexOffsetAtStartOfAccumulation == 0 ? "" :
+                        "(offset: "+ sourceRequestIndexOffsetAtStartOfAccumulation +")");
     }
 }
