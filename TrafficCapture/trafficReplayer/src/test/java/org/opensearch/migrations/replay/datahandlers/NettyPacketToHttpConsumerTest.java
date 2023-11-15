@@ -47,7 +47,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 @WrapWithNettyLeakDetection
-class NettyPacketToHttpConsumerTest {
+public class NettyPacketToHttpConsumerTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
 
@@ -58,7 +58,7 @@ class NettyPacketToHttpConsumerTest {
                     "User-Agent: UnitTest\r\n" +
                     "Connection: Keep-Alive\r\n" +
                     "\r\n";
-    private final static String EXPECTED_RESPONSE_STRING =
+    public final static String EXPECTED_RESPONSE_STRING =
             "HTTP/1.1 200 OK\r\n" +
                     "Content-transfer-encoding: chunked\r\n" +
                     "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n" + // This should be OK since it's always the same length
