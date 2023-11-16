@@ -32,7 +32,7 @@ import java.util.function.BiConsumer;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
-class SummaryTupleToStreamConsumerTest {
+class ResultsToLogsConsumerTest {
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
@@ -41,14 +41,14 @@ class SummaryTupleToStreamConsumerTest {
         List<String> logEvents = new ArrayList<>();
         AbstractAppender testAppender;
         public CloseableLogSetup() {
-            testAppender = new AbstractAppender(SummaryTupleToStreamConsumer.OUTPUT_TUPLE_JSON_LOGGER,
+            testAppender = new AbstractAppender(ResultsToLogsConsumer.OUTPUT_TUPLE_JSON_LOGGER,
                     null, null, false, null) {
                 @Override
                 public void append(LogEvent event) {
                     logEvents.add(event.getMessage().getFormattedMessage());
                 }
             };
-            var tupleLogger = (Logger) LogManager.getLogger(SummaryTupleToStreamConsumer.OUTPUT_TUPLE_JSON_LOGGER);
+            var tupleLogger = (Logger) LogManager.getLogger(ResultsToLogsConsumer.OUTPUT_TUPLE_JSON_LOGGER);
             tupleLogger.setLevel(Level.ALL);
             testAppender.start();
             tupleLogger.setAdditive(false);
@@ -58,7 +58,7 @@ class SummaryTupleToStreamConsumerTest {
 
         @Override
         public void close() {
-            var tupleLogger = (Logger) LogManager.getLogger(SummaryTupleToStreamConsumer.OUTPUT_TUPLE_JSON_LOGGER);
+            var tupleLogger = (Logger) LogManager.getLogger(ResultsToLogsConsumer.OUTPUT_TUPLE_JSON_LOGGER);
             tupleLogger.removeAppender(testAppender);
             testAppender.stop();
         }
@@ -80,7 +80,7 @@ class SummaryTupleToStreamConsumerTest {
                 new UniqueReplayerRequestKey(new PojoTrafficStreamKey(NODE_ID,"c",0), 0, 0),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new TupleParserChainConsumer(null, new SummaryTupleToStreamConsumer());
+            var consumer = new TupleParserChainConsumer(null, new ResultsToLogsConsumer());
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -97,7 +97,7 @@ class SummaryTupleToStreamConsumerTest {
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new TupleParserChainConsumer(null, new SummaryTupleToStreamConsumer());
+            var consumer = new TupleParserChainConsumer(null, new ResultsToLogsConsumer());
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -108,7 +108,7 @@ class SummaryTupleToStreamConsumerTest {
     }
 
     public static byte[] loadResourceAsBytes(String path) throws IOException {
-        try (InputStream inputStream = SummaryTupleToStreamConsumerTest.class.getResourceAsStream(path)) {
+        try (InputStream inputStream = ResultsToLogsConsumerTest.class.getResourceAsStream(path)) {
             return inputStream.readAllBytes();
         }
     }
@@ -243,7 +243,7 @@ class SummaryTupleToStreamConsumerTest {
         var tuple = new SourceTargetCaptureTuple(
                 new UniqueReplayerRequestKey(trafficStreamKey, 0, 0),
                 sourcePair, targetRequest, targetResponse, HttpRequestTransformationStatus.SKIPPED, null, Duration.ofMillis(267));
-        var streamConsumer = new SummaryTupleToStreamConsumer();
+        var streamConsumer = new ResultsToLogsConsumer();
         // we don't have an interface on MetricsLogger yet, so it's a challenge to test that directly.
         // Assuming that it's going to use Slf/Log4J are really brittle.  I'd rather miss a couple lines that
         // should be getting tested elsewhere and be immune to those changes down the line

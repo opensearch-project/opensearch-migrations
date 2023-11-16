@@ -399,7 +399,7 @@ public class TrafficReplayer {
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = new TupleParserChainConsumer(TUPLE_METRICS_LOGGER, new SummaryTupleToStreamConsumer());
+            var tupleWriter = new TupleParserChainConsumer(TUPLE_METRICS_LOGGER, new ResultsToLogsConsumer());
             var timeShifter = new TimeShifter(params.speedupFactor);
             tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(params.observedPacketConnectionTimeout),
                     blockingTrafficSource, timeShifter, tupleWriter);

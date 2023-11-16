@@ -32,7 +32,8 @@ import java.util.stream.Stream;
  */
 @Slf4j
 public class ParsedHttpMessagesAsDicts {
-    public static final String STATUS_CODE_STR = "Status-Code";
+    public static final String STATUS_CODE_KEY = "Status-Code";
+    public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
@@ -106,8 +107,8 @@ public class ParsedHttpMessagesAsDicts {
                                                            UniqueSourceRequestKey requestKey,
                                                            Optional<Map<String, Object>> sourceResponseOp,
                                                            Optional<Map<String, Object>> targetResponseOp) {
-        var sourceStatus = sourceResponseOp.map(r -> r.get(STATUS_CODE_STR));
-        var targetStatus = targetResponseOp.map(r -> r.get(STATUS_CODE_STR));
+        var sourceStatus = sourceResponseOp.map(r -> r.get(STATUS_CODE_KEY));
+        var targetStatus = targetResponseOp.map(r -> r.get(STATUS_CODE_KEY));
         builder = builder.setAttribute(MetricsAttributeKey.REQUEST_ID,
                 requestKey.getTrafficStreamKey().getConnectionId() + "." + requestKey.getSourceRequestIndex());
         builder = addMetricIfPresent(builder, MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceStatus);
@@ -162,9 +163,9 @@ public class ParsedHttpMessagesAsDicts {
             var map = new LinkedHashMap<String, Object>();
             var message = HttpByteBufFormatter.parseHttpResponseFromBufs(byteToByteBufStream(data), true);
             map.put("HTTP-Version", message.protocolVersion());
-            map.put(STATUS_CODE_STR, message.status().code());
+            map.put(STATUS_CODE_KEY, message.status().code());
             map.put("Reason-Phrase", message.status().reasonPhrase());
-            map.put("response_time_ms", latency.toMillis());
+            map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
             return fillMap(map, message.headers(), message.content());
         });
     }
