@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;

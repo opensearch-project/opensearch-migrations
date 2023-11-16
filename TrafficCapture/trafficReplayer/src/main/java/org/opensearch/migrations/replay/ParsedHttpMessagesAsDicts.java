@@ -89,11 +89,6 @@ public class ParsedHttpMessagesAsDicts {
         this.targetResponseOp = targetResponseOp4;
     }
 
-    private static MetricsLogBuilder addMetricIfPresent(MetricsLogBuilder metricBuilder,
-                                                        MetricsAttributeKey key, Optional<Object> value) {
-        return value.map(v -> metricBuilder.setAttribute(key, v)).orElse(metricBuilder);
-    }
-
     public MetricsLogBuilder buildStatusCodeMetrics(MetricsLogger logger, UniqueSourceRequestKey requestKey) {
         var builder = logger.atSuccess(MetricsEvent.STATUS_CODE_COMPARISON);
         return buildStatusCodeMetrics(builder, requestKey);
@@ -111,14 +106,14 @@ public class ParsedHttpMessagesAsDicts {
         var targetStatus = targetResponseOp.map(r -> r.get(STATUS_CODE_KEY));
         builder = builder.setAttribute(MetricsAttributeKey.REQUEST_ID,
                 requestKey.getTrafficStreamKey().getConnectionId() + "." + requestKey.getSourceRequestIndex());
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceStatus);
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.TARGET_HTTP_STATUS, targetStatus);
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_STATUS_MATCH,
+        builder = MetricsLogBuilder.addMetricIfPresent(builder, MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceStatus);
+        builder = MetricsLogBuilder.addMetricIfPresent(builder, MetricsAttributeKey.TARGET_HTTP_STATUS, targetStatus);
+        builder = MetricsLogBuilder.addMetricIfPresent(builder, MetricsAttributeKey.HTTP_STATUS_MATCH,
                 sourceStatus.flatMap(ss -> targetStatus.map(ts -> ss.equals(ts)))
                         .filter(x -> x).map(b -> (Object) 1).or(() -> Optional.<Object>of(Integer.valueOf(0))));
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_METHOD,
+        builder = MetricsLogBuilder.addMetricIfPresent(builder, MetricsAttributeKey.HTTP_METHOD,
                 sourceResponseOp.map(r -> r.get("Method")));
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_ENDPOINT,
+        builder = MetricsLogBuilder.addMetricIfPresent(builder, MetricsAttributeKey.HTTP_ENDPOINT,
                 sourceResponseOp.map(r -> r.get("Request-URI")));
         return builder;
     }
