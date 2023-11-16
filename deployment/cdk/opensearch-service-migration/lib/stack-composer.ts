@@ -19,12 +19,13 @@ import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
-    readonly defaultDeployId: string
+    readonly defaultDeployId: string,
     readonly addOnMigrationDeployId?: string
 }
 
 export interface StackComposerProps extends StackProps {
-    readonly migrationsAppRegistryARN?: string
+    readonly migrationsAppRegistryARN?: string,
+    readonly customReplayerUserAgent?: string
 }
 
 export class StackComposer {
@@ -190,6 +191,14 @@ export class StackComposer {
         const domainRemovalPolicy = domainRemovalPolicyName ? RemovalPolicy[domainRemovalPolicyName as keyof typeof RemovalPolicy] : undefined
         if (domainRemovalPolicyName && !domainRemovalPolicy) {
             throw new Error("Provided domainRemovalPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html")
+        }
+
+        let trafficReplayerCustomUserAgent
+        if (props.customReplayerUserAgent && trafficReplayerUserAgentSuffix) {
+            trafficReplayerCustomUserAgent = `${props.customReplayerUserAgent};${trafficReplayerUserAgentSuffix}`
+        }
+        else {
+            trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.customReplayerUserAgent
         }
 
         const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
@@ -398,7 +407,7 @@ export class StackComposer {
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
-                userAgentSuffix: trafficReplayerUserAgentSuffix,
+                userAgentSuffix: trafficReplayerCustomUserAgent,
                 extraArgs: trafficReplayerExtraArgs,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
