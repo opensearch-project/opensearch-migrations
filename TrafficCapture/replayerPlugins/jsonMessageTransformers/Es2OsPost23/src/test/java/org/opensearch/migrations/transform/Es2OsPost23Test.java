@@ -16,50 +16,6 @@ import java.util.Map;
 
 public class Es2OsPost23Test {
 
-    static final String TEST_INPUT_REQUEST = "{\n" +
-            "  \"method\": \"PUT\",\n" +
-            "  \"URI\": \"/oldStyleIndex\",\n" +
-            "  \"headers\": {\n" +
-            "    \"host\": \"127.0.0.1\"\n" +
-            "  },\n" +
-            "  \"payload\": {\n" +
-            "    \"inlinedJsonBody\": {\n" +
-            "      \"mappings\": {\n" +
-            "        \"oldType\": {\n" +
-            "          \"properties\": {\n" +
-            "            \"field1\": {\n" +
-            "              \"type\": \"text\"\n" +
-            "            },\n" +
-            "            \"field2\": {\n" +
-            "              \"type\": \"keyword\"\n" +
-            "            }\n" +
-            "          }\n" +
-            "        }\n" +
-            "      }\n" +
-            "    }\n" +
-            "  }\n" +
-            "}\n";
-
-    @Test
-    public void testRemoveOldType() {
-        // Parse the JSON string into a Map
-        Map<String, Object> incomingJson = // ... parse TEST_INPUT_REQUEST ...
-
-                // Create an instance of your transformer
-                JMESPathTransformer transformer = new JMESPathTransformer(
-                new JacksonRuntime(),
-                "...your updated JMESPath expression..."
-        );
-
-        // Perform the transformation
-        Map<String, Object> transformedJson = transformer.transformJson(incomingJson);
-
-        // Assert that "oldType" is removed
-        Map<String, Object> inlinedJsonBody = (Map<String, Object>) ((Map<String, Object>) transformedJson.get("payload")).get("inlinedJsonBody");
-        Map<String, Object> mappings = (Map<String, Object>) inlinedJsonBody.get("mappings");
-        assertFalse(mappings.containsKey("oldType"));
-    }
-
     static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>(){};
 
     static ObjectMapper objectMapper = new ObjectMapper();
