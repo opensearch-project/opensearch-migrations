@@ -13,10 +13,9 @@ import jsonpath_ng
 import requests
 
 from endpoint_info import EndpointInfo
-
-# Constants
 from index_doc_count import IndexDocCount
 
+# Constants
 SETTINGS_KEY = "settings"
 MAPPINGS_KEY = "mappings"
 ALIASES_KEY = "aliases"
