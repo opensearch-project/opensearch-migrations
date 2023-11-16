@@ -10,10 +10,8 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
-import java.io.IOException;
 import java.net.SocketAddress;
 import java.time.Instant;
-import java.util.List;
 
 @Slf4j
 public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter {
