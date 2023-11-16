@@ -5,7 +5,9 @@ import {App, Tags} from 'aws-cdk-lib';
 import {StackComposer} from "../lib/stack-composer";
 
 const app = new App();
-const version = readFileSync('../../../VERSION', 'utf-8')
+const versionFile = readFileSync('../../../VERSION', 'utf-8')
+// Remove any blank newlines because this would be an invalid tag value
+const version = versionFile.replace(/\n/g, '');
 Tags.of(app).add("migration_deployment", version)
 const account = process.env.CDK_DEFAULT_ACCOUNT
 const region = process.env.CDK_DEFAULT_REGION
