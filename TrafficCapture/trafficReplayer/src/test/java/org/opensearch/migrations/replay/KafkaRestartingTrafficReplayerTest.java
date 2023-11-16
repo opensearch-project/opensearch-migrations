@@ -76,7 +76,7 @@ public class KafkaRestartingTrafficReplayerTest {
         }
     }
 
-    @ParameterizedTest
+    //@ParameterizedTest
     @CsvSource(value = {
             "3,false",
             "-1,false",

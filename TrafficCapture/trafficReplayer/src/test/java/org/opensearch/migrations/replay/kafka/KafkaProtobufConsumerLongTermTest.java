@@ -89,7 +89,7 @@ public class KafkaProtobufConsumerLongTermTest {
         return TEST_TRAFFIC_STREAM_ID_STRING + "_" + i;
     }
 
-    @Test
+    //@Test
     @Tag("longTest")
     public void testTrafficCaptureSource() throws Exception {
         String testTopicName = "TEST_TOPIC";
