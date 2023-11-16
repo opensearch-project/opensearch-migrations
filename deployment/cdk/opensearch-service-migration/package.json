@@ -1,6 +1,6 @@
 {
   "name": "opensearch-service-domain-cdk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "CDK infrastructure for migrating to AWS OpenSearch",
   "license": "Apache-2.0",
   "author": {
