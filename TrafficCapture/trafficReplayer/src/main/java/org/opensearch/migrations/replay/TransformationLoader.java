@@ -25,7 +25,7 @@ import java.util.stream.Stream;
 public class TransformationLoader {
     public static final String WRONG_JSON_STRUCTURE_MESSAGE = "Must specify the top-level configuration list with a sequence of " +
             "maps that have only one key each, where the key is the name of the transformer to be configured.";
-    public static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[a-zA-Z_$][a-zA-Z\\d_$]*$");
+    public static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[^{}]*$");
     private final List<IJsonTransformerProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
 
