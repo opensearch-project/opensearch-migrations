@@ -23,6 +23,16 @@ processors:
         action: insert
       - key: log4j.context_data.channel_id
         action: delete
+      # The following actions convert various should-be-int strings to ints
+      - key: log4j.context_data.source_http_status
+        action: convert
+        converted_type: int
+      - key: log4j.context_data.target_http_status
+        action: convert
+        converted_type: int
+      - key: log4j.context_data.http_status_match
+        action: convert
+        converted_type: int
 
 extensions:
   health_check:
