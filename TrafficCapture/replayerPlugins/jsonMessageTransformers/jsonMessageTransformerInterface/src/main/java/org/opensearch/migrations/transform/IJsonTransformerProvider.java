@@ -1,5 +1,7 @@
 package org.opensearch.migrations.transform;
 
+import lombok.NonNull;
+
 public interface IJsonTransformerProvider {
     /**
      * Create a new transformer from the given configuration.  This transformer
@@ -10,4 +12,10 @@ public interface IJsonTransformerProvider {
      * @return
      */
     IJsonTransformer createTransformer(Object jsonConfig);
+
+    /**
+     * Friendly name that can be used as a key to identify transformer providers.
+     * @return
+     */
+    default @NonNull String getName() { return this.getClass().getSimpleName(); }
 }

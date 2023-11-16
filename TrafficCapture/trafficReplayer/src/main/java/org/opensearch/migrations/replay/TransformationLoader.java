@@ -71,10 +71,11 @@ public class TransformationLoader {
         var key = keys.stream().findFirst()
                 .orElseThrow(()->new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE));
         for (var p : providers) {
-            var className = p.getClass().getSimpleName();
-            if (className.equals(key)) {
+            var transformerName = p.getName();
+            if (transformerName.equals(key)) {
                 var configuration = c.get(key);
-                log.atInfo().setMessage(()->"Creating a transformer with configuration="+configuration).log();
+                log.atInfo().setMessage(()->"Creating a transformer through provider=" + p +
+                        " with configuration="+configuration).log();
                 return p.createTransformer(configuration);
             }
         }
