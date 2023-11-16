@@ -5,7 +5,7 @@ The base docker image currently relies on a custom build of the `otel-contrib-co
 These two PRs have been manually merged in a local build, available [here](https://github.com/mikaylathompson/opentelemetry-collector-contrib/tree/opensearch-logs-exporter).
 
 To generate the binary, suitable to be used on a docker container, in a location outside of this repo:
-1. `git clone git@github.com:mikaylathompson/opentelemetry-collector-contrib.git`
+1. Clone the github repo mikaylathompson/opentelemetry-collector-contrib
 2. `cd opentelemetry-collector-contrib`
 3. `git checkout opensearch-logs-exporter`
 4. `make install-tools`

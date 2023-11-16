@@ -5,7 +5,6 @@
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id("io.freefair.lombok") version "8.0.1"
-    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
 configurations {

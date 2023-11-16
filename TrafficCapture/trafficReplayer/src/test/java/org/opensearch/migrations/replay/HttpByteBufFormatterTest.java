@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @WrapWithNettyLeakDetection
-public class PrettyPrinterTest {
+public class HttpByteBufFormatterTest {
 
     @BeforeAll
     public static void setup() {
@@ -64,7 +64,7 @@ public class PrettyPrinterTest {
 
     private static Stream<Arguments> makeCombos() {
         return Arrays.stream(BufferType.values())
-                .flatMap(b->Arrays.stream(PrettyPrinter.PacketPrintFormat.values())
+                .flatMap(b->Arrays.stream(HttpByteBufFormatter.PacketPrintFormat.values())
                         .flatMap(fmt->Arrays.stream(BufferContent.values())
                                 .map(str->Arguments.of(fmt,b,str))));
     }
@@ -83,7 +83,7 @@ public class PrettyPrinterTest {
     @ParameterizedTest
     @MethodSource("makeCombos")
     @WrapWithNettyLeakDetection(repetitions = 4)
-    public void httpPacketBufsToString(PrettyPrinter.PacketPrintFormat format,
+    public void httpPacketBufsToString(HttpByteBufFormatter.PacketPrintFormat format,
                                        BufferType bufferType,
                                        BufferContent contentDirective) {
         var fullTrafficBytes = getBytesForScenario(contentDirective);
@@ -92,14 +92,14 @@ public class PrettyPrinterTest {
             byteArrays.add(Arrays.copyOfRange(fullTrafficBytes, i, i+step));
         }
         String outputString =
-                PrettyPrinter.setPrintStyleFor(format, ()->
-                        prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.REQUEST, bufferType));
+                HttpByteBufFormatter.setPrintStyleFor(format, ()->
+                        prettyPrint(byteArrays, HttpByteBufFormatter.HttpMessageType.REQUEST, bufferType));
         Assertions.assertEquals(getExpectedResult(format, contentDirective), outputString);
     }
 
     @Test
     public void httpPostPacketToHttpParsedString() throws Exception {
-        try (var sampleStream = PrettyPrinterTest.class.getResourceAsStream(
+        try (var sampleStream = HttpByteBufFormatterTest.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
             var fullTrafficBytes = sampleStream.readAllBytes();
 
@@ -108,18 +108,18 @@ public class PrettyPrinterTest {
                 byteArrays.add(Arrays.copyOfRange(fullTrafficBytes, i, i+step));
             }
             String outputString =
-                    PrettyPrinter.setPrintStyleFor(PrettyPrinter.PacketPrintFormat.PARSED_HTTP, ()->
-                            prettyPrint(byteArrays, PrettyPrinter.HttpMessageType.REQUEST, BufferType.POOLED_BYTEBUF));
+                    HttpByteBufFormatter.setPrintStyleFor(HttpByteBufFormatter.PacketPrintFormat.PARSED_HTTP, ()->
+                            prettyPrint(byteArrays, HttpByteBufFormatter.HttpMessageType.REQUEST, BufferType.POOLED_BYTEBUF));
             Assertions.assertEquals(new String(fullTrafficBytes, StandardCharsets.UTF_8), outputString);
         }
     }
 
     private static String prettyPrint(List<byte[]> byteArrays,
-                               PrettyPrinter.HttpMessageType messageType,
+                               HttpByteBufFormatter.HttpMessageType messageType,
                                BufferType bufferType) {
         switch (bufferType) {
             case BYTE_ARRAY:
-                return PrettyPrinter.httpPacketBytesToString(messageType, byteArrays);
+                return HttpByteBufFormatter.httpPacketBytesToString(messageType, byteArrays);
             case UNPOOLED_BYTEBUF:
                 return prettyPrintByteBufs(byteArrays, messageType, false);
             case POOLED_BYTEBUF:
@@ -130,15 +130,15 @@ public class PrettyPrinterTest {
     }
 
     private static String prettyPrintByteBufs(List<byte[]> byteArrays,
-                                       PrettyPrinter.HttpMessageType messageType,
+                                       HttpByteBufFormatter.HttpMessageType messageType,
                                        boolean usePooled) {
         var bbList = byteArrays.stream().map(b->TestUtilities.getByteBuf(b,usePooled)).collect(Collectors.toList());
-        var formattedString = PrettyPrinter.httpPacketBufsToString(messageType, bbList.stream());
+        var formattedString = HttpByteBufFormatter.httpPacketBufsToString(messageType, bbList.stream(), false);
         bbList.forEach(bb->bb.release());
         return formattedString;
     }
 
-    static String getExpectedResult(PrettyPrinter.PacketPrintFormat format, BufferContent content) {
+    static String getExpectedResult(HttpByteBufFormatter.PacketPrintFormat format, BufferContent content) {
         switch (format) {
             case TRUNCATED:
             case FULL_BYTES:

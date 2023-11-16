@@ -14,7 +14,6 @@ import io.netty.handler.codec.http.HttpServerCodec;
 import lombok.SneakyThrows;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -24,7 +23,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-public class PrettyPrinter {
+public class HttpByteBufFormatter {
 
     private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle =
             ThreadLocal.withInitial(Optional::empty);
@@ -62,33 +61,26 @@ public class PrettyPrinter {
     public static String httpPacketBytesToString(HttpMessageType msgType, Stream<byte[]> byteArrStream) {
         // This isn't memory efficient,
         // but stringifying byte bufs through a full parse and reserializing them was already really slow!
-        var cleanupByteBufs = new ArrayList<ByteBuf>();
-        try {
-            return httpPacketBufsToString(msgType, byteArrStream.map(bArr ->{
-                var bb = Unpooled.wrappedBuffer(bArr);
-                cleanupByteBufs.add(bb);
-                return bb;
-            }));
-        } finally {
-            cleanupByteBufs.stream().forEach(bb->bb.release());
-        }
+        return httpPacketBufsToString(msgType, byteArrStream.map(Unpooled::wrappedBuffer), true);
     }
 
-    public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
+    public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
+                                                boolean releaseByteBufs) {
         switch (printStyle.get().orElse(PacketPrintFormat.TRUNCATED)) {
             case TRUNCATED:
-                return httpPacketBufsToString(byteBufStream, Utils.MAX_BYTES_SHOWN_FOR_TO_STRING);
+                return httpPacketBufsToString(byteBufStream, Utils.MAX_BYTES_SHOWN_FOR_TO_STRING, releaseByteBufs);
             case FULL_BYTES:
-                return httpPacketBufsToString(byteBufStream, Long.MAX_VALUE);
+                return httpPacketBufsToString(byteBufStream, Long.MAX_VALUE, releaseByteBufs);
             case PARSED_HTTP:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, releaseByteBufs);
             default:
                 throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
-    public static String httpPacketsToPrettyPrintedString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
-        HttpMessage httpMessage = parseHttpMessageFromBufs(msgType, byteBufStream);
+    public static String httpPacketsToPrettyPrintedString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
+                                                          boolean releaseByteBufs) {
+        HttpMessage httpMessage = parseHttpMessageFromBufs(msgType, byteBufStream, releaseByteBufs);
         var holderOp = Optional.ofNullable((httpMessage instanceof ByteBufHolder) ? (ByteBufHolder) httpMessage : null);
         try {
             if (httpMessage instanceof FullHttpRequest) {
@@ -112,12 +104,11 @@ public class PrettyPrinter {
         return prettyPrintNettyMessage(sj, msg, msg.content());
     }
 
-    public static String prettyPrintNettyResponse(FullHttpResponse msg) {
+    static String prettyPrintNettyResponse(FullHttpResponse msg) {
         var sj = new StringJoiner("\n");
         sj.add(msg.protocolVersion().text() + " " + msg.status().code() + " " + msg.status().reasonPhrase());
         return prettyPrintNettyMessage(sj, msg, msg.content());
     }
-
 
     private static String prettyPrintNettyMessage(StringJoiner sj, HttpMessage msg, ByteBuf content) {
         msg.headers().forEach(kvp -> sj.add(String.format("%s: %s", kvp.getKey(), kvp.getValue())));
@@ -134,31 +125,54 @@ public class PrettyPrinter {
      * @param byteBufStream
      * @return
      */
-    static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
+    public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
+                                                       boolean releaseByteBufs) {
         EmbeddedChannel channel = new EmbeddedChannel(
                 msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
                 new HttpContentDecompressor(),
                 new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
         );
 
-        byteBufStream.forEach(b -> channel.writeInbound(b.retainedDuplicate()));
+        byteBufStream.forEach(b -> {
+            try {
+                channel.writeInbound(b.retainedDuplicate());
+            } finally {
+                if (releaseByteBufs) {
+                    b.release();
+                }
+            }
+        });
 
         return channel.readInbound();
     }
 
-    public static String httpPacketBufsToString(Stream<ByteBuf> byteBufStream, long maxBytesToShow) {
+    public static FullHttpRequest parseHttpRequestFromBufs(Stream<ByteBuf> byteBufStream, boolean releaseByteBufs) {
+        return (FullHttpRequest) parseHttpMessageFromBufs(HttpMessageType.REQUEST, byteBufStream, releaseByteBufs);
+    }
+
+    public static FullHttpResponse parseHttpResponseFromBufs(Stream<ByteBuf> byteBufStream, boolean releaseByteBufs) {
+        return (FullHttpResponse) parseHttpMessageFromBufs(HttpMessageType.RESPONSE, byteBufStream, releaseByteBufs);
+    }
+
+    public static String httpPacketBufsToString(Stream<ByteBuf> byteBufStream, long maxBytesToShow,
+                                                boolean releaseByteBufs) {
         if (byteBufStream == null) {
             return "null";
         }
         return byteBufStream.map(originalByteBuf -> {
-                    var bb = originalByteBuf.duplicate();
-                    var length = bb.readableBytes();
-                    var str = IntStream.range(0, length).map(idx -> bb.readByte())
-                            .limit(maxBytesToShow)
-                            .mapToObj(b -> "" + (char) b)
-                            .collect(Collectors.joining());
-                    return "[" + (length > maxBytesToShow ? str + "..." : str) + "]";
-                })
+                    try {
+                        var bb = originalByteBuf.duplicate();
+                        var length = bb.readableBytes();
+                        var str = IntStream.range(0, length).map(idx -> bb.readByte())
+                                .limit(maxBytesToShow)
+                                .mapToObj(b -> "" + (char) b)
+                                .collect(Collectors.joining());
+                        return "[" + (length > maxBytesToShow ? str + "..." : str) + "]";
+                    } finally {
+                        if (releaseByteBufs) {
+                            originalByteBuf.release();
+                        }
+                    }})
                 .collect(Collectors.joining(","));
     }
 }
