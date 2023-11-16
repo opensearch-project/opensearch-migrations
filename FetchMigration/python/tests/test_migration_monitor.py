@@ -44,7 +44,7 @@ class TestMigrationMonitor(unittest.TestCase):
         expected_shutdown_url = TEST_ENDPOINT + "/shutdown"
         test_endpoint = EndpointInfo(TEST_ENDPOINT, TEST_AUTH, TEST_FLAG)
         migration_monitor.shutdown_pipeline(test_endpoint)
-        mock_post.assert_called_once_with(expected_shutdown_url, auth=TEST_AUTH, verify=TEST_FLAG)
+        mock_post.assert_called_once_with(expected_shutdown_url, auth=TEST_AUTH, verify=TEST_FLAG, timeout=ANY)
 
     @patch('requests.get')
     def test_fetch_prometheus_metrics(self, mock_get: MagicMock):
@@ -57,7 +57,7 @@ class TestMigrationMonitor(unittest.TestCase):
         mock_get.return_value = mock_response
         # Test fetch
         raw_metrics_list = migration_monitor.fetch_prometheus_metrics(EndpointInfo(TEST_ENDPOINT))
-        mock_get.assert_called_once_with(expected_url, auth=None, verify=True)
+        mock_get.assert_called_once_with(expected_url, auth=None, verify=True, timeout=ANY)
         self.assertEqual(1, len(raw_metrics_list))
         test_metric = raw_metrics_list[0]
         self.assertEqual(TEST_METRIC_NAME, test_metric.name)

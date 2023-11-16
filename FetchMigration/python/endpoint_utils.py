@@ -98,7 +98,6 @@ def validate_auth(plugin_name: str, plugin_config: dict):
     if plugin_config.get(AWS_SIGV4_KEY, False) or AWS_CONFIG_KEY in plugin_config:
         # Raises a ValueError if region cannot be derived
         get_aws_region(plugin_config)
-        return
     # Validate basic auth
     elif USER_KEY not in plugin_config:
         raise ValueError("Invalid auth configuration (no username) for plugin: " + plugin_name)

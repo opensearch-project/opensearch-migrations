@@ -30,6 +30,7 @@ __DOC_SUCCESS_METRIC: str = "_opensearch_documentsSuccess"
 __RECORDS_IN_FLIGHT_METRIC: str = "_BlockingBuffer_recordsInFlight"
 __NO_PARTITIONS_METRIC: str = "_noPartitionsAcquired"
 __IDLE_THRESHOLD: int = 5
+__TIMEOUT_SECONDS: int = 5
 
 
 def is_process_alive(proc: Popen) -> bool:
@@ -51,13 +52,15 @@ def shutdown_process(proc: Popen) -> Optional[int]:
 
 def shutdown_pipeline(endpoint: EndpointInfo):
     shutdown_endpoint = endpoint.add_path(__SHUTDOWN_API_PATH)
-    requests.post(shutdown_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
+    requests.post(shutdown_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(),
+                  timeout=__TIMEOUT_SECONDS)
 
 
 def fetch_prometheus_metrics(endpoint: EndpointInfo) -> Optional[List[Metric]]:
     metrics_endpoint = endpoint.add_path(__METRICS_API_PATH)
     try:
-        response = requests.get(metrics_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl())
+        response = requests.get(metrics_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(),
+                                timeout=__TIMEOUT_SECONDS)
         response.raise_for_status()
     except requests.exceptions.RequestException:
         return None

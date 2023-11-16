@@ -53,7 +53,8 @@ class TestIndexOperations(unittest.TestCase):
                       match=[matchers.json_params_matcher(test_data[test_constants.INDEX2_NAME])])
         responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX3_NAME,
                       match=[matchers.json_params_matcher(test_data[test_constants.INDEX3_NAME])])
-        index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        self.assertEqual(0, len(failed))
 
     @responses.activate
     def test_create_indices_empty_alias(self):
@@ -67,21 +68,28 @@ class TestIndexOperations(unittest.TestCase):
         responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX1_NAME,
                       match=[matchers.json_params_matcher(expected_payload)])
         # Empty "aliases" should be stripped
-        index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        self.assertEqual(0, len(failed))
         # Index without "aliases" should not fail
         del test_data[test_constants.INDEX1_NAME][aliases_key]
-        index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        self.assertEqual(0, len(failed))
 
     @responses.activate
-    def test_create_indices_exception(self):
-        # Set up expected PUT calls with a mock response status
-        test_data = copy.deepcopy(test_constants.BASE_INDICES_DATA)
-        del test_data[test_constants.INDEX2_NAME]
-        del test_data[test_constants.INDEX3_NAME]
-        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX1_NAME,
+    def test_create_indices_exceptions(self):
+        # Set up second index to hit an exception
+        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX2_NAME,
                       body=requests.Timeout())
-        self.assertRaises(RuntimeError, index_operations.create_indices, test_data,
-                          EndpointInfo(test_constants.TARGET_ENDPOINT))
+        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX1_NAME,
+                      json={})
+        responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX3_NAME,
+                      json={})
+        failed_indices = index_operations.create_indices(test_constants.BASE_INDICES_DATA,
+                                                         EndpointInfo(test_constants.TARGET_ENDPOINT))
+        # Verify that failed indices are returned with their respective errors
+        self.assertEqual(1, len(failed_indices))
+        self.assertTrue(test_constants.INDEX2_NAME in failed_indices)
+        self.assertTrue(isinstance(failed_indices[test_constants.INDEX2_NAME], requests.Timeout))
 
     @responses.activate
     def test_doc_count(self):
@@ -98,6 +106,25 @@ class TestIndexOperations(unittest.TestCase):
         # Now send request
         doc_count_result = index_operations.doc_count(test_indices, EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(total_docs, doc_count_result.total)
+
+    @responses.activate
+    def test_doc_count_error(self):
+        test_indices = {test_constants.INDEX1_NAME, test_constants.INDEX2_NAME}
+        expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search?size=0"
+        responses.get(expected_count_endpoint, body=requests.Timeout())
+        self.assertRaises(RuntimeError, index_operations.doc_count, test_indices,
+                          EndpointInfo(test_constants.SOURCE_ENDPOINT))
+
+    @responses.activate
+    def test_get_request_errors(self):
+        # Set up list of error types to test
+        test_errors = [requests.ConnectionError(), requests.HTTPError(), requests.Timeout(),
+                       requests.exceptions.MissingSchema()]
+        # Verify that each error is wrapped in a RuntimeError
+        for e in test_errors:
+            responses.get(test_constants.SOURCE_ENDPOINT + "*", body=e)
+            self.assertRaises(RuntimeError, index_operations.fetch_all_indices,
+                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
 
 
 if __name__ == '__main__':
