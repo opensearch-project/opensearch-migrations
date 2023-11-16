@@ -24,7 +24,7 @@ public class HttpMessageAndTimestamp {
         }
         @Override
         public String toString() {
-            return super.format(Optional.of(PrettyPrinter.HttpMessageType.REQUEST));
+            return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.REQUEST));
         }
     }
 
@@ -34,7 +34,7 @@ public class HttpMessageAndTimestamp {
         }
         @Override
         public String toString() {
-            return super.format(Optional.of(PrettyPrinter.HttpMessageType.REQUEST));
+            return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.REQUEST));
         }
     }
 
@@ -64,10 +64,11 @@ public class HttpMessageAndTimestamp {
         return packetBytes.stream();
     }
 
-    public String format(Optional<PrettyPrinter.HttpMessageType> messageTypeOp) {
-        var packetBytesAsStr = messageTypeOp.map(mt-> PrettyPrinter.httpPacketBytesToString(mt, packetBytes))
-                .orElseGet(()-> PrettyPrinter.httpPacketBufsToString(packetBytes.stream().map(Unpooled::wrappedBuffer),
-                        Utils.MAX_PAYLOAD_SIZE_TO_PRINT));
+    public String format(Optional<HttpByteBufFormatter.HttpMessageType> messageTypeOp) {
+        var packetBytesAsStr = messageTypeOp.map(mt-> HttpByteBufFormatter.httpPacketBytesToString(mt, packetBytes))
+                .orElseGet(()-> HttpByteBufFormatter.httpPacketBufsToString(
+                        packetBytes.stream().map(Unpooled::wrappedBuffer),
+                        Utils.MAX_PAYLOAD_SIZE_TO_PRINT, true));
         final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
         sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);
         sb.append(", lastPacketTimestamp=").append(lastPacketTimestamp);

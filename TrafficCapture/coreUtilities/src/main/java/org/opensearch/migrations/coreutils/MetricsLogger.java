@@ -76,7 +76,6 @@ class MetricsLogger {
         }
         return new MetricsLogBuilder(logger).atError(event)
                 .setAttribute(MetricsAttributeKey.EXCEPTION_MESSAGE, cause.getMessage())
-                .setAttribute(MetricsAttributeKey.EXCEPTION_STACKTRACE, cause.getStackTrace().toString())
                 .setAttribute(MetricsAttributeKey.EXCEPTION_TYPE, cause.getClass().getName());
     }
 
