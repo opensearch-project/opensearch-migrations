@@ -15,8 +15,10 @@ const migrationsAppRegistryARN = process.env.MIGRATIONS_APP_REGISTRY_ARN
 if (migrationsAppRegistryARN) {
     console.info(`App Registry mode is enabled for CFN stack tracking. Will attempt to import the App Registry application from the MIGRATIONS_APP_REGISTRY_ARN env variable of ${migrationsAppRegistryARN} and looking in the configured region of ${region}`)
 }
+const customReplayerUserAgent = process.env.CUSTOM_REPLAYER_USER_AGENT
 
 new StackComposer(app, {
     migrationsAppRegistryARN: migrationsAppRegistryARN,
+    customReplayerUserAgent: customReplayerUserAgent,
     env: { account: account, region: region }
 });
