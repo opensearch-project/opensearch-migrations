@@ -97,14 +97,16 @@ to supply a _provider-configuration_ file (`META-INF/services/org.opensearch.mig
 with the fully qualified class name of the IJsonTransformerProvider implementation that should be loaded.  The contents
 of that file must be in plain text with a single class on a line.
 
-If multiple IJsonTransformerProviders are loaded, or if the provider/transformer require additional configuration 
-parameters, the user must specify additional configuration to the TrafficReplayer via the "--transformer-config" 
-argument.  This argument must be a json formatted list of maps.  The order of the list will define the order that
-the transformations are run.  Within each map is a single key-value pair whose name is the fully-qualified classname
-of the IJsonTransformerProvider.  The value of that key is then passed to the provider to fully instantiate an 
-IJsonTransformer object.  If only one IJsonTransformerProvider was loaded, configuration may be excluded.  Note that
-when the transformer-config is specified, it will control which of the loaded IJsonTransformerProviders will be 
-created, how they'll be created, and what order they will run in.
+The user must specify transformers to use and their configuration to the TrafficReplayer via the `--transformer-config` 
+argument.  If only one transformer is to be used and it doesn't require additional configuration, specifying JUST the
+classname will cause that single transformer to be used.  Otherwise, the user must specify `--transformer-config` as
+a json formatted list of maps.  The contents may also be specified in a file that can be read from 
+`--transformer-config-file` (which is mutually exclusive with `--transformer-config`).  The order of the list of 
+transformers and configs will define the order that the transformations are run.  Within each map is a single 
+key-value pair whose name must match the getName() of the IJsonTransformerProvider that the user is attempting to use.
+The name is defined by the `IJsonTransformerProvider::getName()`, which unless overridden is the classname 
+(e.g. 'JsonJoltTransformerProvider').  The value corresponding to that key is then passed to instantiate an 
+IJsonTransformer object.
 
 The base [jsonJoltMessageTransformerProvider](../replayerPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider) 
 package includes [JsonCompositeTransformer.java]
@@ -135,7 +137,7 @@ transform to add GZIP encoding and another to apply a new header would be config
 ```
 
 To run only one transformer without any configuration, the `--transformer-config` argument can simply 
-be set to the classname of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
+be set to the name of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
 without quotes or any json surrounding it).
 
 The user can also specify a file to read the transformations from using the `--transformer-config-file`, but can't use
