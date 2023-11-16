@@ -145,7 +145,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                     .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging.toString())
                                     .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
                                     .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
-//                                    .setMessage("Request failed to be transformed").log();
                             throw new CompletionException(t);
                         }
                     } else {
@@ -184,7 +183,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging)
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
-//                .setMessage("Request was redriven without transformation").log();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.SKIPPED, null) :
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.ERROR, reason)),

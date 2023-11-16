@@ -6,7 +6,6 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;

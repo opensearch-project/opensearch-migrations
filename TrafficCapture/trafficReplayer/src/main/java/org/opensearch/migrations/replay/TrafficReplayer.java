@@ -9,6 +9,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.Future;
 import lombok.AllArgsConstructor;
+import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -643,10 +644,9 @@ public class TrafficReplayer {
                     packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
                     commitTrafficStreams(rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
                     return null;
-                } else if (t instanceof Error) {
-                    throw (Error) t;
                 } else {
-                    throw new Error("Unknown throwable type passed to handle().", t);
+                    log.atError().setCause(t).setMessage(()->"Throwable passed to handle().  Rethrowing.").log();
+                    throw Lombok.sneakyThrow(t);
                 }
             } catch (Error error) {
                 log.atError()
