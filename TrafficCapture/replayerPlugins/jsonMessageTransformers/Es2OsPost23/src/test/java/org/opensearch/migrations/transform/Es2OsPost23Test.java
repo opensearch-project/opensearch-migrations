@@ -66,7 +66,7 @@ public class Es2OsPost23Test {
     }
 
     private static void transformJMESAndVerifyResult(Map<String,Object> json, String expectedValueSource) throws Exception{
-        var jmesTransformer = getJMESTransformer();
+        var jmesTransformer = getJMESTransformer(json);
         json = jmesTransformer.transformJson(json);
         var jsonAsStr = objectMapper.writeValueAsString(json);
         Object expectedObject = parseJsonFromResourceName(expectedValueSource);
@@ -87,8 +87,8 @@ public class Es2OsPost23Test {
         return new JsonTypeMappingTransformer();
     }
 
-    static JsonJMESPathTransformer getJMESTransformer() {
+    static JsonJMESPathTransformer getJMESTransformer(Map<String,Object> json) {
         Es2OsPost23 transformerProvider = new Es2OsPost23();
-        return transformerProvider.createTransformer(null);
+        return transformerProvider.createTransformer(json);
     }
 }
