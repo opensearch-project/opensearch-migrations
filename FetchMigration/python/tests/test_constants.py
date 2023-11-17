@@ -1,5 +1,15 @@
-# Holds constants for unit tests
+#
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+#
+
 from os.path import dirname
+
+# Holds constants for unit tests
 
 TEST_RESOURCES_SUBPATH = "/resources/"
 PIPELINE_CONFIG_RAW_FILE_PATH = dirname(__file__) + TEST_RESOURCES_SUBPATH + "test_pipeline_input.yaml"

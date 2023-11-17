@@ -81,7 +81,6 @@ jacocoTestReport {
     }
 
     reports {
-        println("Builddir=${buildDir}...${classDirectories}")
         xml.required = true
         xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
         html.required = true
