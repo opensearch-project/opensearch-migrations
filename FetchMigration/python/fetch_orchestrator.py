@@ -93,7 +93,9 @@ def run(params: FetchOrchestratorParams) -> Optional[int]:
                                                         report=True, dryrun=params.is_dry_run)
     logging.info("Running metadata migration...\n")
     metadata_migration_result = metadata_migration.run(metadata_migration_params)
-    if len(metadata_migration_result.migration_indices) > 0 and not params.is_only_metadata_migration():
+    if metadata_migration_result.target_doc_count == 0:
+        logging.warning("Target document count is zero, skipping data migration...")
+    elif len(metadata_migration_result.migration_indices) > 0 and not params.is_only_metadata_migration():
         # Kick off a subprocess for Data Prepper
         logging.info("Running Data Prepper...\n")
         proc = subprocess.Popen(dp_exec_path)
