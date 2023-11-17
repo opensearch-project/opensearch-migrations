@@ -1,7 +1,19 @@
+#
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+#
+
 import copy
+import logging
 import pickle
 import unittest
 from unittest.mock import patch, MagicMock, ANY
+
+import requests
 
 import metadata_migration
 from index_doc_count import IndexDocCount
@@ -12,8 +24,12 @@ from tests import test_constants
 class TestMetadataMigration(unittest.TestCase):
     # Run before each test
     def setUp(self) -> None:
+        logging.disable(logging.CRITICAL)
         with open(test_constants.PIPELINE_CONFIG_PICKLE_FILE_PATH, "rb") as f:
             self.loaded_pipeline_config = pickle.load(f)
+
+    def tearDown(self) -> None:
+        logging.disable(logging.NOTSET)
 
     @patch('index_operations.doc_count')
     @patch('metadata_migration.write_output')
@@ -135,6 +151,27 @@ class TestMetadataMigration(unittest.TestCase):
         mock_fetch_indices.assert_called_once()
         self.assertEqual(0, test_result.target_doc_count)
         self.assertEqual(0, len(test_result.migration_indices))
+
+    @patch('metadata_migration.write_output')
+    @patch('index_operations.doc_count')
+    @patch('index_operations.create_indices')
+    @patch('index_operations.fetch_all_indices')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_failed_indices(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock,
+                            mock_doc_count: MagicMock, mock_write_output: MagicMock):
+        mock_doc_count.return_value = IndexDocCount(1, dict())
+        # Setup failed indices
+        test_failed_indices_result = {
+            test_constants.INDEX1_NAME: requests.Timeout(),
+            test_constants.INDEX2_NAME: requests.ConnectionError(),
+            test_constants.INDEX3_NAME: requests.Timeout()
+        }
+        mock_create_indices.return_value = test_failed_indices_result
+        # Fetch indices is called first for source, then for target
+        mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, {}]
+        test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, "dummy")
+        self.assertRaises(RuntimeError, metadata_migration.run, test_input)
+        mock_create_indices.assert_called_once_with(test_constants.BASE_INDICES_DATA, ANY)
 
 
 if __name__ == '__main__':

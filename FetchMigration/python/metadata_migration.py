@@ -1,3 +1,12 @@
+#
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+#
+
 import argparse
 import logging
 
@@ -88,7 +97,13 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
             index_data = dict()
             for index_name in diff.indices_to_create:
                 index_data[index_name] = source_indices[index_name]
-            index_operations.create_indices(index_data, target_endpoint_info)
+            failed_indices = index_operations.create_indices(index_data, target_endpoint_info)
+            fail_count = len(failed_indices)
+            if fail_count > 0:
+                logging.error(f"Failed to create {fail_count} of {len(index_data)} indices")
+                for failed_index_name, error in failed_indices.items():
+                    logging.error(f"Index name {failed_index_name} failed: {error!s}")
+                raise RuntimeError("Metadata migration failed, index creation unsuccessful")
     return result
 
 

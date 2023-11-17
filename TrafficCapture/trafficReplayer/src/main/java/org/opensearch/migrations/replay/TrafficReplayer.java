@@ -3,16 +3,17 @@ package org.opensearch.migrations.replay;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.Future;
 import lombok.AllArgsConstructor;
+import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
@@ -71,12 +72,15 @@ import static org.opensearch.migrations.coreutils.MetricsLogger.initializeOpenTe
 @Slf4j
 public class TrafficReplayer {
 
+    private static final MetricsLogger TUPLE_METRICS_LOGGER = new MetricsLogger("SourceTargetCaptureTuple");
+
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String AWS_AUTH_HEADER_USER_AND_SECRET_ARG = "--auth-header-user-and-secret";
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
+
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
     private final ClientConnectionPool clientConnectionPool;
     private final TrafficStreamLimiter liveTrafficStreamLimiter;
@@ -396,7 +400,7 @@ public class TrafficReplayer {
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = new SourceTargetCaptureTuple.TupleToStreamConsumer();
+            var tupleWriter = new TupleParserChainConsumer(TUPLE_METRICS_LOGGER, new ResultsToLogsConsumer());
             var timeShifter = new TimeShifter(params.speedupFactor);
             tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(params.observedPacketConnectionTimeout),
                     blockingTrafficSource, timeShifter, tupleWriter);
@@ -640,10 +644,9 @@ public class TrafficReplayer {
                     packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
                     commitTrafficStreams(rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
                     return null;
-                } else if (t instanceof Error) {
-                    throw (Error) t;
                 } else {
-                    throw new Error("Unknown throwable type passed to handle().", t);
+                    log.atError().setCause(t).setMessage(()->"Throwable passed to handle().  Rethrowing.").log();
+                    throw Lombok.sneakyThrow(t);
                 }
             } catch (Error error) {
                 log.atError()

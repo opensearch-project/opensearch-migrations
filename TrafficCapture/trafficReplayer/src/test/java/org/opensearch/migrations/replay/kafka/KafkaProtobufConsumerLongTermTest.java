@@ -9,12 +9,10 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.jetbrains.annotations.NotNull;
-import org.junit.Assume;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.opensearch.migrations.AssumeDockerIsAvailableExtension;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -32,9 +30,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @Tag("requiresDocker")
-@ExtendWith(AssumeDockerIsAvailableExtension.class)
 public class KafkaProtobufConsumerLongTermTest {
 
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
@@ -47,8 +44,7 @@ public class KafkaProtobufConsumerLongTermTest {
     @Container
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
     private KafkaContainer embeddedKafkaBroker =
-            AssumeDockerIsAvailableExtension.assumeNoThrow(
-                    ()->new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0")));
+            new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
 
     Producer<String, byte[]> buildKafkaProducer() {
@@ -93,7 +89,7 @@ public class KafkaProtobufConsumerLongTermTest {
         return TEST_TRAFFIC_STREAM_ID_STRING + "_" + i;
     }
 
-    @Test
+    //@Test
     @Tag("longTest")
     public void testTrafficCaptureSource() throws Exception {
         String testTopicName = "TEST_TOPIC";

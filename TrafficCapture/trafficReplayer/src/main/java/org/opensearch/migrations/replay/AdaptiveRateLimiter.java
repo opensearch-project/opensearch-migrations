@@ -35,14 +35,13 @@ public class AdaptiveRateLimiter<D,T> {
                 .limitForPeriod(10)  // adjust this dynamically based on your needs
                 .build();
 
-        var retry = Retry.of("Retry_" + System.identityHashCode(producer), retryConfig);
+        Retry.of("Retry_" + System.identityHashCode(producer), retryConfig);
         var rateLimiter = RateLimiter.of("RateLimiter_" + System.identityHashCode(producer), rateLimiterConfig);
 
-        var rateLimitedSupplier =
-                RateLimiter.decorateCompletionStage(rateLimiter, () -> {
-                    var df = producer.get();
-                    return df.future;
-                });
+        RateLimiter.decorateCompletionStage(rateLimiter, () -> {
+            var df = producer.get();
+            return df.future;
+        });
 
         // TODO: I'm still trying to figure out how to connect these together and to round-trip
         // marshal the DTCF through as a CompletionStage

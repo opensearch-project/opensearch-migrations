@@ -44,7 +44,6 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
         FrontsideHandler.closeAndFlush(writeBackChannel);
         metricsLogger.atSuccess(MetricsEvent.BACKSIDE_HANDLER_CHANNEL_CLOSED)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
-//                .setMessage("BacksideHandler channel is closed.").log();
     }
 
     @Override
@@ -54,6 +53,5 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
         FrontsideHandler.closeAndFlush(ctx.channel());
         metricsLogger.atError(MetricsEvent.BACKSIDE_HANDLER_EXCEPTION, cause)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channelId).emit();
-//                .setMessage("Exception caught by BacksideChannel").log();
     }
 }
