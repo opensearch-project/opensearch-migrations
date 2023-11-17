@@ -56,9 +56,11 @@ dependencies {
     implementation("org.apache.logging.log4j:log4j-slf4j2-impl:2.20.0")
 
     // OpenTelemetry core
-    implementation("io.opentelemetry:opentelemetry-sdk:1.30.0")
-    implementation("io.opentelemetry:opentelemetry-exporter-otlp:1.30.0")
-    implementation("io.opentelemetry:opentelemetry-semconv:1.30.1-alpha")
+    implementation group: 'io.opentelemetry', name:'opentelemetry-api', version: '1.30.0'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-exporter-otlp', version: '1.30.0'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-sdk', version: '1.30.0'
+    implementation group: 'io.opentelemetry.instrumentation', name:'opentelemetry-log4j-appender-2.17', version: '1.30.0-alpha'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-semconv', version: '1.30.0-alpha'
 
     // OpenTelemetry log4j appender
     implementation("io.opentelemetry.instrumentation:opentelemetry-log4j-appender-2.17:1.30.0-alpha")

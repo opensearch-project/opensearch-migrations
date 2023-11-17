@@ -52,6 +52,8 @@ exporters:
         insecure_skip_verify: true
   logging:
     verbosity: detailed
+  file:
+    path: /logs/filename.json
   debug:
 
 service:
@@ -63,4 +65,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [attributes]
-      exporters: [logging, debug, opensearch]
+      exporters: [logging, debug, opensearch, file]

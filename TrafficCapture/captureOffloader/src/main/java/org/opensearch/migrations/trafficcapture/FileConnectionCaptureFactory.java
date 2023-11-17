@@ -52,6 +52,9 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
     class StreamManager extends OrderedStreamLifecyleManager<Void> {
         String connectionId;
         @Override
+        public void close() {}
+
+        @Override
         public CodedOutputStreamAndByteBufferWrapper createStream() {
             return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
         }

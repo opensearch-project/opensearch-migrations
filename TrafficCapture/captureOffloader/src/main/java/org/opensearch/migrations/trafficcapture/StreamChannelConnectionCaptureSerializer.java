@@ -188,20 +188,23 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         if (streamHasBeenClosed || (currentCodedOutputStreamHolderOrNull == null && !isFinal)) {
             return CompletableFuture.completedFuture(null);
         }
-        CodedOutputStream currentStream = getOrCreateCodedOutputStream();
-        var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
-        // e.g. 3: 1
-        currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
-        log.trace("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
-        currentStream.flush();
-        assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that " +
-                "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
-        var future = streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
-        currentCodedOutputStreamHolderOrNull = null;
-        if (isFinal) {
-            streamHasBeenClosed = true;
+        try {
+            CodedOutputStream currentStream = getOrCreateCodedOutputStream();
+            var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
+            // e.g. 3: 1
+            currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
+            log.trace("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
+            currentStream.flush();
+            assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that " +
+                    "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
+            return streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
+        } finally {
+            currentCodedOutputStreamHolderOrNull = null;
+            if (isFinal) {
+                streamHasBeenClosed = true;
+                streamManager.close();
+            }
         }
-        return future;
     }
 
     @Override
@@ -222,7 +225,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     @Override
     public void addCloseEvent(Instant timestamp) throws IOException {
         beginSubstreamObservation(timestamp, TrafficObservation.CLOSE_FIELD_NUMBER, 1);
-        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.CLOSE_FIELD_NUMBER, CloseObservation.getDefaultInstance());
+        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.CLOSE_FIELD_NUMBER,
+                CloseObservation.getDefaultInstance());
     }
 
     @Override

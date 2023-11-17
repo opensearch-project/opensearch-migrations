@@ -321,6 +321,9 @@ class StreamChannelConnectionCaptureSerializerTest {
         ConcurrentLinkedQueue<ByteBuffer> outputBuffers;
 
         @Override
+        public void close() {}
+
+        @Override
         public CodedOutputStreamHolder createStream() {
             return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
         }

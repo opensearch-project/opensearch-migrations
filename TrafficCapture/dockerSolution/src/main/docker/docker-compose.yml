@@ -9,6 +9,8 @@ services:
     ports:
       - "9200:9200"
       - "19200:19200"
+    volumes:
+      - /Users/schohn/dev/opensearch-migrations/TrafficCapture/containerLogs:/logs
     environment:
       - http.port=19200
     # Run processes for elasticsearch and capture proxy, and exit if either one ends
@@ -70,6 +72,7 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
+      - /Users/schohn/dev/opensearch-migrations/TrafficCapture/containerLogs:/logs
     environment:
       - TUPLE_DIR_PATH=/shared-replayer-output/traffic-replayer-default
     depends_on:
@@ -119,10 +122,12 @@ services:
       - "13133:13133"
     volumes:
       - ./otelcol/otel-config.yml:/etc/otel-config.yml
+      - /Users/schohn/dev/opensearch-migrations/TrafficCapture/containerLogs:/logs
     networks:
       - migrations
     depends_on:
       - opensearchanalytics
+    command: tail -f /dev/null
 
   migration-console:
     image: 'migrations/migration_console:latest'

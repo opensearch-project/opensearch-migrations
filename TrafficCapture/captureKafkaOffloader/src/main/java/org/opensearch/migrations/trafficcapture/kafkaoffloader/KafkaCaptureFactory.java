@@ -1,6 +1,12 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import com.google.protobuf.CodedOutputStream;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +23,10 @@ import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 
@@ -31,6 +40,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes and
     // general Kafka message overhead
     public static final int KAFKA_MESSAGE_OVERHEAD_BYTES = 500;
+    public static final String TELEMETRY_SCOPE_NAME = "KafkaCaptureFactory";
 
     private final String nodeId;
     // Potential future optimization here to use a direct buffer (e.g. nio) instead of byte array
@@ -52,7 +62,16 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
     @Override
     public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(String connectionId) {
-        return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager(connectionId));
+        var tracer = GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME);
+        Span connectionSpan = tracer.spanBuilder("connection").startSpan();
+
+        try (var namedOnlyForAutoClose = Context.current().with(connectionSpan).makeCurrent()) {
+            var meter = GlobalOpenTelemetry.get().getMeter(TELEMETRY_SCOPE_NAME);
+            meter.counterBuilder("connection_created").build().add(1);
+        }
+
+        return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId,
+                new StreamManager(connectionSpan, connectionId));
     }
 
     @AllArgsConstructor
@@ -65,9 +84,28 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         }
     }
 
-    @AllArgsConstructor
     class StreamManager extends OrderedStreamLifecyleManager<RecordMetadata> {
+        Span telemetrySpan;
         String connectionId;
+        Instant startTime;
+
+        public StreamManager(Span telemetrySpan, String connectionId) {
+            this.telemetrySpan = telemetrySpan;
+            this.connectionId = connectionId;
+            this.startTime = Instant.now();
+        }
+
+        @Override
+        public void close() throws IOException {
+            try (var namedOnlyForAutoClose = Context.current().with(telemetrySpan).makeCurrent()) {
+                var histogram = GlobalOpenTelemetry.get().getMeter(TELEMETRY_SCOPE_NAME)
+                        .histogramBuilder("connection_lifetime").build();
+                telemetrySpan.setAttribute("connectionId", connectionId);
+                histogram.record((double) Duration.between(startTime, Instant.now()).toMillis(), Attributes.empty(),
+                        Context.current().with(telemetrySpan));
+                telemetrySpan.end();
+            }
+        }
 
         @Override
         public CodedOutputStreamWrapper createStream() {

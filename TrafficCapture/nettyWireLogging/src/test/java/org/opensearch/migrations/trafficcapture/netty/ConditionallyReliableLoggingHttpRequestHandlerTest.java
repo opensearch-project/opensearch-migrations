@@ -40,6 +40,9 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
         AtomicInteger flushCount = new AtomicInteger();
 
         @Override
+        public void close() {}
+
+        @Override
         public CodedOutputStreamAndByteBufferWrapper createStream() {
             return new CodedOutputStreamAndByteBufferWrapper(1024*1024);
         }
