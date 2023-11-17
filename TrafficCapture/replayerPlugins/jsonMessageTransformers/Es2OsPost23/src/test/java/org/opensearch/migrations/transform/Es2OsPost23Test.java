@@ -44,6 +44,18 @@ public class Es2OsPost23Test {
         transformAndVerifyResult(json, "get_query_output.txt");
     }
 
+    @Test
+    public void removeTypeMappingsWhenExists() throws Exception {
+        var json = parseJsonFromResourceName("put_index_settings_input_1.txt");
+        transformJMESAndVerifyResult(json, "put_index_settings_output.txt");
+    }
+
+    @Test
+    public void removeTypeMappingsWhenNoTypeExists() throws Exception {
+        var json = parseJsonFromResourceName("put_index_settings_input_2.txt");
+        transformJMESAndVerifyResult(json, "put_index_settings_output.txt");
+    }
+
     private static Map<String,Object> parseJsonFromResourceName(String resourceName) throws Exception {
         var jsonAccumulator = new JsonAccumulator();
         try (var resourceStream = getInputStreamForTypeMappingResource(resourceName);
@@ -51,6 +63,15 @@ public class Es2OsPost23Test {
             var expectedBytes = CharStreams.toString(isr).getBytes(StandardCharsets.UTF_8);
             return (Map<String,Object>) jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
         }
+    }
+
+    private static void transformJMESAndVerifyResult(Map<String,Object> json, String expectedValueSource) throws Exception{
+        var jmesTransformer = getJMESTransformer();
+        json = jmesTransformer.transformJson(json);
+        var jsonAsStr = objectMapper.writeValueAsString(json);
+        Object expectedObject = parseJsonFromResourceName(expectedValueSource);
+        var expectedValue = objectMapper.writeValueAsString(expectedObject);
+        Assertions.assertEquals(expectedValue, jsonAsStr);
     }
 
     private static void transformAndVerifyResult(Map<String,Object> json, String expectedValueSource) throws Exception {
@@ -64,5 +85,10 @@ public class Es2OsPost23Test {
 
     static IJsonTransformer getJsonTransformer() {
         return new JsonTypeMappingTransformer();
+    }
+
+    static JsonJMESPathTransformer getJMESTransformer() {
+        Es2OsPost23 transformerProvider = new Es2OsPost23();
+        return transformerProvider.createTransformer(null);
     }
 }
