@@ -76,7 +76,11 @@ public class TransformationLoader {
                 var configuration = c.get(key);
                 log.atInfo().setMessage(()->"Creating a transformer through provider=" + p +
                         " with configuration="+configuration).log();
-                return p.createTransformer(configuration);
+                try {
+                    return p.createTransformer(configuration);
+                } catch (Exception e) {
+                    throw new Exception("Error creating transformer: " + key, e);
+                }
             }
         }
         throw new IllegalArgumentException("Could not find a provider named: " + key);
