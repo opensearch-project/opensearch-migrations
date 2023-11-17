@@ -30,6 +30,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Properties;
+import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -68,8 +69,7 @@ import java.util.stream.StreamSupport;
 @Slf4j
 public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
 
-    @ToString(callSuper = true)
-    private static class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey {
+    static class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey {
         private final int partition;
         private final long offset;
 
@@ -77,6 +77,15 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
             super(trafficStream);
             this.partition = partition;
             this.offset = offset;
+        }
+
+        @Override
+        public String toString() {
+            return new StringJoiner("|")
+                    .add(super.toString())
+                    .add("partition=" + partition)
+                    .add("offset=" + offset)
+                    .toString();
         }
     }
 
@@ -221,7 +230,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
             }).filter(Objects::nonNull);
             return trafficStream.collect(Collectors.<ITrafficStreamWithKey>toList());
         } catch (Exception e) {
-            log.error("Terminating Kafka traffic stream");
+            log.atError().setCause(e).setMessage("Terminating Kafka traffic stream").log();
             throw e;
         }
     }

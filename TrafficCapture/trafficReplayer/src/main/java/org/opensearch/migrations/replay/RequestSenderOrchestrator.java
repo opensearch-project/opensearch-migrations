@@ -160,7 +160,8 @@ public class RequestSenderOrchestrator {
                 var sf = eventLoop.schedule(kvp.getValue(), getDelayFromNowMs(kvp.getKey()), TimeUnit.MILLISECONDS);
                 sf.addListener(sfp->{
                     if (!sfp.isSuccess()) {
-                        log.atWarn().setCause(sfp.cause()).setMessage(()->"Scheduled future was not successful").log();
+                        log.atWarn().setCause(sfp.cause()).setMessage(()->"Scheduled future was not successful for " +
+                                channelInteraction).log();
                     }
                 });
             });
@@ -171,7 +172,7 @@ public class RequestSenderOrchestrator {
                     eventLoop.schedule(task, getDelayFromNowMs(atTime), TimeUnit.MILLISECONDS);
             scheduledFuture.addListener(f->{
                 if (!f.isSuccess()) {
-                    log.atError().setCause(f.cause()).setMessage(()->"Error scheduling task").log();
+                    log.atError().setCause(f.cause()).setMessage(()->"Error scheduling task for "+channelKey).log();
                 } else {
                     log.atInfo().setMessage(()->"scheduled future has finished for "+channelInteraction).log();
                 }

@@ -137,7 +137,8 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
                  return;
             }
         } catch (Exception e) {
-            log.warn("writing headers directly to chunks w/ sizes didn't work: "+e);
+            log.atWarn().setCause(e).setMessage(()->"writing headers directly to chunks w/ sizes didn't work for " +
+                    httpJson).log();
         }
 
         try (var baos = new ByteArrayOutputStream()) {

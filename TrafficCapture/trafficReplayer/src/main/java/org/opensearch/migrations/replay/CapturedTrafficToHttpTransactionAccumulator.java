@@ -185,7 +185,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .or(() -> handleObservationForReadState(accum, observation, trafficStreamKey, timestamp))
                 .or(() -> handleObservationForWriteState(accum, observation, trafficStreamKey, timestamp))
                 .orElseGet(() -> {
-                    log.atWarn().setMessage(()->"unaccounted for observation type " + observation).log();
+                    log.atWarn().setMessage(()->"unaccounted for observation type " + observation +
+                            " for " + accum.trafficChannelKey).log();
                     return CONNECTION_STATUS.ALIVE;
                 });
     }
@@ -380,8 +381,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     // It might be advantageous to replicate these to provide stress to the target server, but
                     // it's a difficult decision and one to be managed with a policy.
                     // TODO - add Jira/github issue here.
-                    log.warn("Terminating a TrafficStream reconstruction w/out an accumulated value, " +
-                            "assuming an empty server interaction and NOT reproducing this to the target cluster.");
+                    log.atWarn().setMessage("Terminating a TrafficStream reconstruction before data was accumulated " +
+                            "for " + accumulation.trafficChannelKey + "assuming an empty server interaction and NOT " +
+                            "reproducing this to the target cluster.").log();
                     if (accumulation.hasRrPair()) {
                         listener.onTrafficStreamsExpired(status,
                                 Collections.unmodifiableList(accumulation.getRrPair().trafficStreamKeysBeingHeld));
