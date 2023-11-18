@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
@@ -19,11 +20,14 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.slf4j.event.Level;
 
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -49,8 +53,7 @@ import java.util.stream.StreamSupport;
  * may not be called for almost an hour.  By design, we're not calling Kafka to pull
  * any more messages since we know that we don't have work to do for an hour.  Shortly
  * after the hour of waiting begins, Kakfa will notice that this application is no
- * longer calling poll and will kick the consumer out of the client group.  Other
- * consumers may connect, though they'll also be kicked out of the group shortly.
+ * longer calling poll and will kick the consumer out of the client group.
  *
  * See
  * <a href="https://kafka.apache.org/21/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#failuredetection">...</a>
@@ -60,15 +63,15 @@ import java.util.stream.StreamSupport;
  * over its partitions. When this happens, you may see an offset commit failure (as
  * indicated by a CommitFailedException thrown from a call to commitSync())."
  *
- * I believe that this can be mitigated, hopefully fully, by adding a keepAlive/do nothing
- * call that the BlockingTrafficSource can use.  That can be implemented in a source
- * like this with Kafka by polling, then resetting the position on the stream if we
- * aren't supposed to be reading new data.
+ * Since the Kafka client requires all calls to be made from the same thread, we can't
+ * simply run a background job to keep the client warm.  We need the caller to touch
+ * this object periodically to keep the connection alive.
  */
 @Slf4j
 public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
 
     @ToString(callSuper = true)
+    @EqualsAndHashCode(callSuper = true)
     private static class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey {
         private final int partition;
         private final long offset;
@@ -119,6 +122,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
 
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
 
+    private final Clock clock;
     private final Consumer<String, byte[]> kafkaConsumer;
     private final ConcurrentHashMap<Integer,OffsetLifecycleTracker> partitionToOffsetLifecycleTrackerMap;
     private final ConcurrentHashMap<TopicPartition,OffsetAndMetadata> nextSetOfCommitsMap;
@@ -128,16 +132,17 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
     private final AtomicInteger trafficStreamsRead;
 
     public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic) {
-        this(kafkaConsumer, topic, new KafkaBehavioralPolicy());
+        this(kafkaConsumer, topic, Clock.systemUTC(), new KafkaBehavioralPolicy());
     }
 
     public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, @NonNull String topic,
-                                 KafkaBehavioralPolicy behavioralPolicy) {
+                                 Clock clock, @NonNull KafkaBehavioralPolicy behavioralPolicy) {
         this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic));
         trafficStreamsRead = new AtomicInteger();
+        this.clock = clock;
 
         partitionToOffsetLifecycleTrackerMap = new ConcurrentHashMap<>();
         nextSetOfCommitsMap = new ConcurrentHashMap<>();
@@ -148,9 +153,12 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                                                            @NonNull String groupId,
                                                            boolean enableMSKAuth,
                                                            String propertyFilePath,
-                                                           KafkaBehavioralPolicy behavioralPolicy) throws IOException {
+                                                           Clock clock,
+                                                           @NonNull  KafkaBehavioralPolicy behavioralPolicy)
+            throws IOException
+    {
         var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
-        return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic, behavioralPolicy);
+        return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic, clock, behavioralPolicy);
     }
 
     public static Properties buildKafkaProperties(@NonNull String brokers,
@@ -182,6 +190,16 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
         return kafkaProps;
     }
 
+//    @Override
+//    public Optional<Duration> maximumKeepAliveInterval() {
+//        return Optional.of(Duration.);
+//    }
+
+    @Override
+    public Optional<Instant> touch() {
+        return Optional.of(Instant.MAX);
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
@@ -191,7 +209,8 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
     public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously() {
         try {
             ConsumerRecords<String, byte[]> records;
-            records = safeCommitAndPollWithSwallowedRuntimeExceptions();
+            safeCommitWithRetry();
+            records = safePollWithSwallowedRuntimeExceptions();
             Stream<ITrafficStreamWithKey> trafficStream = StreamSupport.stream(records.spliterator(), false)
                     .map(kafkaRecord -> {
                         try {
@@ -226,19 +245,32 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
         }
     }
 
-    private ConsumerRecords<String, byte[]> safeCommitAndPollWithSwallowedRuntimeExceptions() {
-        try {
-            synchronized (offsetLifecycleLock) {
+    private void safeCommitWithRetry() {
+        synchronized (offsetLifecycleLock) {
+            try {
                 if (!nextSetOfCommitsMap.isEmpty()) {
-                    log.atDebug().setMessage(()->"Committing "+nextSetOfCommitsMap).log();
+                    log.atDebug().setMessage(() -> "Committing " + nextSetOfCommitsMap).log();
                     kafkaConsumer.commitSync(nextSetOfCommitsMap);
-                    log.atDebug().setMessage(()->"Done committing "+nextSetOfCommitsMap).log();
-                    nextSetOfCommitsMap.clear();
+                    log.atDebug().setMessage(() -> "Done committing " + nextSetOfCommitsMap).log();
                 }
+            } catch (RuntimeException e) {
+                log.atWarn().setCause(e)
+                        .setMessage(() -> "Error while committing.  Purging all commit points since another consumer " +
+                                "may have already begun processing messages BEFORE those commits.  Commits being " +
+                                "discarded: " + nextSetOfCommitsMap.entrySet().stream()
+                                .map(kvp -> kvp.getKey() + "->" + kvp.getValue()).collect(Collectors.joining(",")))
+                        .log();
+            } finally {
+                nextSetOfCommitsMap.clear();
             }
+        }
+    }
 
+    private ConsumerRecords<String, byte[]> safePollWithSwallowedRuntimeExceptions() {
+        try {
             var records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
-            log.atInfo().setMessage(()->"Kafka consumer poll has fetched "+records.count()+" records").log();
+            log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
+                    .setMessage(()->"Kafka consumer poll has fetched "+records.count()+" records").log();
             log.atDebug().setMessage(()->"All positions: {"+kafkaConsumer.assignment().stream()
                     .map(tp->tp+": "+kafkaConsumer.position(tp)).collect(Collectors.joining(",")) + "}").log();
             log.atDebug().setMessage(()->"All COMMITTED positions: {"+kafkaConsumer.assignment().stream()

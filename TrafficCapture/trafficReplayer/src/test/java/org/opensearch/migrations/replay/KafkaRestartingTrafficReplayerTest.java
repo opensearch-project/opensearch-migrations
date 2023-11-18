@@ -90,7 +90,7 @@ public class KafkaRestartingTrafficReplayerTest {
                 response->TestHttpServerContext.makeResponse(random, response));
         var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
-        log.atInfo().setMessage(()->trafficStreams.stream().map(ts-> TrafficStreamUtils.summarizeTrafficStream(ts))
+        log.atInfo().setMessage(()->trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
                 .collect(Collectors.joining("\n"))).log();
 
         loadStreamsToKafka(buildKafkaConsumer(),
@@ -98,7 +98,7 @@ public class KafkaRestartingTrafficReplayerTest {
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
                 () -> new SentinelSensingTrafficSource(
-                        new KafkaProtobufConsumer(buildKafkaConsumer(), TEST_TOPIC_NAME, null)));
+                        new KafkaProtobufConsumer(buildKafkaConsumer(), TEST_TOPIC_NAME)));
         log.error("done");
     }
 
@@ -174,7 +174,7 @@ public class KafkaRestartingTrafficReplayerTest {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME, null);
+        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME);
     }
 
     @SneakyThrows

@@ -9,6 +9,7 @@ import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 
 @Slf4j
@@ -32,7 +33,8 @@ public class TrafficCaptureSourceFactory {
 
         if (isKafkaActive) {
             return KafkaProtobufConsumer.buildKafkaConsumer(appParams.kafkaTrafficBrokers, appParams.kafkaTrafficTopic,
-                appParams.kafkaTrafficGroupId, appParams.kafkaTrafficEnableMSKAuth, appParams.kafkaTrafficPropertyFile, new KafkaBehavioralPolicy());
+                appParams.kafkaTrafficGroupId, appParams.kafkaTrafficEnableMSKAuth, appParams.kafkaTrafficPropertyFile,
+                    Clock.systemUTC(), new KafkaBehavioralPolicy());
         } else if (isInputFileActive) {
             return new InputStreamOfTraffic(new FileInputStream(appParams.inputFilename));
         } else {
