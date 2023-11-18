@@ -70,6 +70,8 @@ import java.util.stream.StreamSupport;
 @Slf4j
 public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
 
+    public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
+
     @ToString(callSuper = true)
     @EqualsAndHashCode(callSuper = true)
     private static class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey {
@@ -128,17 +130,25 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
     private final ConcurrentHashMap<TopicPartition,OffsetAndMetadata> nextSetOfCommitsMap;
     private final Object offsetLifecycleLock = new Object();
     private final String topic;
+    private final Duration keepAliveInterval;
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final AtomicInteger trafficStreamsRead;
+    private Instant lastPollTimestamp;
 
-    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic) {
-        this(kafkaConsumer, topic, Clock.systemUTC(), new KafkaBehavioralPolicy());
+    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
+        this(kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
     }
 
-    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, @NonNull String topic,
-                                 Clock clock, @NonNull KafkaBehavioralPolicy behavioralPolicy) {
+    public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer,
+                                 @NonNull String topic,
+                                 Duration keepAliveInterval,
+                                 Clock clock,
+                                 @NonNull KafkaBehavioralPolicy behavioralPolicy)
+    {
         this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
+        this.keepAliveInterval = keepAliveInterval;
+        log.error("keepAliveInterval="+keepAliveInterval);
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic));
         trafficStreamsRead = new AtomicInteger();
@@ -158,7 +168,14 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
             throws IOException
     {
         var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
-        return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic, clock, behavioralPolicy);
+        var pollPeriod = Duration.ofMillis(Integer.valueOf((String)kafkaProps.get(MAX_POLL_INTERVAL_KEY)));
+        var keepAlivePeriod = getKeepAlivePeriodFromPollPeriod(pollPeriod);
+        return new KafkaProtobufConsumer(new KafkaConsumer<>(kafkaProps), topic, keepAlivePeriod,
+                clock, behavioralPolicy);
+    }
+
+    private static Duration getKeepAlivePeriodFromPollPeriod(Duration pollPeriod) {
+        return pollPeriod.dividedBy(2);
     }
 
     public static Properties buildKafkaProperties(@NonNull String brokers,
@@ -190,14 +207,40 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
         return kafkaProps;
     }
 
-//    @Override
-//    public Optional<Duration> maximumKeepAliveInterval() {
-//        return Optional.of(Duration.);
-//    }
-
     @Override
-    public Optional<Instant> touch() {
-        return Optional.of(Instant.MAX);
+    public void touch() {
+        log.error("TOUCH CALLED");
+        try {
+            var records = kafkaConsumer.poll(Duration.ZERO);
+            log.atError().setMessage(()->"Polled "+records.count()+" records to keep the consumer alive").log();
+            records.forEach(r -> {
+                try {
+                    var tp = new TopicPartition(r.topic(), r.partition());
+                    log.atError().setMessage(()->"Resetting "+tp+" to offset="+r.offset()).log();
+                    kafkaConsumer.seek(tp, r.offset());
+                } catch (IllegalStateException e) {
+                    log.atWarn().setCause(e).setMessage(() -> "Caught exception while seeking.  " +
+                            "Ignoring so that other records can have their seeks readjusted.").log();
+                }
+            });
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. " +
+                    "Swallowing and awaiting next metadata refresh to try again.").addArgument(topic).log();
+        }
+        lastPollTimestamp = clock.instant();
+    }
+
+    /**
+     * If messages are outstanding, we need to keep the connection alive, otherwise, there's no
+     * reason to.  It's OK to fall out of the group and rejoin once ready.
+     * @return
+     */
+    @Override
+    public Optional<Instant> getNextRequiredTouch() {
+        synchronized (offsetLifecycleLock) {
+            return partitionToOffsetLifecycleTrackerMap.isEmpty() ? Optional.empty() :
+                    Optional.of(lastPollTimestamp.plus(keepAliveInterval));
+        }
     }
 
     @Override
@@ -268,6 +311,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
 
     private ConsumerRecords<String, byte[]> safePollWithSwallowedRuntimeExceptions() {
         try {
+            lastPollTimestamp = clock.instant();
             var records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
                     .setMessage(()->"Kafka consumer poll has fetched "+records.count()+" records").log();

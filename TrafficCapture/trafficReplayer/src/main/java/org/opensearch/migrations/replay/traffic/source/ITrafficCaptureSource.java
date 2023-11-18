@@ -25,7 +25,6 @@ public interface ITrafficCaptureSource extends Closeable {
      * active.  Empty indicates that touch() does not need to be called to keep the
      * source active.
      */
-    default Optional<Instant> touch() {
-        return Optional.empty();
-    }
+    default void touch() {}
+    default Optional<Instant> getNextRequiredTouch() { return Optional.empty(); }
 }

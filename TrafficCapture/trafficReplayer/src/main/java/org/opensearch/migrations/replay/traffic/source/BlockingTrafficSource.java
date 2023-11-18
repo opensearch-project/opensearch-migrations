@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -40,8 +41,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * Limit the number of readers to one at a time and only if we haven't yet maxed out our time buffer
      */
     private final Semaphore readGate;
-
     private final Duration bufferTimeWindow;
+
 
     public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying,
                                  Duration bufferTimeWindow) {
@@ -89,27 +90,9 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
     readNextTrafficStreamChunk() {
-        var trafficStreamListFuture =
-                CompletableFuture.supplyAsync(() -> {
-                                    if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
-                                    while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
-                                        try {
-                                            log.atInfo().setMessage(
-                                                            "blocking until signaled to read the next chunk last={} stop={}")
-                                                    .addArgument(lastTimestampSecondsRef.get())
-                                                    .addArgument(stopReadingAtRef.get())
-                                                    .log();
-                                            readGate.acquire();
-                                        } catch (InterruptedException e) {
-                                            log.atWarn().setCause(e).log("Interrupted while waiting to read more data");
-                                            Thread.currentThread().interrupt();
-                                            break;
-                                        }
-                                    }
-                                    return null;
-                                },
-                                task -> new Thread(task).start())
-                        .thenCompose(v->underlyingSource.readNextTrafficStreamChunk());
+        var trafficStreamListFuture = CompletableFuture
+                .supplyAsync(this::blockIfNeeded, task -> new Thread(task).start())
+                .thenCompose(v->underlyingSource.readNextTrafficStreamChunk());
         return trafficStreamListFuture.whenComplete((v,t)->{
             if (t != null) {
                 return;
@@ -124,6 +107,42 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
                     +lastTimestampSecondsRef.get()).log();
         });
+    }
+
+    private Void blockIfNeeded() {
+        if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
+        log.atInfo().setMessage(()->"stopReadingAtRef="+stopReadingAtRef+
+                " lastTimestampSecondsRef="+lastTimestampSecondsRef).log();
+        while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
+            try {
+                log.atInfo().setMessage(
+                                "blocking until signaled to read the next chunk last={} stop={}")
+                        .addArgument(lastTimestampSecondsRef.get())
+                        .addArgument(stopReadingAtRef.get())
+                        .log();
+                var nextTouchOp = underlyingSource.getNextRequiredTouch();
+                if (nextTouchOp.isEmpty()) {
+                    readGate.acquire();
+                } else {
+                    var nextInstant = nextTouchOp.get();
+                    final var nowTime = Instant.now();
+                    var waitIntervalMs = Duration.between(nowTime, nextInstant).toMillis();
+                    log.error("Next touch at " + nextInstant + " ... in " + waitIntervalMs + "ms (now="+nowTime+")");
+                    if (waitIntervalMs <= 0) {
+                        underlyingSource.touch();
+                    } else {
+                        // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
+                        // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
+                        readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
+                    }
+                }
+            } catch (InterruptedException e) {
+                log.atWarn().setCause(e).log("Interrupted while waiting to read more data");
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return null;
     }
 
     @Override

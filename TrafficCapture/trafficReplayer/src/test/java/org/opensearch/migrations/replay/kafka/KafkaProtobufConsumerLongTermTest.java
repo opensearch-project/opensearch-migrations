@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -24,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +36,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.IntStream;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
@@ -49,7 +50,6 @@ public class KafkaProtobufConsumerLongTermTest {
     private static final String FAKE_READ_PACKET_DATA = "Fake pa";
     public static final int PRODUCER_SLEEP_INTERVAL_MS = 100;
 
-    public static final String MAX_POLL_INTERVAL_BEFORE_EVICTION_KEY = "max.poll.interval.ms";
     public static final String HEARTBEAT_INTERVAL_MS_KEY = "heartbeat.interval.ms";
 
     @Container
@@ -105,6 +105,9 @@ public class KafkaProtobufConsumerLongTermTest {
     public void testTimeoutsDontOccurForSlowPolls() throws Exception {
         String testTopicName = "TEST_TOPIC";
 
+        log.info("Starting test");
+        log.error("Starting test");
+
         var kafkaProducer = buildKafkaProducer();
         var sendCompleteCount = new AtomicInteger(0);
         produceKafkaRecord(testTopicName, kafkaProducer, 0, sendCompleteCount).get();
@@ -112,31 +115,48 @@ public class KafkaProtobufConsumerLongTermTest {
 
         var kafkaProperties = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false,  null);
-        Assertions.assertNull(kafkaProperties.get(MAX_POLL_INTERVAL_BEFORE_EVICTION_KEY));
+        Assertions.assertNull(kafkaProperties.get(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY));
 
-        final String MAX_POLL_INTERVAL_MS = "100";
-        final String HEARTBEAT_INTERVAL_MS = "30";
+        final long MAX_POLL_INTERVAL_MS = 1000;
+        final long HEARTBEAT_INTERVAL_MS = 300;
 
-        kafkaProperties.put(MAX_POLL_INTERVAL_BEFORE_EVICTION_KEY, MAX_POLL_INTERVAL_MS);
-        kafkaProperties.put(HEARTBEAT_INTERVAL_MS_KEY, HEARTBEAT_INTERVAL_MS);
+        kafkaProperties.put(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY, MAX_POLL_INTERVAL_MS+"");
+        kafkaProperties.put(HEARTBEAT_INTERVAL_MS_KEY, HEARTBEAT_INTERVAL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaProperties);
-        var kafkaSource = new KafkaProtobufConsumer(kafkaConsumer, testTopicName);
+        var trafficSource = new BlockingTrafficSource(
+                new KafkaProtobufConsumer(kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS)),
+                Duration.ZERO);
         var keysReceived = new ArrayList<ITrafficStreamKey>();
 
-        readNextNStreams(kafkaSource,  keysReceived, 0, 1);
+        readNextNStreams(trafficSource,  keysReceived, 0, 1);
+        trafficSource.stopReadsPast(Instant.EPOCH.plus(Duration.ofDays(1)));
         produceKafkaRecord(testTopicName, kafkaProducer, 1, sendCompleteCount);
 
-        var pollIntervalMs = Optional.ofNullable(kafkaProperties.get(MAX_POLL_INTERVAL_BEFORE_EVICTION_KEY))
+        var pollIntervalMs = Optional.ofNullable(kafkaProperties.get(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY))
                 .map(s->Integer.valueOf((String)s)).orElseThrow();
-        Thread.sleep(pollIntervalMs*10);
-        kafkaSource.commitTrafficStream(keysReceived.get(0));
+        var executor = Executors.newSingleThreadScheduledExecutor();
+        executor.schedule(()-> {
+                    try {
+                        var k = keysReceived.get(0);
+                        log.warn("Calling commit traffic stream for "+k);
+                        trafficSource.commitTrafficStream(k);
+                        trafficSource.stopReadsPast(Instant.MAX);
+                        log.warn("Stop reads past infinity");
+                        Thread.sleep(1000);
+                        produceKafkaRecord(testTopicName, kafkaProducer, 2, sendCompleteCount);
+                    } catch (Exception e) {
+                        Lombok.sneakyThrow(e);
+                    }
+                },
+                pollIntervalMs, TimeUnit.MILLISECONDS);
+
         log.info("finished committing traffic stream");
-        readNextNStreams(kafkaSource,  keysReceived, 1, 1);
-        Assertions.assertEquals(2, keysReceived.size());
+        readNextNStreams(trafficSource,  keysReceived, 1, 2);
+        Assertions.assertEquals(3, keysReceived.size());
     }
 
     @SneakyThrows
-    private static void readNextNStreams(KafkaProtobufConsumer kafkaSource, List<ITrafficStreamKey> keysReceived,
+    private static void readNextNStreams(BlockingTrafficSource kafkaSource, List<ITrafficStreamKey> keysReceived,
                                      int from, int count) {
         Assertions.assertEquals(from, keysReceived.size());
         for (int i=0; i<count; ) {
@@ -159,9 +179,11 @@ public class KafkaProtobufConsumerLongTermTest {
 
         var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false,  null);
-        kafkaConsumerProps.setProperty(MAX_POLL_INTERVAL_BEFORE_EVICTION_KEY, "10000");
+        final long MAX_POLL_MS = 10000;
+        kafkaConsumerProps.setProperty(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY, MAX_POLL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
-        var kafkaTrafficCaptureSource = new KafkaProtobufConsumer(kafkaConsumer, testTopicName);
+        var kafkaTrafficCaptureSource = new KafkaProtobufConsumer(kafkaConsumer, testTopicName,
+                Duration.ofMillis(MAX_POLL_MS));
 
         var kafkaProducer = buildKafkaProducer();
         var sendCompleteCount = new AtomicInteger(0);

@@ -50,6 +50,7 @@ public class KafkaRestartingTrafficReplayerTest {
 
     public static final int PRODUCER_SLEEP_INTERVAL_MS = 100;
     public static final Duration MAX_WAIT_TIME_FOR_TOPIC = Duration.ofMillis(PRODUCER_SLEEP_INTERVAL_MS*2);
+    public static final long DEFAULT_POLL_INTERVAL_MS = 5000;
 
     @Container
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
@@ -98,7 +99,8 @@ public class KafkaRestartingTrafficReplayerTest {
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
                 () -> new SentinelSensingTrafficSource(
-                        new KafkaProtobufConsumer(buildKafkaConsumer(), TEST_TOPIC_NAME)));
+                        new KafkaProtobufConsumer(buildKafkaConsumer(), TEST_TOPIC_NAME,
+                                Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
         log.error("done");
     }
 
@@ -106,7 +108,7 @@ public class KafkaRestartingTrafficReplayerTest {
     private KafkaConsumer<String, byte[]> buildKafkaConsumer() {
         var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false, null);
-        kafkaConsumerProps.setProperty("max.poll.interval.ms", "5000");
+        kafkaConsumerProps.setProperty("max.poll.interval.ms", DEFAULT_POLL_INTERVAL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String, byte[]>(kafkaConsumerProps);
         log.atInfo().setMessage(()->"Just built KafkaConsumer="+kafkaConsumer).log();
         return kafkaConsumer;
@@ -174,7 +176,8 @@ public class KafkaRestartingTrafficReplayerTest {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME);
+        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME,
+                Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS));
     }
 
     @SneakyThrows
