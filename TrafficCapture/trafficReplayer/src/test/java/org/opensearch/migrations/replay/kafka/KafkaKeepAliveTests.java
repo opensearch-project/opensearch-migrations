@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.kafka;
 
+import com.beust.ah.A;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
@@ -49,7 +51,14 @@ public class KafkaKeepAliveTests {
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
     private KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
+    private KafkaProtobufConsumer kafkaSource;
 
+    /**
+     * Setup the test case where we've produced and received 1 message, but have not yet committed it.
+     * Another message is in the process of being produced.
+     * The BlockingTrafficSource is blocked on everything after a point before the beginning of the test.
+     * @throws Exception
+     */
     @BeforeEach
     private void setupTestCase() throws Exception {
         kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
@@ -63,17 +72,16 @@ public class KafkaKeepAliveTests {
 
         kafkaProperties.put(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY, MAX_POLL_INTERVAL_MS+"");
         kafkaProperties.put(HEARTBEAT_INTERVAL_MS_KEY, HEARTBEAT_INTERVAL_MS+"");
+        kafkaProperties.put("max.poll.records", 1);
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaProperties);
-        this.trafficSource = new BlockingTrafficSource(
-                new KafkaProtobufConsumer(kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS)),
-                Duration.ZERO);
+        this.kafkaSource = new KafkaProtobufConsumer(kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS));
+        this.trafficSource = new BlockingTrafficSource(kafkaSource, Duration.ZERO);
         this.keysReceived = new ArrayList<ITrafficStreamKey>();
 
         readNextNStreams(trafficSource,  keysReceived, 0, 1);
-        trafficSource.stopReadsPast(Instant.EPOCH.plus(Duration.ofDays(1)));
+        stopReadsPast(1);
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1, sendCompleteCount);
-    } 
-    
+    }
 
     @Test
     @Tag("longTest")
@@ -87,7 +95,7 @@ public class KafkaKeepAliveTests {
                         log.warn("Calling commit traffic stream for "+k);
                         trafficSource.commitTrafficStream(k);
                         log.info("finished committing traffic stream");
-                        trafficSource.stopReadsPast(Instant.MAX);
+                        stopReadsPast(2);
                         log.warn("Stop reads past infinity");
                         // this is a way to signal back to the main thread that this thread is done
                         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 2, sendCompleteCount);
@@ -104,69 +112,57 @@ public class KafkaKeepAliveTests {
         // (all the way through to Kafka), and no commits are in-flight yet for the last two messages.
     }
 
-
     @Test
     @Tag("longTest")
     public void testBlockedReadsAndBrokenCommitsDontCauseReordering() throws Exception {
-        var pollIntervalMs = Optional.ofNullable(kafkaProperties.get(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY))
-                .map(s->Integer.valueOf((String)s)).orElseThrow();
-        var executor = Executors.newSingleThreadScheduledExecutor();
-        executor.schedule(()-> {
-                    try {
-                        var k = keysReceived.get(0);
-                        log.warn("Calling commit traffic stream for "+k);
-                        trafficSource.commitTrafficStream(k);
-                        log.info("finished committing traffic stream");
-                        trafficSource.stopReadsPast(Instant.MAX);
-                        log.warn("Stop reads past infinity");
-                        // this is a way to signal back to the main thread that this thread is done
-                        KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 2, sendCompleteCount);
-                    } catch (Exception e) {
-                        Lombok.sneakyThrow(e);
-                    }
-                },
-                pollIntervalMs, TimeUnit.MILLISECONDS);
+        trafficSource.stopReadsPast(Instant.MAX);
+        for (int i=0; i<2; ++i) {
+            KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1 + i, sendCompleteCount).get();
+        }
+        readNextNStreams(trafficSource, keysReceived, 1, 1);
 
-        // wait for 2 messages so that they include the last one produced by the async schedule call previously
-        readNextNStreams(trafficSource, keysReceived, 1, 2);
-        Assertions.assertEquals(3, keysReceived.size());
-        // At this point, we've read all (3) messages produced , committed the first one
-        // (all the way through to Kafka), and no commits are in-flight yet for the last two messages.
+        trafficSource.commitTrafficStream(keysReceived.get(0));
+        log.info("Called commitTrafficStream but waiting long enough for the client to leave the group.  " +
+                "That will make the previous commit a 'zombie-commit' that should easily be dropped.");
 
-        // the first message was committed even though we waited to pull the next message only because of touches
-        KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 3, sendCompleteCount);
-        readNextNStreams(trafficSource, keysReceived,2, 1 );
-        //
+        log.info("1 message was committed, but not synced, 1 message is being processed." +
+                        "wait long enough to fall out of the group before we can commit");
+        Thread.sleep(2*MAX_POLL_INTERVAL_MS);
 
-        KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 4, sendCompleteCount);
+        var keysReceivedUntilDrop1 = keysReceived;
+        keysReceived = new ArrayList<>();
 
-        // wait long enough to call the BlockingTrafficSource so that the kafka consumer will fall out
-        // and make sure that we have only committed the one message within the delayed scheduler above
-        // (we should have definitely hit that since readNextNStreams() will block
-        Thread.sleep(2* MAX_POLL_INTERVAL_MS);
-        readNextNStreams(trafficSource, keysReceived, 3, 1);
-        Assertions.assertEquals(4, keysReceived.size());
+        log.info("re-establish a client connection so that the following commit will work");
+        log.atInfo().setMessage(()->"1 ..."+renderNextCommitsAsString()).log();
+        readNextNStreams(trafficSource, keysReceived, 0, 1);
+        log.atInfo().setMessage(()->"2 ..."+renderNextCommitsAsString()).log();
 
+        log.info("wait long enough to fall out of the group again");
+        Thread.sleep(2*MAX_POLL_INTERVAL_MS);
 
+        var keysReceivedUntilDrop2 = keysReceived;
+        keysReceived = new ArrayList<>();
+        log.atInfo().setMessage(()->"re-establish... 3 ..."+renderNextCommitsAsString()).log();
+        readNextNStreams(trafficSource, keysReceived, 0, 1);
+        trafficSource.commitTrafficStream(keysReceivedUntilDrop1.get(1));
+        log.atInfo().setMessage(()->"re-establish... 4 ..."+renderNextCommitsAsString()).log();
+        readNextNStreams(trafficSource, keysReceived, 1, 1);
+        log.atInfo().setMessage(()->"5 ..."+renderNextCommitsAsString()).log();
 
-
-
-        // the first message was committed even though we waited to pull the next message only because of touches
-        KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 3, sendCompleteCount);
-        readNextNStreams(trafficSource, keysReceived,2, 1 );
-        //
-
-        KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 4, sendCompleteCount);
-
-        // wait long enough to call the BlockingTrafficSource so that the kafka consumer will fall out
-        // and make sure that we have only committed the one message within the delayed scheduler above
-        // (we should have definitely hit that since readNextNStreams() will block
-        Thread.sleep(2* MAX_POLL_INTERVAL_MS);
-        readNextNStreams(trafficSource, keysReceived, 3, 1);
-        Assertions.assertEquals(4, keysReceived.size());
-
+        Thread.sleep(2*MAX_POLL_INTERVAL_MS);
+        readNextNStreams(trafficSource, keysReceived, 0, 3);
+        log.atInfo().setMessage(()->"6 ..."+renderNextCommitsAsString()).log();
     }
-    
+
+    private String renderNextCommitsAsString() {
+        return "nextCommits="+kafkaSource.nextSetOfCommitsMap.entrySet().stream()
+                .map(kvp->kvp.getKey()+"->"+kvp.getValue()).collect(Collectors.joining(","));
+    }
+
+    private void stopReadsPast(int i) {
+        trafficSource.stopReadsPast(Instant.EPOCH.plus(Duration.ofDays(i)));
+    }
+
     @SneakyThrows
     private static void readNextNStreams(BlockingTrafficSource kafkaSource, List<ITrafficStreamKey> keysReceived,
                                          int from, int count) {

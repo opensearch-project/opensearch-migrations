@@ -18,6 +18,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Properties;
 import java.util.concurrent.Future;
@@ -56,7 +57,7 @@ public class KafkaTestUtils {
 
     static TrafficStream makeTestTrafficStream(Instant t, int i) {
         var timestamp = Timestamp.newBuilder()
-                .setSeconds(t.getEpochSecond())
+                .setSeconds(t.plus(Duration.ofDays(i)).getEpochSecond())
                 .setNanos(t.getNano())
                 .build();
         var tsb = TrafficStream.newBuilder()

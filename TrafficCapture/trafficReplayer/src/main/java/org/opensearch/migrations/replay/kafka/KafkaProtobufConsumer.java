@@ -77,9 +77,11 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
     private static class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey {
         private final int partition;
         private final long offset;
+        private final int generation;
 
-        TrafficStreamKeyWithKafkaRecordId(TrafficStream trafficStream, int partition, long offset) {
+        TrafficStreamKeyWithKafkaRecordId(int generation, TrafficStream trafficStream, int partition, long offset) {
             super(trafficStream);
+            this.generation = generation;
             this.partition = partition;
             this.offset = offset;
         }
@@ -126,14 +128,16 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
 
     private final Clock clock;
     private final Consumer<String, byte[]> kafkaConsumer;
-    private final ConcurrentHashMap<Integer,OffsetLifecycleTracker> partitionToOffsetLifecycleTrackerMap;
-    private final ConcurrentHashMap<TopicPartition,OffsetAndMetadata> nextSetOfCommitsMap;
+    final ConcurrentHashMap<Integer,OffsetLifecycleTracker> partitionToOffsetLifecycleTrackerMap;
+    // loosening visibility so that a unit test can read this
+    final ConcurrentHashMap<TopicPartition,OffsetAndMetadata> nextSetOfCommitsMap;
     private final Object offsetLifecycleLock = new Object();
     private final String topic;
     private final Duration keepAliveInterval;
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final AtomicInteger trafficStreamsRead;
     private Instant lastPollTimestamp;
+    private int consumerConnectionGeneration;
 
     public KafkaProtobufConsumer(Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
         this(kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
@@ -226,7 +230,9 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
         } catch (RuntimeException e) {
             log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. " +
                     "Swallowing and awaiting next metadata refresh to try again.").addArgument(topic).log();
+            resetCommitInfo();
         }
+        safeCommitWithRetry();
         lastPollTimestamp = clock.instant();
     }
 
@@ -264,7 +270,8 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                                     .setAttribute(MetricsAttributeKey.TOPIC_NAME, this.topic)
                                     .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, ts.getSerializedSize()).emit();
                             addOffset(kafkaRecord.partition(), kafkaRecord.offset());
-                            var key = new TrafficStreamKeyWithKafkaRecordId(ts, kafkaRecord.partition(), kafkaRecord.offset());
+                            var key = new TrafficStreamKeyWithKafkaRecordId(consumerConnectionGeneration, ts,
+                                    kafkaRecord.partition(), kafkaRecord.offset());
                             log.atTrace().setMessage(()->"Parsed traffic stream #{}: {} {}")
                                     .addArgument(trafficStreamsRead.incrementAndGet())
                                     .addArgument(key)
@@ -296,6 +303,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                     kafkaConsumer.commitSync(nextSetOfCommitsMap);
                     log.atDebug().setMessage(() -> "Done committing " + nextSetOfCommitsMap).log();
                 }
+                nextSetOfCommitsMap.clear();
             } catch (RuntimeException e) {
                 log.atWarn().setCause(e)
                         .setMessage(() -> "Error while committing.  Purging all commit points since another consumer " +
@@ -303,10 +311,16 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                                 "discarded: " + nextSetOfCommitsMap.entrySet().stream()
                                 .map(kvp -> kvp.getKey() + "->" + kvp.getValue()).collect(Collectors.joining(",")))
                         .log();
-            } finally {
-                nextSetOfCommitsMap.clear();
+                resetCommitInfo();
             }
         }
+    }
+
+    private void resetCommitInfo() {
+        ++consumerConnectionGeneration;
+        nextSetOfCommitsMap.clear();
+        partitionToOffsetLifecycleTrackerMap.clear();
+
     }
 
     private ConsumerRecords<String, byte[]> safePollWithSwallowedRuntimeExceptions() {
@@ -323,6 +337,7 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
         } catch (RuntimeException e) {
             log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. " +
                     "Swallowing and awaiting next metadata refresh to try again.").addArgument(topic).log();
+            resetCommitInfo();
             return new ConsumerRecords<>(Collections.emptyMap());
         }
     }
@@ -342,6 +357,13 @@ public class KafkaProtobufConsumer implements ISimpleTrafficCaptureSource {
                     " but received "+trafficStreamKey+" (of type="+trafficStreamKey.getClass()+")");
         }
         var kafkaTsk = (TrafficStreamKeyWithKafkaRecordId) trafficStreamKey;
+        if (kafkaTsk.generation != consumerConnectionGeneration) {
+            log.atWarn().setMessage(()->"trafficKey's generation (" + kafkaTsk.generation + ") is not current (" +
+                    consumerConnectionGeneration + ").  Dropping this commit request since the record would have " +
+                    "been or will be handled again by a current consumer within this process or another. Full key=" +
+                    kafkaTsk).log();
+            return;
+        }
         var p = kafkaTsk.partition;
         Optional<Long> newHeadValue;
         synchronized (offsetLifecycleLock) {
