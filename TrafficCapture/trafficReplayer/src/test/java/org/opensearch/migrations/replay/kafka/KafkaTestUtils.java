@@ -1,0 +1,89 @@
+package org.opensearch.migrations.replay.kafka;
+
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.Tag;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Properties;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+
+@Slf4j
+public class KafkaTestUtils {
+
+    public static final String TEST_GROUP_PRODUCER_ID = "TEST_GROUP_PRODUCER_ID";
+    private static final String FAKE_READ_PACKET_DATA = "Fake pa";
+    public static final String TEST_NODE_ID = "TestNodeId";
+    public static final String TEST_TRAFFIC_STREAM_ID_STRING = "TEST_TRAFFIC_STREAM_ID_STRING";
+
+    static Producer<String, byte[]> buildKafkaProducer(String bootstrapServers) {
+        var kafkaProps = new Properties();
+        kafkaProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+        kafkaProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
+        // Property details: https://docs.confluent.io/platform/current/installation/configuration/producer-configs.html#delivery-timeout-ms
+        kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10000);
+        kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
+        kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
+        kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, TEST_GROUP_PRODUCER_ID);
+        kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        try {
+            return new KafkaProducer(kafkaProps);
+        } catch (Exception e) {
+            log.atError().setCause(e).log();
+            System.exit(1);
+            throw e;
+        }
+    }
+
+    static String getConnectionId(int i) {
+        return TEST_TRAFFIC_STREAM_ID_STRING + "_" + i;
+    }
+
+    static TrafficStream makeTestTrafficStream(Instant t, int i) {
+        var timestamp = Timestamp.newBuilder()
+                .setSeconds(t.getEpochSecond())
+                .setNanos(t.getNano())
+                .build();
+        var tsb = TrafficStream.newBuilder()
+                .setNumber(i);
+        // TODO - add something for setNumberOfThisLastChunk.  There's no point in doing that now though
+        //        because the code doesn't make any distinction between the very last one and the previous ones
+        return tsb.setNodeId(TEST_NODE_ID)
+                .setConnectionId(getConnectionId(i))
+                .addSubStream(TrafficObservation.newBuilder().setTs(timestamp)
+                        .setRead(ReadObservation.newBuilder()
+                                .setData(ByteString.copyFrom(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8)))
+                                .build())
+                        .build()).build();
+
+    }
+
+    static Future produceKafkaRecord(String testTopicName, Producer<String, byte[]> kafkaProducer,
+                                             int i, AtomicInteger sendCompleteCount) {
+        var trafficStream = KafkaTestUtils.makeTestTrafficStream(Instant.now(), i);
+        var record = new ProducerRecord(testTopicName, makeKey(i), trafficStream.toByteArray());
+        return kafkaProducer.send(record, (metadata, exception) -> {
+            sendCompleteCount.incrementAndGet();
+        });
+    }
+
+    @NotNull
+    private static String makeKey(int i) {
+        return "KEY_" + i;
+    }
+}
