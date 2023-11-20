@@ -1,12 +1,10 @@
 package org.opensearch.migrations.replay.kafka;
 
-import com.beust.ah.A;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.Producer;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -18,14 +16,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -51,7 +47,7 @@ public class KafkaKeepAliveTests {
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
     private KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
-    private KafkaProtobufConsumer kafkaSource;
+    private KafkaTrafficCaptureSource kafkaSource;
 
     /**
      * Setup the test case where we've produced and received 1 message, but have not yet committed it.
@@ -66,15 +62,15 @@ public class KafkaKeepAliveTests {
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 0, sendCompleteCount).get();
         Assertions.assertEquals(1, sendCompleteCount.get());
 
-        this.kafkaProperties = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
+        this.kafkaProperties = KafkaTrafficCaptureSource.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false,  null);
-        Assertions.assertNull(kafkaProperties.get(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY));
+        Assertions.assertNull(kafkaProperties.get(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY));
 
-        kafkaProperties.put(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY, MAX_POLL_INTERVAL_MS+"");
+        kafkaProperties.put(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY, MAX_POLL_INTERVAL_MS+"");
         kafkaProperties.put(HEARTBEAT_INTERVAL_MS_KEY, HEARTBEAT_INTERVAL_MS+"");
         kafkaProperties.put("max.poll.records", 1);
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaProperties);
-        this.kafkaSource = new KafkaProtobufConsumer(kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS));
+        this.kafkaSource = new KafkaTrafficCaptureSource(kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS));
         this.trafficSource = new BlockingTrafficSource(kafkaSource, Duration.ZERO);
         this.keysReceived = new ArrayList<ITrafficStreamKey>();
 
@@ -86,7 +82,7 @@ public class KafkaKeepAliveTests {
     @Test
     @Tag("longTest")
     public void testTimeoutsDontOccurForSlowPolls() throws Exception {
-        var pollIntervalMs = Optional.ofNullable(kafkaProperties.get(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY))
+        var pollIntervalMs = Optional.ofNullable(kafkaProperties.get(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY))
                 .map(s->Integer.valueOf((String)s)).orElseThrow();
         var executor = Executors.newSingleThreadScheduledExecutor();
         executor.schedule(()-> {
@@ -155,7 +151,7 @@ public class KafkaKeepAliveTests {
     }
 
     private String renderNextCommitsAsString() {
-        return "nextCommits="+kafkaSource.nextSetOfCommitsMap.entrySet().stream()
+        return "nextCommits="+kafkaSource.workingState.nextSetOfCommitsMap.entrySet().stream()
                 .map(kvp->kvp.getKey()+"->"+kvp.getValue()).collect(Collectors.joining(","));
     }
 

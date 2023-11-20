@@ -1,41 +1,17 @@
 package org.opensearch.migrations.replay.kafka;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Timestamp;
-import lombok.Lombok;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
-import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Properties;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("requiresDocker")
-public class KafkaProtobufConsumerLongTermTest {
+public class KafkaTrafficCaptureSourceLongTermTest {
 
     public static final int TEST_RECORD_COUNT = 10;
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
@@ -60,12 +36,12 @@ public class KafkaProtobufConsumerLongTermTest {
     public void testTrafficCaptureSource() throws Exception {
         String testTopicName = "TEST_TOPIC";
 
-        var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
+        var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false,  null);
         final long MAX_POLL_MS = 10000;
-        kafkaConsumerProps.setProperty(KafkaProtobufConsumer.MAX_POLL_INTERVAL_KEY, MAX_POLL_MS+"");
+        kafkaConsumerProps.setProperty(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY, MAX_POLL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
-        var kafkaTrafficCaptureSource = new KafkaProtobufConsumer(kafkaConsumer, testTopicName,
+        var kafkaTrafficCaptureSource = new KafkaTrafficCaptureSource(kafkaConsumer, testTopicName,
                 Duration.ofMillis(MAX_POLL_MS));
 
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());

@@ -90,9 +90,13 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
     readNextTrafficStreamChunk() {
+        log.info("BlockingTrafficSource::readNext");
         var trafficStreamListFuture = CompletableFuture
                 .supplyAsync(this::blockIfNeeded, task -> new Thread(task).start())
-                .thenCompose(v->underlyingSource.readNextTrafficStreamChunk());
+                .thenCompose(v->{
+                    log.info("BlockingTrafficSource::composing");
+                    return underlyingSource.readNextTrafficStreamChunk();
+                });
         return trafficStreamListFuture.whenComplete((v,t)->{
             if (t != null) {
                 return;

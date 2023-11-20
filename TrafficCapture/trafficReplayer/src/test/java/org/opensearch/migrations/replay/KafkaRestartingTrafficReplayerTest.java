@@ -11,10 +11,8 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
+import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
@@ -99,14 +97,14 @@ public class KafkaRestartingTrafficReplayerTest {
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
                 () -> new SentinelSensingTrafficSource(
-                        new KafkaProtobufConsumer(buildKafkaConsumer(), TEST_TOPIC_NAME,
+                        new KafkaTrafficCaptureSource(buildKafkaConsumer(), TEST_TOPIC_NAME,
                                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
         log.error("done");
     }
 
     @SneakyThrows
     private KafkaConsumer<String, byte[]> buildKafkaConsumer() {
-        var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
+        var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false, null);
         kafkaConsumerProps.setProperty("max.poll.interval.ms", DEFAULT_POLL_INTERVAL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String, byte[]>(kafkaConsumerProps);
@@ -176,7 +174,7 @@ public class KafkaRestartingTrafficReplayerTest {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME,
+        return () -> new KafkaTrafficCaptureSource(kafkaConsumer, TEST_TOPIC_NAME,
                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS));
     }
 
