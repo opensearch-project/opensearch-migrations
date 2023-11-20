@@ -200,6 +200,37 @@ Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/
 ./accessAnalyticsDashboard.sh dev us-east-1
 ```
 
+## Configuring Capture Proxy IAM and Security Groups
+Although this CDK does not set up the Capture Proxy on source cluster nodes (except in the case of the demo solution), the Capture Proxy instances do need to communicate with resources deployed by this CDK (e.g. Kafka) which this section covers
+
+WIP
+
+* **Make sure that your MSK client is accessible by the coordinator nodes in the cluster*
+  * Add the following IAM policy to the node/EC2 instance so that it’s able to store the captured traffic in Kafka:
+  * From the AWS Console, go to the EC2 instance page, click on **IAM Role**,  click on **Add permissions**, choose **Create inline policy**, click on **JSON VIEW** then add the following policy (replace region and account-id).
+
+    ```json
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": "kafka-cluster:Connect",
+                "Resource": "arn:aws:kafka:<region>:<account-id>:cluster/migration-msk-cluster-<stage>/*",
+                "Effect": "Allow"
+            },
+            {
+                "Action": [
+                    "kafka-cluster:CreateTopic",
+                    "kafka-cluster:DescribeTopic",
+                    "kafka-cluster:WriteData"
+                ],
+                "Resource": "arn:aws:kafka:<region>:<account-id>:topic/migration-msk-cluster-<stage>/*",
+                "Effect": "Allow"
+            }
+        ]
+    }
+  ```
+
 
 ## Tearing down CDK
 To remove all the CDK stack(s) which get created during a deployment we can execute a command similar to below
