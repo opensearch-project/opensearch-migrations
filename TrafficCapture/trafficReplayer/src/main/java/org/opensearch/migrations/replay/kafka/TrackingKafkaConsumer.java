@@ -7,15 +7,16 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.event.Level;
-//import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -28,93 +29,106 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     final String topic;
     private final Clock clock;
-    final ConcurrentHashMap<Integer, OffsetLifecycleTracker> partitionToOffsetLifecycleTrackerMap;
+    /**
+     * This collection holds the definitive list, as per the rebalance callback, of the partitions
+     * that are currently assigned to this consumer.  The objects are removed when partitions are
+     * revoked and new objects are only created/inserted when they're assigned.  That means that
+     * the generations of each OffsetLifecycleTracker value may be different.
+     */
+    final Map<Integer, OffsetLifecycleTracker> partitionToOffsetLifecycleTrackerMap;
     // loosening visibility so that a unit test can read this
-    final ConcurrentHashMap<TopicPartition, OffsetAndMetadata> nextSetOfCommitsMap;
+    final Map<TopicPartition, OffsetAndMetadata> nextSetOfCommitsMap;
     private final Duration keepAliveInterval;
-    private final Object offsetLifecycleLock = new Object();
+    private final AtomicReference<Instant> lastTouchTimeRef;
     private int consumerConnectionGeneration;
-    private Instant lastPollTimestamp;
+    private boolean hasPendingCommitsToSend;
+    private boolean consumerIsPaused;
 
     public TrackingKafkaConsumer(Consumer<String, byte[]> kafkaConsumer, String topic,
                                  Duration keepAliveInterval, Clock c) {
         this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
         this.clock = c;
-        this.partitionToOffsetLifecycleTrackerMap = new ConcurrentHashMap<>();
-        this.nextSetOfCommitsMap = new ConcurrentHashMap<>();
+        this.partitionToOffsetLifecycleTrackerMap = new HashMap<>();
+        this.nextSetOfCommitsMap = new HashMap<>();
+        this.lastTouchTimeRef = new AtomicReference<>(Instant.EPOCH);
         this.keepAliveInterval = keepAliveInterval;
         log.error("keepAliveInterval="+keepAliveInterval);
     }
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-        log.atWarn().setCause(new Exception()).setMessage(()->this+"partitions revoked for "+partitions.stream()
+        safeCommit();
+        partitions.forEach(p->{
+            nextSetOfCommitsMap.remove(new TopicPartition(topic, p.partition()));
+            partitionToOffsetLifecycleTrackerMap.remove(p.partition());
+        });
+        if (hasPendingCommitsToSend) {
+            hasPendingCommitsToSend = partitionToOffsetLifecycleTrackerMap.values().stream()
+                    .anyMatch(olt -> !olt.isEmpty());
+        }
+        log.atWarn().setMessage(()->this+"partitions revoked for "+partitions.stream()
                 .map(p->p+"").collect(Collectors.joining(","))).log();
-        safeCommitWithRetry();
     }
 
     @Override public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-        log.atWarn().setCause(new Exception()).setMessage(()->this+"partitions added for "+partitions.stream()
+        ++consumerConnectionGeneration;
+        partitions.forEach(p->partitionToOffsetLifecycleTrackerMap.computeIfAbsent(p.partition(),
+                x->new OffsetLifecycleTracker(consumerConnectionGeneration)));
+        log.atWarn().setMessage(()->this+"partitions added for "+partitions.stream()
                 .map(p->p+"").collect(Collectors.joining(","))).log();
     }
 
     public void close() {
+        log.info("Kafka consumer closing.  Committing: " + renderNextCommitsAsString());
         kafkaConsumer.close();
-        log.info("Kafka consumer closed successfully.");
     }
 
     public Optional<Instant> getNextRequiredTouch() {
-        synchronized (offsetLifecycleLock) {
-            return partitionToOffsetLifecycleTrackerMap.isEmpty() ? Optional.empty() :
-                    Optional.of(lastPollTimestamp.plus(keepAliveInterval));
-        }
+        return hasPendingCommitsToSend ? Optional.of(lastTouchTimeRef.get().plus(keepAliveInterval)) : Optional.empty();
     }
 
     public void touch() {
         log.error("TOUCH CALLED");
         try {
-            //kafkaConsumer.pause();
+            if (!consumerIsPaused) {
+                kafkaConsumer.pause(getActivePartitions());
+                consumerIsPaused = true;
+            }
             var records = kafkaConsumer.poll(Duration.ZERO);
-            log.atError().setMessage(()->"Polled "+records.count()+" records to keep the consumer alive").log();
-            records.forEach(r -> {
-                try {
-                    var tp = new TopicPartition(r.topic(), r.partition());
-                    log.atError().setMessage(()->"Resetting "+tp+" to offset="+r.offset()).log();
-                    kafkaConsumer.seek(tp, r.offset());
-                } catch (IllegalStateException e) {
-                    log.atWarn().setCause(e).setMessage(() -> "Caught exception while seeking.  " +
-                            "Ignoring so that other records can have their seeks readjusted.").log();
-                }
-            });
+            assert records.isEmpty() : "expected no entries once the consumer was paused";
         } catch (RuntimeException e) {
             log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. " +
                     "Swallowing and awaiting next metadata refresh to try again.").addArgument(topic).log();
-            resetCommitInfo();
         }
-        safeCommitWithRetry();
-        lastPollTimestamp = clock.instant();
+        safeCommit();
+        lastTouchTimeRef.set(clock.instant());
     }
 
-    public <K> K createAndTrackKey(int partition, long offset,
-                                   Function<KafkaCommitOffsetData.PojoKafkaCommitOffsetData, K> keyFactory) {
-        synchronized (offsetLifecycleLock) {
-            var offsetTracker = partitionToOffsetLifecycleTrackerMap.computeIfAbsent(partition,
-                    p -> new OffsetLifecycleTracker());
-            offsetTracker.add(offset);
-        }
-        return keyFactory.apply(new KafkaCommitOffsetData.PojoKafkaCommitOffsetData(consumerConnectionGeneration,
-                partition, offset));
+    public <K> K createAndTrackKey(int partition, long offset, Function<PojoKafkaCommitOffsetData, K> keyFactory) {
+        var offsetTracker = partitionToOffsetLifecycleTrackerMap.get(partition);
+        offsetTracker.add(offset);
+        return keyFactory.apply(new PojoKafkaCommitOffsetData(consumerConnectionGeneration, partition, offset));
     }
 
-    ConsumerRecords<String, byte[]> getNextBatchOfRecords() {
-        safeCommitWithRetry();
-        return safePollWithSwallowedRuntimeExceptions();
+    private Collection<TopicPartition> getActivePartitions() {
+        return partitionToOffsetLifecycleTrackerMap.keySet().stream()
+                .map(p->new TopicPartition(topic,p)).collect(Collectors.toList());
+    }
+
+    public ConsumerRecords<String, byte[]> getNextBatchOfRecords() {
+        if (consumerIsPaused) {
+            kafkaConsumer.resume(getActivePartitions());
+            consumerIsPaused = false;
+        }
+        var records = safePollWithSwallowedRuntimeExceptions();
+        safeCommit();
+        return records;
     }
 
     private ConsumerRecords<String, byte[]> safePollWithSwallowedRuntimeExceptions() {
         try {
-            lastPollTimestamp = clock.instant();
+            lastTouchTimeRef.set(clock.instant());
             var records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
                     .setMessage(()->"Kafka consumer poll has fetched "+records.count()+" records").log();
@@ -126,7 +140,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         } catch (RuntimeException e) {
             log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. " +
                     "Swallowing and awaiting next metadata refresh to try again.").addArgument(topic).log();
-            resetCommitInfo();
             return new ConsumerRecords<>(Collections.emptyMap());
         }
     }
@@ -141,44 +154,39 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
         var p = kafkaTsk.getPartition();
         Optional<Long> newHeadValue;
-        synchronized (offsetLifecycleLock) {
-            var tracker = partitionToOffsetLifecycleTrackerMap.get(p);
-            newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk);
-            newHeadValue.ifPresent(o -> {
-                if (tracker.isEmpty()) {
-                    partitionToOffsetLifecycleTrackerMap.remove(p);
-                }
-                nextSetOfCommitsMap.put(new TopicPartition(topic, p), new OffsetAndMetadata(o));
-            });
-        }
+
+        newHeadValue = partitionToOffsetLifecycleTrackerMap.get(p).removeAndReturnNewHead(kafkaTsk);
+        newHeadValue.ifPresent(o -> {
+            hasPendingCommitsToSend = true;
+            nextSetOfCommitsMap.put(new TopicPartition(topic, p), new OffsetAndMetadata(o));
+        });
     }
 
-    private void safeCommitWithRetry() {
-        synchronized (offsetLifecycleLock) {
-            try {
-                if (!nextSetOfCommitsMap.isEmpty()) {
-                    log.atDebug().setMessage(() -> "Committing " + nextSetOfCommitsMap).log();
-                    kafkaConsumer.commitSync(nextSetOfCommitsMap);
-                    log.atDebug().setMessage(() -> "Done committing " + nextSetOfCommitsMap).log();
-                }
+    private void safeCommit() {
+        try {
+            if (hasPendingCommitsToSend) {
+                log.atDebug().setMessage(() -> "Committing " + nextSetOfCommitsMap).log();
+                kafkaConsumer.commitSync(nextSetOfCommitsMap);
+                log.atDebug().setMessage(() -> "Done committing " + nextSetOfCommitsMap).log();
                 nextSetOfCommitsMap.clear();
-            } catch (RuntimeException e) {
-                log.atWarn().setCause(e)
-                        .setMessage(() -> "Error while committing.  Purging all commit points since another consumer " +
-                                "may have already begun processing messages BEFORE those commits.  Commits being " +
-                                "discarded: " + nextSetOfCommitsMap.entrySet().stream()
-                                .map(kvp -> kvp.getKey() + "->" + kvp.getValue()).collect(Collectors.joining(",")))
-                        .log();
-                resetCommitInfo();
             }
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e)
+                    .setMessage(() -> "Error while committing.  " +
+                            "Another consumer may already be processing messages before these commits.  " +
+                            "Commits ARE NOT being discarded here, with the expectation that the revoked callback " +
+                            "(onPartitionsRevoked) will be called.  " +
+                            "Within that method, commits for unassigned partitions will be discarded.  " +
+                            "After that, touch() or poll() will trigger another commit attempt." +
+                            "Those calls will occur in the near future if assigned partitions have pending commits." +
+                            nextSetOfCommitsMap.entrySet().stream()
+                                    .map(kvp -> kvp.getKey() + "->" + kvp.getValue()).collect(Collectors.joining(",")))
+                    .log();
         }
     }
 
-    private void resetCommitInfo() {
-        ++consumerConnectionGeneration;
-        nextSetOfCommitsMap.clear();
-        partitionToOffsetLifecycleTrackerMap.clear();
-
+    String renderNextCommitsAsString() {
+            return "nextCommits="+nextSetOfCommitsMap.entrySet().stream()
+                    .map(kvp->kvp.getKey()+"->"+kvp.getValue()).collect(Collectors.joining(","));
     }
-
 }

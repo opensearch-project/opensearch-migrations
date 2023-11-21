@@ -209,8 +209,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             throw new IllegalArgumentException("Expected key of type "+TrafficStreamKeyWithKafkaRecordId.class+
                     " but received "+trafficStreamKey+" (of type="+trafficStreamKey.getClass()+")");
         }
-        var kafkaTsk = (TrafficStreamKeyWithKafkaRecordId) trafficStreamKey;
-
+        workingState.commitKafkaKey((TrafficStreamKeyWithKafkaRecordId) trafficStreamKey);
     }
 
     @Override

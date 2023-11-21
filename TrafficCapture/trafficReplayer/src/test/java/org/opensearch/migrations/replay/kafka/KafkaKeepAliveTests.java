@@ -75,7 +75,6 @@ public class KafkaKeepAliveTests {
         this.keysReceived = new ArrayList<ITrafficStreamKey>();
 
         readNextNStreams(trafficSource,  keysReceived, 0, 1);
-        stopReadsPast(1);
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1, sendCompleteCount);
     }
 
@@ -91,8 +90,7 @@ public class KafkaKeepAliveTests {
                         log.warn("Calling commit traffic stream for "+k);
                         trafficSource.commitTrafficStream(k);
                         log.info("finished committing traffic stream");
-                        stopReadsPast(2);
-                        log.warn("Stop reads past infinity");
+                        log.warn("Stop reads to infinity");
                         // this is a way to signal back to the main thread that this thread is done
                         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 2, sendCompleteCount);
                     } catch (Exception e) {
@@ -111,7 +109,6 @@ public class KafkaKeepAliveTests {
     @Test
     @Tag("longTest")
     public void testBlockedReadsAndBrokenCommitsDontCauseReordering() throws Exception {
-        trafficSource.stopReadsPast(Instant.MAX);
         for (int i=0; i<2; ++i) {
             KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1 + i, sendCompleteCount).get();
         }
@@ -146,17 +143,15 @@ public class KafkaKeepAliveTests {
         log.atInfo().setMessage(()->"5 ..."+renderNextCommitsAsString()).log();
 
         Thread.sleep(2*MAX_POLL_INTERVAL_MS);
+        var keysReceivedUntilDrop3 = keysReceived;
+        keysReceived = new ArrayList<>();
         readNextNStreams(trafficSource, keysReceived, 0, 3);
-        log.atInfo().setMessage(()->"6 ..."+renderNextCommitsAsString()).log();
+        log.atInfo().setMessage(()->"6 ..."+kafkaSource.workingState.renderNextCommitsAsString()).log();
+        trafficSource.close();
     }
 
     private String renderNextCommitsAsString() {
-        return "nextCommits="+kafkaSource.workingState.nextSetOfCommitsMap.entrySet().stream()
-                .map(kvp->kvp.getKey()+"->"+kvp.getValue()).collect(Collectors.joining(","));
-    }
-
-    private void stopReadsPast(int i) {
-        trafficSource.stopReadsPast(Instant.EPOCH.plus(Duration.ofDays(i)));
+        return kafkaSource.workingState.renderNextCommitsAsString();
     }
 
     @SneakyThrows

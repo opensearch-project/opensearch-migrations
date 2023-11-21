@@ -9,8 +9,10 @@ import java.util.PriorityQueue;
 class OffsetLifecycleTracker {
     private final PriorityQueue<Long> pQueue = new PriorityQueue<>();
     private long cursorHighWatermark;
+    final int consumerConnectionGeneration;
 
-    OffsetLifecycleTracker() {
+    OffsetLifecycleTracker(int generation) {
+        this.consumerConnectionGeneration = generation;
     }
 
     boolean isEmpty() {
