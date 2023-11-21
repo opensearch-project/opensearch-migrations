@@ -203,19 +203,18 @@ Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/
 ## Configuring Capture Proxy IAM and Security Groups
 Although this CDK does not set up the Capture Proxy on source cluster nodes (except in the case of the demo solution), the Capture Proxy instances do need to communicate with resources deployed by this CDK (e.g. Kafka) which this section covers
 
-WIP
-
-* **Make sure that your MSK client is accessible by the coordinator nodes in the cluster*
-  * Add the following IAM policy to the node/EC2 instance so that it’s able to store the captured traffic in Kafka:
-  * From the AWS Console, go to the EC2 instance page, click on **IAM Role**,  click on **Add permissions**, choose **Create inline policy**, click on **JSON VIEW** then add the following policy (replace region and account-id).
-
-    ```json
+#### Capture Proxy on OpenSearch/Elasticsearch nodes
+After [setting up Capture Proxy instances](../../../TrafficCapture/trafficCaptureProxyServer/README.md#how-to-attach-a-capture-proxy-on-a-coordinator-node) on the source cluster, the IAM policies and Security Groups for the nodes should allow access to the Migration tooling:
+1. The nodes should add the `migrationMSKSecurityGroup` security group to allow access to Kafka
+2. The IAM role used by the nodes should have permissions to publish captured traffic to Kafka. A template policy to use, can be seen below
+   * This can be added through the AWS Console (IAM Role -> Add permissions -> Create inline policy -> JSON view)
+```json
     {
         "Version": "2012-10-17",
         "Statement": [
             {
                 "Action": "kafka-cluster:Connect",
-                "Resource": "arn:aws:kafka:<region>:<account-id>:cluster/migration-msk-cluster-<stage>/*",
+                "Resource": "arn:aws:kafka:<REGION>:<ACCOUNT-ID>:cluster/migration-msk-cluster-<STAGE>/*",
                 "Effect": "Allow"
             },
             {
@@ -224,12 +223,15 @@ WIP
                     "kafka-cluster:DescribeTopic",
                     "kafka-cluster:WriteData"
                 ],
-                "Resource": "arn:aws:kafka:<region>:<account-id>:topic/migration-msk-cluster-<stage>/*",
+                "Resource": "arn:aws:kafka:<REGION>:<ACCOUNT-ID>:topic/migration-msk-cluster-<STAGE>/*",
                 "Effect": "Allow"
             }
         ]
     }
-  ```
+```
+
+#### Load Balanced Endpoints
+If clients for your source cluster hit a load balanced endpoint that routes to your nodes, it may also be beneficial to add the same `migrationMSKSecurityGroup` to this endpoint to allow making requests to this endpoint from the Migration Console
 
 
 ## Tearing down CDK
