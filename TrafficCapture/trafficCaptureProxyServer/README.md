@@ -39,7 +39,7 @@ Follow documentation for [deploying solution](../../deployment/README.md) to set
         * This command will start the Capture Proxy in the background and allow it to continue past the lifetime of the shell session.
         * :warning: If the machine running the elasticsearch/opensearch process is restarted, the Capture Proxy will need to be started again
         * Explanation of parameters in the command above:
-            * --kafkaConnection: Your Kafka broker endpoint(s) as a string with multiple brokers delimited by a ',' e.g. "broker1:9098,broker2:9098".
+            * --kafkaConnection: Your Kafka broker endpoint(s) as a string with multiple brokers delimited by a ',' e.g. `"broker1:9098,broker2:9098"`.
             * --destinationUri: URI of the server that the Capture Proxy is capturing traffic for.
             * --listenPort: Exposed port for clients to connect to this proxy. (The original port that the node was listening to)
             * --enableMSKAuth: Enables SASL Kafka properties required for connecting to Kafka with IAM auth. **Note**: Only valid for AWS MSK setups
