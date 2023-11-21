@@ -17,7 +17,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -25,7 +24,6 @@ import java.util.Properties;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
@@ -45,12 +43,12 @@ public class KafkaKeepAliveTests {
 
     @Container
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private KafkaContainer embeddedKafkaBroker =
+    private final KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
     private KafkaTrafficCaptureSource kafkaSource;
 
     /**
-     * Setup the test case where we've produced and received 1 message, but have not yet committed it.
+     * Set up the test case where we've produced and received 1 message, but have not yet committed it.
      * Another message is in the process of being produced.
      * The BlockingTrafficSource is blocked on everything after a point before the beginning of the test.
      * @throws Exception
@@ -72,7 +70,7 @@ public class KafkaKeepAliveTests {
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaProperties);
         this.kafkaSource = new KafkaTrafficCaptureSource(kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS));
         this.trafficSource = new BlockingTrafficSource(kafkaSource, Duration.ZERO);
-        this.keysReceived = new ArrayList<ITrafficStreamKey>();
+        this.keysReceived = new ArrayList<>();
 
         readNextNStreams(trafficSource,  keysReceived, 0, 1);
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1, sendCompleteCount);
@@ -94,7 +92,7 @@ public class KafkaKeepAliveTests {
                         // this is a way to signal back to the main thread that this thread is done
                         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 2, sendCompleteCount);
                     } catch (Exception e) {
-                        Lombok.sneakyThrow(e);
+                        throw Lombok.sneakyThrow(e);
                     }
                 },
                 pollIntervalMs, TimeUnit.MILLISECONDS);
@@ -146,12 +144,12 @@ public class KafkaKeepAliveTests {
         var keysReceivedUntilDrop3 = keysReceived;
         keysReceived = new ArrayList<>();
         readNextNStreams(trafficSource, keysReceived, 0, 3);
-        log.atInfo().setMessage(()->"6 ..."+kafkaSource.workingState.renderNextCommitsAsString()).log();
+        log.atInfo().setMessage(()->"6 ..."+kafkaSource.trackingKafkaConsumer.nextCommitsToString()).log();
         trafficSource.close();
     }
 
     private String renderNextCommitsAsString() {
-        return kafkaSource.workingState.renderNextCommitsAsString();
+        return kafkaSource.trackingKafkaConsumer.nextCommitsToString();
     }
 
     @SneakyThrows

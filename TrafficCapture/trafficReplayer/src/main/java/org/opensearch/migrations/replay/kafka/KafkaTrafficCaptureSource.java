@@ -5,19 +5,15 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.TopicPartition;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.slf4j.event.Level;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -66,13 +62,14 @@ import java.util.stream.StreamSupport;
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
+    // see https://stackoverflow.com/questions/39730126/difference-between-session-timeout-ms-and-max-poll-interval-ms-for-kafka-0-10
+    public static final String DEFAULT_POLL_INTERVAL_MS = "60000";
     private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
 
-    
-    private final Clock clock;
-    private final KafkaBehavioralPolicy behavioralPolicy;
+
+    final TrackingKafkaConsumer trackingKafkaConsumer;
     private final AtomicLong trafficStreamsRead;
-    final TrackingKafkaConsumer workingState;
+    private final KafkaBehavioralPolicy behavioralPolicy;
 
     public KafkaTrafficCaptureSource(Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
         this(kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
@@ -84,11 +81,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                                      Clock clock,
                                      @NonNull KafkaBehavioralPolicy behavioralPolicy)
     {
-        workingState = new TrackingKafkaConsumer(kafkaConsumer, topic, keepAliveInterval, clock);
-        this.behavioralPolicy = behavioralPolicy;
-        kafkaConsumer.subscribe(Collections.singleton(topic), workingState);
+        trackingKafkaConsumer = new TrackingKafkaConsumer(kafkaConsumer, topic, keepAliveInterval, clock);
         trafficStreamsRead = new AtomicLong();
-        this.clock = clock;
+        this.behavioralPolicy = behavioralPolicy;
+        kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
     }
 
     public static KafkaTrafficCaptureSource buildKafkaConsumer(@NonNull String brokers,
@@ -96,17 +92,25 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                                                                @NonNull String groupId,
                                                                boolean enableMSKAuth,
                                                                String propertyFilePath,
-                                                               Clock clock,
-                                                               @NonNull  KafkaBehavioralPolicy behavioralPolicy)
+                                                               @NonNull Clock clock,
+                                                               @NonNull KafkaBehavioralPolicy behavioralPolicy)
             throws IOException
     {
         var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
-        var pollPeriod = Duration.ofMillis(Integer.valueOf((String)kafkaProps.get(MAX_POLL_INTERVAL_KEY)));
+        kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, DEFAULT_POLL_INTERVAL_MS);
+        var pollPeriod = Duration.ofMillis(Long.valueOf((String)kafkaProps.get(MAX_POLL_INTERVAL_KEY)));
         var keepAlivePeriod = getKeepAlivePeriodFromPollPeriod(pollPeriod);
-        return new KafkaTrafficCaptureSource(new KafkaConsumer<>(kafkaProps), topic, keepAlivePeriod,
-                clock, behavioralPolicy);
+        return new KafkaTrafficCaptureSource(new KafkaConsumer<>(kafkaProps),
+                topic, keepAlivePeriod, clock, behavioralPolicy);
     }
 
+    /**
+     * We'll have to 'maintain' touches more frequently than the poll period, otherwise the
+     * consumer will fall out of the group, putting all the commits in-flight at risk.  Notice
+     * that this doesn't have a bearing on heartbeats, which themselves are maintained through
+     * Kafka Consumer poll() calls.  When those poll calls stop, so does the heartbeat, which
+     * is more sensitive, but managed via the 'session.timeout.ms' property.
+     */
     private static Duration getKeepAlivePeriodFromPollPeriod(Duration pollPeriod) {
         return pollPeriod.dividedBy(2);
     }
@@ -142,7 +146,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     public void touch() {
-        workingState.touch();
+        trackingKafkaConsumer.touch();
     }
 
     /**
@@ -152,7 +156,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      */
     @Override
     public Optional<Instant> getNextRequiredTouch() {
-        return workingState.getNextRequiredTouch();
+        return trackingKafkaConsumer.getNextRequiredTouch();
     }
 
     @Override
@@ -168,7 +172,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously() {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
         try {
-            var records = workingState.getNextBatchOfRecords();
+            var records = trackingKafkaConsumer.getNextBatchOfRecords();
             Stream<ITrafficStreamWithKey> trafficStream = StreamSupport.stream(records.spliterator(), false)
                     .map(kafkaRecord -> {
                         try {
@@ -176,20 +180,18 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             // Ensure we increment trafficStreamsRead even at a higher log level
                             metricsLogger.atSuccess(MetricsEvent.PARSED_TRAFFIC_STREAM_FROM_KAFKA)
                                     .setAttribute(MetricsAttributeKey.CONNECTION_ID, ts.getConnectionId())
-                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, workingState.topic)
+                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, trackingKafkaConsumer.topic)
                                     .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, ts.getSerializedSize()).emit();
-                            var key = workingState.createAndTrackKey(kafkaRecord.partition(), kafkaRecord.offset(),
+                            var key = trackingKafkaConsumer.createAndTrackKey(kafkaRecord.partition(), kafkaRecord.offset(),
                                     ck -> new TrafficStreamKeyWithKafkaRecordId(ts, ck));
-                            log.atTrace().setMessage(()->"Parsed traffic stream #{}: {} {}")
-                                    .addArgument(trafficStreamsRead.incrementAndGet())
-                                    .addArgument(key)
-                                    .addArgument(ts)
-                                    .log();
+                            var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
+                            log.atTrace().setMessage(()->"Parsed traffic stream #" + trafficStreamsSoFar +
+                                            ": " + key + " " + ts).log();
                             return (ITrafficStreamWithKey) new PojoTrafficStreamWithKey(ts, key);
                         } catch (InvalidProtocolBufferException e) {
                             RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);
                             metricsLogger.atError(MetricsEvent.PARSING_TRAFFIC_STREAM_FROM_KAFKA_FAILED, recordError)
-                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, workingState.topic).emit();
+                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, trackingKafkaConsumer.topic).emit();
                             if (recordError != null) {
                                 throw recordError;
                             }
@@ -198,7 +200,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             }).filter(Objects::nonNull);
             return trafficStream.collect(Collectors.<ITrafficStreamWithKey>toList());
         } catch (Exception e) {
-            log.error("Terminating Kafka traffic stream");
+            log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
             throw e;
         }
     }
@@ -209,11 +211,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             throw new IllegalArgumentException("Expected key of type "+TrafficStreamKeyWithKafkaRecordId.class+
                     " but received "+trafficStreamKey+" (of type="+trafficStreamKey.getClass()+")");
         }
-        workingState.commitKafkaKey((TrafficStreamKeyWithKafkaRecordId) trafficStreamKey);
+        trackingKafkaConsumer.commitKafkaKey((TrafficStreamKeyWithKafkaRecordId) trafficStreamKey);
     }
 
     @Override
     public void close() throws IOException {
-        workingState.close();
+        trackingKafkaConsumer.close();
     }
 }

@@ -14,17 +14,32 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * This is a wrapper around Kafka's Consumer class that provides tracking of partitions
+ * and their current (asynchronously 'committed' by the calling contexts) offsets.  It
+ * manages those offsets and the 'active' set of records that have been rendered by this
+ * consumer, when to pause a poll loop(), and how to deal with consumer rebalances.
+ */
 @Slf4j
 public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
-    public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
-
+    /**
+     * The keep-alive should already be set to a fraction of the max poll timeout for
+     * the consumer (done outside of this class).  The keep-alive tells this class how
+     * often the caller should be interacting with touch() and poll() calls.  As such,
+     * we want to set up a long enough poll to not overwhelm a broker or client with
+     * many empty poll() message responses.  We also don't want to poll() for so long
+     * when there aren't messages that there isn't enough time to commit messages,
+     * which happens after we poll() (on the same thread, as per Consumer requirements).
+     */
+    public static final int POLL_TIMEOUT_KEEP_ALIVE_DIVISOR = 4;
     private final Consumer<String, byte[]> kafkaConsumer;
 
     final String topic;
@@ -42,7 +57,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private final AtomicReference<Instant> lastTouchTimeRef;
     private int consumerConnectionGeneration;
     private boolean hasPendingCommitsToSend;
-    private boolean consumerIsPaused;
 
     public TrackingKafkaConsumer(Consumer<String, byte[]> kafkaConsumer, String topic,
                                  Duration keepAliveInterval, Clock c) {
@@ -53,7 +67,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         this.nextSetOfCommitsMap = new HashMap<>();
         this.lastTouchTimeRef = new AtomicReference<>(Instant.EPOCH);
         this.keepAliveInterval = keepAliveInterval;
-        log.error("keepAliveInterval="+keepAliveInterval);
     }
 
     @Override
@@ -80,7 +93,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public void close() {
-        log.info("Kafka consumer closing.  Committing: " + renderNextCommitsAsString());
+        log.atInfo().setMessage(()->"Kafka consumer closing.  " +
+                "Committing (implicitly by Kafka's consumer): " + nextCommitsToString()).log();
         kafkaConsumer.close();
     }
 
@@ -89,20 +103,58 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public void touch() {
-        log.error("TOUCH CALLED");
+        log.trace("touch() called.");
+        pause();
         try {
-            if (!consumerIsPaused) {
-                kafkaConsumer.pause(getActivePartitions());
-                consumerIsPaused = true;
-            }
             var records = kafkaConsumer.poll(Duration.ZERO);
-            assert records.isEmpty() : "expected no entries once the consumer was paused";
+            if (!records.isEmpty()) {
+                throw new IllegalStateException("Expected no entries once the consumer was paused.  " +
+                        "This may have happened because a new assignment slipped into the consumer AFTER pause calls.");
+            }
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (RuntimeException e) {
-            log.atWarn().setCause(e).setMessage("Unable to poll the topic: {} with our Kafka consumer. " +
-                    "Swallowing and awaiting next metadata refresh to try again.").addArgument(topic).log();
+            log.atWarn().setCause(e).setMessage("Unable to poll the topic: " + topic + " with our Kafka consumer. " +
+                    "Swallowing and awaiting next metadata refresh to try again.").log();
+        } finally {
+            resume();
         }
         safeCommit();
         lastTouchTimeRef.set(clock.instant());
+    }
+
+    private void pause() {
+        var activePartitions = kafkaConsumer.assignment();
+        try {
+            kafkaConsumer.pause(activePartitions);
+        } catch (IllegalStateException e) {
+            log.atError().setCause(e).setMessage(()->"Unable to pause the topic partitions: " + topic + ".  " +
+                    "The active partitions passed here : " + activePartitions.stream()
+                            .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                    "The active partitions as tracked here are: " + getActivePartitions().stream()
+                            .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                    "The active partitions according to the consumer:  " + kafkaConsumer.assignment().stream()
+                            .map(x->x.toString()).collect(Collectors.joining(","))
+                    ).log();
+        }
+    }
+
+    private void resume() {
+        var activePartitions = kafkaConsumer.assignment();
+        try {
+            kafkaConsumer.pause(activePartitions);
+        } catch (IllegalStateException e) {
+            log.atError().setCause(e).setMessage(()->"Unable to resume the topic partitions: " + topic + ".  " +
+                    "This may not be a fatal error for the entire process as the consumer should eventually"
+                    + " rejoin and rebalance.  " +
+                    "The active partitions passed here : " + activePartitions.stream()
+                    .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                    "The active partitions as tracked here are: " + getActivePartitions().stream()
+                    .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                    "The active partitions according to the consumer:  " + kafkaConsumer.assignment().stream()
+                    .map(x->x.toString()).collect(Collectors.joining(","))
+            ).log();
+        }
     }
 
     public <K> K createAndTrackKey(int partition, long offset, Function<PojoKafkaCommitOffsetData, K> keyFactory) {
@@ -117,10 +169,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public ConsumerRecords<String, byte[]> getNextBatchOfRecords() {
-        if (consumerIsPaused) {
-            kafkaConsumer.resume(getActivePartitions());
-            consumerIsPaused = false;
-        }
         var records = safePollWithSwallowedRuntimeExceptions();
         safeCommit();
         return records;
@@ -129,12 +177,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private ConsumerRecords<String, byte[]> safePollWithSwallowedRuntimeExceptions() {
         try {
             lastTouchTimeRef.set(clock.instant());
-            var records = kafkaConsumer.poll(CONSUMER_POLL_TIMEOUT);
+            var records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
                     .setMessage(()->"Kafka consumer poll has fetched "+records.count()+" records").log();
-            log.atDebug().setMessage(()->"All positions: {"+kafkaConsumer.assignment().stream()
+            log.atTrace().setMessage(()->"All positions: {"+kafkaConsumer.assignment().stream()
                     .map(tp->tp+": "+kafkaConsumer.position(tp)).collect(Collectors.joining(",")) + "}").log();
-            log.atDebug().setMessage(()->"All COMMITTED positions: {"+kafkaConsumer.assignment().stream()
+            log.atTrace().setMessage(()->"All previously COMMITTED positions: {"+kafkaConsumer.assignment().stream()
                     .map(tp->tp+": "+kafkaConsumer.committed(tp)).collect(Collectors.joining(",")) + "}").log();
             return records;
         } catch (RuntimeException e) {
@@ -155,7 +203,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         var p = kafkaTsk.getPartition();
         Optional<Long> newHeadValue;
 
-        newHeadValue = partitionToOffsetLifecycleTrackerMap.get(p).removeAndReturnNewHead(kafkaTsk);
+        newHeadValue = partitionToOffsetLifecycleTrackerMap.get(p).removeAndReturnNewHead(kafkaTsk.getOffset());
         newHeadValue.ifPresent(o -> {
             hasPendingCommitsToSend = true;
             nextSetOfCommitsMap.put(new TopicPartition(topic, p), new OffsetAndMetadata(o));
@@ -185,7 +233,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
-    String renderNextCommitsAsString() {
+    String nextCommitsToString() {
             return "nextCommits="+nextSetOfCommitsMap.entrySet().stream()
                     .map(kvp->kvp.getKey()+"->"+kvp.getValue()).collect(Collectors.joining(","));
     }
