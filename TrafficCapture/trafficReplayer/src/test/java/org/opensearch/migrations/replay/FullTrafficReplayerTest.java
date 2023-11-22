@@ -80,7 +80,7 @@ public class FullTrafficReplayerTest {
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
                 httpServer.localhostEndpoint(), new IndexWatchingReceiverFactory(), trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
-        log.error("done");
+        log.info("done");
     }
 
     @ParameterizedTest
@@ -104,7 +104,7 @@ public class FullTrafficReplayerTest {
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(numExpectedRequests,
                 httpServer.localhostEndpoint(), new IndexWatchingReceiverFactory(), trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.streams.size(), trafficSourceSupplier.nextReadCursor.get());
-        log.error("done");
+        log.info("done");
     }
 
     @Getter
@@ -141,7 +141,7 @@ public class FullTrafficReplayerTest {
 
         public ISimpleTrafficCaptureSource get() {
             var rval = new ArrayCursorTrafficCaptureSource(this);
-            log.error("trafficSource="+rval+" readCursor="+rval.readCursor.get()+" nextReadCursor="+ nextReadCursor.get());
+            log.info("trafficSource="+rval+" readCursor="+rval.readCursor.get()+" nextReadCursor="+ nextReadCursor.get());
             return rval;
         }
     }

@@ -34,7 +34,7 @@ public class NettyJsonToByteBufHandlerTest {
     @Test
     public void testThatHttpContentsAreRepackagedToChunkSizeSpec() {
         for (int i=0; i<10; ++i) {
-            log.error("Testing w/ random seed="+i);
+            log.info("Testing w/ random seed="+i);
             testWithSeed(new Random(i));
             System.gc();
             System.runFinalization();
@@ -90,7 +90,7 @@ public class NettyJsonToByteBufHandlerTest {
     static byte nonce = 0;
     private int writeAndCheck(EmbeddedChannel channel, ArrayList<Integer> sizesWrittenList, int len) {
         var bytes = new byte[len];
-        log.warn("Writing "+len);
+        log.debug("Writing "+len);
         sizesWrittenList.add(len);
         Arrays.fill(bytes, nonce++);
         var httpContent = new DefaultHttpContent(Unpooled.wrappedBuffer(bytes));

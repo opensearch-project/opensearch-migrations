@@ -2,13 +2,14 @@ package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.kafka.KafkaBehavioralPolicy;
-import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
+import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 
 @Slf4j
@@ -31,8 +32,9 @@ public class TrafficCaptureSourceFactory {
         }
 
         if (isKafkaActive) {
-            return KafkaProtobufConsumer.buildKafkaConsumer(appParams.kafkaTrafficBrokers, appParams.kafkaTrafficTopic,
-                appParams.kafkaTrafficGroupId, appParams.kafkaTrafficEnableMSKAuth, appParams.kafkaTrafficPropertyFile, new KafkaBehavioralPolicy());
+            return KafkaTrafficCaptureSource.buildKafkaConsumer(appParams.kafkaTrafficBrokers, appParams.kafkaTrafficTopic,
+                appParams.kafkaTrafficGroupId, appParams.kafkaTrafficEnableMSKAuth, appParams.kafkaTrafficPropertyFile,
+                    Clock.systemUTC(), new KafkaBehavioralPolicy());
         } else if (isInputFileActive) {
             return new InputStreamOfTraffic(new FileInputStream(appParams.inputFilename));
         } else {

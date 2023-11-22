@@ -30,10 +30,9 @@ import java.util.Properties;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 @Slf4j
-class KafkaProtobufConsumerTest {
+class KafkaTrafficCaptureSourceTest {
     public static final int NUM_READ_ITEMS_BOUND = 1000;
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
@@ -52,7 +51,8 @@ class KafkaProtobufConsumerTest {
     public void testSupplyTrafficFromSource() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME);
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(mockConsumer, TEST_TOPIC_NAME,
+                Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
         List<Integer> substreamCounts = new ArrayList<>();
@@ -92,7 +92,8 @@ class KafkaProtobufConsumerTest {
     public void testSupplyTrafficWithUnformattedMessages() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaProtobufConsumer protobufConsumer = new KafkaProtobufConsumer(mockConsumer, TEST_TOPIC_NAME);
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(mockConsumer, TEST_TOPIC_NAME,
+                Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
         List<Integer> substreamCounts = new ArrayList<>();
@@ -141,7 +142,7 @@ class KafkaProtobufConsumerTest {
 
     @Test
     public void testBuildPropertiesBaseCase() throws IOException {
-        Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", false, null);
+        Properties props = KafkaTrafficCaptureSource.buildKafkaProperties("brokers", "groupId", false, null);
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringDeserializer", props.get("key.deserializer"));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", props.get("value.deserializer"));
@@ -151,7 +152,7 @@ class KafkaProtobufConsumerTest {
 
     @Test
     public void testBuildPropertiesMSKAuthEnabled() throws IOException {
-        Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", true, null);
+        Properties props = KafkaTrafficCaptureSource.buildKafkaProperties("brokers", "groupId", true, null);
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringDeserializer", props.get("key.deserializer"));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", props.get("value.deserializer"));
@@ -166,7 +167,7 @@ class KafkaProtobufConsumerTest {
     @Test
     public void testBuildPropertiesWithProvidedPropertyFile() throws IOException {
         File simplePropertiesFile = new File("src/test/resources/kafka/simple-kafka.properties");
-        Properties props = KafkaProtobufConsumer.buildKafkaProperties("brokers", "groupId", true, simplePropertiesFile.getPath());
+        Properties props = KafkaTrafficCaptureSource.buildKafkaProperties("brokers", "groupId", true, simplePropertiesFile.getPath());
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals("org.apache.kafka.common.serialization.StringDeserializer", props.get("key.deserializer"));
         Assertions.assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", props.get("value.deserializer"));
