@@ -1,10 +1,12 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import lombok.EqualsAndHashCode;
 import lombok.ToString;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 @ToString
+@EqualsAndHashCode()
 public class PojoTrafficStreamKey implements ITrafficStreamKey {
     private final String nodeId;
     private final String connectionId;

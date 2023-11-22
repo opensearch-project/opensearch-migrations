@@ -11,10 +11,8 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.opensearch.migrations.replay.kafka.KafkaProtobufConsumer;
+import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
@@ -50,10 +48,11 @@ public class KafkaRestartingTrafficReplayerTest {
 
     public static final int PRODUCER_SLEEP_INTERVAL_MS = 100;
     public static final Duration MAX_WAIT_TIME_FOR_TOPIC = Duration.ofMillis(PRODUCER_SLEEP_INTERVAL_MS*2);
+    public static final long DEFAULT_POLL_INTERVAL_MS = 5000;
 
     @Container
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private KafkaContainer embeddedKafkaBroker =
+    private final KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
     private static class CounterLimitedReceiverFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
@@ -66,7 +65,7 @@ public class KafkaRestartingTrafficReplayerTest {
             var counter = new AtomicInteger();
             return tuple -> {
                 if (counter.incrementAndGet() > stopPoint) {
-                    log.error("Request received after our ingest threshold. Throwing.  Discarding " +
+                    log.warn("Request received after our ingest threshold. Throwing.  Discarding " +
                             tuple.uniqueRequestKey);
                     var nextStopPoint = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
                     nextStopPointRef.compareAndSet(stopPoint, nextStopPoint);
@@ -90,7 +89,7 @@ public class KafkaRestartingTrafficReplayerTest {
                 response->TestHttpServerContext.makeResponse(random, response));
         var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
-        log.atInfo().setMessage(()->trafficStreams.stream().map(ts-> TrafficStreamUtils.summarizeTrafficStream(ts))
+        log.atInfo().setMessage(()->trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
                 .collect(Collectors.joining("\n"))).log();
 
         loadStreamsToKafka(buildKafkaConsumer(),
@@ -98,15 +97,16 @@ public class KafkaRestartingTrafficReplayerTest {
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
                 () -> new SentinelSensingTrafficSource(
-                        new KafkaProtobufConsumer(buildKafkaConsumer(), TEST_TOPIC_NAME, null)));
-        log.error("done");
+                        new KafkaTrafficCaptureSource(buildKafkaConsumer(), TEST_TOPIC_NAME,
+                                Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
+        log.info("done");
     }
 
     @SneakyThrows
     private KafkaConsumer<String, byte[]> buildKafkaConsumer() {
-        var kafkaConsumerProps = KafkaProtobufConsumer.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
+        var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false, null);
-        kafkaConsumerProps.setProperty("max.poll.interval.ms", "5000");
+        kafkaConsumerProps.setProperty("max.poll.interval.ms", DEFAULT_POLL_INTERVAL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String, byte[]>(kafkaConsumerProps);
         log.atInfo().setMessage(()->"Just built KafkaConsumer="+kafkaConsumer).log();
         return kafkaConsumer;
@@ -174,7 +174,8 @@ public class KafkaRestartingTrafficReplayerTest {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-        return () -> new KafkaProtobufConsumer(kafkaConsumer, TEST_TOPIC_NAME, null);
+        return () -> new KafkaTrafficCaptureSource(kafkaConsumer, TEST_TOPIC_NAME,
+                Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS));
     }
 
     @SneakyThrows
