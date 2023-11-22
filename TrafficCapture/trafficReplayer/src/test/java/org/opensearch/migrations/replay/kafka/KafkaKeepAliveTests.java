@@ -85,10 +85,10 @@ public class KafkaKeepAliveTests {
         executor.schedule(()-> {
                     try {
                         var k = keysReceived.get(0);
-                        log.warn("Calling commit traffic stream for "+k);
+                        log.info("Calling commit traffic stream for "+k);
                         trafficSource.commitTrafficStream(k);
                         log.info("finished committing traffic stream");
-                        log.warn("Stop reads to infinity");
+                        log.info("Stop reads to infinity");
                         // this is a way to signal back to the main thread that this thread is done
                         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 2, sendCompleteCount);
                     } catch (Exception e) {

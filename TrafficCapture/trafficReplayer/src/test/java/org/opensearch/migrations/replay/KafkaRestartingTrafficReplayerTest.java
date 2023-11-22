@@ -65,7 +65,7 @@ public class KafkaRestartingTrafficReplayerTest {
             var counter = new AtomicInteger();
             return tuple -> {
                 if (counter.incrementAndGet() > stopPoint) {
-                    log.error("Request received after our ingest threshold. Throwing.  Discarding " +
+                    log.warn("Request received after our ingest threshold. Throwing.  Discarding " +
                             tuple.uniqueRequestKey);
                     var nextStopPoint = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
                     nextStopPointRef.compareAndSet(stopPoint, nextStopPoint);
@@ -99,7 +99,7 @@ public class KafkaRestartingTrafficReplayerTest {
                 () -> new SentinelSensingTrafficSource(
                         new KafkaTrafficCaptureSource(buildKafkaConsumer(), TEST_TOPIC_NAME,
                                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
-        log.error("done");
+        log.info("done");
     }
 
     @SneakyThrows
