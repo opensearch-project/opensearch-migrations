@@ -119,8 +119,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 " lastTimestampSecondsRef="+lastTimestampSecondsRef).log();
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
             try {
-                log.atInfo().setMessage(
-                                "blocking until signaled to read the next chunk last={} stop={}")
+                log.atInfo().setMessage("blocking until signaled to read the next chunk last={} stop={}")
                         .addArgument(lastTimestampSecondsRef.get())
                         .addArgument(stopReadingAtRef.get())
                         .log();
@@ -131,7 +130,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     var nextInstant = nextTouchOp.get();
                     final var nowTime = Instant.now();
                     var waitIntervalMs = Duration.between(nowTime, nextInstant).toMillis();
-                    log.error("Next touch at " + nextInstant + " ... in " + waitIntervalMs + "ms (now="+nowTime+")");
+                    log.atDebug().setMessage(()->"Next touch at " + nextInstant +
+                            " ... in " + waitIntervalMs + "ms (now="+nowTime+")").log();
                     if (waitIntervalMs <= 0) {
                         underlyingSource.touch();
                     } else {

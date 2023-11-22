@@ -21,10 +21,13 @@ public interface ITrafficCaptureSource extends Closeable {
     /**
      * Keep-alive call to be used by the BlockingTrafficSource to keep this connection alive if
      * this is required.
+     */
+    default void touch() {}
+
+    /**
      * @return The time that the next call to touch() must be completed for this source to stay
      * active.  Empty indicates that touch() does not need to be called to keep the
      * source active.
      */
-    default void touch() {}
     default Optional<Instant> getNextRequiredTouch() { return Optional.empty(); }
 }
