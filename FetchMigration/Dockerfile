@@ -19,5 +19,4 @@ RUN echo "ssl: false" > $DATA_PREPPER_PATH/config/data-prepper-config.yaml
 RUN echo "metricRegistries: [Prometheus]" >> $DATA_PREPPER_PATH/config/data-prepper-config.yaml
 
 # Include the -u flag to have unbuffered stdout (for detached mode)
-# "$@" allows passing extra args/flags to the entrypoint when the image is run
-ENTRYPOINT python3 -u ./fetch_orchestrator.py --insecure $DATA_PREPPER_PATH $FM_CODE_PATH/input.yaml "$@"
+ENTRYPOINT ["python3", "-u", "./fetch_orchestrator.py", "--insecure", "$DATA_PREPPER_PATH", "$FM_CODE_PATH/input.yaml"]

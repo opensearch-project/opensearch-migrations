@@ -41,13 +41,13 @@ def write_output(yaml_data: dict, indices_to_migrate: set, output_path: str):
 
 def print_report(diff: IndexDiff, total_doc_count: int):  # pragma no cover
     logging.info("Identical indices in the target cluster: " + utils.string_from_set(diff.identical_indices))
-    logging.info("Identical empty indices in the target cluster (data will be migrated): " +
+    logging.info("Identical empty indices in the target cluster (will be migrated): " +
                  utils.string_from_set(diff.identical_empty_indices))
-    logging.info("Indices present in both clusters with conflicting settings/mappings (data will not be migrated): " +
+    logging.info("Indices present in both clusters with conflicting settings/mappings (will NOT be migrated): " +
                  utils.string_from_set(diff.conflicting_indices))
-    logging.info("Indices to be created in the target cluster (data will be migrated): " +
+    logging.info("Indices to be created in the target cluster (will be migrated): " +
                  utils.string_from_set(diff.indices_to_create))
-    logging.info("Total number of documents to be moved: " + str(total_doc_count))
+    logging.info("Target document count: " + str(total_doc_count))
 
 
 def run(args: MetadataMigrationParams) -> MetadataMigrationResult:

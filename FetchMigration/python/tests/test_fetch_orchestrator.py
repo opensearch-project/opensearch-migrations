@@ -8,6 +8,7 @@
 #
 
 import copy
+import logging
 import os
 import unittest
 from unittest import mock
@@ -23,6 +24,12 @@ EXPECTED_LOCAL_ENDPOINT = "https://localhost:4900"
 
 
 class TestFetchOrchestrator(unittest.TestCase):
+    # Run before each test
+    def setUp(self) -> None:
+        logging.disable(logging.CRITICAL)
+
+    def tearDown(self) -> None:
+        logging.disable(logging.NOTSET)
 
     @patch('migration_monitor.run')
     @patch('subprocess.Popen')
