@@ -3,10 +3,19 @@ package org.opensearch.migrations.trafficcapture.netty;
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.testing.junit5.OpenTelemetryExtension;
+import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
@@ -33,6 +42,10 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class ConditionallyReliableLoggingHttpRequestHandlerTest {
+    @RegisterExtension
+    static final OpenTelemetryExtension otelTesting = OpenTelemetryExtension.create();
+    private final Tracer tracer = otelTesting.getOpenTelemetry().getTracer("test");
+    private final Meter meter = otelTesting.getOpenTelemetry().getMeter("test");
 
     @AllArgsConstructor
     static class StreamManager extends OrderedStreamLifecyleManager {
@@ -74,8 +87,12 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection",
                 new StreamManager(outputByteBuffer, flushCount));
 
+        var span = otelTesting.getOpenTelemetry().getTracer("Test")
+                .spanBuilder("test").startSpan();
+        var telemetryCtx = Context.current().with(span);
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpRequestHandler(offloader, x->true)); // true: block every request
+                new ConditionallyReliableLoggingHttpRequestHandler(telemetryCtx, offloader,
+                        x->true)); // true: block every request
         channelWriter.accept(channel);
 
         // we wrote the correct data to the downstream handler/channel
@@ -98,6 +115,9 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
                 .collect(Collectors.toList())));
         Assertions.assertArrayEquals(fullTrafficBytes, combinedTrafficPacketsSteam.readAllBytes());
         Assertions.assertEquals(1, flushCount.get());
+
+        Assertions.assertTrue(!otelTesting.getSpans().isEmpty());
+        Assertions.assertTrue(!otelTesting.getMetrics().isEmpty());
     }
 
     private static byte[] consumeIntoArray(ByteBuf m) {

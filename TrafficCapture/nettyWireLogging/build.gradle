@@ -13,7 +13,9 @@ dependencies {
 
     implementation project(':captureOffloader')
     implementation project(':coreUtilities')
-    api group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
+    api            group: 'io.netty', name: 'netty-buffer'
+    api            group: 'io.netty', name: 'netty-codec-http'
+    api            group: 'io.netty', name: 'netty-handler'
 
     implementation group: 'io.opentelemetry', name:'opentelemetry-api'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'

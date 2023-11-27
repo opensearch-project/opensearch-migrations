@@ -129,7 +129,7 @@ class MetricsLogger {
      *  metricsLogger.atSuccess().addKeyValue("key", "value").setMessage("Task succeeded").log();
      */
     public MetricsLogBuilder atSuccess(MetricsEvent event) {
-        return new MetricsLogBuilder().atSuccess(event);
+        return new MetricsLogBuilder(logger).atSuccess(event);
     }
 
     /**
@@ -142,7 +142,7 @@ class MetricsLogger {
         if (cause == null) {
             return atError(event);
         }
-        return new MetricsLogBuilder().atError(event)
+        return new MetricsLogBuilder(logger).atError(event)
                 .setAttribute(MetricsAttributeKey.EXCEPTION_MESSAGE, cause.getMessage())
                 .setAttribute(MetricsAttributeKey.EXCEPTION_TYPE, cause.getClass().getName());
     }
@@ -153,10 +153,10 @@ class MetricsLogger {
      */
     public MetricsLogBuilder atError(MetricsEvent event) {
 
-        return new MetricsLogBuilder().atError(event);
+        return new MetricsLogBuilder(logger).atError(event);
     }
 
     public MetricsLogBuilder atTrace(MetricsEvent event) {
-        return new MetricsLogBuilder().atTrace(event);
+        return new MetricsLogBuilder(logger).atTrace(event);
     }
 }

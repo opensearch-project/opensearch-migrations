@@ -3,6 +3,8 @@ package org.opensearch.migrations.trafficcapture.netty;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.util.ReferenceCountUtil;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.context.Context;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -13,9 +15,10 @@ import java.util.function.Predicate;
 public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHttpRequestHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpRequestHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader,
+    public ConditionallyReliableLoggingHttpRequestHandler(Context incomingContext,
+                                                          IChannelConnectionCaptureSerializer<T> trafficOffloader,
                                                           Predicate<HttpRequest> headerPredicateForWhenToBlock) {
-        super(trafficOffloader);
+        super(incomingContext, trafficOffloader);
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
     }
 
@@ -23,12 +26,22 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest)
             throws Exception {
         if (shouldBlockPredicate.test(httpRequest)) {
+            var blockingSpan = METERING_CLOSURE_OP.map(m->{
+                m.meterIncrementEvent(telemetryContext, "blockingRequestUntilFlush");
+                try (var namedOnlyForAutoClose = telemetryContext.makeCurrent()) {
+                    return GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
+                            .spanBuilder("blockedOnFlush").startSpan();
+                }}).orElse(null);
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
+                METERING_CLOSURE_OP.ifPresent(m->{
+                    blockingSpan.end();
+                    m.meterIncrementEvent(telemetryContext, t != null ? "blockedFlushFailure" : "blockedFlushSuccess");
+                });
                 if (t != null) {
                     // This is a spot where we would benefit from having a behavioral policy that different users
                     // could set as needed. Some users may be fine with just logging a failed offloading of a request
                     // where other users may want to stop entirely. JIRA here: https://opensearch.atlassian.net/browse/MIGRATIONS-1276
-                    log.warn("Got error: " + t.getMessage());
+                    log.warn("Dropping request - Got error: " + t.getMessage());
                     ReferenceCountUtil.release(msg);
                 } else {
                     try {
@@ -39,6 +52,9 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
                 }
             });
         } else {
+            METERING_CLOSURE_OP.ifPresent(m->{
+                m.meterIncrementEvent(telemetryContext, "nonBlockingRequest");
+            });
             super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
         }
     }
