@@ -13,6 +13,8 @@ configurations {
 }
 
 dependencies {
+    implementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
+
     implementation 'org.opensearch.plugin:opensearch-security:2.6.0.0'
     opensearchSecurityPlugin 'org.opensearch.plugin:opensearch-security:2.6.0.0'
     implementation files(zipTree("$configurations.opensearchSecurityPlugin.singleFile").matching {
@@ -38,14 +40,14 @@ dependencies {
     implementation group: 'com.beust', name: 'jcommander', version: '1.82'
     implementation 'com.google.protobuf:protobuf-java:3.22.2'
 
-    implementation group: 'io.opentelemetry', name:'opentelemetry-api', version: '1.30.0'
-    implementation group: 'io.opentelemetry', name: 'opentelemetry-sdk', version: '1.32.0'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-api'
+    implementation group: 'io.opentelemetry', name: 'opentelemetry-sdk'
 
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':captureOffloader'))
 
-    testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing', version: '1.32.0'
+    testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
 }
 
 tasks.withType(Tar){

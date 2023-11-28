@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -35,7 +34,7 @@ public class HeaderTransformerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, null, testPacketCapture,
-                "TEST", TestRequestKey.getTestConnectionRequestId(0));
+                "TEST", TestRequestKey.getTestConnectionRequestContext(0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
@@ -88,7 +87,7 @@ public class HeaderTransformerTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
                 httpBasicAuthTransformer, testPacketCapture, "TEST", 
-                TestRequestKey.getTestConnectionRequestId(0));
+                TestRequestKey.getTestConnectionRequestContext(0));
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
@@ -114,7 +113,7 @@ public class HeaderTransformerTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME, null,
                         "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
-                null, testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestId(0));
+                null, testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestContext(0));
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)

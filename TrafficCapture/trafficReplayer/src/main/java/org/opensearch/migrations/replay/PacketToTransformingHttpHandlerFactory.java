@@ -7,6 +7,7 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -28,6 +29,6 @@ public class PacketToTransformingHttpHandlerFactory implements
     create(UniqueReplayerRequestKey requestKey) {
         log.trace("creating HttpJsonTransformingConsumer");
         return new HttpJsonTransformingConsumer<>(jsonTransformer, authTransformerFactory,
-                new TransformedPacketReceiver(), requestKey.toString(), requestKey);
+                new TransformedPacketReceiver(), requestKey.toString(), new RequestContext(requestKey));
     }
 }

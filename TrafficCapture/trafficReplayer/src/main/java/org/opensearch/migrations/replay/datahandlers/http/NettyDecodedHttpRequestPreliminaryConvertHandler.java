@@ -10,7 +10,7 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -27,19 +27,19 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    private UniqueReplayerRequestKey requestKeyForMetricsLogging;
+    private RequestContext requestContext;
     static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
                                                             String diagnosticLabel,
-                                                            UniqueReplayerRequestKey requestKeyForMetricsLogging) {
+                                                            RequestContext requestContext) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;
         this.diagnosticLabel = "[" + diagnosticLabel + "] ";
-        this.requestKeyForMetricsLogging = requestKeyForMetricsLogging;
+        this.requestContext = requestContext;
     }
 
     @Override
@@ -55,8 +55,8 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
                     .append(request.protocolVersion().text())
                     .toString());
             metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
-                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging)
-                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
+                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getChannelKey().getConnectionId())
                     .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
                     .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 

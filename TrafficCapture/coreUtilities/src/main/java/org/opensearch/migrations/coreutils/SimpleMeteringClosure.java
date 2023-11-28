@@ -106,15 +106,21 @@ public class SimpleMeteringClosure {
     }
 
     public void meterHistogramMillis(Context ctx, String eventName, Duration between) {
-        meterHistogram(ctx, eventName, (double) between.toMillis());
+        meterHistogram(ctx, eventName, "ms", between.toMillis());
     }
 
-    public void meterHistogram(Context ctx, String eventName, double value) {
+    public void meterHistogramMicros(Context ctx, String eventName, Duration between) {
+        meterHistogram(ctx, eventName, "us", between.toNanos()*1000);
+    }
+
+    public void meterHistogram(Context ctx, String eventName, String units, long value) {
         if (ctx == null) {
             return;
         }
         try (var namedOnlyForAutoClose = ctx.makeCurrent()) {
             meter.histogramBuilder(eventName)
+                    .ofLongs()
+                    .setUnit(units)
                     .build().record(value, Attributes.builder()
                             .put("labelName", eventName)
                             .build());

@@ -14,7 +14,10 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
@@ -66,8 +69,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
-import static org.opensearch.migrations.coreutils.SimpleMeteringClosure.initializeOpenTelemetry;
 
 @Slf4j
 public class TrafficReplayer {
@@ -384,7 +385,7 @@ public class TrafficReplayer {
             return;
         }
         if (params.otelCollectorEndpoint != null) {
-            initializeOpenTelemetry("traffic-replayer", params.otelCollectorEndpoint);
+            SimpleMeteringClosure.initializeOpenTelemetry("replay", params.otelCollectorEndpoint);
         }
 
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
@@ -601,11 +602,12 @@ public class TrafficReplayer {
         private ITrafficCaptureSource trafficCaptureSource;
 
         @Override
-        public void onRequestReceived(UniqueReplayerRequestKey requestKey, HttpMessageAndTimestamp request) {
+        public void onRequestReceived(UniqueReplayerRequestKey requestKey, RequestContext ctx,
+                                      HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             liveTrafficStreamLimiter.addWork(1);
-            var requestPushFuture = transformAndSendRequest(replayEngine, request, requestKey);
+            var requestPushFuture = transformAndSendRequest(replayEngine, request, requestKey, ctx);
             requestFutureMap.put(requestKey, requestPushFuture);
             liveRequests.put(requestKey, true);
             requestPushFuture.map(f->f.whenComplete((v,t)->{
@@ -618,7 +620,7 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
+        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey, RequestContext ctx,
                                        @NonNull RequestResponsePacketPair rrPair) {
             log.atInfo().setMessage(()->"Done receiving captured stream for " + requestKey +
                     ":" + rrPair.requestData).log();
@@ -674,7 +676,7 @@ public class TrafficReplayer {
 
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                                            ConnectionContext ctx, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             commitTrafficStreams(trafficStreamKeysBeingHeld, status);
         }
 
@@ -696,15 +698,15 @@ public class TrafficReplayer {
 
         @Override
         public void onConnectionClose(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                                      RequestResponsePacketPair.ReconstructionStatus status, Instant timestamp,
-                                      List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                                      ConnectionContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
+                                      Instant timestamp, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
-            replayEngine.closeConnection(channelKey, channelInteractionNum, timestamp);
+            replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
             commitTrafficStreams(trafficStreamKeysBeingHeld, status);
         }
 
         @Override
-        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
+        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, ConnectionContext ctx) {
             commitTrafficStreams(List.of(tsk), true);
         }
 
@@ -858,15 +860,15 @@ public class TrafficReplayer {
 
     public DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
     transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request,
-                            UniqueReplayerRequestKey requestKey) {
-        return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
+                            UniqueReplayerRequestKey requestKey, RequestContext ctx) {
+        return transformAndSendRequest(inputRequestTransformerFactory, replayEngine, ctx,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
                 request.packetBytes::stream);
     }
 
     public static DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
     transformAndSendRequest(PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
-                            ReplayEngine replayEngine,
+                            ReplayEngine replayEngine, RequestContext ctx,
                             @NonNull Instant start, @NonNull Instant end,
                             UniqueReplayerRequestKey requestKey,
                             Supplier<Stream<byte[]>> packetsSupplier)
@@ -880,7 +882,7 @@ public class TrafficReplayer {
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
             return transformationCompleteFuture.thenCompose(transformedResult ->
-                        replayEngine.scheduleRequest(requestKey, start, end,
+                        replayEngine.scheduleRequest(requestKey, ctx, start, end,
                                         transformedResult.transformedOutput.size(),
                                         transformedResult.transformedOutput.streamRetained())
                                 .map(future->future.thenApply(t->

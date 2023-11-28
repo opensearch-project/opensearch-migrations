@@ -5,7 +5,6 @@ import io.netty.buffer.ByteBufHolder;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.Assume;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -40,20 +39,21 @@ class RequestSenderOrchestratorTest {
         Instant lastEndTime = baseTime;
         var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
         for (int i = 0; i<NUM_REQUESTS_TO_SCHEDULE; ++i) {
-            var rKey = TestRequestKey.getTestConnectionRequestId(i);
+            var requestContext = TestRequestKey.getTestConnectionRequestContext(i);
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
             var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
             var requestPackets = makeRequest(i/NUM_REPEATS);
-            var arr = senderOrchestrator.scheduleRequest(rKey, startTimeForThisRequest, Duration.ofMillis(1),
-                    requestPackets.stream());
+            var arr = senderOrchestrator.scheduleRequest(requestContext.getRequestKey(), requestContext,
+                    startTimeForThisRequest, Duration.ofMillis(1), requestPackets.stream());
             log.info("Scheduled item to run at " + startTimeForThisRequest);
             scheduledItems.add(arr);
             lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
+        var connectionCtx = TestRequestKey.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
         var closeFuture = senderOrchestrator.scheduleClose(
-                TestRequestKey.getTestConnectionRequestId(NUM_REQUESTS_TO_SCHEDULE).trafficStreamKey,
-                NUM_REQUESTS_TO_SCHEDULE, lastEndTime.plus(Duration.ofMillis(100)));
+                connectionCtx.getChannelKey(), NUM_REQUESTS_TO_SCHEDULE, connectionCtx,
+                lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
         for (int i=0; i<scheduledItems.size(); ++i) {

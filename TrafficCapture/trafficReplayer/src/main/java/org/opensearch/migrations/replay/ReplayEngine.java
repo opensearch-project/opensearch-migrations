@@ -9,6 +9,8 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
@@ -134,7 +136,7 @@ public class ReplayEngine {
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueReplayerRequestKey requestKey, Instant originalStart, Instant originalEnd,
+    scheduleRequest(UniqueReplayerRequestKey requestKey, RequestContext ctx, Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
@@ -147,16 +149,17 @@ public class ReplayEngine {
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKey.getTrafficStreamKey().getConnectionId())
                 .setAttribute(MetricsAttributeKey.DELAY_FROM_ORIGINAL_TO_SCHEDULED_START, Duration.between(originalStart, start).toMillis())
                 .setAttribute(MetricsAttributeKey.SCHEDULED_SEND_TIME, start.toString()).emit();
-        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, start, interval, packets);
+        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets);
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }
 
-    public void closeConnection(ISourceTrafficChannelKey channelKey, int channelInteractionNum, Instant timestamp) {
+    public void closeConnection(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
+                                ConnectionContext ctx, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
-        var future = networkSendOrchestrator.scheduleClose(channelKey, channelInteractionNum, atTime);
+        var future = networkSendOrchestrator.scheduleClose(channelKey, channelInteractionNum, ctx, atTime);
         hookWorkFinishingUpdates(future, timestamp, channelKey, label);
     }
 

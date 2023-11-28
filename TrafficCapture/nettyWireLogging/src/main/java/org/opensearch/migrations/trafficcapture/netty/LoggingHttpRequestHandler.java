@@ -85,8 +85,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     public LoggingHttpRequestHandler(Context incomingContext, IChannelConnectionCaptureSerializer<T> trafficOffloader) {
         this.createdTime = Instant.now();
         try (var scope = incomingContext.makeCurrent()) {
-            var span = GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
-                    .spanBuilder("frontendConnection").startSpan();
+            var span = METERING_CLOSURE.tracer.spanBuilder("frontendConnection").startSpan();
             telemetryContext = incomingContext.with(span);
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "requestStarted");
         }

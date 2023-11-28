@@ -284,7 +284,7 @@ public class CaptureProxy {
         var backsideUri = convertStringToUri(params.backsideUriString);
 
         if (params.otelCollectorEndpoint != null) {
-            SimpleMeteringClosure.initializeOpenTelemetry("capture-proxy", params.otelCollectorEndpoint);
+            SimpleMeteringClosure.initializeOpenTelemetry("capture", params.otelCollectorEndpoint);
         }
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)

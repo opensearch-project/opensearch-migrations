@@ -14,6 +14,8 @@ import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
@@ -190,12 +192,14 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueReplayerRequestKey key, HttpMessageAndTimestamp request) {
+                            public void onRequestReceived(UniqueReplayerRequestKey key, RequestContext ctx,
+                                                          HttpMessageAndTimestamp request) {
                                 requestsReceived.incrementAndGet();
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair fullPair) {
+                            public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestContext ctx,
+                                                           RequestResponsePacketPair fullPair) {
                                 var sourceIdx = requestKey.getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
                                         RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
@@ -215,16 +219,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
+                                                                ConnectionContext ctx,
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
                             public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          ConnectionContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
-                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
+                                                                         ConnectionContext ctx) {}
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();

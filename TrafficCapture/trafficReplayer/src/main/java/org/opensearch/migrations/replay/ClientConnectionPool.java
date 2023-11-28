@@ -11,21 +11,29 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
+import io.opentelemetry.context.ContextKey;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
+import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class ClientConnectionPool {
+    private static final ContextKey<String> RECORD_ID_KEY = ContextKey.named("recordId");
+    public static final String TELEMETRY_SCOPE_NAME = "ClientConnectionPool";
+    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 
     public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
     private final URI serverUri;
@@ -61,17 +69,17 @@ public class ClientConnectionPool {
     }
 
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getResilientClientChannelProducer(EventLoop eventLoop, String diagnosticLabel) {
+    getResilientClientChannelProducer(EventLoop eventLoop, ConnectionContext connectionContext) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var clientConnectionChannelCreatedFuture =
                             new StringTrackableCompletableFuture<ChannelFuture>(new CompletableFuture<>(),
                                     () -> "waiting for createClientConnection to finish");
                     var channelFuture = NettyPacketToHttpConsumer.createClientConnection(eventLoop,
-                            sslContext, serverUri, diagnosticLabel);
+                            sslContext, serverUri, connectionContext);
                     channelFuture.addListener(f -> {
                         log.atInfo().setMessage(()->
-                                "New network connection result for " + diagnosticLabel + "=" + f.isSuccess()).log();
+                                "New network connection result for " + connectionContext + "=" + f.isSuccess()).log();
                         if (f.isSuccess()) {
                             clientConnectionChannelCreatedFuture.future.complete(channelFuture);
                         } else {
@@ -135,7 +143,7 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualSessionGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent) {
+    submitEventualSessionGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent, ConnectionContext ctx) {
         ConnectionReplaySession channelFutureAndSchedule =
                 getCachedSession(channelKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
@@ -146,8 +154,7 @@ public class ClientConnectionPool {
         return channelFutureAndSchedule.eventLoop.submit(() -> {
             if (channelFutureAndSchedule.getChannelFutureFuture() == null) {
                 channelFutureAndSchedule.setChannelFutureFuture(
-                        getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop,
-                                channelKey.getConnectionId()));
+                        getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop, ctx));
             }
             return channelFutureAndSchedule;
         });

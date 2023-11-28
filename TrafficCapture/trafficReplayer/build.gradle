@@ -35,6 +35,7 @@ repositories {
 dependencies {
     //spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
     def resilience4jVersion = "1.7.0";
+    implementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
@@ -50,6 +51,8 @@ dependencies {
     implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"${resilience4jVersion}"
     implementation group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"${resilience4jVersion}"
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-api'
+    implementation group: 'io.opentelemetry', name: 'opentelemetry-sdk'
     implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.6.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
@@ -65,11 +68,14 @@ dependencies {
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
 
+    testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
     testFixturesImplementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
     testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.9.3'
-
+    testFixturesImplementation group: 'io.opentelemetry', name:'opentelemetry-api'
+    testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk'
+    testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
 
     testImplementation project(':captureOffloader')
     testImplementation testFixtures(project(path: ':captureOffloader'))
@@ -78,6 +84,7 @@ dependencies {
     testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
+    testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.x.x'
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.0'

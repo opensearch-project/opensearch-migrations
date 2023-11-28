@@ -36,6 +36,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     private static final ContextKey<String> RECORD_ID_KEY = ContextKey.named("recordId");
     private static final ContextKey<String> TOPIC_KEY = ContextKey.named("topic");
     private static final ContextKey<Integer> RECORD_SIZE_KEY = ContextKey.named("recordSize");
+    private static final ContextKey<Instant> START_FLUSH_KEY = ContextKey.named("startKafkaSend");
     public static final String TELEMETRY_SCOPE_NAME = "KafkaCapture";
     public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 
@@ -101,7 +102,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
         @Override
         public void close() throws IOException {
-            METERING_CLOSURE.meterHistogramMillis(telemetryContext, "connection_lifetime",
+            log.atInfo().setMessage(()->"factory.close()").log();
+            METERING_CLOSURE.meterHistogramMillis(telemetryContext, "offloader_stream_lifetime",
                         Duration.between(startTime, Instant.now()));
             METERING_CLOSURE.meterDeltaEvent(telemetryContext, "offloaders_active", -1);
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "offloader_closed");
@@ -111,12 +113,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
         @Override
         public CodedOutputStreamWrapper createStream() {
-            Context newStreamCtx;
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_created");
-            try (var scope = telemetryContext.makeCurrent()) {
-                newStreamCtx = Context.current()
-                        .with(METERING_CLOSURE.tracer.spanBuilder("recordStream").startSpan());
-            }
+            var newStreamCtx = telemetryContext
+                    .with(METERING_CLOSURE.tracer.spanBuilder("recordStream").startSpan());
 
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
             return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb, newStreamCtx);
@@ -146,7 +145,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 try (var scope = telemetryContext
                         .with(RECORD_ID_KEY, recordId)
                         .with(TOPIC_KEY, topicNameForTraffic)
-                        .with(RECORD_SIZE_KEY, kafkaRecord.value().length).makeCurrent()) {
+                        .with(RECORD_SIZE_KEY, kafkaRecord.value().length)
+                        .with(START_FLUSH_KEY, Instant.now())
+                        .makeCurrent()) {
                     METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_flush_called");
                     flushContext = Context.current()
                             .with(METERING_CLOSURE.tracer.spanBuilder("flushRecord").startSpan());
@@ -181,6 +182,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         private Callback handleProducerRecordSent(CompletableFuture<RecordMetadata> cf, String recordId,
                                                   Context flushContext) {
             return (metadata, exception) -> {
+                log.atInfo().setMessage(()->"kafka completed sending a record").log();
+                METERING_CLOSURE.meterHistogramMicros(telemetryContext,
+                        exception==null ? "stream_flush_success_ms" : "stream_flush_failure_ms",
+                        Duration.between(flushContext.get(START_FLUSH_KEY), Instant.now()));
                 METERING_CLOSURE.meterIncrementEvent(telemetryContext,
                         exception==null ? "stream_flush_success" : "stream_flush_failure");
                 METERING_CLOSURE.meterIncrementEvent(telemetryContext,

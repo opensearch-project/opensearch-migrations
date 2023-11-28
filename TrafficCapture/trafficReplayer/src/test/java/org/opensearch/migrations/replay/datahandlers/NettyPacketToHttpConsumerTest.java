@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
@@ -128,9 +129,11 @@ public class NettyPacketToHttpConsumerTest {
             var testServer = testServers.get(useTls);
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-            var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
-                    testServer.localhostEndpoint(), sslContext, "unitTest"+i,
-                    TestRequestKey.getTestConnectionRequestId(0));
+            var nphc = new NettyPacketToHttpConsumer(
+                    new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
+                    testServer.localhostEndpoint(),
+                    sslContext,
+                    TestRequestKey.getTestConnectionRequestContext(0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -162,9 +165,10 @@ public class NettyPacketToHttpConsumerTest {
             for (int i = 0; i < 2; ++i) {
                 String connId = "TEST_" + j;
                 var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
+                var requestKey = new UniqueReplayerRequestKey(trafficStreamKey, 0, i);
+                var ctx = new RequestContext(requestKey);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
-                        sendingFactory, Instant.now(), Instant.now(),
-                        new UniqueReplayerRequestKey(trafficStreamKey, 0, i),
+                        sendingFactory, ctx, Instant.now(), Instant.now(), requestKey,
                         ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 log.info("requestFinishFuture="+requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();

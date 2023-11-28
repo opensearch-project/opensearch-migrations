@@ -40,6 +40,8 @@ repositories {
 }
 
 dependencies {
+    implementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
+
     implementation project(':captureProtobufs')
 
     implementation "com.google.protobuf:protobuf-java:3.22.2"
@@ -56,9 +58,9 @@ dependencies {
     implementation("org.apache.logging.log4j:log4j-slf4j2-impl:2.20.0")
 
     // OpenTelemetry core
-    implementation group: 'io.opentelemetry', name:'opentelemetry-api', version: '1.30.0'
-    implementation group: 'io.opentelemetry', name:'opentelemetry-exporter-otlp', version: '1.30.0'
-    implementation group: 'io.opentelemetry', name:'opentelemetry-sdk', version: '1.30.0'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-api'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-exporter-otlp'
+    implementation group: 'io.opentelemetry', name:'opentelemetry-sdk'
     implementation group: 'io.opentelemetry.instrumentation', name:'opentelemetry-log4j-appender-2.17', version: '1.30.0-alpha'
     implementation group: 'io.opentelemetry', name:'opentelemetry-semconv', version: '1.30.0-alpha'
 

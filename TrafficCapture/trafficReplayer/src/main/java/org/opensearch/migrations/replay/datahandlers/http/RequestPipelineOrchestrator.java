@@ -11,6 +11,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -43,7 +44,7 @@ public class RequestPipelineOrchestrator<R> {
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer<R> packetReceiver;
     final String diagnosticLabel;
-    private UniqueReplayerRequestKey requestKeyForMetricsLogging;
+    private RequestContext requestContext;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
 
@@ -51,13 +52,13 @@ public class RequestPipelineOrchestrator<R> {
                                        IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
                                        String diagnosticLabel,
-                                       UniqueReplayerRequestKey requestKeyForMetricsLogging) {
+                                       RequestContext requestContext) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
                 IAuthTransformerFactory.NullAuthTransformerFactory.instance;
         this.diagnosticLabel = diagnosticLabel;
-        this.requestKeyForMetricsLogging = requestKeyForMetricsLogging;
+        this.requestContext = requestContext;
     }
 
     static void removeThisAndPreviousHandlers(ChannelPipeline pipeline, ChannelHandler targetHandler) {
@@ -100,7 +101,7 @@ public class RequestPipelineOrchestrator<R> {
         //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
         //        NettyDecodedHttpRequestHandler is removed.
         pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler<R>(transformer, chunkSizes, this,
-                diagnosticLabel, requestKeyForMetricsLogging));
+                diagnosticLabel, requestContext));
         addLoggingHandler(pipeline, "B");
     }
 

@@ -13,22 +13,33 @@ exporters:
     loglevel: debug
 
   zipkin:
-    endpoint: "http://zipkin-all-in-one:9411/api/v2/spans"
+    endpoint: "http://zipkin:9411/api/v2/spans"
     format: proto
 
-  otlp/jaeger:
-    endpoint: jaeger-all-in-one:14250
+  otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
+    endpoint: jaeger:4317
     tls:
       insecure: true
 
-# Alternatively, use jaeger_thrift_http with the settings below. In this case
-# update the list of exporters on the traces pipeline.
-#
-#  jaeger_thrift_http:
-#    url: http://jaeger-all-in-one:14268/api/traces
 
 processors:
-  batch:
+  # Processor to set the namespace based on the service name
+  attributes/nscapture:
+    actions:
+      - key: namespace
+        value: "capture"
+        action: insert
+      - key: service.name
+        value: "capture"
+        action: update
+  attributes/nsreplayer:
+    actions:
+      - key: namespace
+        value: "replay"
+        action: insert
+      - key: service.name
+        value: "replay"
+        action: update
 
 extensions:
   health_check:
@@ -42,9 +53,9 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: []
       exporters: [logging, zipkin, otlp/jaeger]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [attributes/nscapture, attributes/nsreplayer]
       exporters: [logging, prometheus]

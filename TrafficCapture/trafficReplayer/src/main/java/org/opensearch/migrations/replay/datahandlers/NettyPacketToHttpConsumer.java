@@ -18,14 +18,17 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
+import io.opentelemetry.context.ContextKey;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
+import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
@@ -36,6 +39,11 @@ import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
+    private static final ContextKey<Instant> START_OF_REQUEST_KEY = ContextKey.named("startOfRequest");
+    private static final ContextKey<Instant> START_OF_WRITE_KEY = ContextKey.named("startOfWrite");
+    public static final String TELEMETRY_SCOPE_NAME = "HttpSender";
+    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
+
     /**
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
@@ -52,18 +60,15 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
-    final String diagnosticLabel;
-    private UniqueReplayerRequestKey uniqueRequestKeyForMetricsLogging;
+    RequestContext tracingContext;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
-                                     String diagnosticLabel, UniqueReplayerRequestKey uniqueRequestKeyForMetricsLogging) {
-        this(createClientConnection(eventLoopGroup, sslContext, serverUri, diagnosticLabel),
-                diagnosticLabel, uniqueRequestKeyForMetricsLogging);
+                                     RequestContext requestContext) {
+        this(createClientConnection(eventLoopGroup, sslContext, serverUri, requestContext), requestContext);
     }
 
-    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, String diagnosticLabel, UniqueReplayerRequestKey uniqueRequestKeyForMetricsLogging) {
-        this.diagnosticLabel = "[" + diagnosticLabel + "] ";
-        this.uniqueRequestKeyForMetricsLogging = uniqueRequestKeyForMetricsLogging;
+    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, RequestContext ctx) {
+        this.tracingContext = ctx;
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
@@ -87,7 +92,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup, SslContext sslContext,
-                                                       URI serverUri, String diagnosticLabel) {
+                                                       URI serverUri, ConnectionContext connectionContext) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
@@ -105,8 +110,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             if (connectFuture.isSuccess()) {
                 var pipeline = connectFuture.channel().pipeline();
                 pipeline.removeFirst();
-                log.atTrace()
-                        .setMessage(()->diagnosticLabel + " Done setting up client channel & it was successful").log();
+                log.atTrace().setMessage(()->connectionContext.getChannelKey() +
+                        " Done setting up client channel & it was successful").log();
                 if (sslContext != null) {
                     var sslEngine = sslContext.newEngine(connectFuture.channel().alloc());
                     sslEngine.setUseClientMode(true);
@@ -126,7 +131,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             } else {
                 // Close the connection if the connection attempt has failed.
                 log.atWarn().setCause(connectFuture.cause())
-                        .setMessage(() -> diagnosticLabel + " CONNECT future was not successful, " +
+                        .setMessage(() -> connectionContext.getChannelKey() + " CONNECT future was not successful, " +
                         "so setting the channel future's result to an exception").log();
                 rval.setFailure(connectFuture.cause());
             }
@@ -190,8 +195,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         System.identityHashCode(packetData) + ")").log();
                 return writePacketAndUpdateFuture(packetData);
             } else {
-                log.atWarn().setMessage(()->diagnosticLabel + "outbound channel was not set up successfully, " +
-                        "NOT writing bytes hash=" + System.identityHashCode(packetData)).log();
+                log.atWarn().setMessage(()->tracingContext.getRequestKey() + "outbound channel was not set up " +
+                        "successfully, NOT writing bytes hash=" + System.identityHashCode(packetData)).log();
                 channel.close();
                 return DiagnosticTrackableCompletableFuture.Factory.failedFuture(channelInitException, ()->"");
             }
@@ -206,13 +211,14 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
         final int readableBytes = packetData.readableBytes();
+        METERING_CLOSURE.meterIncrementEvent(tracingContext.context, "readBytes", packetData.readableBytes());
         channel.writeAndFlush(packetData)
                 .addListener((ChannelFutureListener) future -> {
                     Throwable cause = null;
                     try {
                         if (!future.isSuccess()) {
-                            log.atWarn().setMessage(()->diagnosticLabel + "closing outbound channel because WRITE " +
-                                    "future was not successful " + future.cause() + " hash=" +
+                            log.atWarn().setMessage(()->tracingContext.getRequestKey() + "closing outbound channel " +
+                                    "because WRITE future was not successful " + future.cause() + " hash=" +
                                     System.identityHashCode(packetData) + " will be sending the exception to " +
                                     completableFuture).log();
                             future.channel().close(); // close the backside
@@ -222,17 +228,17 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         cause = e;
                     }
                     if (cause == null) {
-                        log.atTrace().setMessage(()->"Signaling previously returned CompletableFuture packet write was successful: "
-                                + packetData + " hash=" + System.identityHashCode(packetData)).log();
+                        log.atTrace().setMessage(()->"Previously returned CompletableFuture packet write was " +
+                                "successful: " + packetData + " hash=" + System.identityHashCode(packetData)).log();
                         completableFuture.future.complete(null);
                     } else {
-                        log.atInfo().setMessage(()->"Signaling previously returned CompletableFuture packet write had an exception : "
-                                + packetData + " hash=" + System.identityHashCode(packetData)).log();
+                        log.atInfo().setMessage(()->"Previously returned CompletableFuture packet write had " +
+                                " an exception :" + packetData + " hash=" + System.identityHashCode(packetData)).log();
                         metricsLogger.atError(MetricsEvent.WRITING_REQUEST_COMPONENT_FAILED, cause)
                                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
-                                .setAttribute(MetricsAttributeKey.REQUEST_ID, uniqueRequestKeyForMetricsLogging)
+                                .setAttribute(MetricsAttributeKey.REQUEST_ID, tracingContext.getRequestKey().toString())
                                 .setAttribute(MetricsAttributeKey.CONNECTION_ID,
-                                        uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId()).emit();
+                                        tracingContext.getRequestKey().getTrafficStreamKey().getConnectionId()).emit();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
                     }
@@ -241,8 +247,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 ".  Created future for writing data="+completableFuture).log();
         metricsLogger.atSuccess(MetricsEvent.WROTE_REQUEST_COMPONENT)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, uniqueRequestKeyForMetricsLogging)
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, uniqueRequestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, tracingContext.getRequestKey())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
+                        tracingContext.getRequestKey().getTrafficStreamKey().getConnectionId())
                 .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, readableBytes).emit();
         return completableFuture;
     }
