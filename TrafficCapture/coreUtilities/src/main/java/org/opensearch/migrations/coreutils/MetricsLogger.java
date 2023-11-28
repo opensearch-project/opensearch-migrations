@@ -2,6 +2,7 @@ package org.opensearch.migrations.coreutils;
 
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
@@ -101,13 +102,19 @@ class MetricsLogger {
         public void meterIncrementEvent(Context ctx, String eventName, long increment) {
             if (ctx == null) { return; }
             try (var namedOnlyForAutoClose = ctx.makeCurrent()) {
-                meter.counterBuilder(eventName).build().add(increment);
+                meter.counterBuilder(eventName)
+                        .build().add(increment, Attributes.builder()
+                                .put("labelName", eventName)
+                                .build());
             }
         }
         public void meterDeltaEvent(Context ctx, String eventName, long delta) {
             if (ctx == null) { return; }
             try (var namedOnlyForAutoClose = ctx.makeCurrent()) {
-                meter.upDownCounterBuilder(eventName).build().add(delta);
+                meter.upDownCounterBuilder(eventName)
+                        .build().add(delta, Attributes.builder()
+                                .put("labelName", eventName)
+                                .build());
             }
         }
         public void meterHistogramMillis(Context ctx, String eventName, Duration between) {
@@ -116,7 +123,10 @@ class MetricsLogger {
         public void meterHistogram(Context ctx, String eventName, double value) {
             if (ctx == null) { return; }
             try (var namedOnlyForAutoClose = ctx.makeCurrent()) {
-                meter.histogramBuilder(eventName).build().record(value);
+                meter.histogramBuilder(eventName)
+                        .build().record(value, Attributes.builder()
+                                .put("labelName", eventName)
+                                .build());
             }
         }
     }
