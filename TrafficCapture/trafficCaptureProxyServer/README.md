@@ -24,18 +24,20 @@ Follow documentation for [deploying solution](../../deployment/README.md) to set
     * If the new port is not there, then there is a chance that Elasticsearch/OpenSearch is not running, in that case, you must start the process again and verify that it has started properly.
 6. Test the new port by sending any kind of traffic or request, e.g. `curl https://localhost:19200` or if security is not enabled `curl http://localhost:19200`
 7. Verify the JAVA_HOME environment variable has been set (`echo $JAVA_HOME`) as this will be necessary for the Capture Proxy to execute.
-    * If Java is not already available on your node, your elasticsearch/opensearch folder may have a bundled JDK you can use, e.g. `export JAVA_HOME=/home/ec2-user/elasticsearch/jdk`
+    * If Java is not already available on your node, your elasticsearch/opensearch folder may have a bundled JDK you can use, e.g. `export JAVA_HOME=/home/ec2-user/elasticsearch/jdk` (this can also be added to your shell startup script to be available for all sessions)
 8. Download the Capture Proxy tar file
     1. Go to the `opensearch-migrations` repository's latest releases page: https://github.com/opensearch-project/opensearch-migrations/releases/latest
     2. Copy the link for the Capture Proxy tar file, mind your node’s architecture.
-    3. Download the tar file in a persistent folder `curl -L0 <CAPTURE-PROXY-TAR-LINK> --output CaptureProxyX64.tar.gz`
+    3. Download the tar file in a persistent folder, using the link from the previous step `curl -L0 <CAPTURE-PROXY-TAR-LINK> --output CaptureProxyX64.tar.gz`
     4. Unpack the tar file: `tar -xvf CaptureProxyX64.tar.gz`
 9. Start the Capture Proxy:
     1. Access the Capture Proxy shell script directory `cd trafficCaptureProxyServer/bin`
     2. Run the Capture Proxy command
         * Depending on how you are running Kafka, the command needed will differ:
             * For **default/Docker Kafka** clusters `nohup ./trafficCaptureProxyServer --kafkaConnection <KAFKA_BROKERS> --destinationUri http://localhost:19200 --listenPort 9200 --insecureDestination &`
+              * The `KAFKA_BROKERS` referenced here will vary based on setup, but for a default docker setup would be `kafka:9092` 
             * For **AWS MSK(Kafka)** clusters `nohup ./trafficCaptureProxyServer --kafkaConnection <KAFKA_BROKERS> --destinationUri http://localhost:19200 --listenPort 9200 --enableMSKAuth --insecureDestination &`
+              * The `KAFKA_BROKERS` referenced here can be obtained from the AWS Console(MSK -> Clusters -> Select Cluster -> View Client Information -> Copy Private endpoint)
         * This command will start the Capture Proxy in the background and allow it to continue past the lifetime of the shell session.
         * :warning: If the machine running the elasticsearch/opensearch process is restarted, the Capture Proxy will need to be started again
         * Explanation of parameters in the command above:

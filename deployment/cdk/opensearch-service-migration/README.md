@@ -204,30 +204,30 @@ Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/
 Although this CDK does not set up the Capture Proxy on source cluster nodes (except in the case of the demo solution), the Capture Proxy instances do need to communicate with resources deployed by this CDK (e.g. Kafka) which this section covers
 
 #### Capture Proxy on OpenSearch/Elasticsearch nodes
-After [setting up Capture Proxy instances](../../../TrafficCapture/trafficCaptureProxyServer/README.md#how-to-attach-a-capture-proxy-on-a-coordinator-node) on the source cluster, the IAM policies and Security Groups for the nodes should allow access to the Migration tooling:
-1. The nodes should add the `migrationMSKSecurityGroup` security group to allow access to Kafka
-2. The IAM role used by the nodes should have permissions to publish captured traffic to Kafka. A template policy to use, can be seen below
+Before [setting up Capture Proxy instances](../../../TrafficCapture/trafficCaptureProxyServer/README.md#how-to-attach-a-capture-proxy-on-a-coordinator-node) on the source cluster, the IAM policies and Security Groups for the nodes should allow access to the Migration tooling:
+1. The coordinator nodes should add the `migrationMSKSecurityGroup` security group to allow access to Kafka
+2. The IAM role used by the coordinator nodes should have permissions to publish captured traffic to Kafka. A template policy to use, can be seen below
    * This can be added through the AWS Console (IAM Role -> Add permissions -> Create inline policy -> JSON view)
 ```json
-    {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Action": "kafka-cluster:Connect",
-                "Resource": "arn:aws:kafka:<REGION>:<ACCOUNT-ID>:cluster/migration-msk-cluster-<STAGE>/*",
-                "Effect": "Allow"
-            },
-            {
-                "Action": [
-                    "kafka-cluster:CreateTopic",
-                    "kafka-cluster:DescribeTopic",
-                    "kafka-cluster:WriteData"
-                ],
-                "Resource": "arn:aws:kafka:<REGION>:<ACCOUNT-ID>:topic/migration-msk-cluster-<STAGE>/*",
-                "Effect": "Allow"
-            }
-        ]
-    }
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": "kafka-cluster:Connect",
+            "Resource": "arn:aws:kafka:<REGION>:<ACCOUNT-ID>:cluster/migration-msk-cluster-<STAGE>/*",
+            "Effect": "Allow"
+        },
+        {
+            "Action": [
+                "kafka-cluster:CreateTopic",
+                "kafka-cluster:DescribeTopic",
+                "kafka-cluster:WriteData"
+            ],
+            "Resource": "arn:aws:kafka:<REGION>:<ACCOUNT-ID>:topic/migration-msk-cluster-<STAGE>/*",
+            "Effect": "Allow"
+        }
+    ]
+}
 ```
 
 #### Load Balanced Endpoints
