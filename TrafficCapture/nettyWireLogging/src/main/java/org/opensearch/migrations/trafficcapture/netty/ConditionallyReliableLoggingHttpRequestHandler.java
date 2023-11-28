@@ -4,6 +4,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.util.ReferenceCountUtil;
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -26,17 +27,17 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest)
             throws Exception {
         if (shouldBlockPredicate.test(httpRequest)) {
-            var blockingSpan = METERING_CLOSURE_OP.map(m->{
-                m.meterIncrementEvent(telemetryContext, "blockingRequestUntilFlush");
-                try (var namedOnlyForAutoClose = telemetryContext.makeCurrent()) {
-                    return GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
-                            .spanBuilder("blockedOnFlush").startSpan();
-                }}).orElse(null);
+            Span blockingSpan;
+            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "blockingRequestUntilFlush");
+            try (var namedOnlyForAutoClose = telemetryContext.makeCurrent()) {
+                blockingSpan = GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
+                        .spanBuilder("blockedOnFlush").startSpan();
+            }
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
-                METERING_CLOSURE_OP.ifPresent(m->{
-                    blockingSpan.end();
-                    m.meterIncrementEvent(telemetryContext, t != null ? "blockedFlushFailure" : "blockedFlushSuccess");
-                });
+                blockingSpan.end();
+                METERING_CLOSURE.meterIncrementEvent(telemetryContext,
+                        t != null ? "blockedFlushFailure" : "blockedFlushSuccess");
+
                 if (t != null) {
                     // This is a spot where we would benefit from having a behavioral policy that different users
                     // could set as needed. Some users may be fine with just logging a failed offloading of a request
@@ -52,9 +53,7 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
                 }
             });
         } else {
-            METERING_CLOSURE_OP.ifPresent(m->{
-                m.meterIncrementEvent(telemetryContext, "nonBlockingRequest");
-            });
+            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "nonBlockingRequest");
             super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
         }
     }

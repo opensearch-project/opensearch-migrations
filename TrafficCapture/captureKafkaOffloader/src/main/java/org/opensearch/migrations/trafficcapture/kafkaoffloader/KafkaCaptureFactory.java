@@ -14,6 +14,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -26,7 +27,6 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 
@@ -37,8 +37,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     private static final ContextKey<String> TOPIC_KEY = ContextKey.named("topic");
     private static final ContextKey<Integer> RECORD_SIZE_KEY = ContextKey.named("recordSize");
     public static final String TELEMETRY_SCOPE_NAME = "KafkaCapture";
-    public static final Optional<MetricsLogger.SimpleMeteringClosure> METERING_CLOSURE_OP =
-            Optional.of(new MetricsLogger.SimpleMeteringClosure(TELEMETRY_SCOPE_NAME));
+    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 
     private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHandler");
 
@@ -67,15 +66,13 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
     @Override
     public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(String connectionId) {
-        var context = METERING_CLOSURE_OP.map(m->{
-            Span offloaderSpan = GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
-                    .spanBuilder("offloader").startSpan();
-            offloaderSpan.setAttribute("offloaderConnectionId", connectionId);
-            var c = Context.current().with(offloaderSpan);
-            m.meterIncrementEvent(c, "offloader_created");
-            m.meterDeltaEvent(c, "offloaders_active", 1);
-            return c;
-        }).orElse(null);
+        Span offloaderSpan = GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
+                .spanBuilder("offloader").startSpan();
+        offloaderSpan.setAttribute("offloaderConnectionId", connectionId);
+        var context = Context.current().with(offloaderSpan);
+        METERING_CLOSURE.meterIncrementEvent(context, "offloader_created");
+        METERING_CLOSURE.meterDeltaEvent(context, "offloaders_active", 1);
+
         return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId,
                 new StreamManager(context, connectionId));
     }
@@ -104,23 +101,23 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
         @Override
         public void close() throws IOException {
-            METERING_CLOSURE_OP.ifPresent(m->{
-                m.meterHistogramMillis(telemetryContext, "connection_lifetime",
+            METERING_CLOSURE.meterHistogramMillis(telemetryContext, "connection_lifetime",
                         Duration.between(startTime, Instant.now()));
-                m.meterDeltaEvent(telemetryContext, "offloaders_active", -1);
-                m.meterIncrementEvent(telemetryContext, "offloader_closed");
-            });
+            METERING_CLOSURE.meterDeltaEvent(telemetryContext, "offloaders_active", -1);
+            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "offloader_closed");
+
             Span.fromContext(telemetryContext).end();
         }
 
         @Override
         public CodedOutputStreamWrapper createStream() {
-            var newStreamCtx = METERING_CLOSURE_OP.map(m-> {
-                m.meterIncrementEvent(telemetryContext, "stream_created");
-                try (var scope = telemetryContext.makeCurrent()) {
-                    return Context.current().with(m.tracer.spanBuilder("recordStream").startSpan());
-                }
-            }).orElse(null);
+            Context newStreamCtx;
+            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_created");
+            try (var scope = telemetryContext.makeCurrent()) {
+                newStreamCtx = Context.current()
+                        .with(METERING_CLOSURE.tracer.spanBuilder("recordStream").startSpan());
+            }
+
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
             return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb, newStreamCtx);
         }
@@ -144,16 +141,16 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 var cf = new CompletableFuture<RecordMetadata>();
                 log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
-                var flushContext = METERING_CLOSURE_OP.map(m-> {
-                    Span.fromContext(osh.streamContext).end();
-                    try (var scope = telemetryContext
-                            .with(RECORD_ID_KEY, recordId)
-                            .with(TOPIC_KEY, topicNameForTraffic)
-                            .with(RECORD_SIZE_KEY, kafkaRecord.value().length).makeCurrent()) {
-                        m.meterIncrementEvent(telemetryContext, "stream_flush_called");
-                        return Context.current().with(m.tracer.spanBuilder("flushRecord").startSpan());
-                    }
-                }).orElse(null);
+                Context flushContext;
+                Span.fromContext(osh.streamContext).end();
+                try (var scope = telemetryContext
+                        .with(RECORD_ID_KEY, recordId)
+                        .with(TOPIC_KEY, topicNameForTraffic)
+                        .with(RECORD_SIZE_KEY, kafkaRecord.value().length).makeCurrent()) {
+                    METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_flush_called");
+                    flushContext = Context.current()
+                            .with(METERING_CLOSURE.tracer.spanBuilder("flushRecord").startSpan());
+                }
 
                 // Async request to Kafka cluster
                 producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId, flushContext));
@@ -184,14 +181,12 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         private Callback handleProducerRecordSent(CompletableFuture<RecordMetadata> cf, String recordId,
                                                   Context flushContext) {
             return (metadata, exception) -> {
-                METERING_CLOSURE_OP.ifPresent(m-> {
-                    m.meterIncrementEvent(telemetryContext,
-                            exception==null ? "stream_flush_success" : "stream_flush_failure");
-                    m.meterIncrementEvent(telemetryContext,
-                            exception==null ? "stream_flush_success_bytes" : "stream_flush_failure_bytes",
-                            flushContext.get(RECORD_SIZE_KEY));
-                    Span.fromContext(flushContext).end();
-                });
+                METERING_CLOSURE.meterIncrementEvent(telemetryContext,
+                        exception==null ? "stream_flush_success" : "stream_flush_failure");
+                METERING_CLOSURE.meterIncrementEvent(telemetryContext,
+                        exception==null ? "stream_flush_success_bytes" : "stream_flush_failure_bytes",
+                        flushContext.get(RECORD_SIZE_KEY));
+                Span.fromContext(flushContext).end();
 
                 if (exception != null) {
                     log.error("Error sending producer record: {}", recordId, exception);

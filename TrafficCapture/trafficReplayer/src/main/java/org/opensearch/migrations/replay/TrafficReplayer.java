@@ -67,7 +67,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.opensearch.migrations.coreutils.MetricsLogger.initializeOpenTelemetry;
+import static org.opensearch.migrations.coreutils.SimpleMeteringClosure.initializeOpenTelemetry;
 
 @Slf4j
 public class TrafficReplayer {
