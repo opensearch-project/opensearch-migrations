@@ -230,10 +230,6 @@ Before [setting up Capture Proxy instances](../../../TrafficCapture/trafficCaptu
 }
 ```
 
-#### Load Balanced Endpoints
-If clients for your source cluster hit a load balanced endpoint that routes to your nodes, it may also be beneficial to add the same `migrationMSKSecurityGroup` to this endpoint to allow making requests to this endpoint from the Migration Console
-
-
 ## Tearing down CDK
 To remove all the CDK stack(s) which get created during a deployment we can execute a command similar to below
 ```shell
