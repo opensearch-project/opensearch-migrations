@@ -4,6 +4,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterAll;
@@ -166,7 +167,8 @@ public class NettyPacketToHttpConsumerTest {
                 String connId = "TEST_" + j;
                 var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
                 var requestKey = new UniqueReplayerRequestKey(trafficStreamKey, 0, i);
-                var ctx = new RequestContext(requestKey);
+                var ctx = new RequestContext(requestKey,
+                        GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(), requestKey,
                         ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));

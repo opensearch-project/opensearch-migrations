@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import io.netty.buffer.Unpooled;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
@@ -18,7 +19,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.opensearch.migrations.tracing.EmptyContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -51,7 +54,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer = new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
         KafkaCaptureFactory kafkaCaptureFactory =
             new KafkaCaptureFactory(TEST_NODE_ID_STRING, producer, maxAllowableMessageSize);
-        IChannelConnectionCaptureSerializer serializer = kafkaCaptureFactory.createOffloader(connectionId);
+        IChannelConnectionCaptureSerializer serializer = kafkaCaptureFactory.createOffloader(createCtx(), connectionId);
 
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 15000; i++) {
@@ -71,6 +74,11 @@ public class KafkaCaptureFactoryTest {
         }
         bb.release();
         producer.close();
+    }
+
+    private static ConnectionContext createCtx() {
+        return new ConnectionContext("test", "test",
+                GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
     }
 
     /**
@@ -97,7 +105,7 @@ public class KafkaCaptureFactoryTest {
     public void testLinearOffloadingIsSuccessful() throws IOException {
         KafkaCaptureFactory kafkaCaptureFactory =
                 new KafkaCaptureFactory(TEST_NODE_ID_STRING, mockProducer, 1024*1024);
-        IChannelConnectionCaptureSerializer offloader = kafkaCaptureFactory.createOffloader(connectionId);
+        IChannelConnectionCaptureSerializer offloader = kafkaCaptureFactory.createOffloader(createCtx(), connectionId);
 
         List<Callback> recordSentCallbacks = new ArrayList<>(3);
         when(mockProducer.send(any(), any())).thenAnswer(invocation -> {

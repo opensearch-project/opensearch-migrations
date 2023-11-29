@@ -18,13 +18,11 @@ import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.tracing.ConnectionContext;
-import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.net.URI;
-import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -69,7 +67,7 @@ public class ClientConnectionPool {
     }
 
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getResilientClientChannelProducer(EventLoop eventLoop, ConnectionContext connectionContext) {
+    getResilientClientChannelProducer(EventLoop eventLoop, ChannelKeyContext connectionContext) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var clientConnectionChannelCreatedFuture =
@@ -143,7 +141,7 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualSessionGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent, ConnectionContext ctx) {
+    submitEventualSessionGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent, ChannelKeyContext ctx) {
         ConnectionReplaySession channelFutureAndSchedule =
                 getCachedSession(channelKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {

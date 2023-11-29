@@ -16,7 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
@@ -676,7 +676,7 @@ public class TrafficReplayer {
 
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            ConnectionContext ctx, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                                            ChannelKeyContext ctx, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             commitTrafficStreams(trafficStreamKeysBeingHeld, status);
         }
 
@@ -698,7 +698,7 @@ public class TrafficReplayer {
 
         @Override
         public void onConnectionClose(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                                      ConnectionContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
+                                      ChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
                                       Instant timestamp, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
@@ -706,7 +706,7 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, ConnectionContext ctx) {
+        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, ChannelKeyContext ctx) {
             commitTrafficStreams(List.of(tsk), true);
         }
 
@@ -875,7 +875,7 @@ public class TrafficReplayer {
     {
         try {
             var transformationCompleteFuture = replayEngine.scheduleTransformationWork(requestKey, start, ()->
-                    transformAllData(inputRequestTransformerFactory.create(requestKey), packetsSupplier));
+                    transformAllData(inputRequestTransformerFactory.create(requestKey, ctx), packetsSupplier));
             log.atDebug().setMessage(()->"finalizeRequest future for transformation of " + requestKey +
                     " = " + transformationCompleteFuture).log();
             // It might be safer to chain this work directly inside the scheduleWork call above so that the

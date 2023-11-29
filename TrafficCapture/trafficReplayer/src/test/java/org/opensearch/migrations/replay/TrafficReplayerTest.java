@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -172,19 +172,19 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                ConnectionContext ctx,
+                                                                ChannelKeyContext ctx,
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
                             public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          ConnectionContext ctx,
+                                                          ChannelKeyContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
                             @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         ConnectionContext ctx) {}
+                                                                         ChannelKeyContext ctx) {}
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -224,17 +224,17 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                ConnectionContext ctx,
+                                                                ChannelKeyContext ctx,
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
                             public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          ConnectionContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
+                                                          ChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
                             @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         ConnectionContext ctx) {}
+                                                                         ChannelKeyContext ctx) {}
                         }
                 );
         byte[] serializedChunks;

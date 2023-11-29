@@ -4,15 +4,13 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
-import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.context.Context;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.net.SocketAddress;
 import java.time.Duration;
@@ -25,10 +23,10 @@ public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpResponseHandler");
 
     private final IChannelConnectionCaptureSerializer<T> trafficOffloader;
-    private Context telemetryContext;
+    private ConnectionContext telemetryContext;
     private Instant connectTime;
 
-    public LoggingHttpResponseHandler(Context incomingContext,
+    public LoggingHttpResponseHandler(ConnectionContext incomingContext,
                                       IChannelConnectionCaptureSerializer<T> trafficOffloader) {
         this.trafficOffloader = trafficOffloader;
         this.telemetryContext = incomingContext;
@@ -45,9 +43,8 @@ public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter
     public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) throws Exception {
         trafficOffloader.addConnectEvent(Instant.now(), remoteAddress, localAddress);
 
-        var span = GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
-                .spanBuilder("backendConnection").startSpan();
-        telemetryContext = telemetryContext.with(span);
+        var span = METERING_CLOSURE.makeSpan(telemetryContext,"backendConnection");
+        telemetryContext = new ConnectionContext(telemetryContext, span);
         connectTime = Instant.now();
         METERING_CLOSURE.meterIncrementEvent(telemetryContext, "connect");
         METERING_CLOSURE.meterDeltaEvent(telemetryContext, "connections", 1);
@@ -70,7 +67,7 @@ public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter
         METERING_CLOSURE.meterDeltaEvent(telemetryContext, "connections", -1);
         METERING_CLOSURE.meterHistogramMillis(telemetryContext, "connectionDuration",
                 Duration.between(connectTime, Instant.now()));
-        Span.fromContext(telemetryContext).end();
+        telemetryContext.currentSpan.end();
     }
 
     @Override

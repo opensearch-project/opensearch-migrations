@@ -56,7 +56,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
                     .toString());
             metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
                     .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
-                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getChannelKey().getConnectionId())
+                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
                     .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
                     .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 

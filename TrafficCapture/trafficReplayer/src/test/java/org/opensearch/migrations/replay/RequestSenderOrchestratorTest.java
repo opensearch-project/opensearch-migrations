@@ -44,7 +44,7 @@ class RequestSenderOrchestratorTest {
             var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
             var requestPackets = makeRequest(i/NUM_REPEATS);
-            var arr = senderOrchestrator.scheduleRequest(requestContext.getRequestKey(), requestContext,
+            var arr = senderOrchestrator.scheduleRequest(requestContext.getReplayerRequestKey(), requestContext,
                     startTimeForThisRequest, Duration.ofMillis(1), requestPackets.stream());
             log.info("Scheduled item to run at " + startTimeForThisRequest);
             scheduledItems.add(arr);
@@ -52,7 +52,7 @@ class RequestSenderOrchestratorTest {
         }
         var connectionCtx = TestRequestKey.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
         var closeFuture = senderOrchestrator.scheduleClose(
-                connectionCtx.getChannelKey(), NUM_REQUESTS_TO_SCHEDULE, connectionCtx,
+                connectionCtx.getChannelKey(), NUM_REQUESTS_TO_SCHEDULE, connectionCtx.getChannelKeyContext(),
                 lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());

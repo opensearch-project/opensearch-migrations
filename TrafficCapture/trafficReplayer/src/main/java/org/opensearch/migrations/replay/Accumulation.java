@@ -1,15 +1,21 @@
 package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.tracing.EmptyContext;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Accumulation {
+    public static final String TELEMETRY_SCOPE_NAME = "Accumulator";
+    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 
     enum State {
         // Ignore all initial READs, the first EOM & the following WRITEs (if they or EOMs exist)
@@ -22,11 +28,13 @@ public class Accumulation {
     }
 
     public final ISourceTrafficChannelKey trafficChannelKey;
+    public final ChannelKeyContext channelContext;
     private RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
     State state;
     AtomicInteger numberOfResets;
     final int startingSourceRequestIndex;
+
 
     public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey, int startingSourceRequestIndex) {
         this(trafficChannelKey, startingSourceRequestIndex, false);
@@ -40,19 +48,26 @@ public class Accumulation {
         this.startingSourceRequestIndex = startingSourceRequestIndex;
         this.state =
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
+        channelContext = new ChannelKeyContext(trafficChannelKey,
+                METERING_CLOSURE.makeSpan(EmptyContext.singleton, "accumulatingChannel"));
     }
 
     public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
         if (rrPair != null) {
             return rrPair;
         }
-        rrPair = new RequestResponsePacketPair(forTrafficStreamKey);
+        this.rrPair = new RequestResponsePacketPair(forTrafficStreamKey,
+                new RequestContext(getRequestKey(forTrafficStreamKey),
+                        METERING_CLOSURE.makeSpan(channelContext, "accumulatingRequest")));
         return rrPair;
     }
 
     public UniqueReplayerRequestKey getRequestKey() {
-        return new UniqueReplayerRequestKey(getRrPair().getBeginningTrafficStreamKey(),
-                startingSourceRequestIndex, getIndexOfCurrentRequest());
+        return getRequestKey(getRrPair().getBeginningTrafficStreamKey());
+    }
+
+    private UniqueReplayerRequestKey getRequestKey(@NonNull ITrafficStreamKey tsk) {
+        return new UniqueReplayerRequestKey(tsk, startingSourceRequestIndex, getIndexOfCurrentRequest());
     }
 
     public boolean hasSignaledRequests() {

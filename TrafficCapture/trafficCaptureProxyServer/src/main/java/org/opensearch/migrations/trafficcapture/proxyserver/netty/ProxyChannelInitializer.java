@@ -5,18 +5,19 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
-import io.opentelemetry.context.Context;
-import io.opentelemetry.context.ContextKey;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
+import org.opensearch.migrations.tracing.EmptyContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpRequestHandler;
 import org.opensearch.migrations.trafficcapture.netty.LoggingHttpResponseHandler;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import javax.net.ssl.SSLEngine;
 import java.io.IOException;
 import java.util.function.Supplier;
 
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
-    static final ContextKey<String> CONNECTION_ID_KEY = ContextKey.named("connectionId");
+    static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure("FrontendConnection");
 
     private final IConnectionCaptureFactory<T> connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
@@ -45,8 +46,9 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         }
 
         var connectionId = ch.id().asLongText();
-        var offloader = connectionCaptureFactory.createOffloader(connectionId);
-        var ctx = Context.current().with(CONNECTION_ID_KEY, connectionId);
+        var ctx = new ConnectionContext(connectionId, "",
+                METERING_CLOSURE.makeSpan(EmptyContext.singleton, "connectionLifetime"));
+        var offloader = connectionCaptureFactory.createOffloader(ctx, connectionId);
         ch.pipeline().addLast(new LoggingHttpResponseHandler<>(ctx, offloader));
         ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler<T>(ctx, offloader,
                 this::shouldGuaranteeMessageOffloading));

@@ -1,26 +1,54 @@
 package org.opensearch.migrations.replay.tracing;
 
-import io.opentelemetry.context.Context;
-import io.opentelemetry.context.ContextKey;
-import lombok.NonNull;
+import io.opentelemetry.api.trace.Span;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.tracing.IReplayerRequestContext;
+import org.opensearch.migrations.tracing.IWithStartTime;
 
-public class RequestContext extends ConnectionContext {
-    private static final ContextKey<UniqueReplayerRequestKey> UNIQUE_REQUEST_KEY = ContextKey.named("requestId");
+import java.time.Instant;
 
-    public RequestContext(UniqueReplayerRequestKey requestKey) {
-        this(Context.current(), requestKey);
+public class RequestContext implements IReplayerRequestContext, IWithStartTime {
+    @Getter
+    final UniqueReplayerRequestKey replayerRequestKey;
+    @Getter
+    final Instant startTime;
+    @Getter
+    final Span currentSpan;
+
+    public RequestContext(UniqueReplayerRequestKey replayerRequestKey, Span currentSpan) {
+        this.replayerRequestKey = replayerRequestKey;
+        this.currentSpan = currentSpan;
+        this.startTime = Instant.now();
     }
 
-    public RequestContext(ConnectionContext ctx, UniqueReplayerRequestKey requestKey) {
-        this(ctx.context, requestKey);
+    public ChannelKeyContext getChannelKeyContext() {
+        return new ChannelKeyContext(replayerRequestKey.trafficStreamKey, currentSpan);
     }
 
-    public RequestContext(Context context, UniqueReplayerRequestKey requestKey) {
-        super(context.with(UNIQUE_REQUEST_KEY, requestKey).with(CHANNEL_KEY_CONTEXT_KEY, requestKey.trafficStreamKey));
+    @Override
+    public String getConnectionId() {
+        return replayerRequestKey.trafficStreamKey.getConnectionId();
     }
 
-    public @NonNull UniqueReplayerRequestKey getRequestKey() {
-        return context.get(UNIQUE_REQUEST_KEY);
+    @Override
+    public String getNodeId() {
+        return replayerRequestKey.trafficStreamKey.getNodeId();
+    }
+
+    @Override
+    public long sourceRequestIndex() {
+        return replayerRequestKey.getSourceRequestIndex();
+    }
+
+    @Override
+    public long replayerRequestIndex() {
+        return replayerRequestKey.getReplayerRequestIndex();
+    }
+
+    public ISourceTrafficChannelKey getChannelKey() {
+        return replayerRequestKey.trafficStreamKey;
     }
 }

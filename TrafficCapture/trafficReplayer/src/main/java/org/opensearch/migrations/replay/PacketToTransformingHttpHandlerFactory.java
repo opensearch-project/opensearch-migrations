@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
@@ -14,6 +15,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 @Slf4j
 public class PacketToTransformingHttpHandlerFactory implements
         PacketConsumerFactory<TransformedOutputAndResult<TransformedPackets>> {
+
     private final IJsonTransformer jsonTransformer;
     private final IAuthTransformerFactory authTransformerFactory;
 
@@ -26,9 +28,9 @@ public class PacketToTransformingHttpHandlerFactory implements
 
     @Override
     public IPacketFinalizingConsumer<TransformedOutputAndResult<TransformedPackets>>
-    create(UniqueReplayerRequestKey requestKey) {
+    create(UniqueReplayerRequestKey requestKey, RequestContext requestContext) {
         log.trace("creating HttpJsonTransformingConsumer");
         return new HttpJsonTransformingConsumer<>(jsonTransformer, authTransformerFactory,
-                new TransformedPacketReceiver(), requestKey.toString(), new RequestContext(requestKey));
+                new TransformedPacketReceiver(), requestKey.toString(), requestContext);
     }
 }

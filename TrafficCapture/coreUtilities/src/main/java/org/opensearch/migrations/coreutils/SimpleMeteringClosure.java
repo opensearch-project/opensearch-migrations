@@ -1,10 +1,9 @@
 package org.opensearch.migrations.coreutils;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
-import io.opentelemetry.context.Context;
 import io.opentelemetry.exporter.otlp.logs.OtlpGrpcLogRecordExporter;
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
@@ -17,8 +16,11 @@ import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
+import org.opensearch.migrations.tracing.IWithAttributes;
+import org.opensearch.migrations.tracing.IWithStartTime;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 
 public class SimpleMeteringClosure {
@@ -77,53 +79,61 @@ public class SimpleMeteringClosure {
         //OpenTelemetryAppender.install(GlobalOpenTelemetry.get());
     }
 
-    public void meterIncrementEvent(Context ctx, String eventName) {
+    public void meterIncrementEvent(IWithAttributes ctx, String eventName) {
         meterIncrementEvent(ctx, eventName, 1);
     }
 
-    public void meterIncrementEvent(Context ctx, String eventName, long increment) {
+    public void meterIncrementEvent(IWithAttributes ctx, String eventName, long increment) {
         if (ctx == null) {
             return;
         }
-        try (var namedOnlyForAutoClose = ctx.makeCurrent()) {
-            meter.counterBuilder(eventName)
-                    .build().add(increment, Attributes.builder()
-                            .put("labelName", eventName)
-                            .build());
-        }
+        meter.counterBuilder(eventName)
+                .build().add(increment, ctx.getPopulatedAttributesBuilder()
+                        .put("labelName", eventName)
+                        .build());
     }
 
-    public void meterDeltaEvent(Context ctx, String eventName, long delta) {
+    public void meterDeltaEvent(IWithAttributes ctx, String eventName, long delta) {
         if (ctx == null) {
             return;
         }
-        try (var namedOnlyForAutoClose = ctx.makeCurrent()) {
-            meter.upDownCounterBuilder(eventName)
-                    .build().add(delta, Attributes.builder()
-                            .put("labelName", eventName)
-                            .build());
-        }
+        meter.upDownCounterBuilder(eventName)
+                .build().add(delta, ctx.getPopulatedAttributesBuilder()
+                        .put("labelName", eventName)
+                        .build());
     }
 
-    public void meterHistogramMillis(Context ctx, String eventName, Duration between) {
+    public <T extends IWithAttributes & IWithStartTime> void meterHistogramMillis(T ctx, String eventName) {
+        meterHistogram(ctx, eventName, "ms", Duration.between(ctx.getStartTime(), Instant.now()).toMillis());
+    }
+
+    public <T extends IWithAttributes & IWithStartTime> void meterHistogramMicros(T ctx, String eventName) {
+        meterHistogram(ctx, eventName, "us", Duration.between(ctx.getStartTime(), Instant.now()).toNanos()*1000);
+    }
+
+    public void meterHistogramMillis(IWithAttributes ctx, String eventName, Duration between) {
         meterHistogram(ctx, eventName, "ms", between.toMillis());
     }
 
-    public void meterHistogramMicros(Context ctx, String eventName, Duration between) {
+    public void meterHistogramMicros(IWithAttributes ctx, String eventName, Duration between) {
         meterHistogram(ctx, eventName, "us", between.toNanos()*1000);
     }
 
-    public void meterHistogram(Context ctx, String eventName, String units, long value) {
+    public void meterHistogram(IWithAttributes ctx, String eventName, String units, long value) {
         if (ctx == null) {
             return;
         }
-        try (var namedOnlyForAutoClose = ctx.makeCurrent()) {
-            meter.histogramBuilder(eventName)
-                    .ofLongs()
-                    .setUnit(units)
-                    .build().record(value, Attributes.builder()
-                            .put("labelName", eventName)
-                            .build());
-        }
+        meter.histogramBuilder(eventName)
+                .ofLongs()
+                .setUnit(units)
+                .build().record(value, ctx.getPopulatedAttributesBuilder()
+                        .put("labelName", eventName)
+                        .build());
+    }
+
+    public Span makeSpan(IWithAttributes ctx, String spanName) {
+        var span = tracer.spanBuilder(spanName).startSpan();
+        span.setAllAttributes(ctx.getPopulatedAttributesBuilder().build());
+        return span;
     }
 }

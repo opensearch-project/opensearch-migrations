@@ -9,7 +9,7 @@ import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
@@ -64,14 +64,14 @@ public class RequestSenderOrchestrator {
                         ()->"waiting for final aggregated response");
         log.atDebug().setMessage(()->"Scheduling request for "+requestKey+" at start time "+start).log();
         return asynchronouslyInvokeRunnableToSetupFuture(requestKey.getTrafficStreamKey(),
-                requestKey.getReplayerRequestIndex(), ctx, false, finalTunneledResponse,
+                requestKey.getReplayerRequestIndex(), ctx.getChannelKeyContext(), false, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> scheduleSendOnConnectionReplaySession(requestKey, ctx,
                         channelFutureAndRequestSchedule, finalTunneledResponse, start, interval, packets));
     }
 
     public StringTrackableCompletableFuture<Void> scheduleClose(ISourceTrafficChannelKey channelKey,
                                                                 int channelInteractionNum,
-                                                                ConnectionContext ctx,
+                                                                ChannelKeyContext ctx,
                                                                 Instant timestamp) {
         var channelInteraction = new IndexedChannelInteraction(channelKey, channelInteractionNum);
         var finalTunneledResponse =
@@ -93,7 +93,7 @@ public class RequestSenderOrchestrator {
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
     asynchronouslyInvokeRunnableToSetupFuture(ISourceTrafficChannelKey channelKey, int channelInteractionNumber,
-                                              ConnectionContext ctx, boolean ignoreIfChannelNotPresent,
+                                              ChannelKeyContext ctx, boolean ignoreIfChannelNotPresent,
                                               DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
                                               Consumer<ConnectionReplaySession> successFn) {
         var channelFutureAndScheduleFuture =
@@ -145,7 +145,7 @@ public class RequestSenderOrchestrator {
     }
 
     private <T> void scheduleOnConnectionReplaySession(ISourceTrafficChannelKey channelKey, int channelInteractionIdx,
-                                                       ConnectionContext ctx,
+                                                       ChannelKeyContext ctx,
                                                        ConnectionReplaySession channelFutureAndRequestSchedule,
                                                        StringTrackableCompletableFuture<T> futureToBeCompletedByTask,
                                                        Instant atTime, String activityNameForLogging, Runnable task) {
@@ -201,8 +201,9 @@ public class RequestSenderOrchestrator {
                         getPacketReceiver(ctx, channelFutureAndRequestSchedule.getInnerChannelFuture(),
                                 packetReceiverRef),
                 eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
-        scheduleOnConnectionReplaySession(requestKey.trafficStreamKey, requestKey.getSourceRequestIndex(), ctx,
-                channelFutureAndRequestSchedule, responseFuture, start, "send", packetSender);
+        scheduleOnConnectionReplaySession(requestKey.trafficStreamKey, requestKey.getSourceRequestIndex(),
+                ctx.getChannelKeyContext(), channelFutureAndRequestSchedule, responseFuture, start,
+                "send", packetSender);
     }
 
     private <T> void runAfterChannelSetup(ConnectionReplaySession channelFutureAndItsFutureRequests,

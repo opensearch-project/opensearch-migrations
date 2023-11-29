@@ -4,6 +4,8 @@ import com.google.common.base.Objects;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.tracing.IRequestContext;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -25,10 +27,12 @@ public class RequestResponsePacketPair {
     HttpMessageAndTimestamp responseData;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
+    RequestContext requestContext;
 
-    public RequestResponsePacketPair(ITrafficStreamKey startingAtTrafficStreamKey) {
+    public RequestResponsePacketPair(ITrafficStreamKey startingAtTrafficStreamKey, RequestContext requestContext) {
         this.trafficStreamKeysBeingHeld = new ArrayList<>();
         this.trafficStreamKeysBeingHeld.add(startingAtTrafficStreamKey);
+        this.requestContext = requestContext;
     }
 
     @NonNull ITrafficStreamKey getBeginningTrafficStreamKey() {

@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -83,7 +84,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer createOffloader(String connectionId) {
+    public IChannelConnectionCaptureSerializer createOffloader(ConnectionContext ctx, String connectionId) {
         return new StreamChannelConnectionCaptureSerializer<Void>(nodeId, connectionId, new StreamManager(connectionId));
     }
 }

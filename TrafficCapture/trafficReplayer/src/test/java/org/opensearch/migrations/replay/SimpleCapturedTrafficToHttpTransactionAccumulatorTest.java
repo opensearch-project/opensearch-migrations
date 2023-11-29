@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
@@ -14,12 +15,13 @@ import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -97,7 +99,9 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset,
                                              List<ObservationDirective> directives) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
-        var offloader = connectionFactory.createOffloader("TEST_"+uniqueIdCounter.incrementAndGet());
+        var offloader = connectionFactory.createOffloader(new ConnectionContext("test", "test",
+                GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan()),
+                "TEST_"+uniqueIdCounter.incrementAndGet());
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);
         }
@@ -219,19 +223,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                ConnectionContext ctx,
+                                                                ChannelKeyContext ctx,
                                                                 List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
                             public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          ConnectionContext ctx,
+                                                          ChannelKeyContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           Instant when,
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
                             @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         ConnectionContext ctx) {}
+                                                                         ChannelKeyContext ctx) {}
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();

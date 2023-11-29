@@ -1,7 +1,6 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import com.google.protobuf.CodedOutputStream;
-import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.ContextKey;
@@ -15,12 +14,15 @@ import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
+import org.opensearch.migrations.tracing.EmptyContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.KafkaRecordContext;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -33,12 +35,8 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMetadata> {
 
-    private static final ContextKey<String> RECORD_ID_KEY = ContextKey.named("recordId");
-    private static final ContextKey<String> TOPIC_KEY = ContextKey.named("topic");
-    private static final ContextKey<Integer> RECORD_SIZE_KEY = ContextKey.named("recordSize");
-    private static final ContextKey<Instant> START_FLUSH_KEY = ContextKey.named("startKafkaSend");
-    public static final String TELEMETRY_SCOPE_NAME = "KafkaCapture";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
+    private static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure("KafkaCapture");
+
 
     private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHandler");
 
@@ -66,23 +64,20 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(String connectionId) {
-        Span offloaderSpan = GlobalOpenTelemetry.get().getTracer(TELEMETRY_SCOPE_NAME)
-                .spanBuilder("offloader").startSpan();
-        offloaderSpan.setAttribute("offloaderConnectionId", connectionId);
-        var context = Context.current().with(offloaderSpan);
-        METERING_CLOSURE.meterIncrementEvent(context, "offloader_created");
-        METERING_CLOSURE.meterDeltaEvent(context, "offloaders_active", 1);
+    public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(ConnectionContext ctx,
+                                                                               String connectionId) {
+        METERING_CLOSURE.meterIncrementEvent(ctx, "offloader_created");
+        METERING_CLOSURE.meterDeltaEvent(ctx, "offloaders_active", 1);
 
         return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId,
-                new StreamManager(context, connectionId));
+                new StreamManager(ctx, connectionId));
     }
 
     @AllArgsConstructor
     static class CodedOutputStreamWrapper implements CodedOutputStreamHolder {
         private final CodedOutputStream codedOutputStream;
         private final ByteBuffer byteBuffer;
-        final Context streamContext;
+        final ConnectionContext streamContext;
         @Override
         public @NonNull CodedOutputStream getOutputStream() {
             return codedOutputStream;
@@ -90,32 +85,33 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     }
 
     class StreamManager extends OrderedStreamLifecyleManager<RecordMetadata> {
-        Context telemetryContext;
+        ConnectionContext telemetryContext;
         String connectionId;
         Instant startTime;
 
-        public StreamManager(Context incomingTelemetryContext, String connectionId) {
-            this.telemetryContext = incomingTelemetryContext;
+        public StreamManager(ConnectionContext incomingTelemetryContext, String connectionId) {
+            this.telemetryContext = new ConnectionContext(incomingTelemetryContext,
+                    METERING_CLOSURE.makeSpan(incomingTelemetryContext, "offloaderLifetime"));
             this.connectionId = connectionId;
             this.startTime = Instant.now();
         }
 
         @Override
         public void close() throws IOException {
-            log.atInfo().setMessage(()->"factory.close()").log();
+            log.atInfo().setMessage(() -> "factory.close()").log();
             METERING_CLOSURE.meterHistogramMillis(telemetryContext, "offloader_stream_lifetime",
-                        Duration.between(startTime, Instant.now()));
+                    Duration.between(startTime, Instant.now()));
             METERING_CLOSURE.meterDeltaEvent(telemetryContext, "offloaders_active", -1);
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "offloader_closed");
 
-            Span.fromContext(telemetryContext).end();
+            telemetryContext.currentSpan.end();
         }
 
         @Override
         public CodedOutputStreamWrapper createStream() {
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_created");
-            var newStreamCtx = telemetryContext
-                    .with(METERING_CLOSURE.tracer.spanBuilder("recordStream").startSpan());
+            var newStreamCtx = new ConnectionContext(telemetryContext,
+                    METERING_CLOSURE.makeSpan(telemetryContext, "recordStream"));
 
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
             return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb, newStreamCtx);
@@ -140,18 +136,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 var cf = new CompletableFuture<RecordMetadata>();
                 log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
-                Context flushContext;
-                Span.fromContext(osh.streamContext).end();
-                try (var scope = telemetryContext
-                        .with(RECORD_ID_KEY, recordId)
-                        .with(TOPIC_KEY, topicNameForTraffic)
-                        .with(RECORD_SIZE_KEY, kafkaRecord.value().length)
-                        .with(START_FLUSH_KEY, Instant.now())
-                        .makeCurrent()) {
-                    METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_flush_called");
-                    flushContext = Context.current()
-                            .with(METERING_CLOSURE.tracer.spanBuilder("flushRecord").startSpan());
-                }
+                var flushContext = new KafkaRecordContext(telemetryContext,
+                        METERING_CLOSURE.makeSpan(telemetryContext, "flushRecord"),
+                        topicNameForTraffic, recordId, kafkaRecord.value().length);
+                METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_flush_called");
 
                 // Async request to Kafka cluster
                 producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId, flushContext));
@@ -168,40 +156,42 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 throw e;
             }
         }
+    }
 
-        /**
-         * The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
-         * documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
-         * "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
-         * and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
-         * <p>
-         * Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
-         * retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
-         * as well as basic retry backoff
-         */
-        private Callback handleProducerRecordSent(CompletableFuture<RecordMetadata> cf, String recordId,
-                                                  Context flushContext) {
-            return (metadata, exception) -> {
-                log.atInfo().setMessage(()->"kafka completed sending a record").log();
-                METERING_CLOSURE.meterHistogramMicros(telemetryContext,
-                        exception==null ? "stream_flush_success_ms" : "stream_flush_failure_ms",
-                        Duration.between(flushContext.get(START_FLUSH_KEY), Instant.now()));
-                METERING_CLOSURE.meterIncrementEvent(telemetryContext,
-                        exception==null ? "stream_flush_success" : "stream_flush_failure");
-                METERING_CLOSURE.meterIncrementEvent(telemetryContext,
-                        exception==null ? "stream_flush_success_bytes" : "stream_flush_failure_bytes",
-                        flushContext.get(RECORD_SIZE_KEY));
-                Span.fromContext(flushContext).end();
+    /**
+     * The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
+     * documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
+     * "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
+     * and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
+     * <p>
+     * Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
+     * retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
+     * as well as basic retry backoff
+     */
+    private Callback handleProducerRecordSent(CompletableFuture<RecordMetadata> cf, String recordId,
+                                              KafkaRecordContext flushContext) {
+        // Keep this out of the inner class because it is more unsafe to include it within
+        // the inner class since the inner class has context that shouldn't be used.  This keeps
+        // that field out of scope.
+        return (metadata, exception) -> {
+            log.atInfo().setMessage(()->"kafka completed sending a record").log();
+            METERING_CLOSURE.meterHistogramMicros(flushContext,
+                    exception==null ? "stream_flush_success_ms" : "stream_flush_failure_ms");
+            METERING_CLOSURE.meterIncrementEvent(flushContext,
+                    exception==null ? "stream_flush_success" : "stream_flush_failure");
+            METERING_CLOSURE.meterIncrementEvent(flushContext,
+                    exception==null ? "stream_flush_success_bytes" : "stream_flush_failure_bytes",
+                    flushContext.getRecordSize());
+            flushContext.currentSpan.end();
 
-                if (exception != null) {
-                    log.error("Error sending producer record: {}", recordId, exception);
-                    cf.completeExceptionally(exception);
-                } else {
-                    log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
-                            recordId, metadata.topic(), metadata.partition());
-                    cf.complete(metadata);
-                }
-            };
-        }
+            if (exception != null) {
+                log.error("Error sending producer record: {}", recordId, exception);
+                cf.completeExceptionally(exception);
+            } else {
+                log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
+                        recordId, metadata.topic(), metadata.partition());
+                cf.complete(metadata);
+            }
+        };
     }
 }

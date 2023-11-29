@@ -6,15 +6,11 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.trace.Tracer;
-import io.opentelemetry.context.Context;
-import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.testing.junit5.OpenTelemetryExtension;
-import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -24,10 +20,10 @@ import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWr
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.ByteBuffer;
@@ -87,12 +83,10 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection",
                 new StreamManager(outputByteBuffer, flushCount));
 
-        var span = otelTesting.getOpenTelemetry().getTracer("Test")
-                .spanBuilder("test").startSpan();
-        var telemetryCtx = Context.current().with(span);
+        var ctx = new ConnectionContext("c",  "n",
+                GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpRequestHandler(telemetryCtx, offloader,
-                        x->true)); // true: block every request
+                new ConditionallyReliableLoggingHttpRequestHandler(ctx, offloader, x->true)); // true: block every request
         channelWriter.accept(channel);
 
         // we wrote the correct data to the downstream handler/channel

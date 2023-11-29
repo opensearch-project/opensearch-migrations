@@ -13,9 +13,6 @@ import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
-import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.context.Context;
 import lombok.Getter;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +21,7 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.time.Instant;
 
@@ -78,17 +76,13 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
     protected final EmbeddedChannel httpDecoderChannel;
     protected final SimpleHttpRequestDecoder requestDecoder;
-    protected final Context telemetryContext;
-    private final Instant createdTime;
+    protected final ConnectionContext connectionContext;
 
-
-    public LoggingHttpRequestHandler(Context incomingContext, IChannelConnectionCaptureSerializer<T> trafficOffloader) {
-        this.createdTime = Instant.now();
-        try (var scope = incomingContext.makeCurrent()) {
-            var span = METERING_CLOSURE.tracer.spanBuilder("frontendConnection").startSpan();
-            telemetryContext = incomingContext.with(span);
-            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "requestStarted");
-        }
+    public LoggingHttpRequestHandler(ConnectionContext incomingContext,
+                                     IChannelConnectionCaptureSerializer<T> trafficOffloader) {
+        this.connectionContext = incomingContext;
+        var span = METERING_CLOSURE.makeSpan(incomingContext, "frontendConnection");
+        METERING_CLOSURE.meterIncrementEvent(incomingContext, "requestStarted");
 
         this.trafficOffloader = trafficOffloader;
         requestDecoder = new SimpleHttpRequestDecoder(); // as a field for easier debugging
@@ -103,7 +97,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         var state = getHandlerThatHoldsParsedHttpRequest().isDone ?
                 HttpProcessedState.FULL_MESSAGE :
                 HttpProcessedState.ONGOING;
-        METERING_CLOSURE.meterIncrementEvent(telemetryContext,
+        METERING_CLOSURE.meterIncrementEvent(connectionContext,
                 state == HttpProcessedState.FULL_MESSAGE ? "requestFullyParsed" : "requestPartiallyParsed");
         return state;
     }
@@ -115,7 +109,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
         trafficOffloader.addCloseEvent(Instant.now());
-        METERING_CLOSURE.meterIncrementEvent(telemetryContext, "unregistered");
+        METERING_CLOSURE.meterIncrementEvent(connectionContext, "unregistered");
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
                 log.warn("Got error: " + t.getMessage());
@@ -132,8 +126,8 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        METERING_CLOSURE.meterIncrementEvent(telemetryContext, "handlerRemoved");
-        Span.fromContext(telemetryContext).end();
+        METERING_CLOSURE.meterIncrementEvent(connectionContext, "handlerRemoved");
+        connectionContext.getCurrentSpan().end();
 
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
@@ -150,7 +144,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
         super.channelRead(ctx, msg);
-        METERING_CLOSURE.meterIncrementEvent(telemetryContext, "requestReceived");
+        METERING_CLOSURE.meterIncrementEvent(connectionContext, "requestReceived");
 
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_REQUEST)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
@@ -165,8 +159,8 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         {
             var bb = ((ByteBuf) msg).retainedDuplicate();
             trafficOffloader.addReadEvent(timestamp, bb);
-            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "read");
-            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "readBytes", bb.readableBytes());
+            METERING_CLOSURE.meterIncrementEvent(connectionContext, "read");
+            METERING_CLOSURE.meterIncrementEvent(connectionContext, "readBytes", bb.readableBytes());
 
             metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
                     .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
@@ -191,7 +185,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
-        METERING_CLOSURE.meterIncrementEvent(telemetryContext, "exception");
+        METERING_CLOSURE.meterIncrementEvent(connectionContext, "exception");
         httpDecoderChannel.close();
         super.exceptionCaught(ctx, cause);
     }

@@ -4,7 +4,7 @@ import lombok.NonNull;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ConnectionContext;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.RequestContext;
 
 import java.time.Instant;
@@ -15,10 +15,10 @@ public interface AccumulationCallbacks {
                            @NonNull HttpMessageAndTimestamp request);
     void onFullDataReceived(@NonNull UniqueReplayerRequestKey key, RequestContext ctx,
                             @NonNull RequestResponsePacketPair rrpp);
-    void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status, ConnectionContext ctx,
+    void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status, ChannelKeyContext ctx,
                                  @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
-    void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber, ConnectionContext ctx,
+    void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber, ChannelKeyContext ctx,
                            RequestResponsePacketPair.ReconstructionStatus status, @NonNull Instant when,
                            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
-    void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, ConnectionContext ctx);
+    void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, ChannelKeyContext ctx);
 }

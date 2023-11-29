@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.Utils;
@@ -45,6 +46,9 @@ import java.util.concurrent.CompletionException;
  */
 @Slf4j
 public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsumer<TransformedOutputAndResult<R>> {
+    public static final String TELEMETRY_SCOPE_NAME = "HttpTransformer";
+    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
+
     public static final int HTTP_MESSAGE_NUM_SEGMENTS = 2;
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
@@ -69,6 +73,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
                                         String diagnosticLabel,
                                         RequestContext requestContext) {
+        this.requestContext = new RequestContext(requestContext.getReplayerRequestKey(),
+                METERING_CLOSURE.makeSpan(requestContext, "httpRequestTransformation"));
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
@@ -125,7 +131,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         } finally {
             var cf = channel.close();
             if (cf.cause() != null) {
-                log.atInfo().setCause(cf.cause()).log();
+                log.atInfo().setCause(cf.cause()).setMessage("Exception encountered during write").log();
             }
         }
         if (offloadingHandler == null) {
@@ -135,26 +141,30 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         }
         return offloadingHandler.getPacketReceiverCompletionFuture()
                 .getDeferredFutureThroughHandle(
-        (v, t) -> {
-                    if (t != null) {
-                        t = unwindPossibleCompletionException(t);
-                        if (t instanceof NoContentException) {
-                            return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
-                        } else {
-                            metricsLogger.atError(MetricsEvent.TRANSFORMING_REQUEST_FAILED, t)
-                                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext.toString())
-                                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getChannelKey().getConnectionId())
-                                    .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
-                            throw new CompletionException(t);
-                        }
-                    } else {
-                        metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
-                                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
-                                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getChannelKey().getConnectionId())
-                                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
-                        return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
-                    }
-                }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
+                        (v, t) -> {
+                            requestContext.getCurrentSpan().end();
+                            METERING_CLOSURE.meterIncrementEvent(requestContext,
+                                    t != null ? "transformRequestFailed" : "transformRequestSuccess");
+                            METERING_CLOSURE.meterHistogramMicros(requestContext, "transformationDuration");
+                            if (t != null) {
+                                t = unwindPossibleCompletionException(t);
+                                if (t instanceof NoContentException) {
+                                    return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
+                                } else {
+                                    metricsLogger.atError(MetricsEvent.TRANSFORMING_REQUEST_FAILED, t)
+                                            .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext.toString())
+                                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
+                                            .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
+                                    throw new CompletionException(t);
+                                }
+                            } else {
+                                metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
+                                        .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
+                                        .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
+                                        .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
+                                return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
+                            }
+                        }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
     }
 
     private static Throwable unwindPossibleCompletionException(Throwable t) {
@@ -181,7 +191,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
         metricsLogger.atError(MetricsEvent.REQUEST_REDRIVEN_WITHOUT_TRANSFORMATION, reason)
                 .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getChannelKey().getConnectionId())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.SKIPPED, null) :
