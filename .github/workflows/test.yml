@@ -27,5 +27,5 @@ jobs:
         run: |
             ls -l
             aws version
-            aws cp ./README.md s3://${{ secrets.OPENSEARCH_MIGRATIONS_S3_TEMP }}/temp/
+            aws s3 cp ./README.md s3://${{ secrets.OPENSEARCH_MIGRATIONS_S3_TEMP }}/temp/
 
