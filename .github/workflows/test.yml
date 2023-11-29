@@ -1,13 +1,9 @@
 name: OpenSearch Migrations Test
 
 on:
-  workflow_dispatch:
-    # Inputs the workflow accepts.
-    inputs:
-      ref:
-        type: string
-        required: false
-        default: 'main'
+  push:
+    branches:
+      - 'testing/githuboidc'
 
 jobs:
   test:
