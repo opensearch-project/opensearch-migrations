@@ -1,0 +1,35 @@
+name: OpenSearch Migrations Test
+
+on:
+  workflow_dispatch:
+    # Inputs the workflow accepts.
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: 'main'
+
+jobs:
+  test:
+    if: github.repository == 'opensearch-project/opensearch-migrations'
+    runs-on: ubuntu-latest
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OPENSEARCH_MIGRATIONS_ROLE }}
+          aws-region: us-east-1
+
+      - name: Copy files
+        run: |
+            ls -l
+            aws version
+            aws cp ./README.md s3://${{ secrets.OPENSEARCH_MIGRATIONS_S3_TEMP }/temp/}
+
