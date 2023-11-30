@@ -19,8 +19,6 @@ public class TestRequestKey {
                 0, replayerIdx);
         var smc = new SimpleMeteringClosure("test");
         var channelKeyContext = new ChannelKeyContext(rk.trafficStreamKey, smc.makeSpanContinuation("test", null));
-        return new RequestContext(channelKeyContext,
-                new UniqueReplayerRequestKey(rk.trafficStreamKey, 1, 1),
-                smc.makeSpanContinuation("test2"));
+        return new RequestContext(channelKeyContext, rk, smc.makeSpanContinuation("test2"));
     }
 }
