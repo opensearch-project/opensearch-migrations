@@ -66,6 +66,7 @@ dependencies {
     implementation 'org.apache.commons:commons-compress:1.24.0'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    testFixturesImplementation project(':coreUtilities')
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
 
     testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")

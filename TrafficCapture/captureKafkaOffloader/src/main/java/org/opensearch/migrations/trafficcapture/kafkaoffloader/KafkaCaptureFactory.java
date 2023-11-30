@@ -1,9 +1,6 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import com.google.protobuf.CodedOutputStream;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.context.Context;
-import io.opentelemetry.context.ContextKey;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -14,7 +11,6 @@ import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
-import org.opensearch.migrations.tracing.EmptyContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -91,7 +87,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
         public StreamManager(ConnectionContext incomingTelemetryContext, String connectionId) {
             this.telemetryContext = new ConnectionContext(incomingTelemetryContext,
-                    METERING_CLOSURE.makeSpan(incomingTelemetryContext, "offloaderLifetime"));
+                    METERING_CLOSURE.makeSpanContinuation("offloaderLifetime"));
             this.connectionId = connectionId;
             this.startTime = Instant.now();
         }
@@ -111,7 +107,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         public CodedOutputStreamWrapper createStream() {
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_created");
             var newStreamCtx = new ConnectionContext(telemetryContext,
-                    METERING_CLOSURE.makeSpan(telemetryContext, "recordStream"));
+                    METERING_CLOSURE.makeSpanContinuation("recordStream"));
 
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
             return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb, newStreamCtx);
@@ -125,6 +121,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                         outputStreamHolder);
             }
             var osh = (CodedOutputStreamWrapper) outputStreamHolder;
+            osh.streamContext.currentSpan.end();
 
             // Structured context for MetricsLogger
             try {
@@ -137,7 +134,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
                 var flushContext = new KafkaRecordContext(telemetryContext,
-                        METERING_CLOSURE.makeSpan(telemetryContext, "flushRecord"),
+                        METERING_CLOSURE.makeSpanContinuation("flushRecord"),
                         topicNameForTraffic, recordId, kafkaRecord.value().length);
                 METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_flush_called");
 

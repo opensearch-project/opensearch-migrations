@@ -7,7 +7,6 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.RequestContext;
-import org.opensearch.migrations.tracing.EmptyContext;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,7 +48,7 @@ public class Accumulation {
         this.state =
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
         channelContext = new ChannelKeyContext(trafficChannelKey,
-                METERING_CLOSURE.makeSpan(EmptyContext.singleton, "accumulatingChannel"));
+                METERING_CLOSURE.makeSpanContinuation("accumulatingChannel", null));
     }
 
     public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
@@ -57,8 +56,8 @@ public class Accumulation {
             return rrPair;
         }
         this.rrPair = new RequestResponsePacketPair(forTrafficStreamKey,
-                new RequestContext(getRequestKey(forTrafficStreamKey),
-                        METERING_CLOSURE.makeSpan(channelContext, "accumulatingRequest")));
+                new RequestContext(channelContext, getRequestKey(forTrafficStreamKey),
+                        METERING_CLOSURE.makeSpanContinuation("accumulatingRequest")));
         return rrPair;
     }
 

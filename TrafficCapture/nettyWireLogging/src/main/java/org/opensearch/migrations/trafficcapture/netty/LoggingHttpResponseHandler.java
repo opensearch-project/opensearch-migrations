@@ -43,8 +43,8 @@ public class LoggingHttpResponseHandler<T> extends ChannelOutboundHandlerAdapter
     public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) throws Exception {
         trafficOffloader.addConnectEvent(Instant.now(), remoteAddress, localAddress);
 
-        var span = METERING_CLOSURE.makeSpan(telemetryContext,"backendConnection");
-        telemetryContext = new ConnectionContext(telemetryContext, span);
+        telemetryContext = new ConnectionContext(telemetryContext,
+                METERING_CLOSURE.makeSpanContinuation("backendConnection"));
         connectTime = Instant.now();
         METERING_CLOSURE.meterIncrementEvent(telemetryContext, "connect");
         METERING_CLOSURE.meterDeltaEvent(telemetryContext, "connections", 1);

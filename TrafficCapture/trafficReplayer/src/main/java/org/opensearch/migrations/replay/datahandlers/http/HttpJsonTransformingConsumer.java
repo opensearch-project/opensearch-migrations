@@ -3,6 +3,9 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.trace.Span;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
@@ -15,11 +18,14 @@ import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.tracing.IWithAttributes;
+import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.slf4j.event.Level;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -54,7 +60,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
     private static final MetricsLogger metricsLogger = new MetricsLogger("HttpJsonTransformingConsumer");
-    private RequestContext requestContext;
+    private IWithStartTimeAndAttributes<RequestContext> transformationContext;
 
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
@@ -73,13 +79,18 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
                                         String diagnosticLabel,
                                         RequestContext requestContext) {
-        this.requestContext = new RequestContext(requestContext.getReplayerRequestKey(),
-                METERING_CLOSURE.makeSpan(requestContext, "httpRequestTransformation"));
+        this.transformationContext = new IWithStartTimeAndAttributes<>() {
+            @Getter
+            Span currentSpan = METERING_CLOSURE.makeSpanContinuation("httpRequestTransformation")
+                    .apply(requestContext.getPopulatedAttributes(), requestContext.getCurrentSpan());
+            @Getter
+            Instant startTime = Instant.now();
+            @Override public RequestContext getEnclosingScope() { return requestContext; }
+        };
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
-        this.requestContext = requestContext;
         pipelineOrchestrator = new RequestPipelineOrchestrator<>(chunkSizes, transformedPacketReceiver,
                 authTransformerFactory, diagnosticLabel, requestContext);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
@@ -142,25 +153,25 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return offloadingHandler.getPacketReceiverCompletionFuture()
                 .getDeferredFutureThroughHandle(
                         (v, t) -> {
-                            requestContext.getCurrentSpan().end();
-                            METERING_CLOSURE.meterIncrementEvent(requestContext,
+                            transformationContext.getCurrentSpan().end();
+                            METERING_CLOSURE.meterIncrementEvent(transformationContext,
                                     t != null ? "transformRequestFailed" : "transformRequestSuccess");
-                            METERING_CLOSURE.meterHistogramMicros(requestContext, "transformationDuration");
+                            METERING_CLOSURE.meterHistogramMicros(transformationContext, "transformationDuration");
                             if (t != null) {
                                 t = unwindPossibleCompletionException(t);
                                 if (t instanceof NoContentException) {
                                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                                 } else {
                                     metricsLogger.atError(MetricsEvent.TRANSFORMING_REQUEST_FAILED, t)
-                                            .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext.toString())
-                                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
+                                            .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext.toString())
+                                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getEnclosingScope().getConnectionId())
                                             .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
                                     throw new CompletionException(t);
                                 }
                             } else {
                                 metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
-                                        .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
-                                        .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
+                                        .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
+                                        .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getEnclosingScope().getConnectionId())
                                         .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
                                 return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                             }
@@ -190,8 +201,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
         metricsLogger.atError(MetricsEvent.REQUEST_REDRIVEN_WITHOUT_TRANSFORMATION, reason)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getEnclosingScope().getConnectionId())
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.SKIPPED, null) :

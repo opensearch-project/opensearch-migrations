@@ -78,7 +78,7 @@ public class KafkaCaptureFactoryTest {
 
     private static ConnectionContext createCtx() {
         return new ConnectionContext("test", "test",
-                GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
+                x->GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
     }
 
     /**

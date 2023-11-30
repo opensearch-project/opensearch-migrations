@@ -5,6 +5,8 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import org.opensearch.migrations.coreutils.SpanGenerator;
+import org.opensearch.migrations.coreutils.SpanWithParentGenerator;
 import org.opensearch.migrations.tracing.IConnectionContext;
 import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.IWithStartTime;
@@ -30,14 +32,14 @@ public class KafkaRecordContext implements IWithAttributes<IConnectionContext>, 
     @Getter
     public final int recordSize;
 
-    public KafkaRecordContext(IConnectionContext enclosingScope, Span currentSpan,
+    public KafkaRecordContext(IConnectionContext enclosingScope, SpanWithParentGenerator incomingSpan,
                               String topic, String recordId, int recordSize) {
         this.enclosingScope = enclosingScope;
-        this.currentSpan = currentSpan;
         this.topic = topic;
         this.recordId = recordId;
         this.recordSize = recordSize;
         this.startTime = Instant.now();
+        currentSpan = incomingSpan.apply(this.getPopulatedAttributes(), enclosingScope.getCurrentSpan());
     }
 
     @Override

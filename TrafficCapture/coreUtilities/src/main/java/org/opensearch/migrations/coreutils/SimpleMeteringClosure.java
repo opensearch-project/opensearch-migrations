@@ -1,9 +1,12 @@
 package org.opensearch.migrations.coreutils;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Context;
 import io.opentelemetry.exporter.otlp.logs.OtlpGrpcLogRecordExporter;
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
@@ -21,6 +24,7 @@ import org.opensearch.migrations.tracing.IWithStartTime;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 public class SimpleMeteringClosure {
@@ -131,9 +135,19 @@ public class SimpleMeteringClosure {
                         .build());
     }
 
-    public Span makeSpan(IWithAttributes ctx, String spanName) {
-        var span = tracer.spanBuilder(spanName).startSpan();
-        span.setAllAttributes(ctx.getPopulatedAttributesBuilder().build());
-        return span;
+    public SpanGenerator makeSpanContinuation(String spanName, Span parentSpan) {
+        var builder = tracer.spanBuilder(spanName);
+        return (attrs) -> getSpanWithParent(builder, attrs, parentSpan);
+    }
+
+    public static Span getSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan) {
+        return Optional.ofNullable(parentSpan).map(p -> builder.setParent(Context.current().with(p)))
+                .orElseGet(builder::setNoParent)
+                .startSpan().setAllAttributes(attrs);
+    }
+
+    public SpanWithParentGenerator makeSpanContinuation(String spanName) {
+        var builder = tracer.spanBuilder(spanName);
+        return (attrs,parentSpan) -> getSpanWithParent(builder, attrs, parentSpan);
     }
 }

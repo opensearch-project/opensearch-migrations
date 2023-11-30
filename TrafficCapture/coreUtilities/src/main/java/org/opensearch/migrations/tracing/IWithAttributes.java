@@ -11,7 +11,13 @@ public interface IWithAttributes<T extends IWithAttributes> {
 
     Span getCurrentSpan();
 
-    AttributesBuilder fillAttributes(AttributesBuilder builder);
+    default AttributesBuilder fillAttributes(AttributesBuilder builder) {
+        return builder;
+    }
+
+    default Attributes getPopulatedAttributes() {
+        return getPopulatedAttributesBuilder().build();
+    }
 
     default AttributesBuilder getPopulatedAttributesBuilder() {
         var currentObj = this;

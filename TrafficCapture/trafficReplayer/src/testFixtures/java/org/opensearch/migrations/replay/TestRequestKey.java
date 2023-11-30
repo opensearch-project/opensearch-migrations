@@ -1,9 +1,13 @@
 package org.opensearch.migrations.replay;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
+import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.tracing.EmptyContext;
 
 public class TestRequestKey {
 
@@ -13,7 +17,10 @@ public class TestRequestKey {
         var rk = new UniqueReplayerRequestKey(
                 new PojoTrafficStreamKey("testNodeId", "testConnectionId", 0),
                 0, replayerIdx);
-        return new RequestContext(new UniqueReplayerRequestKey(rk.trafficStreamKey, 1, 1),
-                GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
+        var smc = new SimpleMeteringClosure("test");
+        var channelKeyContext = new ChannelKeyContext(rk.trafficStreamKey, smc.makeSpanContinuation("test", null));
+        return new RequestContext(channelKeyContext,
+                new UniqueReplayerRequestKey(rk.trafficStreamKey, 1, 1),
+                smc.makeSpanContinuation("test2"));
     }
 }

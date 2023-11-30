@@ -84,7 +84,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
                 new StreamManager(outputByteBuffer, flushCount));
 
         var ctx = new ConnectionContext("c",  "n",
-                GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
+                x->GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
         EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpRequestHandler(ctx, offloader, x->true)); // true: block every request
         channelWriter.accept(channel);

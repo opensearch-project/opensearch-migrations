@@ -167,8 +167,7 @@ public class NettyPacketToHttpConsumerTest {
                 String connId = "TEST_" + j;
                 var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
                 var requestKey = new UniqueReplayerRequestKey(trafficStreamKey, 0, i);
-                var ctx = new RequestContext(requestKey,
-                        GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
+                var ctx = TestRequestKey.getTestConnectionRequestContext(0);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(), requestKey,
                         ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));

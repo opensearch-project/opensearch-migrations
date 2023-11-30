@@ -81,7 +81,6 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     public LoggingHttpRequestHandler(ConnectionContext incomingContext,
                                      IChannelConnectionCaptureSerializer<T> trafficOffloader) {
         this.connectionContext = incomingContext;
-        var span = METERING_CLOSURE.makeSpan(incomingContext, "frontendConnection");
         METERING_CLOSURE.meterIncrementEvent(incomingContext, "requestStarted");
 
         this.trafficOffloader = trafficOffloader;

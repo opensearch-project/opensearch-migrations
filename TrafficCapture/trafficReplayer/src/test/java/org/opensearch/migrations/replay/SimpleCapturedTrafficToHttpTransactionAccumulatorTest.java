@@ -100,7 +100,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                                              List<ObservationDirective> directives) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
         var offloader = connectionFactory.createOffloader(new ConnectionContext("test", "test",
-                GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan()),
+                x->GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan()),
                 "TEST_"+uniqueIdCounter.incrementAndGet());
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);

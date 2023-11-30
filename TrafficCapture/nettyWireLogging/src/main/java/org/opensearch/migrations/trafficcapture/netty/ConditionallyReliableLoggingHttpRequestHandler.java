@@ -30,7 +30,7 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
         if (shouldBlockPredicate.test(httpRequest)) {
             METERING_CLOSURE.meterIncrementEvent(connectionContext, "blockingRequestUntilFlush");
             var flushContext = new ConnectionContext(connectionContext,
-                    METERING_CLOSURE.tracer.spanBuilder("blockedForFlush").startSpan());
+                    METERING_CLOSURE.makeSpanContinuation("blockedForFlush"));
 
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 log.atInfo().setMessage(()->"Done flushing").log();
