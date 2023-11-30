@@ -2,10 +2,9 @@ package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
-import org.opensearch.migrations.coreutils.SpanGenerator;
-import org.opensearch.migrations.coreutils.SpanWithParentGenerator;
+import org.opensearch.migrations.tracing.ISpanGenerator;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.tracing.IConnectionContext;
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
 public class ChannelKeyContext implements IConnectionContext {
     @Getter
@@ -13,7 +12,7 @@ public class ChannelKeyContext implements IConnectionContext {
     @Getter
     final Span currentSpan;
 
-    public ChannelKeyContext(ISourceTrafficChannelKey channelKey, SpanGenerator spanGenerator) {
+    public ChannelKeyContext(ISourceTrafficChannelKey channelKey, ISpanGenerator spanGenerator) {
         this.channelKey = channelKey;
         this.currentSpan = spanGenerator.apply(getPopulatedAttributes());
     }

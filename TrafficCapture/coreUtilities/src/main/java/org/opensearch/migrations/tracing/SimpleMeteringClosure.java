@@ -1,4 +1,4 @@
-package org.opensearch.migrations.coreutils;
+package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
@@ -19,8 +19,6 @@ import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
-import org.opensearch.migrations.tracing.IWithAttributes;
-import org.opensearch.migrations.tracing.IWithStartTime;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -135,7 +133,7 @@ public class SimpleMeteringClosure {
                         .build());
     }
 
-    public SpanGenerator makeSpanContinuation(String spanName, Span parentSpan) {
+    public ISpanGenerator makeSpanContinuation(String spanName, Span parentSpan) {
         var builder = tracer.spanBuilder(spanName);
         return (attrs) -> getSpanWithParent(builder, attrs, parentSpan);
     }
@@ -146,7 +144,7 @@ public class SimpleMeteringClosure {
                 .startSpan().setAllAttributes(attrs);
     }
 
-    public SpanWithParentGenerator makeSpanContinuation(String spanName) {
+    public ISpanWithParentGenerator makeSpanContinuation(String spanName) {
         var builder = tracer.spanBuilder(spanName);
         return (attrs,parentSpan) -> getSpanWithParent(builder, attrs, parentSpan);
     }

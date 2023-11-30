@@ -14,7 +14,7 @@ import io.netty.util.concurrent.Future;
 import io.opentelemetry.context.ContextKey;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.SimpleMeteringClosure;
+import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;

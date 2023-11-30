@@ -2,14 +2,11 @@ package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
-import org.opensearch.migrations.coreutils.SpanGenerator;
-import org.opensearch.migrations.coreutils.SpanWithParentGenerator;
+import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.tracing.EmptyContext;
-import org.opensearch.migrations.tracing.IConnectionContext;
-import org.opensearch.migrations.tracing.IReplayerRequestContext;
-import org.opensearch.migrations.tracing.IRequestContext;
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.IWithStartTime;
 
@@ -28,7 +25,7 @@ public class RequestContext implements IReplayerRequestContext, IWithStartTime {
     IWithAttributes<IWithAttributes<EmptyContext>> foo;
 
     public RequestContext(ChannelKeyContext enclosingScope, UniqueReplayerRequestKey replayerRequestKey,
-                          SpanWithParentGenerator spanGenerator) {
+                          ISpanWithParentGenerator spanGenerator) {
         this.enclosingScope = enclosingScope;
         this.replayerRequestKey = replayerRequestKey;
         this.startTime = Instant.now();
@@ -49,7 +46,7 @@ public class RequestContext implements IReplayerRequestContext, IWithStartTime {
     }
 
     @Override
-    public long sourceRequestIndex() {
+    public long getSourceRequestIndex() {
         return replayerRequestKey.getSourceRequestIndex();
     }
 

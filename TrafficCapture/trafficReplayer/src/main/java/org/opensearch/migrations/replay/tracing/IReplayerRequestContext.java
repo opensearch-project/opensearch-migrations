@@ -1,7 +1,8 @@
-package org.opensearch.migrations.tracing;
+package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
+import org.opensearch.migrations.tracing.commoncontexts.IRequestContext;
 
 public interface IReplayerRequestContext extends IRequestContext {
     static final AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
