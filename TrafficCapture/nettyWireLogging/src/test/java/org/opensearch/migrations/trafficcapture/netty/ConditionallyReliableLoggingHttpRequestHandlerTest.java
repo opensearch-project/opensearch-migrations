@@ -69,7 +69,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
             cos.flush();
             byteBufferAtomicReference.set(osh.getByteBuffer().flip().asReadOnlyBuffer());
-            log.error("byteBufferAtomicReference.get="+byteBufferAtomicReference.get());
+            log.trace("byteBufferAtomicReference.get="+byteBufferAtomicReference.get());
 
             return CompletableFuture.completedFuture(flushCount.incrementAndGet());
         }

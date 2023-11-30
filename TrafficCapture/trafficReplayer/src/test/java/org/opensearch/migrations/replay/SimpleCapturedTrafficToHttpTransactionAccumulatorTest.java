@@ -247,7 +247,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     static void assertReconstructedTransactionsMatchExpectations(List<RequestResponsePacketPair> reconstructedTransactions,
                                                                  int[] expectedRequestSizes,
                                                                  int[] expectedResponseSizes) {
-        log.error("reconstructedTransactions="+ reconstructedTransactions);
+        log.debug("reconstructedTransactions="+ reconstructedTransactions);
         Assertions.assertEquals(expectedRequestSizes.length, reconstructedTransactions.size());
         for (int i = 0; i< reconstructedTransactions.size(); ++i) {
             Assertions.assertEquals((long) expectedRequestSizes[i],

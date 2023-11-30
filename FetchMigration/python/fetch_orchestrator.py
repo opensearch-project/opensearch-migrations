@@ -93,7 +93,9 @@ def run(params: FetchOrchestratorParams) -> Optional[int]:
                                                         report=True, dryrun=params.is_dry_run)
     logging.info("Running metadata migration...\n")
     metadata_migration_result = metadata_migration.run(metadata_migration_params)
-    if len(metadata_migration_result.migration_indices) > 0 and not params.is_only_metadata_migration():
+    if metadata_migration_result.target_doc_count == 0:
+        logging.warning("Target document count is zero, skipping data migration...")
+    elif len(metadata_migration_result.migration_indices) > 0 and not params.is_only_metadata_migration():
         # Kick off a subprocess for Data Prepper
         logging.info("Running Data Prepper...\n")
         proc = subprocess.Popen(dp_exec_path)
@@ -143,7 +145,8 @@ if __name__ == '__main__':  # pragma no cover
     elif not os.path.exists(dp_path + __DP_EXECUTABLE_SUFFIX):
         raise ValueError(f"Could not find {__DP_EXECUTABLE_SUFFIX} executable under Data Prepper install location")
     pipeline_file = os.path.expandvars(cli_args.pipeline_file_path)
-    if not os.path.exists(pipeline_file):
+    # Raise error if pipeline file is neither on disk nor provided inline
+    if __get_env_string("INLINE_PIPELINE") is None and not os.path.exists(pipeline_file):
         raise ValueError("Data Prepper pipeline file does not exist")
     params = FetchOrchestratorParams(dp_path, pipeline_file, port=cli_args.port, insecure=cli_args.insecure,
                                      dryrun=cli_args.dryrun, create_only=cli_args.createonly)
