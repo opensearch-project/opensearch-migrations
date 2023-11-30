@@ -13,6 +13,8 @@ import requests
 import uuid
 import string
 import secrets
+import pytest
+
 from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
@@ -69,13 +71,23 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 15, d
 
 
 class E2ETests(unittest.TestCase):
+
+    @pytest.fixture(autouse=True)
+    def init_fixtures(self, source_endpoint, target_endpoint, auth_type, username, password):
+        self.source_endpoint = source_endpoint
+        self.target_endpoint = target_endpoint
+        self.auth_type = auth_type
+        self.auth = self.setup_authentication(auth_type, username, password)
+        self.username = username
+        self.password = password
+
+    def setup_authentication(self, auth_type, username, password):
+        if auth_type == "basic":
+            return (username, password)
+        return None
+
     def set_common_values(self):
         self.proxy_endpoint = os.getenv('PROXY_ENDPOINT', 'https://localhost:9200')
-        self.source_endpoint = os.getenv('SOURCE_ENDPOINT', 'https://localhost:19200')
-        self.target_endpoint = os.getenv('TARGET_ENDPOINT', 'https://localhost:29200')
-        self.username = os.getenv('username', 'admin')
-        self.password = os.getenv('password', 'admin')
-        self.auth = (self.username, self.password)
         self.index = f"my_index_{uuid.uuid4()}"
         self.doc_id = '7'
         self.ignore_list = []
@@ -178,7 +190,7 @@ class E2ETests(unittest.TestCase):
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
-    def test_0004_negativeAuth_invalidCreds(self):
+    def test_0003_negativeAuth_invalidCreds(self):
         # This test sends negative credentials to the clusters to validate that unauthorized access is prevented.
         alphabet = string.ascii_letters + string.digits
         for _ in range(10):
@@ -195,7 +207,7 @@ class E2ETests(unittest.TestCase):
                 response = requests.get(self.proxy_endpoint, auth=(user, pw), verify=False)
                 self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    def test_0005_negativeAuth_missingCreds(self):
+    def test_0004_negativeAuth_missingCreds(self):
         # This test will use no credentials at all
         # With an empty authorization header
         response = requests.get(self.proxy_endpoint, auth=('', ''), verify=False)
@@ -205,7 +217,7 @@ class E2ETests(unittest.TestCase):
         response = requests.get(self.proxy_endpoint, verify=False)
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    def test_0006_invalidIncorrectUri(self):
+    def test_0005_invalidIncorrectUri(self):
         # This test will send an invalid URI
         invalidUri = "/invalidURI"
         response = requests.get(f'{self.proxy_endpoint}{invalidUri}', auth=self.auth, verify=False)
@@ -216,7 +228,7 @@ class E2ETests(unittest.TestCase):
         response = requests.get(f'{self.proxy_endpoint}{incorrectUri}', auth=self.auth, verify=False)
         self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
 
-    def test_0007_OSB(self):
+    def test_0006_OSB(self):
         cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name=migration']
         container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
 
