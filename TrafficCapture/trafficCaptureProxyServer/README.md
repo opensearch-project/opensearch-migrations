@@ -2,7 +2,7 @@
 
 ## Installing Capture Proxy on Coordinator nodes
 
-Follow documentation for [deploying solution](../../deployment/README.md) to set up the Kafka cluster which the Capture Proxy will send captured traffic to. Then, following the steps below, attach the Capture Proxy on each coordinator node of the source cluster, so that all incoming traffic can be captured. If the source cluster has more than one coordinator node, this can be done in a rolling restart fashion where there is no downtime for the source cluster, otherwise a single node cluster should expect downtime as the Elasticsearch/OpenSearch process restarts
+Follow documentation for [deploying solution](../../deployment/README.md) to set up the Kafka cluster which the Capture Proxy will send captured traffic to. Then, following the steps below, attach the Capture Proxy on each coordinator node of the source cluster, so that all incoming traffic can be captured. If the source cluster has more than one coordinator node, this can be done in a rolling restart fashion where there is no downtime for the source cluster, otherwise a single node cluster should expect downtime as the Elasticsearch/OpenSearch process restarts.
 
 **Note**: For AWS deployments, see required instructions for setting up IAM and Security Groups [here](../../deployment/cdk/opensearch-service-migration/README.md#configuring-capture-proxy-iam-and-security-groups) </br>
 **Note**: This is one method for installing the Capture Proxy on a node, and that these steps may vary depending on your environment.
@@ -14,7 +14,7 @@ Follow documentation for [deploying solution](../../deployment/README.md) to set
     * On EC2 this may look like `/home/ec2-user/elasticsearch`
 3. Update node’s port setting in elasticsearch.yml/opensearch.yml, e.g. `/home/ec2-user/elasticsearch/config/elasticsearch.yml`.
     * Add this line to the node’s config file: `http.port: 19200`
-    * This will allow incoming traffic to enter through the Capture proxy at the normal port (typically `9200`) and then be passed to elasticsearch/opensearch at the `19200` port
+    * This will allow incoming traffic to enter through the Capture proxy at the normal port (typically `9200`) and then be passed to Elasticsearch/OpenSearch at the `19200` port
 4. Restart Elasticsearch/OpenSearch process so that the process will bind to the newly configured port.
     * Depending on the installation method used, how you should restart Elasticsearch/OpenSearch will differ:
         * For **Debian packages with systemctl** (Most common) you can run the following command: `sudo systemctl restart elasticsearch.service`
@@ -39,16 +39,16 @@ Follow documentation for [deploying solution](../../deployment/README.md) to set
             * For **AWS MSK(Kafka)** clusters `nohup ./trafficCaptureProxyServer --kafkaConnection <KAFKA_BROKERS> --destinationUri http://localhost:19200 --listenPort 9200 --enableMSKAuth --insecureDestination &`
               * The `KAFKA_BROKERS` referenced here can be obtained from the AWS Console(MSK -> Clusters -> Select Cluster -> View Client Information -> Copy Private endpoint)
         * This command will start the Capture Proxy in the background and allow it to continue past the lifetime of the shell session.
-        * :warning: If the machine running the elasticsearch/opensearch process is restarted, the Capture Proxy will need to be started again
+        * :warning: If the machine running the Elasticsearch/OpenSearch process is restarted, the Capture Proxy will need to be started again
         * Explanation of parameters in the command above:
             * --kafkaConnection: Your Kafka broker endpoint(s) as a string with multiple brokers delimited by a ',' e.g. `"broker1:9098,broker2:9098"`.
             * --destinationUri: URI of the server that the Capture Proxy is capturing traffic for.
             * --listenPort: Exposed port for clients to connect to this proxy. (The original port that the node was listening to)
             * --enableMSKAuth: Enables SASL Kafka properties required for connecting to Kafka with IAM auth. **Note**: Only valid for AWS MSK setups
             * --insecureDestination: Do not check the destination server’s certificate.
-10. Test that the original opensearch/elasticsearch port for the node is available again.
+10. Test that the original Elasticsearch/OpenSearch port for the node is available again.
     * `curl https://localhost:9200` or if security is not enabled `curl http://localhost:9200`
-    * You should expect the same response when sending a request to either ports (`9200`, `19200`), with the difference being that requests that are sent to the `9200` port now pass through the Capture Proxy whose first priority is to forward the request to the opensearch/elasticsearch process, and whose second priority is to send the captured requests to Kafka.
+    * You should expect the same response when sending a request to either ports (`9200`, `19200`), with the difference being that requests that are sent to the `9200` port now pass through the Capture Proxy whose first priority is to forward the request to the Elasticsearch/OpenSearch process, and whose second priority is to send the captured requests to Kafka.
 11. Verify requests are sent to Kafka
     1. Log in to the Migration Console container. More details [here](../../deployment/cdk/opensearch-service-migration/README.md#executing-commands-on-a-deployed-service) for AWS deployments
     2. Run the following command to list the Kafka topics, and confirm that the `logging-traffic-topic` has been created.
