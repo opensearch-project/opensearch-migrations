@@ -92,6 +92,35 @@ def index_metadata_migration(source: EndpointInfo, target: EndpointInfo,
     return result
 
 
+# Returns true if there were failures, false otherwise
+def __log_template_failures(failures: dict, target_count: int) -> bool:
+    fail_count = len(failures)
+    if fail_count > 0:
+        logging.error(f"Failed to create {fail_count} of {target_count} templates")
+        for failed_template_name, error in failures.items():
+            logging.error(f"Template name {failed_template_name} failed: {error!s}")
+        # Return true to signal failures
+        return True
+    else:
+        # No failures, return false
+        return False
+
+
+# Raises RuntimeError if component/index template migration fails
+def template_migration(source: EndpointInfo, target: EndpointInfo):
+    # Fetch and migrate component templates first
+    templates = index_operations.fetch_all_component_templates(source)
+    failures = index_operations.create_component_templates(templates, target)
+    if not __log_template_failures(failures, len(templates)):
+        # Only migrate index templates if component template migration had no failures
+        templates = index_operations.fetch_all_index_templates(source)
+        failures = index_operations.create_index_templates(templates, target)
+        if __log_template_failures(failures, len(templates)):
+            raise RuntimeError("Failed to create some index templates")
+    else:
+        raise RuntimeError("Failed to create some component templates, aborting index template creation")
+
+
 def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     # Sanity check
     if not args.report and len(args.output_file) == 0:
@@ -112,6 +141,10 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     if result.migration_indices and len(args.output_file) > 0:
         write_output(dp_config, result.migration_indices, args.output_file)
         logging.debug("Wrote output YAML pipeline to: " + args.output_file)
+    if not args.dryrun:
+        # Create component and index templates, may raise RuntimeError
+        template_migration(source_endpoint_info, target_endpoint_info)
+    # Finally return result
     return result
 
 
@@ -143,6 +176,6 @@ if __name__ == '__main__':  # pragma no cover
     arg_parser.add_argument("--report", "-r", action="store_true",
                             help="Print a report of the index differences")
     arg_parser.add_argument("--dryrun", action="store_true",
-                            help="Skips the actual creation of indices on the target cluster")
+                            help="Skips the actual creation of metadata on the target cluster")
     namespace = arg_parser.parse_args()
     run(MetadataMigrationParams(namespace.config_file_path, namespace.output_file, namespace.report, namespace.dryrun))

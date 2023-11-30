@@ -12,8 +12,10 @@ from typing import Optional
 import jsonpath_ng
 import requests
 
+from component_template_info import ComponentTemplateInfo
 from endpoint_info import EndpointInfo
 from index_doc_count import IndexDocCount
+from index_template_info import IndexTemplateInfo
 
 # Constants
 SETTINGS_KEY = "settings"
@@ -21,6 +23,10 @@ MAPPINGS_KEY = "mappings"
 ALIASES_KEY = "aliases"
 COUNT_KEY = "count"
 __INDEX_KEY = "index"
+__COMPONENT_TEMPLATE_LIST_KEY = "component_templates"
+__INDEX_TEMPLATE_LIST_KEY = "index_templates"
+__INDEX_TEMPLATES_PATH = "/_index_template"
+__COMPONENT_TEMPLATES_PATH = "/_component_template"
 __ALL_INDICES_ENDPOINT = "*"
 # (ES 7+) size=0 avoids the "hits" payload to reduce the response size since we're only interested in the aggregation,
 # and track_total_hits forces an accurate doc-count
@@ -106,3 +112,54 @@ def doc_count(indices: set, endpoint: EndpointInfo) -> IndexDocCount:
         return IndexDocCount(total, count_map)
     except RuntimeError as e:
         raise RuntimeError(f"Failed to fetch doc_count: {e!s}")
+
+
+def __fetch_templates(endpoint: EndpointInfo, path: str, root_key: str, factory) -> set:
+    url: str = endpoint.add_path(path)
+    # raises RuntimeError in case of any request errors
+    resp = __send_get_request(url, endpoint)
+    result = set()
+    if root_key in resp.json():
+        for template in resp.json()[root_key]:
+            result.add(factory(template))
+    return result
+
+
+def fetch_all_component_templates(endpoint: EndpointInfo) -> set[ComponentTemplateInfo]:
+    try:
+        # raises RuntimeError in case of any request errors
+        return __fetch_templates(endpoint, __COMPONENT_TEMPLATES_PATH, __COMPONENT_TEMPLATE_LIST_KEY,
+                                 lambda t: ComponentTemplateInfo(t))
+    except RuntimeError as e:
+        raise RuntimeError(f"Failed to fetch component template metadata from cluster endpoint: {e!s}")
+
+
+def fetch_all_index_templates(endpoint: EndpointInfo) -> set[IndexTemplateInfo]:
+    try:
+        # raises RuntimeError in case of any request errors
+        return __fetch_templates(endpoint, __INDEX_TEMPLATES_PATH, __INDEX_TEMPLATE_LIST_KEY,
+                                 lambda t: IndexTemplateInfo(t))
+    except RuntimeError as e:
+        raise RuntimeError(f"Failed to fetch index template metadata from cluster endpoint: {e!s}")
+
+
+def __create_templates(templates: set[ComponentTemplateInfo], endpoint: EndpointInfo, template_path: str) -> dict:
+    failures = dict()
+    for template in templates:
+        template_endpoint = endpoint.add_path(template_path + "/" + template.get_name())
+        try:
+            resp = requests.put(template_endpoint, auth=endpoint.get_auth(), verify=endpoint.is_verify_ssl(),
+                                json=template.get_template_definition(), timeout=__TIMEOUT_SECONDS)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            failures[template.get_name()] = e
+    # Loop completed, return failures if any
+    return failures
+
+
+def create_component_templates(templates: set[ComponentTemplateInfo], endpoint: EndpointInfo) -> dict:
+    return __create_templates(templates, endpoint, __COMPONENT_TEMPLATES_PATH)
+
+
+def create_index_templates(templates: set[IndexTemplateInfo], endpoint: EndpointInfo) -> dict:
+    return __create_templates(templates, endpoint, __INDEX_TEMPLATES_PATH)
