@@ -13,6 +13,7 @@ COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
 COPY catIndices.sh /root/
 COPY showFetchMigrationCommand.sh /root/
+COPY setupIntegTests.sh /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 RUN chmod ug+x /root/runTestBenchmarks.sh
