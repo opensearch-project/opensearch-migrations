@@ -1,15 +1,16 @@
 #!/bin/bash
 
-# WIP add relevant security group and switchover to Capture Proxy on port 9200 for source nodes
 prepare_source_nodes_for_capture () {
-  instance_ids=($(aws ec2 describe-instances --filters 'Name=tag:Name,Values=opensearch-infra-stack*' --query 'Reservations[*].Instances[*].InstanceId' --output text))
-  kafka_sg_id=$(aws ssm get-parameter --name '/migration/int/default/mskAccessSecurityGroupId' --query 'Parameter.Value' --output text)
+  deploy_stage=$1
+  instance_ids=($(aws ec2 describe-instances --filters 'Name=tag:Name,Values=opensearch-infra-stack*' 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
+  kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/mskBrokers" --query 'Parameter.Value' --output text)
+  # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
+  kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
+  kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/mskAccessSecurityGroupId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
-    echo "Key for array is: $id"
+    echo "Performing capture proxy source node setup for: $id"
     group_ids=($(aws ec2 describe-instance-attribute --instance-id $id --attribute groupSet  --query 'Groups[*].GroupId' --output text))
-    echo "${group_ids[*]}"
-
     match=false
     for group_id in "${group_ids[@]}"; do
         if [[ $group_id = "$kafka_sg_id" ]]; then
@@ -18,14 +19,23 @@ prepare_source_nodes_for_capture () {
         fi
     done
     if [[ $match = false ]]; then
-        group_ids+=("$kafka_sg_id")
+      echo "Adding security group: $kafka_sg_id to node: $id"
+      group_ids+=("$kafka_sg_id")
+      printf -v group_ids_string '%s ' "${group_ids[@]}"
+      aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
     fi
-    printf -v groupd_ids_string '%s ' "${group_ids[@]}"
-    aws ec2 modify-instance-attribute --instance-id $id --groups $groupd_ids_string
-    #aws ssm send-command --instance-ids "i-0e34183fd9ca06830" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --help" --output text
-    #aws ssm get-command-invocation --command-id 40d53994-48ae-48a3-873e-46c5407d0d14 --instance-id i-0e34183fd9ca06830 --output text
+    echo "Executing command to run ./startCaptureProxy.sh on node: $id. Attempting to append output of command: "
+    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers" --output text --query 'Command.CommandId')
+    sleep 5
+    echo "Standard Output:"
+    aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'StandardOutputContent'
+    echo "Standard Error:"
+    aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'StandardErrorContent'
   done
 }
+
+#prepare_source_nodes_for_capture 'aws-integ'
+#exit 1
 
 # One-time account setup
 #aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com
@@ -49,7 +59,8 @@ read -r -d '' cdk_context << EOM
     "domainRemovalPolicy": "DESTROY",
     "migrationAnalyticsServiceEnabled": false,
     "fetchMigrationEnabled": true,
-    "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>"
+    "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+    "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml"
 }
 EOM
 
@@ -65,14 +76,12 @@ vpc_id=$(aws cloudformation describe-stacks --stack-name opensearch-network-stac
 echo $vpc_id
 
 cdk_context=$(echo "${cdk_context/<VPC_ID>/$vpc_id}")
-cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/$source_endpoint}")
+cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}}")
 cdk_context=$(echo $cdk_context | jq '@json')
 
 cd ../../deployment/cdk/opensearch-service-migration
 ./buildDockerImages.sh
 cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
-kafka_brokers=$(aws ssm get-parameter --name '/migration/int/default/mskBrokers' --query 'Parameter.Value' --output text)
-kafka_sg_id=$(aws ssm get-parameter --name '/migration/int/default/mskAccessSecurityGroupId' --query 'Parameter.Value' --output text)
 
 # Kickoff integration tests
 #task_arn=$(aws ecs list-tasks --cluster migration-${stage}-ecs-cluster --family "migration-${stage}-migration-console" | jq --raw-output '.taskArns[0]')
