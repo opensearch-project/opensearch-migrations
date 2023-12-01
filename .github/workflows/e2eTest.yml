@@ -44,4 +44,4 @@ jobs:
         run: |
           cd test
           chmod +x ./tests.py
-          pytest -n 3 tests.py
+          pytest -n 3 tests.py --source_endpoint="https://localhost:19200" --target_endpoint="https://localhost:29200" --source_auth_type="basic" --source_username="admin" --source_password="admin" --target_auth_type="basic" --target_username="admin" --target_password="admin"

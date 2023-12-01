@@ -73,13 +73,18 @@ def retry_request(request: Callable, args: Tuple = (), max_attempts: int = 15, d
 class E2ETests(unittest.TestCase):
 
     @pytest.fixture(autouse=True)
-    def init_fixtures(self, source_endpoint, target_endpoint, auth_type, username, password):
+    def init_fixtures(self, source_endpoint, target_endpoint, source_auth_type, source_username, source_password,
+                      target_auth_type, target_username, target_password):
         self.source_endpoint = source_endpoint
         self.target_endpoint = target_endpoint
-        self.auth_type = auth_type
-        self.auth = self.setup_authentication(auth_type, username, password)
-        self.username = username
-        self.password = password
+        self.source_auth_type = source_auth_type
+        self.source_auth = self.setup_authentication(source_auth_type, source_username, source_password)
+        self.source_username = source_username
+        self.source_password = source_password
+        self.target_auth_type = target_auth_type
+        self.target_auth = self.setup_authentication(target_auth_type, target_username, target_password)
+        self.target_username = target_username
+        self.target_password = target_password
 
     def setup_authentication(self, auth_type, username, password):
         if auth_type == "basic":
@@ -94,14 +99,14 @@ class E2ETests(unittest.TestCase):
 
     def setUp(self):
         self.set_common_values()
-        retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.auth),
+        retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.source_auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
-        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.doc_id, self.auth),
+        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.doc_id, self.source_auth),
                       expected_status_code=HTTPStatus.NOT_FOUND)
 
     def tearDown(self):
-        delete_index(self.proxy_endpoint, self.index, self.auth)
-        delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
+        delete_index(self.proxy_endpoint, self.index, self.source_auth)
+        delete_document(self.proxy_endpoint, self.index, self.doc_id, self.source_auth)
 
     def test_0001_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
@@ -110,25 +115,25 @@ class E2ETests(unittest.TestCase):
         # replayer.
 
         # Creating an index, then asserting that the index was created on both targets.
-        proxy_response = retry_request(create_index, args=(self.proxy_endpoint, self.index, self.auth),
+        proxy_response = retry_request(create_index, args=(self.proxy_endpoint, self.index, self.source_auth),
                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
+        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.target_auth),
                                         expected_status_code=HTTPStatus.OK)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
-        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.auth),
+        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.source_auth),
                                         expected_status_code=HTTPStatus.OK)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        proxy_response = retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.auth),
+        proxy_response = retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.source_auth),
                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
+        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.target_auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
-        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.auth),
+        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.source_auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
@@ -139,25 +144,26 @@ class E2ETests(unittest.TestCase):
         # replayer.
 
         # Creating an index, then asserting that the index was created on both targets.
-        proxy_response = retry_request(create_index, args=(self.proxy_endpoint, self.index, self.auth),
+        proxy_response = retry_request(create_index, args=(self.proxy_endpoint, self.index, self.source_auth),
                                        expected_status_code=HTTPStatus.OK)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
+        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.target_auth),
                                         expected_status_code=HTTPStatus.OK)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
-        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.auth),
+        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.source_auth),
                                         expected_status_code=HTTPStatus.OK)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
         # Creating a document, then asserting that the document was created on both targets.
-        proxy_response = create_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
+        proxy_response = create_document(self.proxy_endpoint, self.index, self.doc_id, self.source_auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
-        source_response = get_document(self.source_endpoint, self.index, self.doc_id, self.auth)
+        source_response = get_document(self.source_endpoint, self.index, self.doc_id, self.source_auth)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
 
-        target_response = retry_request(get_document, args=(self.target_endpoint, self.index, self.doc_id, self.auth),
+        target_response = retry_request(get_document, args=(self.target_endpoint, self.index, self.doc_id,
+                                                            self.target_auth),
                                         expected_status_code=HTTPStatus.OK)
         self.assertEqual(target_response.status_code, HTTPStatus.OK)
 
@@ -169,24 +175,26 @@ class E2ETests(unittest.TestCase):
         self.assertEqual(source_content, target_content)
 
         # Deleting the document that was created then asserting that it was deleted on both targets.
-        proxy_response = delete_document(self.proxy_endpoint, self.index, self.doc_id, self.auth)
+        proxy_response = delete_document(self.proxy_endpoint, self.index, self.doc_id, self.source_auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        target_response = retry_request(get_document, args=(self.target_endpoint, self.index, self.doc_id, self.auth),
+        target_response = retry_request(get_document, args=(self.target_endpoint, self.index, self.doc_id,
+                                                            self.target_auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
-        source_response = retry_request(get_document, args=(self.source_endpoint, self.index, self.doc_id, self.auth),
+        source_response = retry_request(get_document, args=(self.source_endpoint, self.index, self.doc_id,
+                                                            self.source_auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
         # Deleting the index that was created then asserting that it was deleted on both targets.
-        proxy_response = delete_index(self.proxy_endpoint, self.index, self.auth)
+        proxy_response = delete_index(self.proxy_endpoint, self.index, self.source_auth)
         self.assertEqual(proxy_response.status_code, HTTPStatus.OK)
 
-        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.auth),
+        target_response = retry_request(check_index, args=(self.target_endpoint, self.index, self.target_auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(target_response.status_code, HTTPStatus.NOT_FOUND)
-        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.auth),
+        source_response = retry_request(check_index, args=(self.source_endpoint, self.index, self.source_auth),
                                         expected_status_code=HTTPStatus.NOT_FOUND)
         self.assertEqual(source_response.status_code, HTTPStatus.NOT_FOUND)
 
@@ -199,8 +207,8 @@ class E2ETests(unittest.TestCase):
 
             credentials = [
                 (username, password),
-                (self.username, password),
-                (username, self.password)
+                (self.source_username, password),
+                (username, self.source_password)
             ]
 
             for user, pw in credentials:
@@ -220,12 +228,12 @@ class E2ETests(unittest.TestCase):
     def test_0005_invalidIncorrectUri(self):
         # This test will send an invalid URI
         invalidUri = "/invalidURI"
-        response = requests.get(f'{self.proxy_endpoint}{invalidUri}', auth=self.auth, verify=False)
+        response = requests.get(f'{self.proxy_endpoint}{invalidUri}', auth=self.source_auth, verify=False)
         self.assertEqual(response.status_code, HTTPStatus.NOT_FOUND)
 
         # This test will send an incorrect URI
         incorrectUri = "/_cluster/incorrectUri"
-        response = requests.get(f'{self.proxy_endpoint}{incorrectUri}', auth=self.auth, verify=False)
+        response = requests.get(f'{self.proxy_endpoint}{incorrectUri}', auth=self.source_auth, verify=False)
         self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
 
     def test_0006_OSB(self):
@@ -240,8 +248,8 @@ class E2ETests(unittest.TestCase):
             logger.error("Migration-console container was not found, please double check that deployment was a success")
             self.assert_(False)
 
-        source_indices = get_indices(self.source_endpoint, self.auth)
-        target_indices = get_indices(self.target_endpoint, self.auth)
+        source_indices = get_indices(self.source_endpoint, self.source_auth)
+        target_indices = get_indices(self.target_endpoint, self.target_auth)
 
         common_indices = set(source_indices) & set(target_indices)
         valid_indices = [index for index in common_indices if index not in self.ignore_list and index != "searchguard"]
@@ -249,8 +257,8 @@ class E2ETests(unittest.TestCase):
         self.assertTrue(valid_indices, "No valid indices found to compare after running OpenSearch Benchmark")
 
         for index in valid_indices:
-            source_count = get_doc_count(self.source_endpoint, index, self.auth)
-        target_count = get_doc_count(self.target_endpoint, index, self.auth)
+            source_count = get_doc_count(self.source_endpoint, index, self.source_auth)
+        target_count = get_doc_count(self.target_endpoint, index, self.target_auth)
 
         if source_count != target_count:
             logger.error(f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
