@@ -101,7 +101,6 @@ class E2ETests(unittest.TestCase):
 
     def setUp(self):
         self.set_common_values()
-        print(f"Proxy Endpoint: {self.proxy_endpoint}")
         retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.source_auth, self.source_verify_ssl),
                       expected_status_code=HTTPStatus.NOT_FOUND)
         retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.doc_id, self.source_auth,
@@ -109,13 +108,8 @@ class E2ETests(unittest.TestCase):
                       expected_status_code=HTTPStatus.NOT_FOUND)
 
     def tearDown(self):
-        source_all_indices = get_indices(self.proxy_endpoint, self.source_auth, self.source_verify_ssl)
-        target_all_indices = get_indices(self.target_endpoint, self.target_auth, self.target_verify_ssl)
-
-        for index in source_all_indices:
-            delete_index(self.proxy_endpoint, index, self.source_auth, self.source_verify_ssl)
-        for index in target_all_indices:
-            delete_index(self.target_endpoint, index, self.target_auth, self.target_verify_ssl)
+        delete_index(self.proxy_endpoint, self.index, self.source_auth, self.source_verify_ssl)
+        delete_document(self.proxy_endpoint, self.index, self.doc_id, self.source_auth, self.source_verify_ssl)
 
     def test_0001_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
