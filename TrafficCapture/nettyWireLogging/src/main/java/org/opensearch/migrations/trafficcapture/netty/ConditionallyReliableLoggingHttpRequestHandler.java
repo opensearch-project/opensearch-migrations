@@ -3,24 +3,31 @@ package org.opensearch.migrations.trafficcapture.netty;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.util.ReferenceCountUtil;
-import io.opentelemetry.context.ContextKey;
+import io.opentelemetry.api.trace.Span;
+import lombok.Getter;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
+import java.io.IOException;
 import java.time.Instant;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 @Slf4j
 public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHttpRequestHandler<T> {
-    private ContextKey<Instant> START_FLUSH_KEY = ContextKey.named("startTime");
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpRequestHandler(ConnectionContext incomingContext,
-                                                          IChannelConnectionCaptureSerializer<T> trafficOffloader,
-                                                          Predicate<HttpRequest> headerPredicateForWhenToBlock) {
-        super(incomingContext, trafficOffloader);
+    public ConditionallyReliableLoggingHttpRequestHandler(String nodeId, String connectionId,
+                                                          IConnectionCaptureFactory<T> trafficOffloaderFactory,
+                                                          Predicate<HttpRequest> headerPredicateForWhenToBlock)
+    throws IOException {
+        super(nodeId, connectionId, trafficOffloaderFactory);
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
     }
 
@@ -28,9 +35,13 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest)
             throws Exception {
         if (shouldBlockPredicate.test(httpRequest)) {
-            METERING_CLOSURE.meterIncrementEvent(connectionContext, "blockingRequestUntilFlush");
-            var flushContext = new ConnectionContext(connectionContext,
-                    METERING_CLOSURE.makeSpanContinuation("blockedForFlush"));
+            METERING_CLOSURE.meterIncrementEvent(messageContext, "blockingRequestUntilFlush");
+            var flushContext = new IWithStartTimeAndAttributes<>() {
+                @Getter Span currentSpan = METERING_CLOSURE.makeSpanContinuation("blockedForFlush")
+                        .apply(messageContext.getPopulatedAttributes(), messageContext.getCurrentSpan());
+                @Getter Instant startTime = Instant.now();
+                @Override public HttpMessageContext getEnclosingScope() { return messageContext; }
+            };
 
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 log.atInfo().setMessage(()->"Done flushing").log();
@@ -55,7 +66,7 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
                 }
             });
         } else {
-            METERING_CLOSURE.meterIncrementEvent(connectionContext, "nonBlockingRequest");
+            METERING_CLOSURE.meterIncrementEvent(messageContext, "nonBlockingRequest");
             super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
         }
     }

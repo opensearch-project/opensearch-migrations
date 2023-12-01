@@ -11,6 +11,7 @@ import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -60,11 +61,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(ConnectionContext ctx,
+    public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(IConnectionContext ctx,
                                                                                String connectionId) {
-        METERING_CLOSURE.meterIncrementEvent(ctx, "offloader_created");
-        METERING_CLOSURE.meterDeltaEvent(ctx, "offloaders_active", 1);
-
         return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId,
                 new StreamManager(ctx, connectionId));
     }
@@ -81,13 +79,15 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     }
 
     class StreamManager extends OrderedStreamLifecyleManager<RecordMetadata> {
-        ConnectionContext telemetryContext;
+        IConnectionContext telemetryContext;
         String connectionId;
         Instant startTime;
 
-        public StreamManager(ConnectionContext incomingTelemetryContext, String connectionId) {
-            this.telemetryContext = new ConnectionContext(incomingTelemetryContext,
-                    METERING_CLOSURE.makeSpanContinuation("offloaderLifetime"));
+        public StreamManager(IConnectionContext ctx, String connectionId) {
+            this.telemetryContext = ctx;
+            METERING_CLOSURE.meterIncrementEvent(telemetryContext, "offloader_created");
+            METERING_CLOSURE.meterDeltaEvent(telemetryContext, "offloaders_active", 1);
+
             this.connectionId = connectionId;
             this.startTime = Instant.now();
         }
@@ -99,8 +99,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                     Duration.between(startTime, Instant.now()));
             METERING_CLOSURE.meterDeltaEvent(telemetryContext, "offloaders_active", -1);
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "offloader_closed");
-
-            telemetryContext.currentSpan.end();
         }
 
         @Override

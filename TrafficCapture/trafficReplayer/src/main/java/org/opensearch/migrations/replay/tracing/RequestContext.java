@@ -41,10 +41,6 @@ public class RequestContext implements IReplayerRequestContext, IWithStartTime {
         return enclosingScope.getConnectionId();
     }
 
-    public String getNodeId() {
-        return enclosingScope.getNodeId();
-    }
-
     @Override
     public long getSourceRequestIndex() {
         return replayerRequestKey.getSourceRequestIndex();

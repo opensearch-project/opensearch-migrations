@@ -5,6 +5,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
+import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpRequestHandler;
@@ -45,12 +46,9 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         }
 
         var connectionId = ch.id().asLongText();
-        var ctx = new ConnectionContext(connectionId, "",
-                METERING_CLOSURE.makeSpanContinuation("connectionLifetime", null));
-        var offloader = connectionCaptureFactory.createOffloader(ctx, connectionId);
-        ch.pipeline().addLast(new LoggingHttpResponseHandler<>(ctx, offloader));
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler<T>(ctx, offloader,
-                this::shouldGuaranteeMessageOffloading));
+        var capturingHandler = new ConditionallyReliableLoggingHttpRequestHandler<>(null, connectionId,
+                connectionCaptureFactory, this::shouldGuaranteeMessageOffloading);
+        ch.pipeline().addLast(capturingHandler);
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }
 }

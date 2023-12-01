@@ -1,8 +1,10 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpContent;
@@ -18,18 +20,24 @@ import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
+import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
+import java.io.IOException;
 import java.time.Instant;
 
 @Slf4j
-public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
-    public static final String TELEMETRY_SCOPE_NAME = "LoggingHttpInboundHandler";
+public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
+    public static final String TELEMETRY_SCOPE_NAME = "CapturingHttpHandler";
     public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
+    public static final String GATHERING_REQUEST = "gatheringRequest";
+    public static final String GATHERING_RESPONSE = "gatheringResponse";
 
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
@@ -75,20 +83,32 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     protected final IChannelConnectionCaptureSerializer<T> trafficOffloader;
 
     protected final EmbeddedChannel httpDecoderChannel;
-    protected final SimpleHttpRequestDecoder requestDecoder;
-    protected final ConnectionContext connectionContext;
 
-    public LoggingHttpRequestHandler(ConnectionContext incomingContext,
-                                     IChannelConnectionCaptureSerializer<T> trafficOffloader) {
-        this.connectionContext = incomingContext;
-        METERING_CLOSURE.meterIncrementEvent(incomingContext, "requestStarted");
+    protected HttpMessageContext messageContext;
 
-        this.trafficOffloader = trafficOffloader;
-        requestDecoder = new SimpleHttpRequestDecoder(); // as a field for easier debugging
+    public LoggingHttpRequestHandler(String nodeId, String channelKey,
+                                     IConnectionCaptureFactory<T> trafficOffloaderFactory)
+    throws IOException {
+        var parentContext = new ConnectionContext(channelKey, nodeId,
+                METERING_CLOSURE.makeSpanContinuation("connectionLifetime", null));
+
+        this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.Direction.REQUEST,
+                METERING_CLOSURE.makeSpanContinuation(GATHERING_REQUEST));
+        METERING_CLOSURE.meterIncrementEvent(messageContext, "requestStarted");
+
+        this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext, channelKey);
         httpDecoderChannel = new EmbeddedChannel(
-                requestDecoder,
-                new SimpleDecodedHttpRequestHandler()
-        );
+                new SimpleHttpRequestDecoder(),
+                new SimpleDecodedHttpRequestHandler());
+    }
+
+    public void rotateNextMessageContext() {
+        messageContext.getCurrentSpan().end();
+        final var wasResponse = messageContext.getDirection() == HttpMessageContext.Direction.RESPONSE;
+        messageContext = new HttpMessageContext(messageContext.getEnclosingScope(),
+                (wasResponse ? 1 : 0) + messageContext.getSourceRequestIndex(),
+                (wasResponse ? HttpMessageContext.Direction.REQUEST : HttpMessageContext.Direction.RESPONSE),
+                METERING_CLOSURE.makeSpanContinuation(wasResponse ? GATHERING_REQUEST : GATHERING_RESPONSE));
     }
 
     private HttpProcessedState parseHttpMessageParts(ByteBuf msg)  {
@@ -96,7 +116,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         var state = getHandlerThatHoldsParsedHttpRequest().isDone ?
                 HttpProcessedState.FULL_MESSAGE :
                 HttpProcessedState.ONGOING;
-        METERING_CLOSURE.meterIncrementEvent(connectionContext,
+        METERING_CLOSURE.meterIncrementEvent(messageContext,
                 state == HttpProcessedState.FULL_MESSAGE ? "requestFullyParsed" : "requestPartiallyParsed");
         return state;
     }
@@ -108,7 +128,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
         trafficOffloader.addCloseEvent(Instant.now());
-        METERING_CLOSURE.meterIncrementEvent(connectionContext, "unregistered");
+        METERING_CLOSURE.meterIncrementEvent(messageContext, "unregistered");
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
                 log.warn("Got error: " + t.getMessage());
@@ -125,8 +145,9 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        METERING_CLOSURE.meterIncrementEvent(connectionContext, "handlerRemoved");
-        connectionContext.getCurrentSpan().end();
+        METERING_CLOSURE.meterIncrementEvent(messageContext, "handlerRemoved");
+        messageContext.getCurrentSpan().end();
+        messageContext.getEnclosingScope().currentSpan.end();
 
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
@@ -143,7 +164,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
         super.channelRead(ctx, msg);
-        METERING_CLOSURE.meterIncrementEvent(connectionContext, "requestReceived");
+        METERING_CLOSURE.meterIncrementEvent(messageContext, "requestReceived");
 
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_REQUEST)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
@@ -153,13 +174,16 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        if (messageContext.getDirection() == HttpMessageContext.Direction.RESPONSE) {
+            rotateNextMessageContext();
+        }
         var timestamp = Instant.now();
         HttpProcessedState httpProcessedState;
         {
             var bb = ((ByteBuf) msg).retainedDuplicate();
             trafficOffloader.addReadEvent(timestamp, bb);
-            METERING_CLOSURE.meterIncrementEvent(connectionContext, "read");
-            METERING_CLOSURE.meterIncrementEvent(connectionContext, "readBytes", bb.readableBytes());
+            METERING_CLOSURE.meterIncrementEvent(messageContext, "read");
+            METERING_CLOSURE.meterIncrementEvent(messageContext, "readBytes", bb.readableBytes());
 
             metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
                     .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
@@ -182,9 +206,24 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     }
 
     @Override
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        if (messageContext.getDirection() == HttpMessageContext.Direction.REQUEST) {
+            rotateNextMessageContext();
+        }
+        var bb = (ByteBuf) msg;
+        trafficOffloader.addWriteEvent(Instant.now(), bb);
+        metricsLogger.atSuccess(MetricsEvent.RECEIVED_RESPONSE_COMPONENT)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
+        METERING_CLOSURE.meterIncrementEvent(messageContext, "write");
+        METERING_CLOSURE.meterIncrementEvent(messageContext, "writeBytes", bb.readableBytes());
+
+        super.write(ctx, msg, promise);
+    }
+
+    @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
-        METERING_CLOSURE.meterIncrementEvent(connectionContext, "exception");
+        METERING_CLOSURE.meterIncrementEvent(messageContext, "exception");
         httpDecoderChannel.close();
         super.exceptionCaught(ctx, cause);
     }

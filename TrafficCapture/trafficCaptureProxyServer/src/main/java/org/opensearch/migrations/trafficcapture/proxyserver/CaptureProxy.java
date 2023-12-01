@@ -174,7 +174,7 @@ public class CaptureProxy {
 
     private static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
-        return (ctx, connectionId) -> new StreamChannelConnectionCaptureSerializer<>(null, connectionId,
+        return (ctx,connectionId) -> new StreamChannelConnectionCaptureSerializer<>(null, connectionId,
                 new StreamLifecycleManager<>() {
                     @Override
                     public void close() {}

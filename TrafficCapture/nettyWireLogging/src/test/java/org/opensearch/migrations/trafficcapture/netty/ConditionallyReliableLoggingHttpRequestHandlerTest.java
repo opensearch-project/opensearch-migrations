@@ -80,13 +80,13 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
             throws IOException {
         AtomicReference<ByteBuffer> outputByteBuffer = new AtomicReference<>();
         AtomicInteger flushCount = new AtomicInteger();
-        var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection",
-                new StreamManager(outputByteBuffer, flushCount));
+        ;
 
-        var ctx = new ConnectionContext("c",  "n",
-                x->GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpRequestHandler(ctx, offloader, x->true)); // true: block every request
+                new ConditionallyReliableLoggingHttpRequestHandler("n", "c",
+                        (ctx, connectionId) -> new StreamChannelConnectionCaptureSerializer("Test", connectionId,
+                                new StreamManager(outputByteBuffer, flushCount)),
+                        x->true)); // true: block every request
         channelWriter.accept(channel);
 
         // we wrote the correct data to the downstream handler/channel

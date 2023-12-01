@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture;
 import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
@@ -60,7 +61,7 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer<Void> createOffloader(ConnectionContext ctx, String connectionId) throws IOException {
+    public IChannelConnectionCaptureSerializer<Void> createOffloader(IConnectionContext ctx, String connectionId) throws IOException {
         // This array is only an indirection to work around Java's constraint that lambda values are final
         return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager());
     }

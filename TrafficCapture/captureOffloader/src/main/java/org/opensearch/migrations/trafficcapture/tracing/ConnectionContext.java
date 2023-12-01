@@ -19,7 +19,7 @@ public class ConnectionContext implements IConnectionContext, IWithStartTime {
     @Getter
     private final Instant startTime;
 
-    public ConnectionContext(ConnectionContext oldContext, ISpanWithParentGenerator spanGenerator) {
+    public ConnectionContext(IConnectionContext oldContext, ISpanWithParentGenerator spanGenerator) {
         this.connectionId = oldContext.getConnectionId();
         this.nodeId = oldContext.getNodeId();
         this.startTime = Instant.now();

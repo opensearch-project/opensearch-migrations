@@ -78,11 +78,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                         String diagnosticLabel,
                                         RequestContext requestContext) {
         this.transformationContext = new IWithStartTimeAndAttributes<>() {
-            @Getter
-            Span currentSpan = METERING_CLOSURE.makeSpanContinuation("httpRequestTransformation")
+            @Getter Span currentSpan = METERING_CLOSURE.makeSpanContinuation("httpRequestTransformation")
                     .apply(requestContext.getPopulatedAttributes(), requestContext.getCurrentSpan());
-            @Getter
-            Instant startTime = Instant.now();
+            @Getter Instant startTime = Instant.now();
             @Override public RequestContext getEnclosingScope() { return requestContext; }
         };
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
