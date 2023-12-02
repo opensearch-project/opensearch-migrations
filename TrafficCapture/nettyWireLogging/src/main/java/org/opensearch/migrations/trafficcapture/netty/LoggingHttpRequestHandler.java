@@ -20,7 +20,6 @@ import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
@@ -37,6 +36,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
     public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
     public static final String GATHERING_REQUEST = "gatheringRequest";
+    public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
     public static final String GATHERING_RESPONSE = "gatheringResponse";
 
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
@@ -92,7 +92,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
         var parentContext = new ConnectionContext(channelKey, nodeId,
                 METERING_CLOSURE.makeSpanContinuation("connectionLifetime", null));
 
-        this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.Direction.REQUEST,
+        this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.HttpTransactionState.REQUEST,
                 METERING_CLOSURE.makeSpanContinuation(GATHERING_REQUEST));
         METERING_CLOSURE.meterIncrementEvent(messageContext, "requestStarted");
 
@@ -102,13 +102,27 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
                 new SimpleDecodedHttpRequestHandler());
     }
 
-    public void rotateNextMessageContext() {
+    static String getSpanLabelForState(HttpMessageContext.HttpTransactionState state) {
+        switch (state) {
+            case REQUEST:
+                return GATHERING_REQUEST;
+            case WAITING:
+                return WAITING_FOR_RESPONSE;
+            case RESPONSE:
+                return GATHERING_RESPONSE;
+            default:
+                throw new IllegalStateException("Unknown enum value: "+state);
+        }
+    }
+
+    public void rotateNextMessageContext(HttpMessageContext.HttpTransactionState nextState) {
         messageContext.getCurrentSpan().end();
-        final var wasResponse = messageContext.getDirection() == HttpMessageContext.Direction.RESPONSE;
+        final var wasResponse = HttpMessageContext.HttpTransactionState.RESPONSE.equals(messageContext.getState());
         messageContext = new HttpMessageContext(messageContext.getEnclosingScope(),
-                (wasResponse ? 1 : 0) + messageContext.getSourceRequestIndex(),
-                (wasResponse ? HttpMessageContext.Direction.REQUEST : HttpMessageContext.Direction.RESPONSE),
-                METERING_CLOSURE.makeSpanContinuation(wasResponse ? GATHERING_REQUEST : GATHERING_RESPONSE));
+                (nextState== HttpMessageContext.HttpTransactionState.REQUEST ? 1 : 0)
+                        + messageContext.getSourceRequestIndex(),
+                nextState,
+                METERING_CLOSURE.makeSpanContinuation(getSpanLabelForState(nextState)));
     }
 
     private HttpProcessedState parseHttpMessageParts(ByteBuf msg)  {
@@ -163,6 +177,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
     }
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
+        rotateNextMessageContext(HttpMessageContext.HttpTransactionState.WAITING);
         super.channelRead(ctx, msg);
         METERING_CLOSURE.meterIncrementEvent(messageContext, "requestReceived");
 
@@ -174,8 +189,8 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (messageContext.getDirection() == HttpMessageContext.Direction.RESPONSE) {
-            rotateNextMessageContext();
+        if (messageContext.getState() == HttpMessageContext.HttpTransactionState.RESPONSE) {
+            rotateNextMessageContext(HttpMessageContext.HttpTransactionState.REQUEST);
         }
         var timestamp = Instant.now();
         HttpProcessedState httpProcessedState;
@@ -207,8 +222,8 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-        if (messageContext.getDirection() == HttpMessageContext.Direction.REQUEST) {
-            rotateNextMessageContext();
+        if (messageContext.getState() != HttpMessageContext.HttpTransactionState.RESPONSE) {
+            rotateNextMessageContext(HttpMessageContext.HttpTransactionState.RESPONSE);
         }
         var bb = (ByteBuf) msg;
         trafficOffloader.addWriteEvent(Instant.now(), bb);

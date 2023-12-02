@@ -71,7 +71,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     static class CodedOutputStreamWrapper implements CodedOutputStreamHolder {
         private final CodedOutputStream codedOutputStream;
         private final ByteBuffer byteBuffer;
-        final ConnectionContext streamContext;
         @Override
         public @NonNull CodedOutputStream getOutputStream() {
             return codedOutputStream;
@@ -104,11 +103,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         @Override
         public CodedOutputStreamWrapper createStream() {
             METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_created");
-            var newStreamCtx = new ConnectionContext(telemetryContext,
-                    METERING_CLOSURE.makeSpanContinuation("recordStream"));
 
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
-            return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb, newStreamCtx);
+            return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb);
         }
 
         @Override
@@ -119,7 +116,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                         outputStreamHolder);
             }
             var osh = (CodedOutputStreamWrapper) outputStreamHolder;
-            osh.streamContext.currentSpan.end();
 
             // Structured context for MetricsLogger
             try {
