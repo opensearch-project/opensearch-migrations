@@ -80,7 +80,6 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
             throws IOException {
         AtomicReference<ByteBuffer> outputByteBuffer = new AtomicReference<>();
         AtomicInteger flushCount = new AtomicInteger();
-        ;
 
         EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpRequestHandler("n", "c",

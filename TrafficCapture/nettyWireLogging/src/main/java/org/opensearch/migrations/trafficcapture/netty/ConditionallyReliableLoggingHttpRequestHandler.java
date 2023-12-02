@@ -36,20 +36,15 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
             throws Exception {
         if (shouldBlockPredicate.test(httpRequest)) {
             METERING_CLOSURE.meterIncrementEvent(messageContext, "blockingRequestUntilFlush");
-            var flushContext = new IWithStartTimeAndAttributes<>() {
-                @Getter Span currentSpan = METERING_CLOSURE.makeSpanContinuation("blockedForFlush")
-                        .apply(messageContext.getPopulatedAttributes(), messageContext.getCurrentSpan());
-                @Getter Instant startTime = Instant.now();
-                @Override public HttpMessageContext getEnclosingScope() { return messageContext; }
-            };
+            rotateNextMessageContext(HttpMessageContext.HttpTransactionState.INTERNALLY_BLOCKED);
 
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 log.atInfo().setMessage(()->"Done flushing").log();
-                METERING_CLOSURE.meterIncrementEvent(flushContext,
+                METERING_CLOSURE.meterIncrementEvent(messageContext,
                         t != null ? "blockedFlushFailure" : "blockedFlushSuccess");
-                METERING_CLOSURE.meterHistogramMicros(flushContext,
+                METERING_CLOSURE.meterHistogramMicros(messageContext,
                         t==null ? "blockedFlushFailure_micro" : "stream_flush_failure_micro");
-                flushContext.currentSpan.end();
+                messageContext.getCurrentSpan().end();
 
                 if (t != null) {
                     // This is a spot where we would benefit from having a behavioral policy that different users

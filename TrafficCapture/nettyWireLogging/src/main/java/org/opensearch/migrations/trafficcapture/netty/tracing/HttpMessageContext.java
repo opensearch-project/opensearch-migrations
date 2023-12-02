@@ -14,6 +14,7 @@ import java.time.Instant;
 public class HttpMessageContext implements IRequestContext, IWithStartTimeAndAttributes<IConnectionContext> {
     public enum HttpTransactionState {
         REQUEST,
+        INTERNALLY_BLOCKED,
         WAITING,
         RESPONSE
     }

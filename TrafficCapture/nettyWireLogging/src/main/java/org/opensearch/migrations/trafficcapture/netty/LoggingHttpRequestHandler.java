@@ -38,6 +38,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
     public static final String GATHERING_REQUEST = "gatheringRequest";
     public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
     public static final String GATHERING_RESPONSE = "gatheringResponse";
+    public static final String BLOCKED = "blocked";
 
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         /**
@@ -106,6 +107,8 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
         switch (state) {
             case REQUEST:
                 return GATHERING_REQUEST;
+            case INTERNALLY_BLOCKED:
+                return BLOCKED;
             case WAITING:
                 return WAITING_FOR_RESPONSE;
             case RESPONSE:
@@ -115,8 +118,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
         }
     }
 
-    public void rotateNextMessageContext(HttpMessageContext.HttpTransactionState nextState) {
-        messageContext.getCurrentSpan().end();
+    protected void rotateNextMessageContext(HttpMessageContext.HttpTransactionState nextState) {
         final var wasResponse = HttpMessageContext.HttpTransactionState.RESPONSE.equals(messageContext.getState());
         messageContext = new HttpMessageContext(messageContext.getEnclosingScope(),
                 (nextState== HttpMessageContext.HttpTransactionState.REQUEST ? 1 : 0)
@@ -190,6 +192,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (messageContext.getState() == HttpMessageContext.HttpTransactionState.RESPONSE) {
+            messageContext.getCurrentSpan().end();
             rotateNextMessageContext(HttpMessageContext.HttpTransactionState.REQUEST);
         }
         var timestamp = Instant.now();
@@ -206,6 +209,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
             httpProcessedState = parseHttpMessageParts(bb); // bb is consumed/release by this method
         }
         if (httpProcessedState == HttpProcessedState.FULL_MESSAGE) {
+            messageContext.getCurrentSpan().end();
             var httpRequest = getHandlerThatHoldsParsedHttpRequest().resetCurrentRequest();
             var decoderResultLoose = httpRequest.decoderResult();
             if (decoderResultLoose instanceof HttpMessageDecoderResult) {
@@ -223,6 +227,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         if (messageContext.getState() != HttpMessageContext.HttpTransactionState.RESPONSE) {
+            messageContext.getCurrentSpan().end();
             rotateNextMessageContext(HttpMessageContext.HttpTransactionState.RESPONSE);
         }
         var bb = (ByteBuf) msg;
