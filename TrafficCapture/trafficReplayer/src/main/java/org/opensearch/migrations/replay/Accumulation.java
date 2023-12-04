@@ -48,7 +48,7 @@ public class Accumulation {
         this.state =
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
         channelContext = new ChannelKeyContext(trafficChannelKey,
-                METERING_CLOSURE.makeSpanContinuation("accumulatingChannel", null));
+                METERING_CLOSURE.makeSpanContinuation("processingChannel", null));
     }
 
     public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
@@ -85,6 +85,14 @@ public class Accumulation {
     public @NonNull RequestResponsePacketPair getRrPair() {
         assert rrPair != null;
         return rrPair;
+    }
+
+    public void rotateRequestGatheringToResponse() {
+        var ctx = rrPair.requestContext;
+        ctx.getCurrentSpan().end();
+        rrPair.requestContext = new RequestContext(ctx.getEnclosingScope(),
+                ctx.getReplayerRequestKey(),
+                METERING_CLOSURE.makeSpanContinuation("accumulatingResponse"));
     }
 
     public Instant getLastTimestamp() {

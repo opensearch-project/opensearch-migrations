@@ -124,15 +124,15 @@ public class ReplayEngine {
     }
 
     public <T> DiagnosticTrackableCompletableFuture<String, T>
-    scheduleTransformationWork(UniqueReplayerRequestKey requestKey, Instant originalStart,
+    scheduleTransformationWork(RequestContext requestCtx, Instant originalStart,
                                Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "processing";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
-        logStartOfWork(requestKey, newCount, start, label);
-        var result = networkSendOrchestrator.scheduleWork(requestKey.trafficStreamKey,
+        logStartOfWork(requestCtx, newCount, start, label);
+        var result = networkSendOrchestrator.scheduleWork(requestCtx.getEnclosingScope(),
                 start.minus(EXPECTED_TRANSFORMATION_DURATION), task);
-        return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
+        return hookWorkFinishingUpdates(result, originalStart, requestCtx, label);
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
@@ -159,7 +159,7 @@ public class ReplayEngine {
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
-        var future = networkSendOrchestrator.scheduleClose(channelKey, channelInteractionNum, ctx, atTime);
+        var future = networkSendOrchestrator.scheduleClose(ctx, channelInteractionNum, atTime);
         hookWorkFinishingUpdates(future, timestamp, channelKey, label);
     }
 

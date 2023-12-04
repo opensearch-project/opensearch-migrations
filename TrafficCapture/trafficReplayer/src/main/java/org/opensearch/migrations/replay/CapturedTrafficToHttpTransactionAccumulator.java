@@ -221,6 +221,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             closedConnectionCounter.incrementAndGet();
+            accum.channelContext.getCurrentSpan().end();
             listener.onConnectionClose(accum.trafficChannelKey, accum.getIndexOfCurrentRequest(), accum.channelContext,
                     RequestResponsePacketPair.ReconstructionStatus.COMPLETE,
                     timestamp, getTrafficStreamsHeldByAccum(accum));
@@ -344,6 +345,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID, accumulation.getRequestKey().getTrafficStreamKey().getConnectionId()).emit();
         assert (requestPacketBytes != null);
         assert (!requestPacketBytes.hasInProgressSegment());
+        accumulation.rotateRequestGatheringToResponse();
         listener.onRequestReceived(accumulation.getRequestKey(), rrPair.requestContext, requestPacketBytes);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;
@@ -356,6 +358,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID, accumulation.getRequestKey().getTrafficStreamKey().getConnectionId()).emit();
         var rrPair = accumulation.getRrPair();
         rrPair.completionStatus = status;
+        rrPair.requestContext.getCurrentSpan().end();
         listener.onFullDataReceived(accumulation.getRequestKey(), rrPair.requestContext, rrPair);
         accumulation.resetForNextRequest();
     }
@@ -400,6 +403,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             }
         } finally {
             if (accumulation.hasSignaledRequests()) {
+                accumulation.channelContext.getCurrentSpan().end();
                 listener.onConnectionClose(accumulation.trafficChannelKey, accumulation.getIndexOfCurrentRequest(),
                         accumulation.channelContext, status, accumulation.getLastTimestamp(),
                         getTrafficStreamsHeldByAccum(accumulation));

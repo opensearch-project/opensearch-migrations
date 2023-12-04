@@ -14,7 +14,7 @@ import java.time.Instant;
 
 public class RequestContext implements IReplayerRequestContext, IWithStartTime {
     @Getter
-    IConnectionContext enclosingScope;
+    ChannelKeyContext enclosingScope;
     @Getter
     final UniqueReplayerRequestKey replayerRequestKey;
     @Getter
@@ -22,19 +22,12 @@ public class RequestContext implements IReplayerRequestContext, IWithStartTime {
     @Getter
     final Span currentSpan;
 
-    IWithAttributes<IWithAttributes<EmptyContext>> foo;
-
     public RequestContext(ChannelKeyContext enclosingScope, UniqueReplayerRequestKey replayerRequestKey,
                           ISpanWithParentGenerator spanGenerator) {
         this.enclosingScope = enclosingScope;
         this.replayerRequestKey = replayerRequestKey;
         this.startTime = Instant.now();
         this.currentSpan = spanGenerator.apply(getPopulatedAttributes(), enclosingScope.getCurrentSpan());
-    }
-
-    public ChannelKeyContext getChannelKeyContext() {
-        return new ChannelKeyContext(replayerRequestKey.trafficStreamKey,
-                innerAttributesToIgnore_LeavingOriginalAttributesInPlace->currentSpan);
     }
 
     public String getConnectionId() {

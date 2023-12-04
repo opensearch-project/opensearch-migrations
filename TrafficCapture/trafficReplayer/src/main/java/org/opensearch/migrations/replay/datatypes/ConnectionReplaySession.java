@@ -6,8 +6,10 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
+import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -18,6 +20,7 @@ import org.opensearch.migrations.replay.util.OnlineRadixSorter;
  */
 @Slf4j
 public class ConnectionReplaySession {
+
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
      * vended by a CompletableFuture (e.g. possibly a rate limiter).  If the ChannelFuture hasn't
@@ -32,7 +35,7 @@ public class ConnectionReplaySession {
 
     @Getter
     @Setter
-    private ISourceTrafficChannelKey channelId;
+    private ChannelKeyContext channelContext;
 
     public ConnectionReplaySession(EventLoop eventLoop) {
         this.eventLoop = eventLoop;

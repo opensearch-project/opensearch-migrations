@@ -874,7 +874,7 @@ public class TrafficReplayer {
                             Supplier<Stream<byte[]>> packetsSupplier)
     {
         try {
-            var transformationCompleteFuture = replayEngine.scheduleTransformationWork(requestKey, start, ()->
+            var transformationCompleteFuture = replayEngine.scheduleTransformationWork(ctx, start, ()->
                     transformAllData(inputRequestTransformerFactory.create(requestKey, ctx), packetsSupplier));
             log.atDebug().setMessage(()->"finalizeRequest future for transformation of " + requestKey +
                     " = " + transformationCompleteFuture).log();

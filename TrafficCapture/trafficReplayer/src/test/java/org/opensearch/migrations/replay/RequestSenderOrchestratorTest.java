@@ -52,7 +52,7 @@ class RequestSenderOrchestratorTest {
         }
         var connectionCtx = TestRequestKey.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
         var closeFuture = senderOrchestrator.scheduleClose(
-                connectionCtx.getChannelKey(), NUM_REQUESTS_TO_SCHEDULE, connectionCtx.getChannelKeyContext(),
+                connectionCtx.getEnclosingScope(), NUM_REQUESTS_TO_SCHEDULE,
                 lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());

@@ -17,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
@@ -141,7 +140,7 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualSessionGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent, ChannelKeyContext ctx) {
+    submitEventualSessionGet(ChannelKeyContext channelKey, boolean ignoreIfNotPresent, ChannelKeyContext ctx) {
         ConnectionReplaySession channelFutureAndSchedule =
                 getCachedSession(channelKey, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
@@ -159,11 +158,11 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(ISourceTrafficChannelKey channelKey, boolean dontCreate) {
+    public ConnectionReplaySession getCachedSession(ChannelKeyContext channelKey, boolean dontCreate) {
         var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKey.getConnectionId()) :
                 connectionId2ChannelCache.get(channelKey.getConnectionId());
         if (crs != null) {
-            crs.setChannelId(channelKey);
+            crs.setChannelContext(channelKey);
         }
         return crs;
     }
@@ -188,7 +187,7 @@ public class ClientConnectionPool {
                             if (channelAndFutureWork.hasWorkRemaining()) {
                                 log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
                                         "(last associated with connection=" +
-                                        channelAndFutureWork.getChannelId() +
+                                        channelAndFutureWork.getChannelContext() +
                                         ").  " + channelAndFutureWork.calculateSizeSlowly() +
                                         " requests that were enqueued won't be run").log();
                             }

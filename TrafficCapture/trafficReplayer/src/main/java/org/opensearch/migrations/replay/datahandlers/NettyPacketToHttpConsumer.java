@@ -39,8 +39,6 @@ import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
-    private static final ContextKey<Instant> START_OF_REQUEST_KEY = ContextKey.named("startOfRequest");
-    private static final ContextKey<Instant> START_OF_WRITE_KEY = ContextKey.named("startOfWrite");
     public static final String TELEMETRY_SCOPE_NAME = "HttpSender";
     public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 
@@ -64,7 +62,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
                                      RequestContext requestContext) {
-        this(createClientConnection(eventLoopGroup, sslContext, serverUri, requestContext.getChannelKeyContext()),
+        this(createClientConnection(eventLoopGroup, sslContext, serverUri, requestContext.getEnclosingScope()),
                 requestContext);
     }
 
