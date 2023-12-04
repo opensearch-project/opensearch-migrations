@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Modify EC2 nodes to add required Kafka security group if it doesn't exist, as well as call the ./startCaptureProxy.sh
+# script on each node which will detect if ES and the Capture Proxy are running and on the correct port, and attempt
+# to mediate if this is not the case.
 prepare_source_nodes_for_capture () {
   deploy_stage=$1
   instance_ids=($(aws ec2 describe-instances --filters 'Name=tag:Name,Values=opensearch-infra-stack*' 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
@@ -34,17 +37,69 @@ prepare_source_nodes_for_capture () {
   done
 }
 
-#prepare_source_nodes_for_capture 'aws-integ'
-#exit 1
+# One-time required service-linked-role creation for AWS accounts which do not have these roles
+create_service_linked_roles () {
+  aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com
+  aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+}
 
-# One-time account setup
-#aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com
-#aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+# One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
+boostrap_region () {
+  # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
+  cdk boostrap "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=false --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+}
 
-# One-time region setup
-#cdk bootstrap
+usage() {
+  echo ""
+  echo "Script to setup E2E AWS infrastructure for an ES 7.10.2 source cluster running on EC2, as well as "
+  echo "an OpenSearch Service Domain as the target cluster, and the Migration infrastructure for simulating a migration from source to target."
+  echo ""
+  echo "Usage: "
+  echo "  ./awsE2ESolutionSetup.sh [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy]"
+  echo ""
+  echo "Options:"
+  echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
+  echo "  --boostrap-region                                If included, will attempt to CDK bootstrap the region to allow CDK deployments"
+  echo "  --enable-capture-proxy                           If included, will attempt to enable the capture proxy on all source nodes"
+  echo ""
+  exit 1
+}
 
 stage='aws-integ'
+CREATE_SLR=false
+BOOTSTRAP_REGION=false
+ENABLE_CAPTURE_PROXY=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --create-service-linked-roles)
+      CREATE_SLR=true
+      shift # past argument
+      ;;
+    --bootstrap-region)
+      BOOTSTRAP_REGION=true
+      shift # past argument
+      ;;
+    --enable-capture-proxy)
+      ENABLE_CAPTURE_PROXY=true
+      shift # past argument
+      ;;
+    -h|--help)
+      usage
+      ;;
+    -*)
+      echo "Unknown option $1"
+      usage
+      ;;
+    *)
+      shift # past argument
+      ;;
+  esac
+done
+
+if [ "$CREATE_SLR" = true ] ; then
+  create_service_linked_roles
+fi
+
 # Store CDK context for migration solution deployment in variable
 read -r -d '' cdk_context << EOM
 {
@@ -68,6 +123,9 @@ git clone https://github.com/lewijacn/opensearch-cluster-cdk.git || echo "Repo a
 cd opensearch-cluster-cdk && git checkout migration-es
 git pull
 npm install
+if [ "$BOOTSTRAP_REGION" = true ] ; then
+  boostrap_region
+fi
 # Deploy source cluster on EC2 instances
 cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c captureProxyTarUrl="https://github.com/opensearch-project/opensearch-migrations/releases/download/1.0.0/trafficCaptureProxyServer.x86_64.tar" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=false --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
 source_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
@@ -81,7 +139,11 @@ cdk_context=$(echo $cdk_context | jq '@json')
 
 cd ../../deployment/cdk/opensearch-service-migration
 ./buildDockerImages.sh
+npm install
 cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
+if [ "$ENABLE_CAPTURE_PROXY" = true ] ; then
+  prepare_source_nodes_for_capture $stage
+fi
 
 # Kickoff integration tests
 #task_arn=$(aws ecs list-tasks --cluster migration-${stage}-ecs-cluster --family "migration-${stage}-migration-console" | jq --raw-output '.taskArns[0]')
