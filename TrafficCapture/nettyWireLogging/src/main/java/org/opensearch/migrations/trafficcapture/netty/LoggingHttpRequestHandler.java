@@ -119,7 +119,6 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
     }
 
     protected void rotateNextMessageContext(HttpMessageContext.HttpTransactionState nextState) {
-        final var wasResponse = HttpMessageContext.HttpTransactionState.RESPONSE.equals(messageContext.getState());
         messageContext = new HttpMessageContext(messageContext.getEnclosingScope(),
                 (nextState== HttpMessageContext.HttpTransactionState.REQUEST ? 1 : 0)
                         + messageContext.getSourceRequestIndex(),

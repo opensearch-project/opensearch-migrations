@@ -6,7 +6,6 @@ receivers:
 exporters:
   prometheus:
     endpoint: "0.0.0.0:8889"
-    namespace: capturereplay
     const_labels:
       label1: value1
   logging:
@@ -20,26 +19,6 @@ exporters:
     endpoint: jaeger:4317
     tls:
       insecure: true
-
-
-processors:
-  # Processor to set the namespace based on the service name
-  attributes/nscapture:
-    actions:
-      - key: namespace
-        value: "capture"
-        action: insert
-      - key: service.name
-        value: "capture"
-        action: update
-  attributes/nsreplayer:
-    actions:
-      - key: namespace
-        value: "replay"
-        action: insert
-      - key: service.name
-        value: "replay"
-        action: update
 
 extensions:
   health_check:
@@ -57,5 +36,4 @@ service:
       exporters: [logging, zipkin, otlp/jaeger]
     metrics:
       receivers: [otlp]
-      processors: [attributes/nscapture, attributes/nsreplayer]
       exporters: [logging, prometheus]
