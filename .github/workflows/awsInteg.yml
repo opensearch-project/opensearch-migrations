@@ -1,0 +1,32 @@
+name: AWS Deploy Test
+
+on:
+  push:
+    branches:
+      - 'testing/githuboidc'
+  pull_request_target:
+    branches:
+      - 'testing/githuboidc'
+
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OPENSEARCH_MIGRATIONS_ROLE }}
+          aws-region: us-east-1
+
+      - name: Run AWS Deploy Script
+        run: |
+          chmod +x ./test/awsE2ESolutionSetup.sh
+          ./test/awsE2ESolutionSetup.sh
