@@ -3,10 +3,10 @@ name: AWS Deploy Test
 on:
   push:
     branches:
-      - 'testing/githuboidc'
+      - 'main'
   pull_request_target:
     branches:
-      - 'testing/githuboidc'
+      - 'main'
 
 
 jobs:
