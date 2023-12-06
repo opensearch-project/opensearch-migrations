@@ -47,7 +47,7 @@ services:
       - ALLOW_ANONYMOUS_LOGIN=yes
 
   kafka:
-    image: docker.io/bitnami/kafka:3.4
+    image: docker.io/bitnami/kafka:3.6
     networks:
       - migrations
     ports:
