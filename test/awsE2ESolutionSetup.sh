@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Note: This is still in an experimental state
 # Modify EC2 nodes to add required Kafka security group if it doesn't exist, as well as call the ./startCaptureProxy.sh
 # script on each node which will detect if ES and the Capture Proxy are running and on the correct port, and attempt
 # to mediate if this is not the case.
@@ -27,7 +28,7 @@ prepare_source_nodes_for_capture () {
       printf -v group_ids_string '%s ' "${group_ids[@]}"
       aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
     fi
-    echo "Executing command to run ./startCaptureProxy.sh on node: $id. Attempting to append output of command: "
+    echo "Executing ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers on node: $id. Attempting to append output of command: "
     command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers" --output text --query 'Command.CommandId')
     sleep 5
     echo "Standard Output:"
@@ -44,9 +45,9 @@ create_service_linked_roles () {
 }
 
 # One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
-boostrap_region () {
+bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
-  cdk boostrap "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=false --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+  cdk bootstrap "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=false --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0" --c captureProxyEnabled=false
 }
 
 usage() {
@@ -59,7 +60,7 @@ usage() {
   echo ""
   echo "Options:"
   echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
-  echo "  --boostrap-region                                If included, will attempt to CDK bootstrap the region to allow CDK deployments"
+  echo "  --bootstrap-region                               If included, will attempt to CDK bootstrap the region to allow CDK deployments"
   echo "  --enable-capture-proxy                           If included, will attempt to enable the capture proxy on all source nodes"
   echo ""
   exit 1
@@ -124,10 +125,10 @@ cd opensearch-cluster-cdk && git checkout migration-es
 git pull
 npm install
 if [ "$BOOTSTRAP_REGION" = true ] ; then
-  boostrap_region
+  bootstrap_region
 fi
 # Deploy source cluster on EC2 instances
-cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c captureProxyTarUrl="https://github.com/opensearch-project/opensearch-migrations/releases/download/1.0.0/trafficCaptureProxyServer.x86_64.tar" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=false --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c captureProxyTarUrl="https://github.com/opensearch-project/opensearch-migrations/releases/download/1.0.0/trafficCaptureProxyServer.x86_64.tar" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
 source_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
 echo $source_endpoint
 vpc_id=$(aws cloudformation describe-stacks --stack-name opensearch-network-stack --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" --output text)
