@@ -3,12 +3,12 @@ import pytest
 
 
 def pytest_addoption(parser):
-    parser.addoption("--proxy_endpoint", action="store")
-    parser.addoption("--source_endpoint", action="store")
-    parser.addoption("--target_endpoint", action="store")
-    parser.addoption("--source_auth_type", action="store", default="none", choices=["none", "basic", "sigv4"])
+    parser.addoption("--proxy_endpoint", action="store", default="https://localhost:9200")
+    parser.addoption("--source_endpoint", action="store", default="https://localhost:19200")
+    parser.addoption("--target_endpoint", action="store", default="https://localhost:29200")
+    parser.addoption("--source_auth_type", action="store", default="basic", choices=["none", "basic", "sigv4"])
     parser.addoption("--source_verify_ssl", action="store", default="False", choices=["True", "False"])
-    parser.addoption("--target_auth_type", action="store", default="none", choices=["none", "basic", "sigv4"])
+    parser.addoption("--target_auth_type", action="store", default="basic", choices=["none", "basic", "sigv4"])
     parser.addoption("--target_verify_ssl", action="store", default="False", choices=["True", "False"])
     parser.addoption("--source_username", action="store", default="admin")
     parser.addoption("--source_password", action="store", default="admin")

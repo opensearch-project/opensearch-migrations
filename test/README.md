@@ -24,14 +24,52 @@ pytest tests.py
 The test script, by default, uses the ports assigned to the containers in this
 [docker-compose file](../TrafficCapture/dockerSolution/src/main/docker/docker-compose.yml), so if the Docker solution in
 its current setup started with no issues, then the test script will run as is. If for any reason
-the user changed the ports in that file, they must also either, change the following environment variables:
-`PROXY_ENDPOINT`, `SOURCE_ENDPOINT`, and `TARGET_ENDPOINT` respectively, or update the default value
-(which can be found below) for them in [tests.py](tests.py).
+the user changed the ports in that file, they must also either, provide the following parameters variables:
+`proxy_endpoint`, `source_endpoint`, and `target_endpoint` respectively, or update the default value
+ for them in [conftest.py](conftest.py).
 
-The following are the default values for the only endpoints touched by this script:
-* `PROXY_ENDPOINT = https://localhost:9200`
-* `SOURCE_ENDPOINT = http://localhost:19200`
-* `TARGET_ENDPOINT = https://localhost:29200`
+
+#### Script Parameters
+
+This script accepts various parameters to customize its behavior. Below is a list of available parameters along with their default values and acceptable choices:
+
+- `--proxy_endpoint`: The endpoint for the proxy endpoint.
+    - Default: `https://localhost:9200`
+
+- `--source_endpoint`: The endpoint for the source endpoint.
+    - Default: `https://localhost:19200`
+
+- `--target_endpoint`: The endpoint for the target endpoint.
+    - Default: `https://localhost:29200`
+
+- `--source_auth_type`: Specifies the authentication type for the source endpoint.
+    - Default: `basic`
+    - Choices: `none`, `basic`, `sigv4`
+
+- `--source_verify_ssl`: Determines whether to verify the SSL certificate for the source endpoint.
+    - Default: `False`
+    - Choices: `True`, `False`
+
+- `--target_auth_type`: Specifies the authentication type for the target endpoint.
+    - Default: `basic`
+    - Choices: `none`, `basic`, `sigv4`
+
+- `--target_verify_ssl`: Determines whether to verify the SSL certificate for the target endpoint.
+    - Default: `False`
+    - Choices: `True`, `False`
+
+- `--source_username`: Username for authentication with the source endpoint.
+    - Default: `admin`
+
+- `--source_password`: Password for authentication with the source endpoint.
+    - Default: `admin`
+
+- `--target_username`: Username for authentication with the target endpoint.
+    - Default: `admin`
+
+- `--target_password`: Password for authentication with the target endpoint.
+    - Default: `admin`
+
 
 #### Clean Up
 The test script is implemented with a setup and teardown functions that are ran after
