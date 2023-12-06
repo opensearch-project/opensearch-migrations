@@ -55,6 +55,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     enum OffloaderCommandType {
         Read,
         EndOfMessage,
+        DropRequest,
         Write,
         Flush
     }
@@ -69,6 +70,9 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         }
         public static ObservationDirective eom() {
             return new ObservationDirective(OffloaderCommandType.EndOfMessage, 0);
+        }
+        public static ObservationDirective cancelOffload() {
+            return new ObservationDirective(OffloaderCommandType.DropRequest, 0);
         }
         public static ObservationDirective write(int i) {
             return new ObservationDirective(OffloaderCommandType.Write, i);
@@ -118,6 +122,9 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                 return;
             case Flush:
                 offloader.flushCommitAndResetStream(false);
+                return;
+            case DropRequest:
+                 offloader.cancelCaptureForCurrentRequest(Instant.EPOCH);
                 return;
             default:
                 throw new IllegalStateException("Unknown directive type: " + directive.offloaderCommandType);

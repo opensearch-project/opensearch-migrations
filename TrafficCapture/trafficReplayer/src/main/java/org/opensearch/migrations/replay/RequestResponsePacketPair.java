@@ -23,17 +23,17 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
+    final ITrafficStreamKey trafficStreamKey;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
 
-    public RequestResponsePacketPair(ITrafficStreamKey startingAtTrafficStreamKey) {
+    public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey) {
         this.trafficStreamKeysBeingHeld = new ArrayList<>();
-        this.trafficStreamKeysBeingHeld.add(startingAtTrafficStreamKey);
+        trafficStreamKey = startingAtTrafficStreamKey;
     }
 
     @NonNull ITrafficStreamKey getBeginningTrafficStreamKey() {
-        assert trafficStreamKeysBeingHeld != null && !trafficStreamKeysBeingHeld.isEmpty();
-        return trafficStreamKeysBeingHeld.get(0);
+        return trafficStreamKey;
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
