@@ -4,6 +4,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.util.ReferenceCountUtil;
 import lombok.Lombok;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
@@ -13,16 +14,18 @@ import java.util.function.Predicate;
 public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHttpRequestHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpRequestHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader,
-                                                          Predicate<HttpRequest> headerPredicateForWhenToBlock) {
-        super(trafficOffloader);
+    public ConditionallyReliableLoggingHttpRequestHandler(@NonNull IChannelConnectionCaptureSerializer<T> trafficOffloader,
+                                                          @NonNull RequestCapturePredicate requestCapturePredicate,
+                                                          @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock) {
+        super(trafficOffloader, requestCapturePredicate);
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
     }
 
     @Override
-    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest)
+    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg,
+                                                       boolean shouldCapture, HttpRequest httpRequest)
             throws Exception {
-        if (shouldBlockPredicate.test(httpRequest)) {
+        if (shouldCapture && shouldBlockPredicate.test(httpRequest)) {
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 if (t != null) {
                     // This is a spot where we would benefit from having a behavioral policy that different users
@@ -32,14 +35,14 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
                     ReferenceCountUtil.release(msg);
                 } else {
                     try {
-                        super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+                        super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
                     } catch (Exception e) {
                         throw Lombok.sneakyThrow(e);
                     }
                 }
             });
         } else {
-            super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+            super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
         }
     }
 }
