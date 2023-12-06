@@ -8,6 +8,8 @@ import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
@@ -134,6 +136,33 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
                 w.writeInbound(singleByte);
             }
         };
+    }
+
+    // This test doesn't work yet, but this is an optimization.  Getting connections with only a
+    // close observation is already a common occurrence.  This is nice to have, so it's good to
+    // keep this warm and ready, but we don't need the feature for correctness.
+    @Disabled
+    @Test
+    @ValueSource(booleans = {false, true})
+    public void testThatSuppressedCaptureWorks() throws Exception {
+        var streamMgr = new TestStreamManager();
+        var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
+
+        var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", "uploader"));
+        EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpRequestHandler(offloader, headerCapturePredicate, x->true));
+        getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
+        channel.close();
+        var requestBytes = SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8);
+
+        Assertions.assertEquals(0, streamMgr.flushCount.get());
+        // we wrote the correct data to the downstream handler/channel
+        var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
+                .map(m->new ByteArrayInputStream(consumeIntoArray((ByteBuf)m)))
+                .collect(Collectors.toList())))
+                .readAllBytes();
+        log.info("outputdata = " + new String(outputData, StandardCharsets.UTF_8));
+        Assertions.assertArrayEquals(requestBytes, outputData);
     }
 
     @ParameterizedTest
