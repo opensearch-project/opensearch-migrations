@@ -10,7 +10,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 @Slf4j
 public class RequestResponsePacketPair {
@@ -23,17 +22,17 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    final ITrafficStreamKey trafficStreamKey;
+    final ITrafficStreamKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
 
     public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey) {
         this.trafficStreamKeysBeingHeld = new ArrayList<>();
-        trafficStreamKey = startingAtTrafficStreamKey;
+        firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
     }
 
     @NonNull ITrafficStreamKey getBeginningTrafficStreamKey() {
-        return trafficStreamKey;
+        return firstTrafficStreamKeyForRequest;
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {

@@ -191,12 +191,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     private static Optional<CONNECTION_STATUS> handleObservationForSkipState(Accumulation accum, TrafficObservation observation) {
+        assert !observation.hasClose() : "close will be handled earlier in handleCloseObservationThatAffectEveryState";
         if (accum.state == Accumulation.State.IGNORING_LAST_REQUEST) {
-            if (observation.hasWrite() || observation.hasWriteSegment() || observation.hasEndOfMessageIndicator()) {
+            if (observation.hasWrite() || observation.hasWriteSegment() ||
+                    observation.hasEndOfMessageIndicator() ||
+                    observation.hasRequestDropped()) {
                 accum.state = Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK;
             }
             // ignore everything until we hit an EOM
-            return Optional.of(observation.hasClose() ? CONNECTION_STATUS.CLOSED : CONNECTION_STATUS.ALIVE);
+            return Optional.of(CONNECTION_STATUS.ALIVE);
         } else if (accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK) {
             // already processed EOMs above.  Be on the lookout to ignore writes
             if (!(observation.hasRead() || observation.hasReadSegment())) {
@@ -270,6 +273,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             var rrPair = accum.getRrPair();
             assert rrPair.requestData.hasInProgressSegment();
             rrPair.requestData.finalizeRequestSegments(timestamp);
+        } else if (observation.hasRequestDropped()){
+            requestCounter.decrementAndGet();
+            accum.getRrPair().getTrafficStreamsHeld().forEach(listener::onTrafficStreamIgnored);
+            accum.resetToIgnoreAndForgetCurrentRequest();
+        } else {
+            return Optional.empty();
         }
         return Optional.of(CONNECTION_STATUS.ALIVE);
     }
@@ -303,6 +312,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         } else if (observation.hasRead() || observation.hasReadSegment()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
             return handleObservationForReadState(accum, observation, trafficStreamKey, timestamp);
+        } else {
+            return Optional.empty();
         }
         return Optional.of(CONNECTION_STATUS.ALIVE);
 

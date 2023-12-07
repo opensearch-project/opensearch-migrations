@@ -32,11 +32,11 @@ public class TrafficStreamGenerator {
     public static final int MAX_READS_IN_REQUEST = 5;
     public static final int MAX_WRITES_IN_RESPONSE = 5;
     public static final List<Integer> RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE = List.of(
-            -1155869325, 892128508, 155629808, 1429008869, -138487339, 26273138, 685382526,
-            -226796111, -270230103, 1705850753, -1978864692, -836540342, 1181244667,-193570837,
-            -1617640095, -1359243304, -1973979577, -67333094, -2129721489, -2114584541, -1121163101,
-            866345822, 1302951949, 30280569, -1199907813, 34574822, 2109003795, -1349584475, -2050877083,
-            160359681, -1345969040, -20026097, 793184536, 834861033
+            -1155869325, 892128508, 155629808, 1429008869, 26273138, 685382526, 1705850753, -1978864692,
+            -836540342, -193570837, -1617640095, -1359243304, -1973979577, -67333094, -2129721489,
+            2110766901, -1121163101, 866345822, -297497515, -736375570, 30280569, -1199907813,
+            1887084032, 519330814, -2050877083, 174127839, 1712524135, -861378278, 793184536, 174500816,
+            237039773, 944491332
     );
 
     public enum ObservationType {
@@ -191,6 +191,9 @@ public class TrafficStreamGenerator {
                     ()-> SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.read(r.nextInt(bufferBound)));
             if (r.nextDouble() <= cancelRequestLikelihood) {
                 commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.cancelOffload());
+                ++i; // compensate to get the right number of requests in the loop
+                sizes.remove(sizes.size()-1); // This won't show up as a request, so don't propagate it
+                continue;
             }
             if (r.nextDouble() <= flushLikelihood) {
                 commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.flush());

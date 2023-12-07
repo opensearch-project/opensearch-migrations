@@ -106,4 +106,9 @@ public class Accumulation {
         this.state = State.ACCUMULATING_READS;
         this.rrPair = null;
     }
+
+    public void resetToIgnoreAndForgetCurrentRequest() {
+        this.state = State.WAITING_FOR_NEXT_READ_CHUNK;
+        this.rrPair = null;
+    }
 }
