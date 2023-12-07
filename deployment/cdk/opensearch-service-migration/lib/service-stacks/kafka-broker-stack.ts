@@ -38,7 +38,7 @@ export class KafkaBrokerStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "kafka-broker",
-            dockerImageRegistryName: "docker.io/bitnami/kafka:3.4",
+            dockerImageRegistryName: "docker.io/bitnami/kafka:3.6",
             securityGroups: securityGroups,
             environment: {
                 // Definitions for some of these variables can be found in the Bitnami docker documentation here: https://hub.docker.com/r/bitnami/kafka/

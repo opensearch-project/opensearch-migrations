@@ -16,7 +16,8 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
-    readonly analyticsServiceEnabled?: boolean
+    readonly analyticsServiceEnabled?: boolean,
+    readonly kafkaContainerEnabled?: boolean,
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -94,10 +95,18 @@ export class TrafficReplayerStack extends MigrationServiceCore {
 
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
+        let brokerEndpoints
+        if (props.kafkaContainerEnabled) {
+            brokerEndpoints = 'kafka-broker:9092'
+        } else  {
+            brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
+        }
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
 
-        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth`
+        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId}`
+        if (!props.kafkaContainerEnabled) {
+            replayerCommand = replayerCommand.concat(` --kafka-traffic-enable-msk-auth`)
+        }
         if (props.enableClusterFGACAuth) {
             const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)

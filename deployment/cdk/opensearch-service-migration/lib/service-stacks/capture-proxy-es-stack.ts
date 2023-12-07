@@ -11,7 +11,8 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface CaptureProxyESProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly analyticsServiceEnabled: boolean
+    readonly analyticsServiceEnabled: boolean,
+    readonly kafkaContainerEnabled?: boolean
 }
 
 /**
@@ -71,8 +72,16 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             ]
         })
 
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
-        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        let brokerEndpoints
+        if (props.kafkaContainerEnabled) {
+            brokerEndpoints = 'kafka-broker:9092'
+        } else  {
+            brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
+        }
+        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --kafkaConnection ${brokerEndpoints} --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        if (!props.kafkaContainerEnabled) {
+            command = command.concat(' --enableMSKAuth')
+        }
         command = props.analyticsServiceEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
         this.createService({
             serviceName: "capture-proxy-es",
