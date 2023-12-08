@@ -39,7 +39,7 @@ import java.util.stream.StreamSupport;
  * BlockingTrafficSource throttles calls to Kafka.  The BlockingTrafficSource may
  * block calls to readNextTrafficStreamChunk() until some time window elapses.  This
  * could be a very large window in cases where there were long gaps between recorded
- * requests from the capturing proxy.  For example, if a TrafficStream is read and it
+ * requests from the capturing proxy.  For example, if a TrafficStream is read and if
  * that stream is scheduled to be run one hour later, readNextTrafficStreamChunk()
  * may not be called for almost an hour.  By design, we're not calling Kafka to pull
  * any more messages since we know that we don't have work to do for an hour.  Shortly

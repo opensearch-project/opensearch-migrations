@@ -17,7 +17,7 @@ class MetricsLogBuilder {
     }
 
     public MetricsLogBuilder setAttribute(MetricsAttributeKey key, Object value) {
-        loggingEventBuilder.addKeyValue(key.getKeyName(), value);
+        loggingEventBuilder = loggingEventBuilder.addKeyValue(key.getKeyName(), value);
         return this;
     }
 
