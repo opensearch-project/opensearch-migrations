@@ -17,6 +17,7 @@ import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
+import {determineStreamingSourceType} from "./streaming-source-type";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -57,7 +58,14 @@ export class StackComposer {
                 return parseInt(option)
             }
             if (expectedType === 'boolean' || expectedType === 'object') {
-                return JSON.parse(option)
+                try {
+                    return JSON.parse(option)
+                } catch (e) {
+                    if (e instanceof SyntaxError) {
+                        console.error(`Unable to parse option: ${optionName} with expected type: ${expectedType}`)
+                    }
+                    throw e
+                }
             }
         }
         // Values provided by the cdk.context.json should be of the desired type
@@ -95,6 +103,8 @@ export class StackComposer {
         if (!contextJSON) {
             throw new Error(`No CDK context block found for contextId '${contextId}'`)
         }
+        console.log('Received following context block for deployment: ')
+        console.log(contextJSON)
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         let version: EngineVersion
@@ -151,6 +161,7 @@ export class StackComposer {
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
+        const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
 
         const migrationAnalyticsServiceEnabled = this.getContextForType('migrationAnalyticsServiceEnabled', 'boolean', defaultValues, contextJSON)
         const migrationAnalyticsBastionHostEnabled = this.getContextForType('migrationAnalyticsBastionEnabled', 'boolean', defaultValues, contextJSON)
@@ -178,6 +189,13 @@ export class StackComposer {
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
         }
+        let targetEndpoint
+        if (targetClusterEndpoint && osContainerServiceEnabled) {
+            throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetClusterEndpoint, osContainerServiceEnabled]")
+        } else if (targetClusterEndpoint || osContainerServiceEnabled) {
+            targetEndpoint = targetClusterEndpoint ? targetClusterEndpoint : "https://opensearch:9200"
+        }
+        const streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         version = this.getEngineVersion(engineVersion)
@@ -210,7 +228,7 @@ export class StackComposer {
             networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
                 availabilityZoneCount: availabilityZoneCount,
-                targetClusterEndpoint: targetClusterEndpoint,
+                targetClusterEndpoint: targetEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 stage: stage,
@@ -223,9 +241,9 @@ export class StackComposer {
         }
 
         // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
-        // created cluster like below or an imported one
+        // created Domain like below or an imported one
         let openSearchStack
-        if (!targetClusterEndpoint) {
+        if (!targetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: version,
                 domainName: domainName,
@@ -393,7 +411,6 @@ export class StackComposer {
         }
 
         // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
-        // TODO: Future work to provide orchestration between fetch migration and migration assistance
         let fetchMigrationStack
         if (fetchMigrationEnabled && networkStack && migrationStack) {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
@@ -418,7 +435,7 @@ export class StackComposer {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
                 vpc: networkStack.vpc,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
-                kafkaContainerEnabled: kafkaBrokerStack != undefined,
+                streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 stage: stage,
@@ -446,7 +463,7 @@ export class StackComposer {
                 userAgentSuffix: trafficReplayerCustomUserAgent,
                 extraArgs: trafficReplayerExtraArgs,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
-                kafkaContainerEnabled: kafkaBrokerStack != undefined,
+                streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
@@ -493,6 +510,7 @@ export class StackComposer {
                 vpc: networkStack.vpc,
                 customSourceClusterEndpoint: captureProxySourceEndpoint,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
+                streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,
@@ -511,7 +529,7 @@ export class StackComposer {
         }
 
         let osContainerStack
-        if (networkStack && migrationStack) {
+        if (osContainerServiceEnabled && networkStack && migrationStack) {
             osContainerStack = new OpenSearchContainerStack(scope, "opensearch-container", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-OpenSearchContainer`,

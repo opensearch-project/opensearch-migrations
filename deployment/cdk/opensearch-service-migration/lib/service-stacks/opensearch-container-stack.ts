@@ -10,6 +10,10 @@ export interface OpenSearchContainerProps extends StackPropsExt {
     readonly vpc: IVpc
 }
 
+/**
+ * This is a testing stack which deploy a SINGLE node OpenSearch cluster as the target cluster for this solution, and
+ * should not be used for production use cases.
+ */
 export class OpenSearchContainerStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: OpenSearchContainerProps) {
@@ -29,7 +33,6 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             dnsName: "opensearch",
             port: 9200
         }
-        // TODO confirm this is needed
         const ulimits: Ulimit[] = [
             {
                 name: UlimitName.MEMLOCK,
@@ -38,8 +41,8 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             },
             {
                 name: UlimitName.NOFILE,
-                softLimit: 1024 * 512,
-                hardLimit: 1024 * 512
+                softLimit: 65536,
+                hardLimit: 65536
             }
         ]
 
@@ -48,20 +51,16 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             dockerImageRegistryName: "opensearchproject/opensearch:2",
             securityGroups: securityGroups,
             environment: {
-                "plugins.security.disabled": "true",
                 "cluster.name": "os-docker-cluster",
                 "node.name": "opensearch-node1",
                 "discovery.seed_hosts": "opensearch-node1",
                 "bootstrap.memory_lock": "true",
-                // TODO confirm these two settings are needed
-                "OPENSEARCH_JAVA_OPTS": "-Xms512m -Xmx512m",
-                "ES_SETTING_NODE_STORE_ALLOW__MMAP": "false",
                 "discovery.type": "single-node"
             },
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
-            taskCpuUnits: 2048,
-            taskMemoryLimitMiB: 8192,
+            taskCpuUnits: 1024,
+            taskMemoryLimitMiB: 4096,
             ulimits: ulimits,
             ...props
         });
