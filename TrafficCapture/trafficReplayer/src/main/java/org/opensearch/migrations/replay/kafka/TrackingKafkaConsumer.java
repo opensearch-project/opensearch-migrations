@@ -142,7 +142,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private void resume() {
         var activePartitions = kafkaConsumer.assignment();
         try {
-            kafkaConsumer.pause(activePartitions);
+            kafkaConsumer.resume(activePartitions);
         } catch (IllegalStateException e) {
             log.atError().setCause(e).setMessage(()->"Unable to resume the topic partitions: " + topic + ".  " +
                     "This may not be a fatal error for the entire process as the consumer should eventually"
