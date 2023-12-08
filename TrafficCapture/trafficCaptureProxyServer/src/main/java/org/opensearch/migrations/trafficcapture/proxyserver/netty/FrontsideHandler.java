@@ -57,7 +57,7 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                         }
                     });
             outboundChannel.config().setAutoRead(true);
-        } else { // if the outbound channel has died, so be it... let this frontside finish with it's caller naturally
+        } else { // if the outbound channel has died, so be it... let this frontside finish with its call naturally
             log.warn("Output channel (" + outboundChannel + ") is NOT active");
             ReferenceCountUtil.release(msg);
         }

@@ -31,7 +31,7 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
                     // This is a spot where we would benefit from having a behavioral policy that different users
                     // could set as needed. Some users may be fine with just logging a failed offloading of a request
                     // where other users may want to stop entirely. JIRA here: https://opensearch.atlassian.net/browse/MIGRATIONS-1276
-                    log.warn("Got error: " + t.getMessage());
+                    log.atWarn().setCause(t).setMessage("Got error").log();
                     ReferenceCountUtil.release(msg);
                 } else {
                     try {
