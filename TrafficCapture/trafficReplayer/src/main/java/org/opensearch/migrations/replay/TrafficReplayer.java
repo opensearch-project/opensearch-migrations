@@ -923,7 +923,7 @@ public class TrafficReplayer {
     }
 
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
-        log.atWarn().setCause(error).setMessage(()->"Shutting down "+this+" because of error").log();
+        log.atWarn().setCause(error).setMessage(()->"Shutting down " + this + " because of error").log();
         shutdownReasonRef.compareAndSet(null, error);
         if (!shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
             log.atError().setMessage(()->"Shutdown was already signaled by {}.  " +

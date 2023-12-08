@@ -382,7 +382,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     // it's a difficult decision and one to be managed with a policy.
                     // TODO - add Jira/github issue here.
                     log.atWarn().setMessage("Terminating a TrafficStream reconstruction before data was accumulated " +
-                            "for " + accumulation.trafficChannelKey + "assuming an empty server interaction and NOT " +
+                            "for " + accumulation.trafficChannelKey + " assuming an empty server interaction and NOT " +
                             "reproducing this to the target cluster.").log();
                     if (accumulation.hasRrPair()) {
                         listener.onTrafficStreamsExpired(status,

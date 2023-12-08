@@ -172,7 +172,7 @@ public class RequestSenderOrchestrator {
                     eventLoop.schedule(task, getDelayFromNowMs(atTime), TimeUnit.MILLISECONDS);
             scheduledFuture.addListener(f->{
                 if (!f.isSuccess()) {
-                    log.atError().setCause(f.cause()).setMessage(()->"Error scheduling task for "+channelKey).log();
+                    log.atError().setCause(f.cause()).setMessage(()->"Error scheduling task for " + channelKey).log();
                 } else {
                     log.atInfo().setMessage(()->"scheduled future has finished for "+channelInteraction).log();
                 }

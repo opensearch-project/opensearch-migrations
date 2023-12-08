@@ -146,7 +146,7 @@ public class ParsedHttpMessagesAsDicts {
             return c.call();
         } catch (Exception e) {
             // TODO - this isn't a good design choice.
-            // We should follow through with the spirit of this class and leave thes as empty optional values
+            // We should follow through with the spirit of this class and leave this as empty optional values
             log.atWarn().setMessage(()->"Putting what may be a bogus value in the output because transforming it " +
                     "into json threw an exception for "+diagnosticKey.toString()).setCause(e).log();
             return Map.of("Exception", (Object) e.toString());
