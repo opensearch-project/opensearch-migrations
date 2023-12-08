@@ -43,7 +43,7 @@ class KafkaTrafficCaptureSourceTest {
                 .setNodeId("n")
                 .setNumber(7)
                 .build();
-        var tsk = new KafkaProtobufConsumer.TrafficStreamKeyWithKafkaRecordId(ts, 2,123);
+        var tsk = new TrafficStreamKeyWithKafkaRecordId(ts, 1, 2, 123);
         Assertions.assertEquals("n.c.7|partition=2|offset=123", tsk.toString());
     }
 

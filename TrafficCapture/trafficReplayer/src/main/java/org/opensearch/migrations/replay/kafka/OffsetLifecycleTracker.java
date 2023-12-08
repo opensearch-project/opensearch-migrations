@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.StringJoiner;
 
 /**
  * This uses a PriorityQueue to find the MINIMUM offset that has yet to be 'committed'.
@@ -27,6 +28,10 @@ class OffsetLifecycleTracker {
         return pQueue.isEmpty();
     }
 
+    int size() {
+        return pQueue.size();
+    }
+
     void add(long offset) {
         cursorHighWatermark = offset;
         pQueue.add(offset);
@@ -45,5 +50,14 @@ class OffsetLifecycleTracker {
             log.atDebug().setMessage("Commit called for " + offsetToRemove + ", but topCursor=" + topCursor).log();
             return Optional.empty();
         }
+    }
+
+    @Override
+    public String toString() {
+        return new StringJoiner(", ", OffsetLifecycleTracker.class.getSimpleName() + "[", "]")
+                .add("pQueue=" + pQueue)
+                .add("cursorHighWatermark=" + cursorHighWatermark)
+                .add("consumerConnectionGeneration=" + consumerConnectionGeneration)
+                .toString();
     }
 }
