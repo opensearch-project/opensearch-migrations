@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.testutils.StreamInterleaver;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -270,6 +271,11 @@ public class TrafficStreamGenerator {
                 generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
                 generateAllIndicativeRandomTrafficStreamsAndSizes();
         var testCaseArr = generatedCases.toArray(RandomTrafficStreamAndTransactionSizes[]::new);
+        log.atInfo().setMessage(()->
+                Arrays.stream(testCaseArr)
+                        .flatMap(tc->Arrays.stream(tc.trafficStreams).map(TrafficStreamUtils::summarizeTrafficStream))
+                        .collect(Collectors.joining("\n")))
+                .log();
         var aggregatedStreams = randomize ?
                 StreamInterleaver.randomlyInterleaveStreams(new Random(count),
                         Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :

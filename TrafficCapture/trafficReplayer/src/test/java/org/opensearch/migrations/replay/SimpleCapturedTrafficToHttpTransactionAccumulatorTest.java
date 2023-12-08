@@ -92,11 +92,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         return new InMemoryConnectionCaptureFactory("TEST_NODE_ID", bufferSize, onClosedCallback);
     }
 
+    private static byte nextPrintable(int i) {
+        final char firstChar = ' ';
+        final byte lastChar = '~';
+        var r = (byte) (i%(lastChar-firstChar));
+        return (byte) ((r < 0) ? (lastChar + r) : (byte) (r + firstChar));
+    }
+
     static ByteBuf makeSequentialByteBuf(int offset, int size) {
         var bb = Unpooled.buffer(size);
+        final var b = nextPrintable(offset);
         for (int i=0; i<size; ++i) {
             //bb.writeByte((i+offset)%255);
-            bb.writeByte('A'+offset);
+            bb.writeByte(b);
         }
         return bb;
     }

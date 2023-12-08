@@ -87,7 +87,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     public void onExpireAccumulation(String partitionId, Accumulation accumulation) {
                         connectionsExpiredCounter.incrementAndGet();
                         log.atTrace().setMessage(()->"firing accumulation for accum=["
-                                + accumulation.getRequestKey() + "]=" + accumulation)
+                                + accumulation.getRrPair().getBeginningTrafficStreamKey() + "]=" + accumulation)
                                 .log();
                         fireAccumulationsCallbacksAndClose(accumulation,
                                 RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY);
@@ -163,10 +163,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     " are encountered.   Full stream object=" + stream).log();
         }
 
-        var startingSourceRequestOffset =
-                stream.getPriorRequestsReceived()+(stream.hasLastObservationWasUnterminatedRead()?1:0);
-        return new Accumulation(streamWithKey.getKey(),
-                startingSourceRequestOffset, stream.getLastObservationWasUnterminatedRead());
+        return new Accumulation(streamWithKey.getKey(), stream);
     }
 
     private enum CONNECTION_STATUS {
@@ -176,7 +173,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public CONNECTION_STATUS addObservationToAccumulation(@NonNull Accumulation accum,
                                                           @NonNull ITrafficStreamKey trafficStreamKey,
                                                           TrafficObservation observation) {
-        log.atTrace().setMessage(()->"Adding observation: "+observation).log();
+        log.atTrace().setMessage(()->"Adding observation: "+observation+" with state="+accum.state).log();
         var timestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
 
@@ -190,13 +187,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 });
     }
 
-    private static Optional<CONNECTION_STATUS> handleObservationForSkipState(Accumulation accum, TrafficObservation observation) {
+    private Optional<CONNECTION_STATUS> handleObservationForSkipState(Accumulation accum, TrafficObservation observation) {
         assert !observation.hasClose() : "close will be handled earlier in handleCloseObservationThatAffectEveryState";
         if (accum.state == Accumulation.State.IGNORING_LAST_REQUEST) {
             if (observation.hasWrite() || observation.hasWriteSegment() ||
-                    observation.hasEndOfMessageIndicator() ||
-                    observation.hasRequestDropped()) {
+                    observation.hasEndOfMessageIndicator()) {
                 accum.state = Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK;
+            } else if (observation.hasRequestDropped()) {
+                handleDroppedRequestForAccumulation(accum);
             }
             // ignore everything until we hit an EOM
             return Optional.of(CONNECTION_STATUS.ALIVE);
@@ -275,8 +273,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             rrPair.requestData.finalizeRequestSegments(timestamp);
         } else if (observation.hasRequestDropped()){
             requestCounter.decrementAndGet();
-            accum.getRrPair().getTrafficStreamsHeld().forEach(listener::onTrafficStreamIgnored);
-            accum.resetToIgnoreAndForgetCurrentRequest();
+            handleDroppedRequestForAccumulation(accum);
         } else {
             return Optional.empty();
         }
@@ -319,6 +316,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     }
 
+    private void handleDroppedRequestForAccumulation(Accumulation accum) {
+        if (accum.hasRrPair()) {
+            accum.getRrPair().getTrafficStreamsHeld().forEach(listener::onTrafficStreamIgnored);
+        }
+        log.atTrace().setMessage(()->"resetting to forget "+ accum.trafficChannelKey).log();
+        accum.resetToIgnoreAndForgetCurrentRequest();
+        log.atTrace().setMessage(()->"done resetting to forget and accum="+ accum).log();
+    }
+
     // This function manages the transition case when an observation comes in that would terminate
     // any previous HTTP transaction for the connection.  It returns true if there WAS a previous
     // transaction that has been reset and false otherwise
@@ -326,7 +332,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         // If this was brand new, we don't need to care about triggering the callback.
         // We only need to worry about this if we have yet to send the RESPONSE.
         if (accum.state == Accumulation.State.ACCUMULATING_WRITES) {
-            log.atDebug().setMessage(()->"Resetting accum[" + connectionId + "]=" + accum).log();
+            log.atDebug().setMessage(()->"handling EOM for accum[" + connectionId + "]=" + accum).log();
             handleEndOfResponse(accum, RequestResponsePacketPair.ReconstructionStatus.COMPLETE);
             return true;
         }
@@ -367,6 +373,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var rrPair = accumulation.getRrPair();
         rrPair.completionStatus = status;
         listener.onFullDataReceived(accumulation.getRequestKey(), rrPair);
+        log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
     }
 
