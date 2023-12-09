@@ -50,7 +50,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
     public void testThatCommitsAndReadsKeepWorking() throws Exception {
         var kafkaSource = new KafkaTrafficCaptureSource(buildKafkaConsumer(),
                 TEST_TOPIC_NAME, Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS/3));
-        var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMillis(500));
+        var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMinutes(5));
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
         var itemQueue = new LinkedBlockingQueue<List<ITrafficStreamWithKey>>();
         blockingSource.stopReadsPast(Instant.EPOCH.plus(Duration.ofMillis(1)));
@@ -94,7 +94,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
     }
 
     private void sendNextMessage(Producer<String, byte[]> kafkaProducer, int i) {
-        var ts = KafkaTestUtils.makeTestTrafficStream(getTimeAtPoint(i), i);
+        var ts = KafkaTestUtils.makeTestTrafficStreamWithFixedTime(getTimeAtPoint(i), i);
         KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(ts),
                 TEST_TOPIC_NAME,  ""+i);
     }

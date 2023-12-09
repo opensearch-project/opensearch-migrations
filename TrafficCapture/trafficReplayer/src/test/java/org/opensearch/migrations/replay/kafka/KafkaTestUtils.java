@@ -57,9 +57,9 @@ public class KafkaTestUtils {
         return TEST_TRAFFIC_STREAM_ID_STRING + "_" + i;
     }
 
-    static TrafficStream makeTestTrafficStream(Instant t, int i) {
+    static TrafficStream makeTestTrafficStreamWithFixedTime(Instant t, int i) {
         var timestamp = Timestamp.newBuilder()
-                .setSeconds(t.plus(Duration.ofDays(i)).getEpochSecond())
+                .setSeconds(t.getEpochSecond())
                 .setNanos(t.getNano())
                 .build();
         var tsb = TrafficStream.newBuilder()
@@ -101,7 +101,8 @@ public class KafkaTestUtils {
 
     static Future produceKafkaRecord(String testTopicName, Producer<String, byte[]> kafkaProducer,
                                              int i, AtomicInteger sendCompleteCount) {
-        var trafficStream = KafkaTestUtils.makeTestTrafficStream(Instant.now(), i);
+        final var timestamp = Instant.now().plus(Duration.ofDays(i));
+        var trafficStream = KafkaTestUtils.makeTestTrafficStreamWithFixedTime(timestamp, i);
         var record = new ProducerRecord(testTopicName, makeKey(i), trafficStream.toByteArray());
         return kafkaProducer.send(record, (metadata, exception) -> {
             sendCompleteCount.incrementAndGet();

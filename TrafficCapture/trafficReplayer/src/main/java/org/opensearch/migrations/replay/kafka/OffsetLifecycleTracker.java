@@ -33,22 +33,27 @@ class OffsetLifecycleTracker {
     }
 
     void add(long offset) {
-        cursorHighWatermark = offset;
-        pQueue.add(offset);
+        synchronized (pQueue) {
+            cursorHighWatermark = offset;
+            pQueue.add(offset);
+        }
     }
 
     Optional<Long> removeAndReturnNewHead(long offsetToRemove) {
-        var topCursor = pQueue.peek();
-        var didRemove = pQueue.remove(offsetToRemove);
-        assert didRemove : "Expected all live records to have an entry and for them to be removed only once";
-        if (topCursor == offsetToRemove) {
-            topCursor = Optional.ofNullable(pQueue.peek())
-                    .orElse(cursorHighWatermark + 1); // most recent cursor was previously popped
-            log.atDebug().setMessage("Commit called for " + offsetToRemove + ", and new topCursor=" + topCursor).log();
-            return Optional.of(topCursor);
-        } else {
-            log.atDebug().setMessage("Commit called for " + offsetToRemove + ", but topCursor=" + topCursor).log();
-            return Optional.empty();
+        synchronized (pQueue) {
+            var topCursor = pQueue.peek();
+            var didRemove = pQueue.remove(offsetToRemove);
+            assert didRemove : "Expected all live records to have an entry and for them to be removed only once";
+            if (offsetToRemove == topCursor) {
+                topCursor = Optional.ofNullable(pQueue.peek())
+                        .orElse(cursorHighWatermark + 1); // most recent cursor was previously popped
+                log.atDebug().setMessage("Commit called for " + offsetToRemove +
+                        ", and new topCursor=" + topCursor).log();
+                return Optional.of(topCursor);
+            } else {
+                log.atDebug().setMessage("Commit called for " + offsetToRemove + ", but topCursor=" + topCursor).log();
+                return Optional.empty();
+            }
         }
     }
 

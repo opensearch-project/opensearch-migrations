@@ -131,9 +131,19 @@ public class ParsedHttpMessagesAsDicts {
         return incoming.stream().map(Unpooled::wrappedBuffer);
     }
 
+    private static byte[] getBytesFromByteBuf(ByteBuf buf) {
+        if (buf.hasArray()) {
+            return buf.array();
+        } else {
+            var bytes = new byte[buf.readableBytes()];
+            buf.getBytes(buf.readerIndex(), bytes);
+            return bytes;
+        }
+    }
+
     private static Map<String, Object> fillMap(LinkedHashMap<String, Object> map,
                                                HttpHeaders headers, ByteBuf content) {
-        String base64body = Base64.getEncoder().encodeToString(content.array());
+        String base64body = Base64.getEncoder().encodeToString(getBytesFromByteBuf(content));
         content.release();
         map.put("body", base64body);
         headers.entries().stream().forEach(kvp -> map.put(kvp.getKey(), kvp.getValue()));

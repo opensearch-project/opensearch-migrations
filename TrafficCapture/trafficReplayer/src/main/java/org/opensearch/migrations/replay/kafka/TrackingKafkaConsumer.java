@@ -194,6 +194,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                     var offsetDetails = new PojoKafkaCommitOffsetData(offsetTracker.consumerConnectionGeneration,
                             kafkaRecord.partition(), kafkaRecord.offset());
                     offsetTracker.add(offsetDetails.getOffset());
+                    kafkaRecordsLeftToCommit.incrementAndGet();
+                    log.atTrace().setMessage(()->"records in flight="+kafkaRecordsLeftToCommit.get()).log();
                     return builder.apply(offsetDetails, kafkaRecord);
                 });
     }
@@ -202,13 +204,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         try {
             lastTouchTimeRef.set(clock.instant());
             var records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
-            {
-                var previousInFlight = kafkaRecordsLeftToCommit.get();
-                var didSucceed = kafkaRecordsLeftToCommit.compareAndSet(previousInFlight,
-                        previousInFlight + records.partitions().size());
-                assert didSucceed : "Only expected the field for the number of in-flight messages left to commit " +
-                        "to be changed within the consumer thread (though read from others).";
-            }
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
                     .setMessage(()->"Kafka consumer poll has fetched "+records.count() + " records.  " +
                             "Records in flight=" + kafkaRecordsLeftToCommit.get()).log();
@@ -256,8 +251,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 log.trace("partitionToOffsetLifecycleTrackerMap="+partitionToOffsetLifecycleTrackerMap);
                 kafkaRecordsLeftToCommit.set(partitionToOffsetLifecycleTrackerMap.values().stream()
                         .mapToInt(OffsetLifecycleTracker::size).sum());
-                log.atDebug().setMessage(() -> "Done committing " + nextSetOfCommitsMap +
-                        ".  Records in flight=" + kafkaRecordsLeftToCommit.get()).log();
+                log.atDebug().setMessage(() -> "Done committing now records in flight=" +
+                        kafkaRecordsLeftToCommit.get()).log();
             }
         } catch (RuntimeException e) {
             log.atWarn().setCause(e)

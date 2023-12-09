@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -27,6 +28,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -68,6 +71,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
 
     final TrackingKafkaConsumer trackingKafkaConsumer;
+    private final ExecutorService kafkaExecutor;
     private final AtomicLong trafficStreamsRead;
     private final KafkaBehavioralPolicy behavioralPolicy;
 
@@ -85,6 +89,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         trafficStreamsRead = new AtomicLong();
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
+        kafkaExecutor = Executors.newSingleThreadExecutor();
     }
 
     public static KafkaTrafficCaptureSource buildKafkaConsumer(@NonNull String brokers,
@@ -145,8 +150,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
+    @SneakyThrows
     public void touch() {
-        trackingKafkaConsumer.touch();
+        CompletableFuture.runAsync(()->trackingKafkaConsumer.touch(), kafkaExecutor).get();
     }
 
     /**
@@ -166,7 +172,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         return CompletableFuture.supplyAsync(() -> {
             log.atTrace().setMessage("async...readNextTrafficStreamChunk()").log();
             return readNextTrafficStreamSynchronously();
-        });
+        }, kafkaExecutor);
     }
 
     public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously() {
