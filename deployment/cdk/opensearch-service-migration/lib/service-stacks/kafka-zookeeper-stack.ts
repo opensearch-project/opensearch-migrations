@@ -22,6 +22,7 @@ export class KafkaZookeeperStack extends MigrationServiceCore {
         super(scope, id, props)
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "streamingSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/streamingSourceAccessSecurityGroupId`))
         ]
 
         const servicePort: PortMapping = {

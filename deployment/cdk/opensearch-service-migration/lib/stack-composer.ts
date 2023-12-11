@@ -17,7 +17,7 @@ import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
-import {determineStreamingSourceType} from "./streaming-source-type";
+import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -296,6 +296,7 @@ export class StackComposer {
         if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
                 vpc: networkStack.vpc,
+                streamingSourceType: streamingSourceType,
                 mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 mskRestrictPublicAccessTo: mskRestrictPublicAccessTo,
@@ -310,17 +311,19 @@ export class StackComposer {
             migrationStack.addDependency(networkStack)
             this.stacks.push(migrationStack)
 
-            mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
-                vpc: networkStack.vpc,
-                mskEnablePublicEndpoints: mskEnablePublicEndpoints,
-                stackName: `OSMigrations-${stage}-${region}-MSKUtility`,
-                description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            mskUtilityStack.addDependency(migrationStack)
-            this.stacks.push(mskUtilityStack)
+            if (streamingSourceType === StreamingSourceType.AWS_MSK) {
+                mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
+                    vpc: networkStack.vpc,
+                    mskEnablePublicEndpoints: mskEnablePublicEndpoints,
+                    stackName: `OSMigrations-${stage}-${region}-MSKUtility`,
+                    description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
+                    stage: stage,
+                    defaultDeployId: defaultDeployId,
+                    ...props,
+                })
+                mskUtilityStack.addDependency(migrationStack)
+                this.stacks.push(mskUtilityStack)
+            }
         }
 
         let migrationAnalyticsStack;
@@ -546,6 +549,7 @@ export class StackComposer {
         if (migrationConsoleServiceEnabled && networkStack && mskUtilityStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
+                streamingSourceType: streamingSourceType,
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationAnalyticsEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,

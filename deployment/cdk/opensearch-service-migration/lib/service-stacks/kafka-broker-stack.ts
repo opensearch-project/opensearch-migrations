@@ -22,6 +22,7 @@ export class KafkaBrokerStack extends MigrationServiceCore {
         super(scope, id, props)
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "streamingSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/streamingSourceAccessSecurityGroupId`))
         ]
 
         const servicePort: PortMapping = {
@@ -35,6 +36,12 @@ export class KafkaBrokerStack extends MigrationServiceCore {
             dnsName: "kafka-broker",
             port: 9092
         }
+
+        new StringParameter(this, 'SSMParameterKafkaBrokers', {
+            description: 'OpenSearch Migration Parameter for Kafka brokers',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`,
+            stringValue: 'kafka-broker:9092'
+        });
 
         this.createService({
             serviceName: "kafka-broker",
