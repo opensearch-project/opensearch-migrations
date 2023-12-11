@@ -142,7 +142,7 @@ public class FullTrafficReplayerTest {
             tr.shutdown(null);
         }
 
-        Assertions.assertEquals(1, tuplesReceived.size());
+        Assertions.assertEquals(2, tuplesReceived.size());
         log.info("done");
     }
 
