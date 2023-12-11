@@ -22,12 +22,11 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    final ITrafficStreamKey firstTrafficStreamKeyForRequest;
+    @NonNull final ITrafficStreamKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
 
     public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey) {
-        this.trafficStreamKeysBeingHeld = new ArrayList<>();
         firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
     }
 

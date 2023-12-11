@@ -125,6 +125,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                         .log();
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
+                    log.trace("acquring readGate semaphore (w/out timeout)");
                     readGate.acquire();
                 } else {
                     var nextInstant = nextTouchOp.get();
@@ -137,6 +138,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     } else {
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
+                        log.atTrace().setMessage(()->"acquring readGate semaphore with timeout="+waitIntervalMs).log();
                         readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
                     }
                 }

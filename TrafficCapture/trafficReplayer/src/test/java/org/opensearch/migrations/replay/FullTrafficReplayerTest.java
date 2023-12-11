@@ -1,10 +1,11 @@
 package org.opensearch.migrations.replay;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.Assume;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -12,17 +13,25 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
+import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import java.io.EOFException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
@@ -46,7 +55,7 @@ public class FullTrafficReplayerTest {
     public static final String TEST_NODE_ID = "TestNodeId";
     public static final String TEST_CONNECTION_ID = "testConnectionId";
 
-    private static class IndexWatchingReceiverFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
+    private static class IndexWatchingListenerFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
         AtomicInteger nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
 
         @Override
@@ -78,8 +87,62 @@ public class FullTrafficReplayerTest {
                 .build();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
-                httpServer.localhostEndpoint(), new IndexWatchingReceiverFactory(), trafficSourceSupplier);
+                httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(), trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
+        log.info("done");
+    }
+
+    @Test
+    public void testDoubleRequestWithCloseIsCommittedOnce() throws Throwable {
+        var random = new Random(1);
+        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+                response->TestHttpServerContext.makeResponse(random, response));
+        var baseTime = Instant.now();
+        var fixedTimestamp =
+                Timestamp.newBuilder().setSeconds(baseTime.getEpochSecond()).setNanos(baseTime.getNano()).build();
+        var tsb = TrafficStream.newBuilder().setConnectionId("C");
+        for (int i=0; i<2; ++i) {
+            tsb = tsb
+                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                            .setRead(ReadObservation.newBuilder()
+                                    .setData(ByteString.copyFrom(("GET /" +  i + " HTTP/1.0\r\n")
+                                            .getBytes(StandardCharsets.UTF_8)))
+                                    .build())
+                            .build())
+                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                            .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
+                                    .setFirstLineByteLength(14)
+                                    .setHeadersByteLength(14)
+                                    .build())
+                            .build())
+                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                            .setWrite(WriteObservation.newBuilder()
+                                    .setData(ByteString.copyFrom("HTTP/1.0 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
+                                    .build())
+                            .build());
+        }
+        var trafficStream = tsb.addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                .setClose(CloseObservation.getDefaultInstance()))
+                .build();
+        var trafficSource =
+                new ArrayCursorTrafficCaptureSource(new ArrayCursorTrafficSourceFactory(List.of(trafficStream)));
+        var tr = new TrafficReplayer(httpServer.localhostEndpoint(), null,
+                new StaticAuthTransformerFactory("TEST"), null,
+                true, 10, 10*1024);
+
+        var tuplesReceived = new HashSet<String>();
+        try (var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
+            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
+                    new TimeShifter(10 * 1000), (t) -> {
+                        var key = t.uniqueRequestKey;
+                        var wasNew = tuplesReceived.add(key.toString());
+                        Assertions.assertTrue(wasNew);
+                    });
+        } finally {
+            tr.shutdown(null);
+        }
+
+        Assertions.assertEquals(2, tuplesReceived.size());
         log.info("done");
     }
 
@@ -102,8 +165,8 @@ public class FullTrafficReplayerTest {
                         .collect(Collectors.joining("\n"))).log();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(numExpectedRequests,
-                httpServer.localhostEndpoint(), new IndexWatchingReceiverFactory(), trafficSourceSupplier);
-        Assertions.assertEquals(trafficSourceSupplier.streams.size(), trafficSourceSupplier.nextReadCursor.get());
+                httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(), trafficSourceSupplier);
+        Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(), trafficSourceSupplier.nextReadCursor.get());
         log.info("done");
     }
 
@@ -132,11 +195,11 @@ public class FullTrafficReplayerTest {
     }
 
     private static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {
-        List<TrafficStream> streams;
+        List<TrafficStream> trafficStreamsList;
         AtomicInteger nextReadCursor = new AtomicInteger();
 
-        public ArrayCursorTrafficSourceFactory(List<TrafficStream> streams) {
-            this.streams = streams;
+        public ArrayCursorTrafficSourceFactory(List<TrafficStream> trafficStreamsList) {
+            this.trafficStreamsList = trafficStreamsList;
         }
 
         public ISimpleTrafficCaptureSource get() {
@@ -164,10 +227,10 @@ public class FullTrafficReplayerTest {
         public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
             var idx = readCursor.getAndIncrement();
             log.info("reading chunk from index="+idx);
-            if (arrayCursorTrafficSourceFactory.streams.size() <= idx) {
+            if (arrayCursorTrafficSourceFactory.trafficStreamsList.size() <= idx) {
                 return CompletableFuture.failedFuture(new EOFException());
             }
-            var stream = arrayCursorTrafficSourceFactory.streams.get(idx);
+            var stream = arrayCursorTrafficSourceFactory.trafficStreamsList.get(idx);
             var key = new TrafficStreamCursorKey(stream, idx);
             synchronized (pQueue) {
                 pQueue.add(key);

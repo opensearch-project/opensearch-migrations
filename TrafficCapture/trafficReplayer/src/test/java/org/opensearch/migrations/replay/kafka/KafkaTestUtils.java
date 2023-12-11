@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.kafka;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
@@ -9,6 +10,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Tag;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -30,7 +32,7 @@ public class KafkaTestUtils {
     public static final String TEST_GROUP_PRODUCER_ID = "TEST_GROUP_PRODUCER_ID";
     private static final String FAKE_READ_PACKET_DATA = "Fake pa";
     public static final String TEST_NODE_ID = "TestNodeId";
-    public static final String TEST_TRAFFIC_STREAM_ID_STRING = "TEST_TRAFFIC_STREAM_ID_STRING";
+    public static final String TEST_TRAFFIC_STREAM_ID_STRING = "TEST_TRAFFIC_STREAM";
 
     static Producer<String, byte[]> buildKafkaProducer(String bootstrapServers) {
         var kafkaProps = new Properties();
@@ -55,9 +57,9 @@ public class KafkaTestUtils {
         return TEST_TRAFFIC_STREAM_ID_STRING + "_" + i;
     }
 
-    static TrafficStream makeTestTrafficStream(Instant t, int i) {
+    static TrafficStream makeTestTrafficStreamWithFixedTime(Instant t, int i) {
         var timestamp = Timestamp.newBuilder()
-                .setSeconds(t.plus(Duration.ofDays(i)).getEpochSecond())
+                .setSeconds(t.getEpochSecond())
                 .setNanos(t.getNano())
                 .build();
         var tsb = TrafficStream.newBuilder()
@@ -74,9 +76,33 @@ public class KafkaTestUtils {
 
     }
 
+    @SneakyThrows
+    public static void writeTrafficStreamRecord(Producer<String, byte[]> kafkaProducer,
+                                                ITrafficStreamWithKey trafficStreamAndKey,
+                                                String TEST_TOPIC_NAME,
+                                                String recordId) {
+        while (true) {
+            try {
+                var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStreamAndKey.getStream().toByteArray());
+                log.info("sending record with trafficStream=" + trafficStreamAndKey.getKey());
+                var sendFuture = kafkaProducer.send(record, (metadata, exception) -> {
+                    log.atInfo().setCause(exception).setMessage(() -> "completed send of TrafficStream with key=" +
+                            trafficStreamAndKey.getKey() + " metadata=" + metadata).log();
+                });
+                var recordMetadata = sendFuture.get();
+                log.info("finished publishing record... metadata=" + recordMetadata);
+                break;
+            } catch (Exception e) {
+                log.error("Caught exception while trying to publish a record to Kafka.  Blindly retrying.");
+                continue;
+            }
+        }
+    }
+
     static Future produceKafkaRecord(String testTopicName, Producer<String, byte[]> kafkaProducer,
                                              int i, AtomicInteger sendCompleteCount) {
-        var trafficStream = KafkaTestUtils.makeTestTrafficStream(Instant.now(), i);
+        final var timestamp = Instant.now().plus(Duration.ofDays(i));
+        var trafficStream = KafkaTestUtils.makeTestTrafficStreamWithFixedTime(timestamp, i);
         var record = new ProducerRecord(testTopicName, makeKey(i), trafficStream.toByteArray());
         return kafkaProducer.send(record, (metadata, exception) -> {
             sendCompleteCount.incrementAndGet();

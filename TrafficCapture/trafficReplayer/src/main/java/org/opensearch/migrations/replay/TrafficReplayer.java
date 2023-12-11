@@ -688,7 +688,7 @@ public class TrafficReplayer {
 
         @SneakyThrows
         private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
-            if (shouldCommit) {
+            if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     trafficCaptureSource.commitTrafficStream(tsk);
                 }
