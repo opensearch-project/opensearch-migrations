@@ -9,6 +9,7 @@ import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogBuilder;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 
 import java.time.Duration;
@@ -46,7 +47,7 @@ public class ParsedHttpMessagesAsDicts {
 
     protected ParsedHttpMessagesAsDicts(SourceTargetCaptureTuple tuple,
                                         Optional<RequestResponsePacketPair> sourcePairOp) {
-        this(getSourceRequestOp(sourcePairOp),
+        this(getSourceRequestOp(tuple.uniqueRequestKey, sourcePairOp),
                 getSourceResponseOp(tuple, sourcePairOp),
                 getTargetRequestOp(tuple),
                 getTargetResponseOp(tuple));
@@ -55,28 +56,30 @@ public class ParsedHttpMessagesAsDicts {
     private static Optional<Map<String, Object>> getTargetResponseOp(SourceTargetCaptureTuple tuple) {
         return Optional.ofNullable(tuple.targetResponseData)
                 .filter(r -> !r.isEmpty())
-                .map(d -> convertResponse(d, tuple.targetResponseDuration));
+                .map(d -> convertResponse(tuple.uniqueRequestKey, d, tuple.targetResponseDuration));
     }
 
     private static Optional<Map<String, Object>> getTargetRequestOp(SourceTargetCaptureTuple tuple) {
         return Optional.ofNullable(tuple.targetRequestData)
                 .map(d -> d.asByteArrayStream())
-                .map(d -> convertRequest(d.collect(Collectors.toList())));
+                .map(d -> convertRequest(tuple.uniqueRequestKey, d.collect(Collectors.toList())));
     }
 
-    private static Optional<Map<String, Object>> getSourceResponseOp(SourceTargetCaptureTuple tuple, Optional<RequestResponsePacketPair> sourcePairOp) {
+    private static Optional<Map<String, Object>> getSourceResponseOp(SourceTargetCaptureTuple tuple,
+                                                                     Optional<RequestResponsePacketPair> sourcePairOp) {
         return sourcePairOp.flatMap(p ->
                 Optional.ofNullable(p.responseData).flatMap(d -> Optional.ofNullable(d.packetBytes))
-                        .map(d -> convertResponse(d,
+                        .map(d -> convertResponse(tuple.uniqueRequestKey, d,
                                 // TODO: These durations are not measuring the same values!
                                 Duration.between(tuple.sourcePair.requestData.getLastPacketTimestamp(),
                                         tuple.sourcePair.responseData.getLastPacketTimestamp()))));
     }
 
-    private static Optional<Map<String, Object>> getSourceRequestOp(Optional<RequestResponsePacketPair> sourcePairOp) {
+    private static Optional<Map<String, Object>> getSourceRequestOp(@NonNull UniqueSourceRequestKey diagnosticKey,
+            Optional<RequestResponsePacketPair> sourcePairOp) {
         return sourcePairOp.flatMap(p ->
                 Optional.ofNullable(p.requestData).flatMap(d -> Optional.ofNullable(d.packetBytes))
-                        .map(d -> convertRequest(d)));
+                        .map(d -> convertRequest(diagnosticKey, d)));
     }
 
     public ParsedHttpMessagesAsDicts(Optional<Map<String, Object>> sourceRequestOp1,
@@ -123,27 +126,41 @@ public class ParsedHttpMessagesAsDicts {
         return incoming.stream().map(Unpooled::wrappedBuffer);
     }
 
+    private static byte[] getBytesFromByteBuf(ByteBuf buf) {
+        if (buf.hasArray()) {
+            return buf.array();
+        } else {
+            var bytes = new byte[buf.readableBytes()];
+            buf.getBytes(buf.readerIndex(), bytes);
+            return bytes;
+        }
+    }
+
     private static Map<String, Object> fillMap(LinkedHashMap<String, Object> map,
                                                HttpHeaders headers, ByteBuf content) {
-        String base64body = Base64.getEncoder().encodeToString(content.array());
+        String base64body = Base64.getEncoder().encodeToString(getBytesFromByteBuf(content));
         content.release();
         map.put("body", base64body);
         headers.entries().stream().forEach(kvp -> map.put(kvp.getKey(), kvp.getValue()));
         return map;
     }
 
-    private static Map<String, Object> makeSafeMap(Callable<Map<String, Object>> c) {
+    private static Map<String, Object> makeSafeMap(@NonNull UniqueSourceRequestKey diagnosticKey,
+                                                   Callable<Map<String, Object>> c) {
         try {
             return c.call();
         } catch (Exception e) {
-            log.warn("Putting what may be a bogus value in the output because transforming it " +
-                    "into json threw an exception");
+            // TODO - this isn't a good design choice.
+            // We should follow through with the spirit of this class and leave this as empty optional values
+            log.atWarn().setMessage(()->"Putting what may be a bogus value in the output because transforming it " +
+                    "into json threw an exception for "+diagnosticKey.toString()).setCause(e).log();
             return Map.of("Exception", (Object) e.toString());
         }
     }
 
-    private static Map<String, Object> convertRequest(@NonNull List<byte[]> data) {
-        return makeSafeMap(() -> {
+    private static Map<String, Object> convertRequest(@NonNull UniqueSourceRequestKey diagnosticKey,
+                                                      @NonNull List<byte[]> data) {
+        return makeSafeMap(diagnosticKey, () -> {
             var map = new LinkedHashMap<String, Object>();
             var message = HttpByteBufFormatter.parseHttpRequestFromBufs(byteToByteBufStream(data), true);
             map.put("Request-URI", message.uri());
@@ -153,8 +170,9 @@ public class ParsedHttpMessagesAsDicts {
         });
     }
 
-    private static Map<String, Object> convertResponse(@NonNull List<byte[]> data, Duration latency) {
-        return makeSafeMap(() -> {
+    private static Map<String, Object> convertResponse(@NonNull UniqueSourceRequestKey diagnosticKey,
+                                                       @NonNull List<byte[]> data, Duration latency) {
+        return makeSafeMap(diagnosticKey, () -> {
             var map = new LinkedHashMap<String, Object>();
             var message = HttpByteBufFormatter.parseHttpResponseFromBufs(byteToByteBufStream(data), true);
             map.put("HTTP-Version", message.protocolVersion());

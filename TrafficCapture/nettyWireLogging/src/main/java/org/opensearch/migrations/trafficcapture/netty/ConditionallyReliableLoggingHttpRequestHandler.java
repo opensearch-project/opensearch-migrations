@@ -6,6 +6,7 @@ import io.netty.util.ReferenceCountUtil;
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import lombok.Lombok;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
@@ -23,21 +24,22 @@ import java.util.function.Predicate;
 public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHttpRequestHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpRequestHandler(String nodeId, String connectionId,
-                                                          IConnectionCaptureFactory<T> trafficOffloaderFactory,
-                                                          Predicate<HttpRequest> headerPredicateForWhenToBlock)
+    public ConditionallyReliableLoggingHttpRequestHandler(@NonNull String nodeId, String connectionId,
+                                                          @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+                                                          @NonNull RequestCapturePredicate requestCapturePredicate,
+                                                          @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock)
     throws IOException {
-        super(nodeId, connectionId, trafficOffloaderFactory);
+        super(nodeId, connectionId, trafficOffloaderFactory, requestCapturePredicate);
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
     }
 
     @Override
-    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest)
+    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg,
+                                                       boolean shouldCapture, HttpRequest httpRequest)
             throws Exception {
-        if (shouldBlockPredicate.test(httpRequest)) {
+        if (shouldCapture && shouldBlockPredicate.test(httpRequest)) {
             METERING_CLOSURE.meterIncrementEvent(messageContext, "blockingRequestUntilFlush");
             rotateNextMessageContext(HttpMessageContext.HttpTransactionState.INTERNALLY_BLOCKED);
-
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 log.atInfo().setMessage(()->"Done flushing").log();
                 METERING_CLOSURE.meterIncrementEvent(messageContext,
@@ -50,11 +52,11 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
                     // This is a spot where we would benefit from having a behavioral policy that different users
                     // could set as needed. Some users may be fine with just logging a failed offloading of a request
                     // where other users may want to stop entirely. JIRA here: https://opensearch.atlassian.net/browse/MIGRATIONS-1276
-                    log.warn("Dropping request - Got error: " + t.getMessage());
+                    log.atWarn().setCause(t).setMessage("Dropping request - Got error").log();
                     ReferenceCountUtil.release(msg);
                 } else {
                     try {
-                        super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+                        super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
                     } catch (Exception e) {
                         throw Lombok.sneakyThrow(e);
                     }
@@ -62,7 +64,8 @@ public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHt
             });
         } else {
             METERING_CLOSURE.meterIncrementEvent(messageContext, "nonBlockingRequest");
-            super.channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+            // TODO - log capturing vs non-capturing too
+            super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
         }
     }
 }

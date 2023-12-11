@@ -49,7 +49,7 @@ public class ConnectionReplaySession {
     }
 
     public boolean hasWorkRemaining() {
-        return !schedule.isEmpty() || scheduleSequencer.hasPending();
+        return scheduleSequencer.hasPending() || schedule.hasPendingTransmissions();
     }
 
     public long calculateSizeSlowly() {

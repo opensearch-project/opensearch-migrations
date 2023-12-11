@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.netty;
 
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.metrics.Meter;
@@ -12,6 +13,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
@@ -24,13 +27,16 @@ import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -43,9 +49,8 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
     private final Tracer tracer = otelTesting.getOpenTelemetry().getTracer("test");
     private final Meter meter = otelTesting.getOpenTelemetry().getMeter("test");
 
-    @AllArgsConstructor
-    static class StreamManager extends OrderedStreamLifecyleManager {
-        AtomicReference<ByteBuffer> byteBufferAtomicReference;
+    static class TestStreamManager extends OrderedStreamLifecyleManager implements AutoCloseable {
+        AtomicReference<ByteBuffer> byteBufferAtomicReference = new AtomicReference<>();
         AtomicInteger flushCount = new AtomicInteger();
 
         @Override
@@ -78,14 +83,12 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter)
             throws IOException {
-        AtomicReference<ByteBuffer> outputByteBuffer = new AtomicReference<>();
-        AtomicInteger flushCount = new AtomicInteger();
+        var streamManager = new TestStreamManager();
+        var offloader = new StreamChannelConnectionCaptureSerializer("Test", "c", streamManager);
 
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpRequestHandler("n", "c",
-                        (ctx, connectionId) -> new StreamChannelConnectionCaptureSerializer("Test", connectionId,
-                                new StreamManager(outputByteBuffer, flushCount)),
-                        x->true)); // true: block every request
+                new ConditionallyReliableLoggingHttpRequestHandler("n", "c", (ctx, connectionId) -> offloader,
+                        new RequestCapturePredicate(), x->true)); // true: block every request
         channelWriter.accept(channel);
 
         // we wrote the correct data to the downstream handler/channel
@@ -95,10 +98,10 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
                 .readAllBytes();
         Assertions.assertArrayEquals(fullTrafficBytes, outputData);
 
-        Assertions.assertNotNull(outputByteBuffer,
+        Assertions.assertNotNull(streamManager.byteBufferAtomicReference,
                 "This would be null if the handler didn't block until the output was written");
         // we wrote the correct data to the offloaded stream
-        var trafficStream = TrafficStream.parseFrom(outputByteBuffer.get());
+        var trafficStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
         Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 &&
                 trafficStream.getSubStream(0).hasRead());
         var combinedTrafficPacketsSteam =
@@ -107,7 +110,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
                 .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
                 .collect(Collectors.toList())));
         Assertions.assertArrayEquals(fullTrafficBytes, combinedTrafficPacketsSteam.readAllBytes());
-        Assertions.assertEquals(1, flushCount.get());
+        Assertions.assertEquals(1, streamManager.flushCount.get());
 
         Assertions.assertTrue(!otelTesting.getSpans().isEmpty());
         Assertions.assertTrue(!otelTesting.getMetrics().isEmpty());
@@ -125,9 +128,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
     public void testThatAPostInASinglePacketBlocksFutureActivity(boolean usePool) throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
         var bb = TestUtilities.getByteBuf(fullTrafficBytes, usePool);
-        writeMessageAndVerify(fullTrafficBytes, w -> {
-            w.writeInbound(bb);
-        });
+        writeMessageAndVerify(fullTrafficBytes, w -> w.writeInbound(bb));
         log.info("buf.refCnt="+bb.refCnt());
     }
 
@@ -135,12 +136,110 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
     @ValueSource(booleans = {true, false})
     public void testThatAPostInTinyPacketsBlocksFutureActivity(boolean usePool) throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
-        writeMessageAndVerify(fullTrafficBytes, w -> {
-            for (int i=0; i<fullTrafficBytes.length; ++i) {
+        writeMessageAndVerify(fullTrafficBytes, getSingleByteAtATimeWriter(usePool, fullTrafficBytes));
+    }
+
+    private static Consumer<EmbeddedChannel> getSingleByteAtATimeWriter(boolean usePool, byte[] fullTrafficBytes) {
+        return w -> {
+            for (int i = 0; i< fullTrafficBytes.length; ++i) {
                 var singleByte = TestUtilities.getByteBuf(Arrays.copyOfRange(fullTrafficBytes, i, i+1), usePool);
                 w.writeInbound(singleByte);
             }
-        });
+        };
+    }
+
+    // This test doesn't work yet, but this is an optimization.  Getting connections with only a
+    // close observation is already a common occurrence.  This is nice to have, so it's good to
+    // keep this warm and ready, but we don't need the feature for correctness.
+    @Disabled
+    @Test
+    @ValueSource(booleans = {false, true})
+    public void testThatSuppressedCaptureWorks() throws Exception {
+        var streamMgr = new TestStreamManager();
+        var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
+
+        var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", "uploader"));
+        EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpRequestHandler("n", "c",
+                        (ctx, connectionId) -> offloader, headerCapturePredicate, x->true));
+        getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
+        channel.close();
+        var requestBytes = SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8);
+
+        Assertions.assertEquals(0, streamMgr.flushCount.get());
+        // we wrote the correct data to the downstream handler/channel
+        var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
+                .map(m->new ByteArrayInputStream(consumeIntoArray((ByteBuf)m)))
+                .collect(Collectors.toList())))
+                .readAllBytes();
+        log.info("outputdata = " + new String(outputData, StandardCharsets.UTF_8));
+        Assertions.assertArrayEquals(requestBytes, outputData);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testThatHealthCheckCaptureCanBeSuppressed(boolean singleBytes) throws Exception {
+        var streamMgr = new TestStreamManager();
+        var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
+
+        var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", ".*uploader.*"));
+        EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpRequestHandler("n", "c",
+                        (ctx, connectionId) -> offloader, headerCapturePredicate, x->true));
+        getWriter(singleBytes, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
+        getWriter(singleBytes, true, SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8)).accept(channel);
+        var requestBytes = (SimpleRequests.HEALTH_CHECK + SimpleRequests.SMALL_POST).getBytes(StandardCharsets.UTF_8);
+
+        // we wrote the correct data to the downstream handler/channel
+        var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
+                .map(m->new ByteArrayInputStream(consumeIntoArray((ByteBuf)m)))
+                .collect(Collectors.toList())))
+                .readAllBytes();
+        log.info("outputdata = " + new String(outputData, StandardCharsets.UTF_8));
+        Assertions.assertArrayEquals(requestBytes, outputData);
+
+        Assertions.assertNotNull(streamMgr.byteBufferAtomicReference,
+                "This would be null if the handler didn't block until the output was written");
+        // we wrote the correct data to the offloaded stream
+        var trafficStream = TrafficStream.parseFrom(streamMgr.byteBufferAtomicReference.get());
+        Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 &&
+                trafficStream.getSubStream(0).hasRead());
+        Assertions.assertEquals(1, streamMgr.flushCount.get());
+        var observations = trafficStream.getSubStreamList();
+        if (singleBytes) {
+            var sawRequestDropped = new AtomicBoolean(false);
+            var observationsAfterDrop = observations.stream().dropWhile(o->{
+                var wasDrop = o.hasRequestDropped();
+                sawRequestDropped.compareAndSet(false, wasDrop);
+                return !sawRequestDropped.get() || wasDrop;
+            }).collect(Collectors.toList());
+            var combinedTrafficPacketsSteam =
+                    new SequenceInputStream(Collections.enumeration(observationsAfterDrop.stream()
+                            .filter(to->to.hasRead())
+                            .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
+                            .collect(Collectors.toList())));
+            Assertions.assertArrayEquals(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8),
+                    combinedTrafficPacketsSteam.readAllBytes());
+        } else {
+            var combinedTrafficPacketsSteam =
+                    new SequenceInputStream(Collections.enumeration(observations.stream()
+                            .filter(to->to.hasRead())
+                            .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
+                            .collect(Collectors.toList())));
+            var reconstitutedTrafficStreamReads = combinedTrafficPacketsSteam.readAllBytes();
+            log.info("reconstitutedTrafficStreamReads="+
+                    new String(reconstitutedTrafficStreamReads, StandardCharsets.UTF_8));
+            Assertions.assertArrayEquals(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8),
+                    reconstitutedTrafficStreamReads);
+        }
+    }
+
+    private Consumer<EmbeddedChannel> getWriter(boolean singleBytes, boolean usePool, byte[] bytes) {
+        if (singleBytes) {
+            return getSingleByteAtATimeWriter(usePool, bytes);
+        } else {
+            return w -> w.writeInbound(Unpooled.wrappedBuffer(bytes));
+        }
     }
 
     @ParameterizedTest

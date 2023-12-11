@@ -1,12 +1,12 @@
 package org.opensearch.migrations.replay;
 
-import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.testutils.StreamInterleaver;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,9 +33,12 @@ public class TrafficStreamGenerator {
     public static final int MAX_READS_IN_REQUEST = 5;
     public static final int MAX_WRITES_IN_RESPONSE = 5;
     public static final List<Integer> RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE = List.of(
-            -1155869325, 892128508, 155629808, 1429008869, -1465154083, -1242363800, 26273138,
-            1705850753, -1956122223, -193570837, 1558626465, 1248685248, -1292756720, -3507139, 929459541,
-            474550272, -957816454, -1418261474, 431108934, 1601212083, 1788602357, 1722788072, 1421653156);
+            -1155869325, 892128508, 155629808, 1429008869, 26273138, 685382526, 1705850753, -1978864692,
+            -836540342, -193570837, -1617640095, -1359243304, -1973979577, -67333094, -2129721489,
+            2110766901, -1121163101, 866345822, -297497515, -736375570, 30280569, -1199907813,
+            1887084032, 519330814, -2050877083, 174127839, 1712524135, -861378278, 793184536, 174500816,
+            237039773, 944491332
+    );
 
     public enum ObservationType {
         Read(0),
@@ -45,7 +48,8 @@ public class TrafficStreamGenerator {
         Write(4),
         WriteSegment(5),
         EndOfWriteSegment(6),
-        Close(7);
+        RequestDropped(7),
+        Close(8);
 
         private final int intValue;
 
@@ -72,7 +76,7 @@ public class TrafficStreamGenerator {
      * a bit more work to fully implement.  For now, the count parameter is ignored.
      */
     private static int makeClassificationValue(ObservationType ot1, ObservationType ot2, Integer count) {
-        return (((0 * CLASSIFY_COMPONENT_INT_SHIFT) + ot1.intValue) * CLASSIFY_COMPONENT_INT_SHIFT) + ot2.intValue;
+        return ((ot1.intValue) * CLASSIFY_COMPONENT_INT_SHIFT) + ot2.intValue;
     }
 
     static String classificationToString(int c) {
@@ -100,6 +104,8 @@ public class TrafficStreamGenerator {
             return Optional.empty();
         } else if (trafficObservation.hasClose()) {
             return Optional.of(ObservationType.Close);
+        } else if (trafficObservation.hasRequestDropped()) {
+            return Optional.of(ObservationType.RequestDropped);
         } else {
             throw new IllegalStateException("unknown traffic observation: " + trafficObservation);
         }
@@ -117,6 +123,8 @@ public class TrafficStreamGenerator {
                 case Write:
                 case WriteSegment:
                     return ObservationType.EndOfWriteSegment;
+                case RequestDropped:
+                    return ObservationType.RequestDropped;
                 default:
                     throw new IllegalStateException("previous observation type doesn't match expected possibilities: " +
                             lastObservationType);
@@ -174,13 +182,20 @@ public class TrafficStreamGenerator {
         return (r.nextDouble() <= p1) ? supplier1.get() : supplier2.get();
     }
 
-    private static void fillCommandsAndSizes(int bufferSize, Random r, double flushLikelihood, int bufferBound,
+    private static void fillCommandsAndSizes(Random r, double cancelRequestLikelihood, double flushLikelihood,
+                                             int bufferBound,
                                              List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands,
                                              List<Integer> sizes) {
         var numTransactions = r.nextInt(MAX_COMMANDS_IN_CONNECTION);
         for (int i=numTransactions; i>0; --i) {
             addCommands(r, flushLikelihood, r.nextInt(MAX_READS_IN_REQUEST)+1, commands, sizes,
                     ()-> SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.read(r.nextInt(bufferBound)));
+            if (r.nextDouble() <= cancelRequestLikelihood) {
+                commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.cancelOffload());
+                ++i; // compensate to get the right number of requests in the loop
+                sizes.remove(sizes.size()-1); // This won't show up as a request, so don't propagate it
+                continue;
+            }
             if (r.nextDouble() <= flushLikelihood) {
                 commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.flush());
             }
@@ -204,7 +219,8 @@ public class TrafficStreamGenerator {
                 .setMessage(()->String.format("bufferSize=%d bufferBound=%d maxPossibleReads=%d maxPossibleWrites=%d",
                         bufferSize, bufferBound, MAX_READS_IN_REQUEST, MAX_WRITES_IN_RESPONSE))
                 .log();
-        fillCommandsAndSizes(bufferSize, r2, Math.pow(r2.nextDouble(),2.0), bufferBound, commands, sizes);
+        var flushLikelihood = Math.pow(r2.nextDouble(),2.0);
+        fillCommandsAndSizes(r2, flushLikelihood/4, flushLikelihood, bufferBound, commands, sizes);
         return SimpleCapturedTrafficToHttpTransactionAccumulatorTest.makeTrafficStreams(bufferSize, (int) rSeed, commands);
     }
 
@@ -222,7 +238,8 @@ public class TrafficStreamGenerator {
                         ObservationType.EOM, List.of(ObservationType.EndOfReadSegment, ObservationType.EndOfWriteSegment),
                         ObservationType.Write, List.of(ObservationType.EndOfReadSegment, ObservationType.EndOfWriteSegment),
                         ObservationType.WriteSegment, List.of(ObservationType.EndOfReadSegment),
-                        ObservationType.EndOfWriteSegment, List.of(ObservationType.EndOfReadSegment))
+                        ObservationType.EndOfWriteSegment, List.of(ObservationType.EndOfReadSegment),
+                        ObservationType.RequestDropped, List.of(ObservationType.EndOfReadSegment, ObservationType.EndOfWriteSegment))
                 .entrySet().stream()
                 .flatMap(kvp->kvp.getValue().stream().map(v->makeClassificationValue(kvp.getKey(), v,0)))
                 .collect(Collectors.toSet());
@@ -230,7 +247,7 @@ public class TrafficStreamGenerator {
         ObservationType.valueStream()
                 .flatMap(ot1->ObservationType.valueStream().map(ot2->makeClassificationValue(ot1, ot2, 0)))
                 .filter(i->!impossibleTransitions.contains(i))
-                .forEach(i->possibilities.add(i));
+                .forEach(possibilities::add);
         return possibilities;
     }
 
@@ -254,6 +271,11 @@ public class TrafficStreamGenerator {
                 generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
                 generateAllIndicativeRandomTrafficStreamsAndSizes();
         var testCaseArr = generatedCases.toArray(RandomTrafficStreamAndTransactionSizes[]::new);
+        log.atInfo().setMessage(()->
+                Arrays.stream(testCaseArr)
+                        .flatMap(tc->Arrays.stream(tc.trafficStreams).map(TrafficStreamUtils::summarizeTrafficStream))
+                        .collect(Collectors.joining("\n")))
+                .log();
         var aggregatedStreams = randomize ?
                 StreamInterleaver.randomlyInterleaveStreams(new Random(count),
                         Arrays.stream(testCaseArr).map(c->Arrays.stream(c.trafficStreams))) :

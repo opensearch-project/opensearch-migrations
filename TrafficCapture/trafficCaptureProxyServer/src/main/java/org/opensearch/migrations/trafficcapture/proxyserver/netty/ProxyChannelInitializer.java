@@ -7,8 +7,10 @@ import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
 import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
+import lombok.NonNull;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpRequestHandler;
+import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.LoggingHttpResponseHandler;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
@@ -22,12 +24,15 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     private final IConnectionCaptureFactory<T> connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
     private final BacksideConnectionPool backsideConnectionPool;
+    private final RequestCapturePredicate requestCapturePredicate;
 
     public ProxyChannelInitializer(BacksideConnectionPool backsideConnectionPool, Supplier<SSLEngine> sslEngineSupplier,
-                                   IConnectionCaptureFactory<T> connectionCaptureFactory) {
+                                   IConnectionCaptureFactory<T> connectionCaptureFactory,
+                                   @NonNull RequestCapturePredicate requestCapturePredicate) {
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
+        this.requestCapturePredicate = requestCapturePredicate;
     }
 
     public boolean shouldGuaranteeMessageOffloading(HttpRequest httpRequest) {
@@ -46,9 +51,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         }
 
         var connectionId = ch.id().asLongText();
-        var capturingHandler = new ConditionallyReliableLoggingHttpRequestHandler<>(null, connectionId,
-                connectionCaptureFactory, this::shouldGuaranteeMessageOffloading);
-        ch.pipeline().addLast(capturingHandler);
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler<T>("n", "c",
+                connectionCaptureFactory, requestCapturePredicate, this::shouldGuaranteeMessageOffloading));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }
 }
