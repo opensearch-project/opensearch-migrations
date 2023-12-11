@@ -47,6 +47,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
     }
 
     @Test
+    @Tag("longTest")
     public void testThatCommitsAndReadsKeepWorking() throws Exception {
         var kafkaSource = new KafkaTrafficCaptureSource(buildKafkaConsumer(),
                 TEST_TOPIC_NAME, Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS/3));

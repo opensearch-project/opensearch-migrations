@@ -270,7 +270,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     String nextCommitsToString() {
-            return "nextCommits="+nextSetOfCommitsMap.entrySet().stream()
-                    .map(kvp->kvp.getKey()+"->"+kvp.getValue()).collect(Collectors.joining(","));
+        return "nextCommits="+nextSetOfCommitsMap.entrySet().stream()
+                .map(kvp->kvp.getKey()+"->"+kvp.getValue()).collect(Collectors.joining(","));
     }
 }

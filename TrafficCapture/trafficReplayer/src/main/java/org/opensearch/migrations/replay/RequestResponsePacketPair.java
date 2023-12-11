@@ -23,7 +23,7 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
+    @NonNull final List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
 
     public RequestResponsePacketPair(ITrafficStreamKey startingAtTrafficStreamKey) {
@@ -59,9 +59,6 @@ public class RequestResponsePacketPair {
     }
 
     public void holdTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        if (trafficStreamKeysBeingHeld == null) {
-            trafficStreamKeysBeingHeld = new ArrayList<>();
-        }
         if (trafficStreamKeysBeingHeld.isEmpty() ||
                 trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size()-1)) {
             trafficStreamKeysBeingHeld.add(trafficStreamKey);

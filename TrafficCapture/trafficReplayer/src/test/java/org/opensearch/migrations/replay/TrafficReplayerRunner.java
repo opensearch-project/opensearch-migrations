@@ -37,7 +37,7 @@ public class TrafficReplayerRunner {
     private TrafficReplayerRunner() {}
 
     static void runReplayerUntilSourceWasExhausted(int numExpectedRequests, URI endpoint,
-                                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleReceiverSupplier,
+                                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
                                                    Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier)
             throws Throwable {
         AtomicInteger runNumberRef = new AtomicInteger();
@@ -50,7 +50,7 @@ public class TrafficReplayerRunner {
         for (; true; runNumberRef.incrementAndGet()) {
             int runNumber = runNumberRef.get();
             var counter = new AtomicInteger();
-            var tupleReceiver = tupleReceiverSupplier.get();
+            var tupleReceiver = tupleListenerSupplier.get();
             try {
                 runTrafficReplayer(trafficSourceSupplier, endpoint, (t) -> {
                     if (runNumber != runNumberRef.get()) {
