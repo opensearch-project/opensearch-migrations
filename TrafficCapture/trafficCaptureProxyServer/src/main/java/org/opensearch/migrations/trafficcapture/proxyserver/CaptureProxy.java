@@ -23,6 +23,7 @@ import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
@@ -36,8 +37,12 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -132,6 +137,13 @@ public class CaptureProxy {
         description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded." +
                 "If this is not provided, metrics will not be sent to a collector.")
         String otelCollectorEndpoint;
+        @Parameter(required = false,
+                names = "--suppressCaptureForHeaderMatch",
+                arity = 2,
+                description = "The header name (which will be interpreted in a case-insensitive manner) and a regex " +
+                        "pattern.  When the incoming request has a header that matches the regex, it will be passed " +
+                        "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
+        private List<String> suppressCaptureHeaderPairs = new ArrayList<>();
     }
 
     static Parameters parseArgs(String[] args) {
@@ -274,6 +286,14 @@ public class CaptureProxy {
         }
     }
 
+    private static Map<String, String> convertPairListToMap(List<String> list) {
+        var map = new TreeMap<String, String>();
+        for (int i=0; i<list.size(); i+=2) {
+            map.put(list.get(i), list.get(i+1));
+        }
+        return map;
+    }
+
     public static void main(String[] args) throws InterruptedException, IOException {
         System.err.println("Starting Capture Proxy");
         System.err.println("Got args: "+ String.join("; ", args));
@@ -289,7 +309,7 @@ public class CaptureProxy {
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),
                         Paths.get(sslConfigFile).toAbsolutePath().getParent()));
 
-        sksOp.ifPresent(x->x.initHttpSSLConfig());
+        sksOp.ifPresent(DefaultSecurityKeyStore::initHttpSSLConfig);
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
         try {
             var pooledConnectionTimeout = params.destinationConnectionPoolSize == 0 ? Duration.ZERO :
@@ -297,14 +317,17 @@ public class CaptureProxy {
             var backsideConnectionPool = new BacksideConnectionPool(backsideUri,
                     loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside),
                     params.destinationConnectionPoolSize, pooledConnectionTimeout);
-            proxy.start(backsideConnectionPool, params.numThreads,
-                    sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
-                        try {
-                            return sks.createHTTPSSLEngine();
-                        } catch (Exception e) {
-                            throw Lombok.sneakyThrow(e);
-                        }
-                    }).orElse(null), getConnectionCaptureFactory(params));
+            Supplier<SSLEngine> sslEngineSupplier = sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
+                try {
+                    return sks.createHTTPSSLEngine();
+                } catch (Exception e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            }).orElse(null);
+            var headerCapturePredicate =
+                    new HeaderValueFilteringCapturePredicate(convertPairListToMap(params.suppressCaptureHeaderPairs));
+            proxy.start(backsideConnectionPool, params.numThreads, sslEngineSupplier,
+                    getConnectionCaptureFactory(params), headerCapturePredicate);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;

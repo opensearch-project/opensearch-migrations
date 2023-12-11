@@ -78,4 +78,6 @@ public interface IChannelConnectionCaptureListener<T> {
     default CompletableFuture<T> flushCommitAndResetStream(boolean isFinal) throws IOException {
         return CompletableFuture.completedFuture(null);
     }
+
+    default void cancelCaptureForCurrentRequest(Instant timestamp) throws IOException {}
 }

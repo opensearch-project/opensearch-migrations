@@ -10,7 +10,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 @Slf4j
 public class RequestResponsePacketPair {
@@ -23,17 +22,16 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    @NonNull final List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
+    @NonNull final ITrafficStreamKey firstTrafficStreamKeyForRequest;
+    List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
 
-    public RequestResponsePacketPair(ITrafficStreamKey startingAtTrafficStreamKey) {
-        this.trafficStreamKeysBeingHeld = new ArrayList<>();
-        this.trafficStreamKeysBeingHeld.add(startingAtTrafficStreamKey);
+    public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey) {
+        firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
     }
 
     @NonNull ITrafficStreamKey getBeginningTrafficStreamKey() {
-        assert trafficStreamKeysBeingHeld != null && !trafficStreamKeysBeingHeld.isEmpty();
-        return trafficStreamKeysBeingHeld.get(0);
+        return firstTrafficStreamKeyForRequest;
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
@@ -59,6 +57,9 @@ public class RequestResponsePacketPair {
     }
 
     public void holdTrafficStream(ITrafficStreamKey trafficStreamKey) {
+        if (trafficStreamKeysBeingHeld == null) {
+            trafficStreamKeysBeingHeld = new ArrayList<>();
+        }
         if (trafficStreamKeysBeingHeld.isEmpty() ||
                 trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size()-1)) {
             trafficStreamKeysBeingHeld.add(trafficStreamKey);

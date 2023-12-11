@@ -3,21 +3,37 @@ package org.opensearch.migrations.trafficcapture.netty;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
+import lombok.NonNull;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Stream;
 
 public class PassThruHttpHeaders extends DefaultHttpHeaders {
 
-    private static final DefaultHttpHeaders HEADERS_TO_PRESERVE = makeHeadersToPreserve();
+    /**
+     * Use the HttpHeaders class because it does case insensitive matches.
+     */
+    private final HttpHeaders mapWithCaseInsensitiveHeaders;
 
-    private static DefaultHttpHeaders makeHeadersToPreserve() {
-        var h = new DefaultHttpHeaders(false);
-        h.add(HttpHeaderNames.CONTENT_LENGTH, "");
-        h.add(HttpHeaderNames.CONTENT_TRANSFER_ENCODING, "");
-        h.add(HttpHeaderNames.TRAILER, "");
-        return h;
+    public static class HttpHeadersToPreserve {
+        private final HttpHeaders caseInsensitiveHeadersMap;
+        public HttpHeadersToPreserve(String... extraHeaderNames) {
+            caseInsensitiveHeadersMap = new DefaultHttpHeaders();
+            Stream.concat(Stream.of(HttpHeaderNames.CONTENT_LENGTH.toString(),
+                                    HttpHeaderNames.CONTENT_TRANSFER_ENCODING.toString(),
+                                    HttpHeaderNames.TRAILER.toString()),
+                            Arrays.stream(extraHeaderNames))
+                    .forEach(h->caseInsensitiveHeadersMap.add(h, ""));
+        }
     }
 
-    private static boolean headerNameShouldBeTracked(CharSequence name) {
-        return HEADERS_TO_PRESERVE.contains(name);
+    public PassThruHttpHeaders(@NonNull HttpHeadersToPreserve headersToPreserve) {
+        this.mapWithCaseInsensitiveHeaders = headersToPreserve.caseInsensitiveHeadersMap;
+    }
+
+    private boolean headerNameShouldBeTracked(CharSequence name) {
+        return mapWithCaseInsensitiveHeaders.contains(name);
     }
 
     @Override

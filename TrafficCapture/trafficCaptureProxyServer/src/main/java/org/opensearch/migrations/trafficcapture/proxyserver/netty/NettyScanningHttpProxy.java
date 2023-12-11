@@ -7,7 +7,9 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import lombok.NonNull;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 
 import javax.net.ssl.SSLEngine;
 import java.util.function.Supplier;
@@ -29,7 +31,8 @@ public class NettyScanningHttpProxy {
     public void start(BacksideConnectionPool backsideConnectionPool,
                       int numThreads,
                       Supplier<SSLEngine> sslEngineSupplier,
-                      IConnectionCaptureFactory<Object> connectionCaptureFactory) throws InterruptedException {
+                      IConnectionCaptureFactory<Object> connectionCaptureFactory,
+                      @NonNull RequestCapturePredicate requestCapturePredicate) throws InterruptedException {
         bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("captureProxyPoolBoss"));
         workerGroup = new NioEventLoopGroup(numThreads, new DefaultThreadFactory("captureProxyPoolWorker"));
         ServerBootstrap serverBootstrap = new ServerBootstrap();
@@ -37,7 +40,7 @@ public class NettyScanningHttpProxy {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new ProxyChannelInitializer<>(backsideConnectionPool, sslEngineSupplier,
-                            connectionCaptureFactory))
+                            connectionCaptureFactory, requestCapturePredicate))
                     .childOption(ChannelOption.AUTO_READ, false)
                     .bind(proxyPort).sync().channel();
         } catch (Exception e) {
