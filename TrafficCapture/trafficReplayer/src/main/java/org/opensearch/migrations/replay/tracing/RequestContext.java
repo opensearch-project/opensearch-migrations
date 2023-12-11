@@ -47,4 +47,9 @@ public class RequestContext implements IReplayerRequestContext, IWithStartTime {
     public ISourceTrafficChannelKey getChannelKey() {
         return replayerRequestKey.trafficStreamKey;
     }
+
+    @Override
+    public String toString() {
+        return replayerRequestKey.toString();
+    }
 }

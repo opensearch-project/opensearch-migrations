@@ -6,6 +6,8 @@ import org.opensearch.migrations.tracing.ISpanGenerator;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
+import java.util.StringJoiner;
+
 public class ChannelKeyContext implements IConnectionContext {
     @Getter
     final ISourceTrafficChannelKey channelKey;
@@ -25,5 +27,10 @@ public class ChannelKeyContext implements IConnectionContext {
     @Override
     public String getNodeId() {
         return channelKey.getNodeId();
+    }
+
+    @Override
+    public String toString() {
+        return channelKey.toString();
     }
 }

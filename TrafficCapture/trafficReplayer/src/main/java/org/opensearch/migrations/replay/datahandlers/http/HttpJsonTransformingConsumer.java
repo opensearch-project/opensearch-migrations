@@ -75,7 +75,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     public HttpJsonTransformingConsumer(IJsonTransformer transformer,
                                         IAuthTransformerFactory authTransformerFactory,
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
-                                        String diagnosticLabel,
                                         RequestContext requestContext) {
         this.transformationContext = new IWithStartTimeAndAttributes<>() {
             @Getter Span currentSpan = METERING_CLOSURE.makeSpanContinuation("httpRequestTransformation")
@@ -88,7 +87,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
         pipelineOrchestrator = new RequestPipelineOrchestrator<>(chunkSizes, transformedPacketReceiver,
-                authTransformerFactory, diagnosticLabel, requestContext);
+                authTransformerFactory, requestContext);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
     }
 

@@ -34,7 +34,7 @@ public class HeaderTransformerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, null, testPacketCapture,
-                "TEST", TestRequestKey.getTestConnectionRequestContext(0));
+                TestRequestKey.getTestConnectionRequestContext(0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
@@ -86,7 +86,7 @@ public class HeaderTransformerTest {
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
-                httpBasicAuthTransformer, testPacketCapture, "TEST", 
+                httpBasicAuthTransformer, testPacketCapture,
                 TestRequestKey.getTestConnectionRequestContext(0));
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
@@ -113,7 +113,7 @@ public class HeaderTransformerTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME, null,
                         "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
-                null, testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestContext(0));
+                null, testPacketCapture, TestRequestKey.getTestConnectionRequestContext(0));
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)

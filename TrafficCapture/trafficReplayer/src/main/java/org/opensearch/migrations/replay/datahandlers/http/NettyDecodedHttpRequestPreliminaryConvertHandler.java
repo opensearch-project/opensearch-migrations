@@ -33,12 +33,11 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
-                                                            String diagnosticLabel,
                                                             RequestContext requestContext) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;
-        this.diagnosticLabel = "[" + diagnosticLabel + "] ";
+        this.diagnosticLabel = "[" + requestContext + "] ";
         this.requestContext = requestContext;
     }
 

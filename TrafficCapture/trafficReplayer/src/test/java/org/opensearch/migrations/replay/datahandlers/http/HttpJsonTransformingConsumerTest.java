@@ -27,7 +27,7 @@ class HttpJsonTransformingConsumerTest {
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(new TransformationLoader()
                         .getTransformerFactoryLoader(null),
-                        null, testPacketCapture, "TEST",
+                        null, testPacketCapture,
                         TestRequestKey.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
@@ -48,7 +48,7 @@ class HttpJsonTransformingConsumerTest {
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(
                         new TransformationLoader().getTransformerFactoryLoader("test.domain"),
-                        null, testPacketCapture, "TEST",
+                        null, testPacketCapture,
                         TestRequestKey.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
@@ -73,8 +73,7 @@ class HttpJsonTransformingConsumerTest {
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(
                         new TransformationLoader().getTransformerFactoryLoader("test.domain"),
-                        RemovingAuthTransformerFactory.instance,
-                        testPacketCapture, "TEST",
+                        RemovingAuthTransformerFactory.instance, testPacketCapture,
                         TestRequestKey.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
@@ -114,7 +113,7 @@ class HttpJsonTransformingConsumerTest {
         });
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(complexTransformer, null,
-                        testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestContext(0));
+                        testPacketCapture, TestRequestKey.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {

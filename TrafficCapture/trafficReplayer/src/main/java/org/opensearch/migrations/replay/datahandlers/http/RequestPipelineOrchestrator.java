@@ -42,7 +42,6 @@ public class RequestPipelineOrchestrator<R> {
     public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer<R> packetReceiver;
-    final String diagnosticLabel;
     private RequestContext requestContext;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
@@ -50,13 +49,11 @@ public class RequestPipelineOrchestrator<R> {
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
                                        IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
-                                       String diagnosticLabel,
                                        RequestContext requestContext) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
                 IAuthTransformerFactory.NullAuthTransformerFactory.instance;
-        this.diagnosticLabel = diagnosticLabel;
         this.requestContext = requestContext;
     }
 
@@ -99,8 +96,8 @@ public class RequestPipelineOrchestrator<R> {
         // Note3: ByteBufs will be sent through when there were pending bytes left to be parsed by the
         //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
         //        NettyDecodedHttpRequestHandler is removed.
-        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler<R>(transformer, chunkSizes, this,
-                diagnosticLabel, requestContext));
+        pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler<R>(transformer, chunkSizes,
+                this, requestContext));
         addLoggingHandler(pipeline, "B");
     }
 
@@ -150,7 +147,7 @@ public class RequestPipelineOrchestrator<R> {
         // OUT: nothing - terminal!  ByteBufs are routed to the packet handler!
         addLoggingHandler(pipeline, "K");
         pipeline.addLast(OFFLOADING_HANDLER_NAME,
-                new NettySendByteBufsToPacketHandlerHandler<R>(packetReceiver, diagnosticLabel));
+                new NettySendByteBufsToPacketHandlerHandler<R>(packetReceiver, requestContext));
     }
 
     private void addLoggingHandler(ChannelPipeline pipeline, String name) {

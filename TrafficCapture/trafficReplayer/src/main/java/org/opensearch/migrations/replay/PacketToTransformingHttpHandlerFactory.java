@@ -30,6 +30,6 @@ public class PacketToTransformingHttpHandlerFactory implements
     create(UniqueReplayerRequestKey requestKey, RequestContext requestContext) {
         log.trace("creating HttpJsonTransformingConsumer");
         return new HttpJsonTransformingConsumer<>(jsonTransformer, authTransformerFactory,
-                new TransformedPacketReceiver(), requestKey.toString(), requestContext);
+                new TransformedPacketReceiver(), requestContext);
     }
 }

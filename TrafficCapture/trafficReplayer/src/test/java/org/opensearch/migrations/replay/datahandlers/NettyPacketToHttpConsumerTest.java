@@ -164,12 +164,9 @@ public class NettyPacketToHttpConsumerTest {
                 new TestFlowController(), timeShifter);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
-                String connId = "TEST_" + j;
-                var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
-                var requestKey = new UniqueReplayerRequestKey(trafficStreamKey, 0, i);
-                var ctx = TestRequestKey.getTestConnectionRequestContext(0);
+                var ctx = TestRequestKey.getTestConnectionRequestContext("TEST_"+i, j);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
-                        sendingFactory, ctx, Instant.now(), Instant.now(), requestKey,
+                        sendingFactory, ctx, Instant.now(), Instant.now(), ctx.getReplayerRequestKey(),
                         ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 log.info("requestFinishFuture="+requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();

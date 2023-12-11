@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
@@ -28,15 +29,15 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
     DiagnosticTrackableCompletableFuture<String, Boolean> currentFuture;
     private AtomicReference<DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>>
             packetReceiverCompletionFutureRef;
-    String diagnosticLabel;
+    RequestContext requestContext;
 
     public NettySendByteBufsToPacketHandlerHandler(IPacketFinalizingConsumer<R> packetReceiver,
-                                                   String diagnosticLabel) {
+                                                   RequestContext requestContext) {
         this.packetReceiver = packetReceiver;
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();
-        this.diagnosticLabel = diagnosticLabel;
+        this.requestContext = requestContext;
         currentFuture = DiagnosticTrackableCompletableFuture.Factory.completedFuture(null,
-                ()->"currentFuture for NettySendByteBufsToPacketHandlerHandler initialized to the base case for " + diagnosticLabel);
+                ()->"currentFuture for NettySendByteBufsToPacketHandlerHandler initialized to the base case for " + requestContext);
     }
 
     @Override
