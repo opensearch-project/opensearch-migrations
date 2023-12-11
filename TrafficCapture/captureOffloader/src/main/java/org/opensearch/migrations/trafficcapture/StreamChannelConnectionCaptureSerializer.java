@@ -13,6 +13,7 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
+import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
@@ -202,6 +203,16 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             streamHasBeenClosed = true;
         }
         return future;
+    }
+
+    @Override
+    public void cancelCaptureForCurrentRequest(Instant timestamp) throws IOException {
+        beginSubstreamObservation(timestamp, TrafficObservation.REQUESTDROPPED_FIELD_NUMBER, 1);
+        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.REQUESTDROPPED_FIELD_NUMBER,
+                RequestIntentionallyDropped.getDefaultInstance());
+        this.readObservationsAreWaitingForEom = false;
+        this.firstLineByteLength = -1;
+        this.headersByteLength = -1;
     }
 
     @Override
