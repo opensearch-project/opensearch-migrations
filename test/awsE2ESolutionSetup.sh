@@ -7,10 +7,10 @@
 prepare_source_nodes_for_capture () {
   deploy_stage=$1
   instance_ids=($(aws ec2 describe-instances --filters 'Name=tag:Name,Values=opensearch-infra-stack*' 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
-  kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/mskBrokers" --query 'Parameter.Value' --output text)
+  kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/kafkaBrokers" --query 'Parameter.Value' --output text)
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
-  kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/mskAccessSecurityGroupId" --query 'Parameter.Value' --output text)
+  kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/streamingSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
