@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
-public class ConditionallyReliableLoggingHttpRequestHandlerTest {
+public class ConditionallyReliableLoggingHttpHandlerTest {
     @RegisterExtension
     static final OpenTelemetryExtension otelTesting = OpenTelemetryExtension.create();
     private final Tracer tracer = otelTesting.getOpenTelemetry().getTracer("test");
@@ -86,7 +86,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "c", streamManager);
 
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpRequestHandler("n", "c", (ctx, connectionId) -> offloader,
+                new ConditionallyReliableLoggingHttpHandler("n", "c", (ctx, connectionId) -> offloader,
                         new RequestCapturePredicate(), x->true)); // true: block every request
         channelWriter.accept(channel);
 
@@ -159,7 +159,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
         var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", "uploader"));
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpRequestHandler("n", "c",
+                new ConditionallyReliableLoggingHttpHandler("n", "c",
                         (ctx, connectionId) -> offloader, headerCapturePredicate, x->true));
         getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
         channel.close();
@@ -183,7 +183,7 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
 
         var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", ".*uploader.*"));
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpRequestHandler("n", "c",
+                new ConditionallyReliableLoggingHttpHandler("n", "c",
                         (ctx, connectionId) -> offloader, headerCapturePredicate, x->false));
         getWriter(singleBytes, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
         channel.writeOutbound(Unpooled.wrappedBuffer("response1".getBytes(StandardCharsets.UTF_8)));

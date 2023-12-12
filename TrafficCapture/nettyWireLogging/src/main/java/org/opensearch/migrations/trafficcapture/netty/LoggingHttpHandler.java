@@ -32,7 +32,7 @@ import java.io.IOException;
 import java.time.Instant;
 
 @Slf4j
-public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
+public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     public static final String TELEMETRY_SCOPE_NAME = "CapturingHttpHandler";
     public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
@@ -143,9 +143,9 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
 
     protected HttpMessageContext messageContext;
 
-    public LoggingHttpRequestHandler(String nodeId, String channelKey,
-                                     @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
-                                     @NonNull RequestCapturePredicate httpHeadersCapturePredicate)
+    public LoggingHttpHandler(String nodeId, String channelKey,
+                              @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+                              @NonNull RequestCapturePredicate httpHeadersCapturePredicate)
     throws IOException {
         var parentContext = new ConnectionContext(channelKey, nodeId,
                 METERING_CLOSURE.makeSpanContinuation("connectionLifetime", null));

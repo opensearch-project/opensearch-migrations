@@ -8,7 +8,7 @@ import io.netty.handler.ssl.SslHandler;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import lombok.NonNull;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpRequestHandler;
+import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 
 import javax.net.ssl.SSLEngine;
@@ -48,7 +48,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         }
 
         var connectionId = ch.id().asLongText();
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler<T>("n", "c",
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<T>("n", "c",
                 connectionCaptureFactory, requestCapturePredicate, this::shouldGuaranteeMessageOffloading));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }

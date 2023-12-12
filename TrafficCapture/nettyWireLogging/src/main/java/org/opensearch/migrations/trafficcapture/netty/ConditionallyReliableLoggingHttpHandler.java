@@ -3,31 +3,23 @@ package org.opensearch.migrations.trafficcapture.netty;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.util.ReferenceCountUtil;
-import io.opentelemetry.api.trace.Span;
-import lombok.Getter;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
-import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
-import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.IOException;
-import java.time.Instant;
-import java.util.function.Function;
 import java.util.function.Predicate;
 
 @Slf4j
-public class ConditionallyReliableLoggingHttpRequestHandler<T> extends LoggingHttpRequestHandler<T> {
+public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpRequestHandler(@NonNull String nodeId, String connectionId,
-                                                          @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
-                                                          @NonNull RequestCapturePredicate requestCapturePredicate,
-                                                          @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock)
+    public ConditionallyReliableLoggingHttpHandler(@NonNull String nodeId, String connectionId,
+                                                   @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+                                                   @NonNull RequestCapturePredicate requestCapturePredicate,
+                                                   @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock)
     throws IOException {
         super(nodeId, connectionId, trafficOffloaderFactory, requestCapturePredicate);
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
