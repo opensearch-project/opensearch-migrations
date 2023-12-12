@@ -1,6 +1,6 @@
 export enum StreamingSourceType {
-    AWS_MSK,
-    KAFKA_ECS
+    AWS_MSK = 'AWS_MSK',
+    KAFKA_ECS = 'KAFKA_ECS'
 }
 
 export function determineStreamingSourceType(kafkaBrokerServiceEnabled: boolean): StreamingSourceType {

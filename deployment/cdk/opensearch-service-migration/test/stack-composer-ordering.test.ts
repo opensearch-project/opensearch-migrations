@@ -9,12 +9,45 @@ import {KafkaBrokerStack} from "../lib/service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "../lib/service-stacks/kafka-zookeeper-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import {MigrationAnalyticsStack} from "../lib/service-stacks/migration-analytics-stack";
+import {OpenSearchContainerStack} from "../lib/service-stacks/opensearch-container-stack";
 
 // Mock using local Dockerfile (which may not exist and would fail synthesis) with the intent of using a "fake-image" from a public registry
 jest.mock("aws-cdk-lib/aws-ecr-assets")
 jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("fake-image"));
 
-test('Test all migration services get created when enabled', () => {
+test('Test all migration services with MSK get created when enabled', () => {
+
+    const contextOptions = {
+        "stage": "test",
+        "engineVersion": "OS_2.9",
+        "domainName": "unit-test-opensearch-cluster",
+        "dataNodeCount": 2,
+        "availabilityZoneCount": 2,
+        "openAccessPolicyEnabled": true,
+        "domainRemovalPolicy": "DESTROY",
+        "vpcEnabled": true,
+        "migrationAssistanceEnabled": true,
+        "migrationConsoleServiceEnabled": true,
+        "captureProxyESServiceEnabled": true,
+        "trafficReplayerServiceEnabled": true,
+        "captureProxyServiceEnabled": true,
+        "elasticsearchServiceEnabled": true,
+        "migrationAnalyticsServiceEnabled": true,
+        "osContainerServiceEnabled": true
+    }
+
+    const stacks = createStackComposer(contextOptions)
+
+    const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
+        TrafficReplayerStack, MigrationAnalyticsStack, OpenSearchContainerStack]
+    services.forEach( (stackClass) => {
+        const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
+        const template = Template.fromStack(stack)
+        template.resourceCountIs("AWS::ECS::Service", 1)
+    })
+})
+
+test('Test all migration services with Kafka container get created when enabled', () => {
 
     const contextOptions = {
         "stage": "test",
@@ -33,13 +66,14 @@ test('Test all migration services get created when enabled', () => {
         "elasticsearchServiceEnabled": true,
         "kafkaBrokerServiceEnabled": true,
         "kafkaZookeeperServiceEnabled": true,
-        "migrationAnalyticsServiceEnabled": true
+        "migrationAnalyticsServiceEnabled": true,
+        "osContainerServiceEnabled": true
     }
 
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack, MigrationAnalyticsStack]
+        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack, MigrationAnalyticsStack, OpenSearchContainerStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)
