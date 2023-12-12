@@ -4,6 +4,7 @@ import lombok.NonNull;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,7 +27,12 @@ public class Accumulation {
     AtomicLong newestPacketTimestampInMillis;
     State state;
     AtomicInteger numberOfResets;
-    final int startingSourceRequestIndex;
+    int startingSourceRequestIndex;
+
+    public Accumulation(ITrafficStreamKey key, TrafficStream ts) {
+        this(key, ts.getPriorRequestsReceived()+(ts.hasLastObservationWasUnterminatedRead()?1:0),
+                ts.getLastObservationWasUnterminatedRead());
+    }
 
     public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey, int startingSourceRequestIndex) {
         this(trafficChannelKey, startingSourceRequestIndex, false);
@@ -104,6 +110,14 @@ public class Accumulation {
     public void resetForNextRequest() {
         numberOfResets.incrementAndGet();
         this.state = State.ACCUMULATING_READS;
+        this.rrPair = null;
+    }
+
+    public void resetToIgnoreAndForgetCurrentRequest() {
+        if (state == State.IGNORING_LAST_REQUEST) {
+            --startingSourceRequestIndex;
+        }
+        this.state = State.WAITING_FOR_NEXT_READ_CHUNK;
         this.rrPair = null;
     }
 }

@@ -74,4 +74,12 @@ class ParsedHttpMessagesAsDictsTest {
                 Map.of("Status-Code", Integer.valueOf(404))));
         Assertions.assertEquals("REQUEST_ID:C.0|SOURCE_HTTP_STATUS:200|TARGET_HTTP_STATUS:404|HTTP_STATUS_MATCH:0", loggedMetrics);
     }
+
+    @Test
+    public void testMetricsAreRightWithMissingStatusCode() {
+        var loggedMetrics = getLoggedMetrics(makeTestData(
+                Map.of("Sorry", "exception message..."),
+                Map.of("Status-Code", Integer.valueOf(404))));
+        Assertions.assertEquals("REQUEST_ID:C.0|TARGET_HTTP_STATUS:404|HTTP_STATUS_MATCH:0", loggedMetrics);
+    }
 }

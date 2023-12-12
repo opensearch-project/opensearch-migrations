@@ -11,7 +11,9 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -117,8 +119,9 @@ public class KafkaRestartingTrafficReplayerTest {
         var kafkaProducer = buildKafkaProducer();
         var counter = new AtomicInteger();
         loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer, streams, s -> s.forEach(trafficStream ->
-                writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(trafficStream),
-                        "KEY_" + counter.incrementAndGet())));
+                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(trafficStream),
+                        TEST_TOPIC_NAME, "KEY_" + counter.incrementAndGet())));
+        Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
     }
 
     private <R extends AutoCloseable> void
@@ -167,7 +170,9 @@ public class KafkaRestartingTrafficReplayerTest {
                             List<ITrafficStreamWithKey> chunks = null;
                             chunks = originalTrafficSource.readNextTrafficStreamChunk().get();
                             for (int j = 0; j < chunks.size(); ++j) {
-                                writeTrafficStreamRecord(kafkaProducer, chunks.get(j), "KEY_" + i + "_" + j);
+                                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, chunks.get(j), TEST_TOPIC_NAME,
+                                        "KEY_" + i + "_" + j);
+                                Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
                             }
                         }
                     } catch (Exception e) {
@@ -178,26 +183,4 @@ public class KafkaRestartingTrafficReplayerTest {
                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS));
     }
 
-    @SneakyThrows
-    private static void writeTrafficStreamRecord(Producer<String, byte[]> kafkaProducer,
-                                                 ITrafficStreamWithKey trafficStreamAndKey,
-                                                 String recordId) {
-        while (true) {
-            try {
-                var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStreamAndKey.getStream().toByteArray());
-                log.info("sending record with trafficStream=" + trafficStreamAndKey.getKey());
-                var sendFuture = kafkaProducer.send(record, (metadata, exception) -> {
-                    log.atInfo().setCause(exception).setMessage(() -> "completed send of TrafficStream with key=" +
-                            trafficStreamAndKey.getKey() + " metadata=" + metadata).log();
-                });
-                var recordMetadata = sendFuture.get();
-                log.info("finished publishing record... metadata=" + recordMetadata);
-                break;
-            } catch (Exception e) {
-                log.error("Caught exception while trying to publish a record to Kafka.  Blindly retrying.");
-                continue;
-            }
-        }
-        Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
-    }
 }
