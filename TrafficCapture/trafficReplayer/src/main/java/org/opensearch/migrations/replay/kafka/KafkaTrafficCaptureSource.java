@@ -181,11 +181,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             return trackingKafkaConsumer.getNextBatchOfRecords((offsetData,kafkaRecord) -> {
                         try {
                             TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
-                            metricsLogger.atSuccess(MetricsEvent.PARSED_TRAFFIC_STREAM_FROM_KAFKA)
-                                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, ts.getConnectionId())
-                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, trackingKafkaConsumer.topic)
-                                    .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, ts.getSerializedSize()).emit();
-
                             // Ensure we increment trafficStreamsRead even at a higher log level
                             metricsLogger.atSuccess(MetricsEvent.PARSED_TRAFFIC_STREAM_FROM_KAFKA)
                                     .setAttribute(MetricsAttributeKey.CONNECTION_ID, ts.getConnectionId())
