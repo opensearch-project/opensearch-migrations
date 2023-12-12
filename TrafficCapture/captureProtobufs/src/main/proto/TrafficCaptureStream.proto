@@ -41,6 +41,7 @@ message EndOfMessageIndication {
   optional int32 firstLineByteLength = 1;
   optional int32 headersByteLength = 2;
 }
+message RequestIntentionallyDropped {}
 
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
@@ -61,6 +62,8 @@ message TrafficObservation {
     // having been committed to the stream.
     EndOfSegmentsIndication segmentEnd = 14;
     EndOfMessageIndication endOfMessageIndicator = 15;
+
+    RequestIntentionallyDropped requestDropped = 16;
   }
 }
 

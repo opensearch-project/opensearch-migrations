@@ -190,7 +190,6 @@ public class ClientConnectionPool {
                             var schedule = channelAndFutureWork.schedule;
                             while (channelAndFutureWork.hasWorkRemaining()) {
                                 var scheduledItemToKill = schedule.peekFirstItem();
-                                scheduledItemToKill.getValue();
                                 schedule.removeFirstItem();
                             }
                         })

@@ -6,7 +6,8 @@ import lombok.ToString;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-@ToString(callSuper = true)
+import java.util.StringJoiner;
+
 @EqualsAndHashCode(callSuper = true)
 @Getter
 class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey implements KafkaCommitOffsetData {
@@ -23,5 +24,14 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey implements 
         this.generation = generation;
         this.partition = partition;
         this.offset = offset;
+    }
+
+    @Override
+    public String toString() {
+        return new StringJoiner("|")
+                .add(super.toString())
+                .add("partition=" + partition)
+                .add("offset=" + offset)
+                .toString();
     }
 }
