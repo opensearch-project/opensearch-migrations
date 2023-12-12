@@ -41,11 +41,40 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
     public static final String GATHERING_RESPONSE = "gatheringResponse";
     public static final String BLOCKED = "blocked";
 
+    static class CaptureIgnoreState {
+        static final byte CAPTURE = 0;
+        static final byte IGNORE_REQUEST = 1;
+        static final byte IGNORE_RESPONSE = 2;
+        private CaptureIgnoreState() {}
+    }
+
+    static class CaptureState {
+        byte captureIgnoreState = CaptureIgnoreState.CAPTURE;
+        boolean liveReadObservationsInOffloader = false;
+
+        boolean shouldCapture() {
+            return captureIgnoreState == CaptureIgnoreState.CAPTURE;
+        }
+
+        public void setShouldCaptureForRequest(boolean b) {
+            captureIgnoreState = b ? CaptureIgnoreState.CAPTURE : CaptureIgnoreState.IGNORE_REQUEST;
+        }
+
+        public void advanceStateModelIntoResponseGather() {
+            if (CaptureIgnoreState.CAPTURE != captureIgnoreState) {
+                captureIgnoreState = CaptureIgnoreState.IGNORE_RESPONSE;
+            }
+        }
+    }
+    
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         private final PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve;
+        private final CaptureState captureState;
 
-        public SimpleHttpRequestDecoder(@NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve) {
+        public SimpleHttpRequestDecoder(@NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve,
+                                        CaptureState captureState) {
             this.headersToPreserve = headersToPreserve;
+            this.captureState = captureState;
         }
 
         /**
@@ -60,34 +89,40 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
                     , new PassThruHttpHeaders(headersToPreserve)
             );
         }
-    }
 
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            if (captureState.captureIgnoreState == CaptureIgnoreState.IGNORE_RESPONSE) {
+                captureState.captureIgnoreState = CaptureIgnoreState.CAPTURE;
+            }
+            super.channelRead(ctx, msg);
+        }
+    }
+    
     static class SimpleDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter {
         @Getter
         private HttpRequest currentRequest;
         final RequestCapturePredicate requestCapturePredicate;
-        boolean isDone;
-        boolean shouldCapture;
-        boolean liveReadObservationsInOffloader;
-
-        SimpleDecodedHttpRequestHandler(RequestCapturePredicate requestCapturePredicate) {
+        boolean haveParsedFullRequest;
+        final CaptureState captureState;
+        
+        SimpleDecodedHttpRequestHandler(RequestCapturePredicate requestCapturePredicate, CaptureState captureState) {
             this.requestCapturePredicate = requestCapturePredicate;
             this.currentRequest = null;
-            this.isDone = false;
-            this.shouldCapture = true;
-            liveReadObservationsInOffloader = false;
+            this.haveParsedFullRequest = false;
+            this.captureState = captureState;
         }
 
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
             if (msg instanceof HttpRequest) {
                 currentRequest = (HttpRequest) msg;
-                shouldCapture = RequestCapturePredicate.CaptureDirective.CAPTURE ==
-                        requestCapturePredicate.apply((HttpRequest) msg);
+                captureState.setShouldCaptureForRequest(RequestCapturePredicate.CaptureDirective.CAPTURE ==
+                        requestCapturePredicate.apply((HttpRequest) msg));
             } else if (msg instanceof HttpContent) {
                 ((HttpContent)msg).release();
                 if (msg instanceof LastHttpContent) {
-                    isDone = true;
+                    haveParsedFullRequest = true;
                 }
             } else {
                 super.channelRead(ctx, msg);
@@ -95,11 +130,9 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
         }
 
         public HttpRequest resetCurrentRequest() {
-            this.shouldCapture = true;
-            this.isDone = false;
+            this.haveParsedFullRequest = false;
             var old = currentRequest;
             this.currentRequest = null;
-            this.liveReadObservationsInOffloader = false;
             return old;
         }
     }
@@ -122,12 +155,12 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
         METERING_CLOSURE.meterIncrementEvent(messageContext, "requestStarted");
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext, channelKey);
+        var captureState = new CaptureState();
         httpDecoderChannel = new EmbeddedChannel(
-                new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher()),
-                new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate)
+                new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher(), captureState),
+                new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate, captureState)
         );
     }
-
 
     static String getSpanLabelForState(HttpMessageContext.HttpTransactionState state) {
         switch (state) {
@@ -217,16 +250,16 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
         httpDecoderChannel.writeInbound(bb.retainedDuplicate()); // the ByteBuf is consumed/release by this method
 
         METERING_CLOSURE.meterIncrementEvent(messageContext,
-                getHandlerThatHoldsParsedHttpRequest().isDone ? "requestFullyParsed" : "requestPartiallyParsed");
+                getHandlerThatHoldsParsedHttpRequest().haveParsedFullRequest ? "requestFullyParsed" : "requestPartiallyParsed");
 
-        var shouldCapture = requestParsingHandler.shouldCapture;
+        var captureState = requestParsingHandler.captureState;
+        var shouldCapture = captureState.shouldCapture();
         if (shouldCapture) {
-            requestParsingHandler.liveReadObservationsInOffloader = true;
+            captureState.liveReadObservationsInOffloader = true;
             trafficOffloader.addReadEvent(timestamp, bb);
-
-        } else if (requestParsingHandler.liveReadObservationsInOffloader) {
+        } else if (captureState.liveReadObservationsInOffloader) {
             trafficOffloader.cancelCaptureForCurrentRequest(timestamp);
-            requestParsingHandler.liveReadObservationsInOffloader = false;
+            captureState.liveReadObservationsInOffloader = false;
         }
 
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
@@ -235,9 +268,12 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
         METERING_CLOSURE.meterIncrementEvent(messageContext, "readBytes", bb.readableBytes());
 
 
-        if (requestParsingHandler.isDone) {
+        if (requestParsingHandler.haveParsedFullRequest) {
             messageContext.getCurrentSpan().end();
             var httpRequest = requestParsingHandler.resetCurrentRequest();
+            captureState.liveReadObservationsInOffloader = false;
+            captureState.advanceStateModelIntoResponseGather();
+
             if (shouldCapture) {
                 var decoderResultLoose = httpRequest.decoderResult();
                 if (decoderResultLoose instanceof HttpMessageDecoderResult) {
@@ -260,7 +296,9 @@ public class LoggingHttpRequestHandler<T> extends ChannelDuplexHandler {
             rotateNextMessageContext(HttpMessageContext.HttpTransactionState.RESPONSE);
         }
         var bb = (ByteBuf) msg;
-        trafficOffloader.addWriteEvent(Instant.now(), bb);
+        if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
+            trafficOffloader.addWriteEvent(Instant.now(), bb);
+        }
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_RESPONSE_COMPONENT)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         METERING_CLOSURE.meterIncrementEvent(messageContext, "write");

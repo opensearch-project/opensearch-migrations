@@ -5,14 +5,11 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
-import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import lombok.NonNull;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpRequestHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
-import org.opensearch.migrations.trafficcapture.netty.LoggingHttpResponseHandler;
-import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import javax.net.ssl.SSLEngine;
 import java.io.IOException;

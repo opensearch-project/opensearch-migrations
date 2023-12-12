@@ -4,11 +4,9 @@ import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.sdk.testing.junit5.OpenTelemetryExtension;
-import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -23,17 +21,17 @@ import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWr
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
-import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 public class ConditionallyReliableLoggingHttpRequestHandlerTest {
@@ -185,18 +184,22 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
         var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", ".*uploader.*"));
         EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpRequestHandler("n", "c",
-                        (ctx, connectionId) -> offloader, headerCapturePredicate, x->true));
+                        (ctx, connectionId) -> offloader, headerCapturePredicate, x->false));
         getWriter(singleBytes, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
+        channel.writeOutbound(Unpooled.wrappedBuffer("response1".getBytes(StandardCharsets.UTF_8)));
         getWriter(singleBytes, true, SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8)).accept(channel);
+        var bytesForResponsePreserved = "response2".getBytes(StandardCharsets.UTF_8);
+        channel.writeOutbound(Unpooled.wrappedBuffer(bytesForResponsePreserved));
+        channel.close();
         var requestBytes = (SimpleRequests.HEALTH_CHECK + SimpleRequests.SMALL_POST).getBytes(StandardCharsets.UTF_8);
 
         // we wrote the correct data to the downstream handler/channel
-        var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
+        var consumedData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
                 .map(m->new ByteArrayInputStream(consumeIntoArray((ByteBuf)m)))
                 .collect(Collectors.toList())))
                 .readAllBytes();
-        log.info("outputdata = " + new String(outputData, StandardCharsets.UTF_8));
-        Assertions.assertArrayEquals(requestBytes, outputData);
+        log.info("captureddata = " + new String(consumedData, StandardCharsets.UTF_8));
+        Assertions.assertArrayEquals(requestBytes, consumedData);
 
         Assertions.assertNotNull(streamMgr.byteBufferAtomicReference,
                 "This would be null if the handler didn't block until the output was written");
@@ -206,32 +209,39 @@ public class ConditionallyReliableLoggingHttpRequestHandlerTest {
                 trafficStream.getSubStream(0).hasRead());
         Assertions.assertEquals(1, streamMgr.flushCount.get());
         var observations = trafficStream.getSubStreamList();
-        if (singleBytes) {
-            var sawRequestDropped = new AtomicBoolean(false);
-            var observationsAfterDrop = observations.stream().dropWhile(o->{
-                var wasDrop = o.hasRequestDropped();
-                sawRequestDropped.compareAndSet(false, wasDrop);
-                return !sawRequestDropped.get() || wasDrop;
-            }).collect(Collectors.toList());
+        {
+            var readObservationStreamToUse = singleBytes ? skipReadsBeforeDrop(observations) : observations.stream();
             var combinedTrafficPacketsSteam =
-                    new SequenceInputStream(Collections.enumeration(observationsAfterDrop.stream()
-                            .filter(to->to.hasRead())
-                            .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
-                            .collect(Collectors.toList())));
-            Assertions.assertArrayEquals(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8),
-                    combinedTrafficPacketsSteam.readAllBytes());
-        } else {
-            var combinedTrafficPacketsSteam =
-                    new SequenceInputStream(Collections.enumeration(observations.stream()
-                            .filter(to->to.hasRead())
-                            .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
+                    new SequenceInputStream(Collections.enumeration(readObservationStreamToUse
+                            .filter(to -> to.hasRead())
+                            .map(to -> new ByteArrayInputStream(to.getRead().getData().toByteArray()))
                             .collect(Collectors.toList())));
             var reconstitutedTrafficStreamReads = combinedTrafficPacketsSteam.readAllBytes();
-            log.info("reconstitutedTrafficStreamReads="+
-                    new String(reconstitutedTrafficStreamReads, StandardCharsets.UTF_8));
             Assertions.assertArrayEquals(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8),
                     reconstitutedTrafficStreamReads);
         }
+
+        // check that we only got one response
+        {
+            var combinedTrafficPacketsSteam =
+                    new SequenceInputStream(Collections.enumeration(observations.stream()
+                            .filter(to->to.hasWrite())
+                            .map(to->new ByteArrayInputStream(to.getWrite().getData().toByteArray()))
+                            .collect(Collectors.toList())));
+            var reconstitutedTrafficStreamWrites = combinedTrafficPacketsSteam.readAllBytes();
+            log.info("reconstitutedTrafficStreamWrites="+
+                    new String(reconstitutedTrafficStreamWrites, StandardCharsets.UTF_8));
+            Assertions.assertArrayEquals(bytesForResponsePreserved, reconstitutedTrafficStreamWrites);
+        }
+    }
+
+    private static Stream<TrafficObservation> skipReadsBeforeDrop(List<TrafficObservation> observations) {
+        var sawRequestDropped = new AtomicBoolean(false);
+        return observations.stream().dropWhile(o->{
+            var wasDrop = o.hasRequestDropped();
+            sawRequestDropped.compareAndSet(false, wasDrop);
+            return !sawRequestDropped.get() || wasDrop;
+        });
     }
 
     private Consumer<EmbeddedChannel> getWriter(boolean singleBytes, boolean usePool, byte[] bytes) {
