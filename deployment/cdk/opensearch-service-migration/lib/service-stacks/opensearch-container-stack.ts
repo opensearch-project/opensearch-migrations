@@ -11,8 +11,8 @@ export interface OpenSearchContainerProps extends StackPropsExt {
 }
 
 /**
- * This is a testing stack which deploy a SINGLE node OpenSearch cluster as the target cluster for this solution, and
- * should not be used for production use cases.
+ * This is a testing stack which deploys a SINGLE node OpenSearch cluster as the target cluster for this solution with
+ * no persistent storage. As such, it should NOT be used for production use cases.
  */
 export class OpenSearchContainerStack extends MigrationServiceCore {
 
