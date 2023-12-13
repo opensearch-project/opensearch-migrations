@@ -22,8 +22,10 @@ ALIASES_KEY = "aliases"
 COUNT_KEY = "count"
 __INDEX_KEY = "index"
 __ALL_INDICES_ENDPOINT = "*"
-__SEARCH_COUNT_PATH = "/_search?size=0"
-__SEARCH_COUNT_PAYLOAD = {"aggs": {"count": {"terms": {"field": "_index"}}}}
+# (ES 7+) size=0 avoids the "hits" payload to reduce the response size since we're only interested in the aggregation,
+# and track_total_hits forces an accurate doc-count
+__SEARCH_COUNT_PATH = "/_search"
+__SEARCH_COUNT_PAYLOAD = {"size": 0, "track_total_hits": True, "aggs": {"count": {"terms": {"field": "_index"}}}}
 __TOTAL_COUNT_JSONPATH = jsonpath_ng.parse("$.hits.total.value")
 __INDEX_COUNT_JSONPATH = jsonpath_ng.parse("$.aggregations.count.buckets")
 __BUCKET_INDEX_NAME_KEY = "key"
