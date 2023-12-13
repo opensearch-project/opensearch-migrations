@@ -120,14 +120,14 @@ export class MigrationAssistanceStack extends Stack {
             throw new Error("The 'mskEnablePublicEndpoints' option requires both 'mskRestrictPublicAccessTo' and 'mskRestrictPublicAccessType' options to be provided")
         }
 
-        const streamingSecurityGroup = new SecurityGroup(this, 'migrationStreamingSourceSG', {
+        const streamingSecurityGroup = new SecurityGroup(this, 'trafficStreamSourceSG', {
             vpc: props.vpc,
             allowAllOutbound: false
         });
         streamingSecurityGroup.addIngressRule(streamingSecurityGroup, Port.allTraffic())
-        new StringParameter(this, 'SSMParameterStreamingSourceGroupId', {
-            description: 'OpenSearch migration parameter for streaming source access security group id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/streamingSourceAccessSecurityGroupId`,
+        new StringParameter(this, 'SSMParameterTrafficStreamSourceGroupId', {
+            description: 'OpenSearch migration parameter for traffic stream source access security group id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`,
             stringValue: streamingSecurityGroup.securityGroupId
         });
 

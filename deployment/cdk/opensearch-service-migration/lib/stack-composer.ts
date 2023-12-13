@@ -112,6 +112,7 @@ export class StackComposer {
         }
         console.log('Received following context block for deployment: ')
         console.log(contextJSON)
+        console.log('End of context block.')
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         let version: EngineVersion
