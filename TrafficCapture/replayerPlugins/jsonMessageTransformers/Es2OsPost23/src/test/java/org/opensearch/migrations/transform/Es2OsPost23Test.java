@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public class TypeMappingsExcisionTest {
+public class Es2OsPost23Test {
 
     static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>(){};
 
@@ -22,26 +22,20 @@ public class TypeMappingsExcisionTest {
 
 
     static InputStream getInputStreamForTypeMappingResource(String resourceName) {
-        return TypeMappingsExcisionTest.class.getResourceAsStream("/sampleJsonDocuments/typeMappings/" +
+        return Es2OsPost23Test.class.getResourceAsStream("/sampleJsonDocuments/typeMappings/" +
                 resourceName);
     }
 
     @Test
-    public void removesTypeMappingsFrom_indexCreation() throws Exception {
-        var json = parseJsonFromResourceName("put_index_input.txt");
-        transformAndVerifyResult(json, "put_index_output.txt");
+    public void removeTypeMappingsWhenExists() throws Exception {
+        var json = parseJsonFromResourceName("put_index_settings_input_1.txt");
+        transformJMESAndVerifyResult(json, "put_index_settings_output.txt");
     }
 
     @Test
-    public void removesTypeMappingsFrom_documentPut() throws Exception {
-        var json = parseJsonFromResourceName("put_document_input.txt");
-        transformAndVerifyResult(json, "put_document_output.txt");
-    }
-
-    @Test
-    public void removesTypeMappingsFrom_queryGet() throws Exception {
-        var json = parseJsonFromResourceName("get_query_input.txt");
-        transformAndVerifyResult(json, "get_query_output.txt");
+    public void removeTypeMappingsWhenNoTypeExists() throws Exception {
+        var json = parseJsonFromResourceName("put_index_settings_input_2.txt");
+        transformJMESAndVerifyResult(json, "put_index_settings_output.txt");
     }
 
     private static Map<String,Object> parseJsonFromResourceName(String resourceName) throws Exception {
@@ -53,16 +47,21 @@ public class TypeMappingsExcisionTest {
         }
     }
 
-    private static void transformAndVerifyResult(Map<String,Object> json, String expectedValueSource) throws Exception {
-        var jsonTransformer = getJsonTransformer();
-        json = jsonTransformer.transformJson(json);
+    private static void transformJMESAndVerifyResult(Map<String,Object> json, String expectedValueSource) throws Exception{
+        var jmesTransformer = getJMESTransformer(json);
+        json = jmesTransformer.transformJson(json);
         var jsonAsStr = objectMapper.writeValueAsString(json);
         Object expectedObject = parseJsonFromResourceName(expectedValueSource);
         var expectedValue = objectMapper.writeValueAsString(expectedObject);
         Assertions.assertEquals(expectedValue, jsonAsStr);
     }
 
-    static IJsonTransformer getJsonTransformer() {
-        return new JsonTypeMappingTransformer();
+
+
+
+
+    static IJsonTransformer getJMESTransformer(Map<String,Object> json) {
+        Es2OsPost23 transformerProvider = new Es2OsPost23();
+        return transformerProvider.createTransformer(json);
     }
 }

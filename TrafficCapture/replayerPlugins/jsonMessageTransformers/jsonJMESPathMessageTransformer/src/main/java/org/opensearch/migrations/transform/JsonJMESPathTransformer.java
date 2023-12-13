@@ -3,6 +3,7 @@ package org.opensearch.migrations.transform;
 
 import io.burt.jmespath.BaseRuntime;
 import io.burt.jmespath.Expression;
+import io.burt.jmespath.jcf.JcfRuntime;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
@@ -16,6 +17,11 @@ public class JsonJMESPathTransformer implements IJsonTransformer {
     public JsonJMESPathTransformer(BaseRuntime<Object> runtime, String script) {
         this.expression = runtime.compile(script);
     }
+
+    public JsonJMESPathTransformer(String script) {
+        this(new JcfRuntime(), script);
+    }
+
 
     @Override
     public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
