@@ -99,7 +99,7 @@ class TestIndexOperations(unittest.TestCase):
         for index_name in test_indices:
             test_buckets.append({"key": index_name, "doc_count": index_doc_count})
         total_docs: int = index_doc_count * len(test_buckets)
-        expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search?size=0"
+        expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search"
         mock_count_response = {"hits": {"total": {"value": total_docs}},
                                "aggregations": {"count": {"buckets": test_buckets}}}
         responses.get(expected_count_endpoint, json=mock_count_response)
@@ -110,7 +110,7 @@ class TestIndexOperations(unittest.TestCase):
     @responses.activate
     def test_doc_count_error(self):
         test_indices = {test_constants.INDEX1_NAME, test_constants.INDEX2_NAME}
-        expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search?size=0"
+        expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search"
         responses.get(expected_count_endpoint, body=requests.Timeout())
         self.assertRaises(RuntimeError, index_operations.doc_count, test_indices,
                           EndpointInfo(test_constants.SOURCE_ENDPOINT))
