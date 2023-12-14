@@ -1,6 +1,10 @@
 #!/bin/bash
 
-# Note: This is still in an experimental state
+# Note: As this script will deploy an E2E solution in AWS, it assumes all the dependencies of the migration solution (e.g. aws cli, cdk cli,
+# configured aws credentials, git, java, docker) as well as 'jq'
+
+
+# Note: This function is still in an experimental state
 # Modify EC2 nodes to add required Kafka security group if it doesn't exist, as well as call the ./startCaptureProxy.sh
 # script on each node which will detect if ES and the Capture Proxy are running and on the correct port, and attempt
 # to mediate if this is not the case.
@@ -10,7 +14,7 @@ prepare_source_nodes_for_capture () {
   kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/kafkaBrokers" --query 'Parameter.Value' --output text)
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
-  kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/streamingSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
+  kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
@@ -101,6 +105,7 @@ if [ "$CREATE_SLR" = true ] ; then
   create_service_linked_roles
 fi
 
+# TODO allow spaces in CDK context block when passing as CLI param
 # Store CDK context for migration solution deployment in variable
 read -r -d '' cdk_context << EOM
 {

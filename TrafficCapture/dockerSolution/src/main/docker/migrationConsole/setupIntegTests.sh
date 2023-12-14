@@ -11,10 +11,10 @@ git init
 remote_exists=$(git remote -v | grep origin)
 if [ -z "${remote_exists}" ]; then
   echo "No remote detected, adding 'origin'"
-  git remote add -f origin $git_http_url
+  git remote add -f origin "$git_http_url"
 else
   echo "Existing 'origin' remote detected, updating to $git_http_url"
-  git remote set-url origin $git_http_url
+  git remote set-url origin "$git_http_url"
 fi
 
 git config core.sparseCheckout true
@@ -23,7 +23,7 @@ if test -f .git/info/sparse-checkout; then
   sparse_entry=$(cat .git/info/sparse-checkout | grep "/test")
   if [ -z "${sparse_entry}" ]; then
     echo "No '/test' entry in '.git/info/sparse-checkout' file detected, will attempt to add"
-    git remote add -f origin $git_http_url
+    git remote add -f origin "$git_http_url"
   else
     echo "Have detected '/test' entry in '.git/info/sparse-checkout' file, no changes needed"
   fi
@@ -32,7 +32,7 @@ else
   echo "/test" >> .git/info/sparse-checkout
 fi
 
-git pull origin $branch
+git pull origin "$branch"
 cd test || exit
 pip install virtualenv
 
