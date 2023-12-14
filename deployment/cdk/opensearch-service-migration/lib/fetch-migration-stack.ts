@@ -43,8 +43,8 @@ export class FetchMigrationStack extends Stack {
 
         const serviceName = "fetch-migration"
         const ecsTaskRole = createDefaultECSTaskRole(this, serviceName)
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
         ecsTaskRole.addToPolicy(openSearchPolicy)
         ecsTaskRole.addToPolicy(openSearchServerlessPolicy)
         // ECS Task Definition

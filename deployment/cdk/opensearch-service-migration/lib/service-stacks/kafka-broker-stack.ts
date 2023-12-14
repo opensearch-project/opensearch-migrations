@@ -22,6 +22,7 @@ export class KafkaBrokerStack extends MigrationServiceCore {
         super(scope, id, props)
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
         ]
 
         const servicePort: PortMapping = {
@@ -36,9 +37,15 @@ export class KafkaBrokerStack extends MigrationServiceCore {
             port: 9092
         }
 
+        new StringParameter(this, 'SSMParameterKafkaBrokers', {
+            description: 'OpenSearch Migration Parameter for Kafka brokers',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`,
+            stringValue: 'kafka-broker:9092'
+        });
+
         this.createService({
             serviceName: "kafka-broker",
-            dockerImageRegistryName: "docker.io/bitnami/kafka:3.4",
+            dockerImageRegistryName: "docker.io/bitnami/kafka:3.6",
             securityGroups: securityGroups,
             environment: {
                 // Definitions for some of these variables can be found in the Bitnami docker documentation here: https://hub.docker.com/r/bitnami/kafka/
