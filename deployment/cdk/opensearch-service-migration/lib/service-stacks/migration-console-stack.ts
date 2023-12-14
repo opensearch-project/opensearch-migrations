@@ -6,31 +6,66 @@ import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {createOpenSearchIAMAccessPolicy, createOpenSearchServerlessIAMAccessPolicy} from "../common-utilities";
+import {
+    createMSKConsumerIAMPolicies,
+    createOpenSearchIAMAccessPolicy,
+    createOpenSearchServerlessIAMAccessPolicy
+} from "../common-utilities";
+import {StreamingSourceType} from "../streaming-source-type";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
     readonly migrationAnalyticsEnabled: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
+    
+    createMSKAdminIAMPolicies(stage: string, deployId: string): PolicyStatement[] {
+        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterARN`);
+        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterName`);
+        const mskClusterAdminPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [mskClusterARN],
+            actions: [
+                "kafka-cluster:*"
+            ]
+        })
+        const mskClusterAllTopicArn = `arn:aws:kafka:${this.region}:${this.account}:topic/${mskClusterName}/*`
+        const mskTopicAdminPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [mskClusterAllTopicArn],
+            actions: [
+                "kafka-cluster:*"
+            ]
+        })
+        const mskClusterAllGroupArn = `arn:aws:kafka:${this.region}:${this.account}:group/${mskClusterName}/*`
+        const mskConsumerGroupAdminPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [mskClusterAllGroupArn],
+            actions: [
+                "kafka-cluster:*"
+            ]
+        })
+        return [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy]
+    }
 
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
         ]
         if (props.migrationAnalyticsEnabled) {
             securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)))
         }
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
+        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
 
         const volumeName = "sharedReplayerOutputVolume"
         const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputEFSId`)
@@ -56,31 +91,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`);
-        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`);
-        const mskClusterAdminPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterARN],
-            actions: [
-                "kafka-cluster:*"
-            ]
-        })
-        const mskClusterAllTopicArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:topic/${mskClusterName}/*`
-        const mskTopicAdminPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterAllTopicArn],
-            actions: [
-                "kafka-cluster:*"
-            ]
-        })
-        const mskClusterAllGroupArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:group/${mskClusterName}/*`
-        const mskConsumerGroupAdminPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterAllGroupArn],
-            actions: [
-                "kafka-cluster:*"
-            ]
-        })
         const allReplayerServiceArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:service/migration-${props.stage}-ecs-cluster/migration-${props.stage}-traffic-replayer*`
         const updateReplayerServicePolicy = new PolicyStatement({
             effect: Effect.ALLOW,
@@ -93,10 +103,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
         }
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
-        const taskRolePolicies = [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy, replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy]
-
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy]
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
+            const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
+            servicePolicies = servicePolicies.concat(mskAdminPolicies)
+        }
         if (props.fetchMigrationEnabled) {
             environment["FETCH_MIGRATION_COMMAND"] = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`)
 
@@ -118,8 +131,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                     "iam:PassRole"
                 ]
             })
-            taskRolePolicies.push(fetchMigrationTaskRunPolicy)
-            taskRolePolicies.push(fetchMigrationPassRolePolicy)
+            servicePolicies.push(fetchMigrationTaskRunPolicy)
+            servicePolicies.push(fetchMigrationPassRolePolicy)
         }
 
         this.createService({
@@ -129,7 +142,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
-            taskRolePolicies: taskRolePolicies,
+            taskRolePolicies: servicePolicies,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 1024,
             ...props

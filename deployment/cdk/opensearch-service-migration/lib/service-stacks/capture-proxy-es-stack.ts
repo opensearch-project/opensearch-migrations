@@ -4,13 +4,15 @@ import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
-import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {StreamingSourceType} from "../streaming-source-type";
+import {createMSKProducerIAMPolicies} from "../common-utilities";
 
 
 export interface CaptureProxyESProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly streamingSourceType: StreamingSourceType,
     readonly analyticsServiceEnabled: boolean
 }
 
@@ -25,7 +27,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         super(scope, id, props)
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`))
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
         ]
 
         const servicePort: PortMapping = {
@@ -51,36 +53,18 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             port: 19200
         }
 
-        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`);
-        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`);
-        const mskClusterConnectPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterARN],
-            actions: [
-                "kafka-cluster:Connect"
-            ]
-        })
-        const mskClusterAllTopicArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:topic/${mskClusterName}/*`
-        const mskTopicProducerPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterAllTopicArn],
-            actions: [
-                "kafka-cluster:CreateTopic",
-                "kafka-cluster:DescribeTopic",
-                "kafka-cluster:WriteData"
-            ]
-        })
+        const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.region, this.account, props.stage, props.defaultDeployId) : []
 
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
-        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --enableMSKAuth --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        let brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
+        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --kafkaConnection ${brokerEndpoints} --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
         command = props.analyticsServiceEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
         this.createService({
             serviceName: "capture-proxy-es",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
-            // TODO: add otel collector endpoint
             dockerImageCommand: ['/bin/sh', '-c', command.concat(" & wait -n 1")],
             securityGroups: securityGroups,
-            taskRolePolicies: [mskClusterConnectPolicy, mskTopicProducerPolicy],
+            taskRolePolicies: servicePolicies,
             portMappings: [servicePort, esServicePort],
             environment: {
                 // Set Elasticsearch port to 19200 to allow capture proxy at port 9200
