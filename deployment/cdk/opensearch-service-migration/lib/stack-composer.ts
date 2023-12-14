@@ -106,13 +106,18 @@ export class StackComposer {
         if (!contextId) {
             throw new Error("Required context field 'contextId' not provided")
         }
-        const contextJSON = scope.node.tryGetContext(contextId)
+        let contextJSON = scope.node.tryGetContext(contextId)
         if (!contextJSON) {
             throw new Error(`No CDK context block found for contextId '${contextId}'`)
         }
         console.log('Received following context block for deployment: ')
         console.log(contextJSON)
         console.log('End of context block.')
+        // For a context block to be provided as a string (as in the case of providing via command line) it will need to be properly escaped
+        // to be captured. This requires JSON to parse twice, 1. Returns a normal JSON string with no escaping 2. Returns a JSON object for use
+        if (typeof contextJSON === 'string') {
+            contextJSON = JSON.parse(JSON.parse(contextJSON))
+        }
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         let version: EngineVersion
