@@ -32,6 +32,6 @@ abstract class PojoTrafficStreamKey implements ITrafficStreamKey {
 
     @Override
     public String toString() {
-        return TrafficChannelKeyFormatter.format(nodeId, connectionId);
+        return TrafficChannelKeyFormatter.format(nodeId, connectionId, trafficStreamIndex);
     }
 }

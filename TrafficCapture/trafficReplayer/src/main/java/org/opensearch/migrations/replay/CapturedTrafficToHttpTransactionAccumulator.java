@@ -421,7 +421,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         var rrPair = accumulation.getRrPair();
-        var requestKey = rrPair.getRequestContext().getLogicalEnclosingScope().getReplayerRequestKey();
+        var requestKey = rrPair.getResponseContext().getLogicalEnclosingScope().getReplayerRequestKey();
         metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
                 .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID,
