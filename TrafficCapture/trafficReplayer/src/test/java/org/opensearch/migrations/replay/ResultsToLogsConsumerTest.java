@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.MockMetricsBuilder;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -77,7 +77,8 @@ class ResultsToLogsConsumerTest {
     @Test
     public void testOutputterWithNulls() throws IOException {
         var emptyTuple = new SourceTargetCaptureTuple(
-                new UniqueReplayerRequestKey(new PojoTrafficStreamKey(NODE_ID,"c",0), 0, 0),
+                new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
+                        TestTrafficStreamsLifecycleContext::new), 0, 0),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             var consumer = new TupleParserChainConsumer(null, new ResultsToLogsConsumer());
@@ -93,7 +94,8 @@ class ResultsToLogsConsumerTest {
     public void testOutputterWithException() throws IOException {
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(
-                new UniqueReplayerRequestKey(new PojoTrafficStreamKey(NODE_ID,"c",0), 0, 0),
+                new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
+                        TestTrafficStreamsLifecycleContext::new), 0, 0),
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
@@ -228,7 +230,8 @@ class ResultsToLogsConsumerTest {
 
     @Test
     private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
-        var trafficStreamKey = new PojoTrafficStreamKey(NODE_ID,"c",0);
+        var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
+                TestTrafficStreamsLifecycleContext::new);
         var requestCtx = TestRequestKey.getTestConnectionRequestContext(0);
         trafficStreamKey.setTrafficStreamsContext(requestCtx.getImmediateEnclosingScope());
         var sourcePair = new RequestResponsePacketPair(trafficStreamKey, 0, 0);

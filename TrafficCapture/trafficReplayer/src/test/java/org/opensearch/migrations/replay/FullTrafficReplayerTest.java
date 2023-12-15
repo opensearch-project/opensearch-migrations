@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -188,9 +188,10 @@ public class FullTrafficReplayerTest {
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
             this.arrayIndex = arrayIndex;
-            var key = new PojoTrafficStreamKey(connectionId, nodeId, trafficStreamIndex);
-            this.trafficStreamsContext = new TestTrafficStreamsLifecycleContext(key);
-            key.setTrafficStreamsContext(this.trafficStreamsContext);
+            var key = PojoTrafficStreamKeyAndContext.build(connectionId, nodeId, trafficStreamIndex, tsk->
+                    new TestTrafficStreamsLifecycleContext(tsk));
+            trafficStreamsContext = key.getTrafficStreamsContext();
+            key.setTrafficStreamsContext(trafficStreamsContext);
         }
 
         @Override
@@ -241,7 +242,7 @@ public class FullTrafficReplayerTest {
                 pQueue.add(key);
                 cursorHighWatermark = idx;
             }
-            return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamWithKey(stream, key)));
+            return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamAndKey(stream, key)));
         }
 
         @Override

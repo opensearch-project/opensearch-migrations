@@ -1,4 +1,4 @@
 package org.opensearch.migrations.tracing;
 
-public interface IWithStartTimeAndAttributes extends IWithStartTime, IWithAttributes {
+public interface IWithStartTimeAndAttributes extends IWithStartTime, IScopedInstrumentationAttributes {
 }

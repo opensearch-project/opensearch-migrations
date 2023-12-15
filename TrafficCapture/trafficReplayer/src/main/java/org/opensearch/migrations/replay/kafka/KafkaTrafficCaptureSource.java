@@ -11,7 +11,7 @@ import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -201,7 +201,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                                             ": " + offsetData + " " + ts).log();
                             var key = new TrafficStreamKeyWithKafkaRecordId(
                                     channelContextManager::retainOrCreateContext, ts, kafkaRecord.key(), offsetData);
-                            return (ITrafficStreamWithKey) new PojoTrafficStreamWithKey(ts, key);
+                            return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key);
                         } catch (InvalidProtocolBufferException e) {
                             RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);
                             metricsLogger.atError(MetricsEvent.PARSING_TRAFFIC_STREAM_FROM_KAFKA_FAILED, recordError)

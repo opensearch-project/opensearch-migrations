@@ -1,15 +1,12 @@
 package org.opensearch.migrations.replay;
 
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Optional;
-import java.util.zip.GZIPInputStream;
 
 public class V0_1TrafficCaptureSource extends CompressedFileTrafficCaptureSource {
 
@@ -32,9 +29,10 @@ public class V0_1TrafficCaptureSource extends CompressedFileTrafficCaptureSource
             outgoingBuilder.setNumberOfThisLastChunk(incoming.getNumberOfThisLastChunk());
         }
         var progress = connectionProgressMap.get(incoming.getConnectionId());
+        var key = streamWithKey.getKey();
         if (progress == null) {
             progress = new Progress();
-            progress.lastWasRead = streamWithKey.getKey().getTrafficStreamIndex() != 0;
+            progress.lastWasRead = key.getTrafficStreamIndex() != 0;
             connectionProgressMap.put(incoming.getConnectionId(), progress);
         }
         outgoingBuilder.setLastObservationWasUnterminatedRead(progress.lastWasRead);
@@ -44,7 +42,7 @@ public class V0_1TrafficCaptureSource extends CompressedFileTrafficCaptureSource
         if (incoming.hasNumberOfThisLastChunk()) {
             connectionProgressMap.remove(incoming.getConnectionId());
         }
-        return new TrafficStreamWithEmbeddedKey(outgoingBuilder.build());
+        return new PojoTrafficStreamAndKey(outgoingBuilder.build(), key);
     }
 
     private static class Progress {

@@ -5,10 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -85,18 +86,19 @@ class BlockingTrafficSourceTest {
 
             var t = sourceStartTime.plus(Duration.ofMillis(i));
             log.debug("Built timestamp for " + i);
-            return CompletableFuture.completedFuture(List.of(new TrafficStreamWithEmbeddedKey(
-                    TrafficStream.newBuilder()
-                            .setNumberOfThisLastChunk(0)
-                            .setConnectionId("conn_" + i)
-                            .addSubStream(TrafficObservation.newBuilder()
-                                    .setTs(Timestamp.newBuilder()
-                                            .setSeconds(t.getEpochSecond())
-                                            .setNanos(t.getNano())
-                                            .build())
-                                    .setClose(CloseObservation.getDefaultInstance())
+            var ts = TrafficStream.newBuilder()
+                    .setNumberOfThisLastChunk(0)
+                    .setConnectionId("conn_" + i)
+                    .addSubStream(TrafficObservation.newBuilder()
+                            .setTs(Timestamp.newBuilder()
+                                    .setSeconds(t.getEpochSecond())
+                                    .setNanos(t.getNano())
                                     .build())
-                            .build())));
+                            .setClose(CloseObservation.getDefaultInstance())
+                            .build())
+                    .build();
+            var key = PojoTrafficStreamKeyAndContext.build(ts, TestTrafficStreamsLifecycleContext::new);
+            return CompletableFuture.completedFuture(List.of(new PojoTrafficStreamAndKey(ts, key)));
         }
 
         @Override

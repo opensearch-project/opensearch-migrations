@@ -5,5 +5,5 @@ import io.opentelemetry.api.trace.Span;
 
 import java.util.function.BiFunction;
 
-public interface ISpanWithParentGenerator extends BiFunction<Attributes, Span,Span> {
+public interface ISpanWithParentGenerator extends BiFunction<Attributes, Span, Span> {
 }

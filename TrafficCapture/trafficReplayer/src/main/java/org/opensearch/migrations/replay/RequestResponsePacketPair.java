@@ -8,7 +8,7 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.tracing.IContexts;
-import org.opensearch.migrations.tracing.IWithAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.nio.charset.StandardCharsets;
@@ -33,7 +33,7 @@ public class RequestResponsePacketPair {
     ReconstructionStatus completionStatus;
     // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,
     // or just leave this null, in which case, the context from the trafficStreamKey should be used
-    private IWithAttributes requestOrResponseAccumulationContext;
+    private IScopedInstrumentationAttributes requestOrResponseAccumulationContext;
 
     public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey,
                                      int startingSourceRequestIndex, int indexOfCurrentRequest) {

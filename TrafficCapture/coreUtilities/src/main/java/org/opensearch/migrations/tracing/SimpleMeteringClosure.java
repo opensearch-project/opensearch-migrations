@@ -81,11 +81,11 @@ public class SimpleMeteringClosure {
         //OpenTelemetryAppender.install(GlobalOpenTelemetry.get());
     }
 
-    public void meterIncrementEvent(IWithAttributes ctx, String eventName) {
+    public void meterIncrementEvent(IScopedInstrumentationAttributes ctx, String eventName) {
         meterIncrementEvent(ctx, eventName, 1);
     }
 
-    public void meterIncrementEvent(IWithAttributes ctx, String eventName, long increment) {
+    public void meterIncrementEvent(IScopedInstrumentationAttributes ctx, String eventName, long increment) {
         if (ctx == null) {
             return;
         }
@@ -95,7 +95,7 @@ public class SimpleMeteringClosure {
                         .build());
     }
 
-    public void meterDeltaEvent(IWithAttributes ctx, String eventName, long delta) {
+    public void meterDeltaEvent(IScopedInstrumentationAttributes ctx, String eventName, long delta) {
         if (ctx == null) {
             return;
         }
@@ -105,23 +105,23 @@ public class SimpleMeteringClosure {
                         .build());
     }
 
-    public <T extends IWithAttributes & IWithStartTime> void meterHistogramMillis(T ctx, String eventName) {
+    public <T extends IScopedInstrumentationAttributes & IWithStartTime> void meterHistogramMillis(T ctx, String eventName) {
         meterHistogram(ctx, eventName, "ms", Duration.between(ctx.getStartTime(), Instant.now()).toMillis());
     }
 
-    public <T extends IWithAttributes & IWithStartTime> void meterHistogramMicros(T ctx, String eventName) {
+    public <T extends IScopedInstrumentationAttributes & IWithStartTime> void meterHistogramMicros(T ctx, String eventName) {
         meterHistogram(ctx, eventName, "us", Duration.between(ctx.getStartTime(), Instant.now()).toNanos()*1000);
     }
 
-    public void meterHistogramMillis(IWithAttributes ctx, String eventName, Duration between) {
+    public void meterHistogramMillis(IScopedInstrumentationAttributes ctx, String eventName, Duration between) {
         meterHistogram(ctx, eventName, "ms", between.toMillis());
     }
 
-    public void meterHistogramMicros(IWithAttributes ctx, String eventName, Duration between) {
+    public void meterHistogramMicros(IScopedInstrumentationAttributes ctx, String eventName, Duration between) {
         meterHistogram(ctx, eventName, "us", between.toNanos()*1000);
     }
 
-    public void meterHistogram(IWithAttributes ctx, String eventName, String units, long value) {
+    public void meterHistogram(IScopedInstrumentationAttributes ctx, String eventName, String units, long value) {
         if (ctx == null) {
             return;
         }

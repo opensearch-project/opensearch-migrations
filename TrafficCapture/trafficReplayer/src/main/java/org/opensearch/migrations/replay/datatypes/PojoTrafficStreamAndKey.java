@@ -8,7 +8,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 @AllArgsConstructor
 @Getter
-public class PojoTrafficStreamWithKey implements ITrafficStreamWithKey {
+public class PojoTrafficStreamAndKey implements ITrafficStreamWithKey {
     public final TrafficStream stream;
     public final ITrafficStreamKey key;
 }

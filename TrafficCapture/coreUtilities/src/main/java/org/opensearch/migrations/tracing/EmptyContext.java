@@ -3,7 +3,7 @@ package org.opensearch.migrations.tracing;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 
-public class EmptyContext implements IWithAttributes {
+public class EmptyContext implements IScopedInstrumentationAttributes {
     public static final EmptyContext singleton = new EmptyContext();
 
     private EmptyContext() {}
@@ -14,7 +14,7 @@ public class EmptyContext implements IWithAttributes {
     }
 
     @Override
-    public IWithAttributes getEnclosingScope() {
+    public IScopedInstrumentationAttributes getEnclosingScope() {
         return null;
     }
 

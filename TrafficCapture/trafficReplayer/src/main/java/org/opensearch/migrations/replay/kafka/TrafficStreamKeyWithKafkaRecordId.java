@@ -3,7 +3,7 @@ package org.opensearch.migrations.replay.kafka;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
@@ -14,7 +14,7 @@ import java.util.function.Function;
 
 @EqualsAndHashCode(callSuper = true)
 @Getter
-class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKey implements KafkaCommitOffsetData {
+class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext implements KafkaCommitOffsetData {
     public static final String TELEMETRY_SCOPE_NAME = "KafkaRecords";
     public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 

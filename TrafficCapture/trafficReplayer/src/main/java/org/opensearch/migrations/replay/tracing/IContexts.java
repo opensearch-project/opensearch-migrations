@@ -5,19 +5,19 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.tracing.IWithAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
 public class IContexts {
     public static interface IKafkaRecordContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IChannelKeyContext> {
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IChannelKeyContext> {
         static final AttributeKey<String> RECORD_ID_KEY = AttributeKey.stringKey("recordId");
 
         String getRecordId();
 
         default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-            return IWithAttributes.super.fillAttributes(builder.put(RECORD_ID_KEY, getRecordId()));
+            return IScopedInstrumentationAttributes.super.fillAttributes(builder.put(RECORD_ID_KEY, getRecordId()));
         }
     }
 
@@ -57,23 +57,23 @@ public class IContexts {
     }
 
     public static interface IRequestAccumulationContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
     public static interface IResponseAccumulationContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
     public static interface IRequestTransformationContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
     public static interface IWaitingForHttpResponseContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
     public static interface IReceivingHttpResponseContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
     public static interface IRequestSendingContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
     public static interface ITupleHandlingContext
-            extends IWithAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 }

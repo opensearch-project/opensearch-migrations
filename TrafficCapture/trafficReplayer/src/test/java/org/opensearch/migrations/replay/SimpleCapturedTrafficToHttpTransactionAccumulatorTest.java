@@ -12,12 +12,12 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
@@ -264,7 +264,10 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();
-        trafficStreams.forEach(ts->trafficAccumulator.accept(new TrafficStreamWithEmbeddedKey(ts)));
+        ;
+        trafficStreams.forEach(ts->trafficAccumulator.accept(
+                new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts, TestTrafficStreamsLifecycleContext::new)
+                )));
         trafficAccumulator.close();
         return tsIndicesReceived;
     }

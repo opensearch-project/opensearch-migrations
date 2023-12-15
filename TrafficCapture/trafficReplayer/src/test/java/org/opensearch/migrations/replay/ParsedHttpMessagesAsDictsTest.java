@@ -2,20 +2,17 @@ package org.opensearch.migrations.replay;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.MockMetricsBuilder;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
 
 import java.util.Map;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class ParsedHttpMessagesAsDictsTest {
 
-    private static final PojoTrafficStreamKey TEST_TRAFFIC_STREAM_KEY =
-            new PojoTrafficStreamKey("N","C",1);
+    private static final PojoTrafficStreamKeyAndContext TEST_TRAFFIC_STREAM_KEY =
+            PojoTrafficStreamKeyAndContext.build("N","C",1, TestTrafficStreamsLifecycleContext::new);
 
     ParsedHttpMessagesAsDicts makeTestData() {
         return makeTestData(null, null);

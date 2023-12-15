@@ -10,8 +10,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -20,9 +18,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.locks.Condition;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
@@ -96,7 +92,6 @@ public class KafkaCommitsWorkBetweenLongPolls {
 
     private void sendNextMessage(Producer<String, byte[]> kafkaProducer, int i) {
         var ts = KafkaTestUtils.makeTestTrafficStreamWithFixedTime(getTimeAtPoint(i), i);
-        KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(ts),
-                TEST_TOPIC_NAME,  ""+i);
+        KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, ts, TEST_TOPIC_NAME,  ""+i);
     }
 }

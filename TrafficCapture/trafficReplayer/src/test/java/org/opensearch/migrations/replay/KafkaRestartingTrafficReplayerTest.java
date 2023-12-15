@@ -8,16 +8,13 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -119,8 +116,8 @@ public class KafkaRestartingTrafficReplayerTest {
         var kafkaProducer = buildKafkaProducer();
         var counter = new AtomicInteger();
         loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer, streams, s -> s.forEach(trafficStream ->
-                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(trafficStream),
-                        TEST_TOPIC_NAME, "KEY_" + counter.incrementAndGet())));
+                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer,
+                        trafficStream, TEST_TOPIC_NAME, "KEY_" + counter.incrementAndGet())));
         Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
     }
 
@@ -170,8 +167,8 @@ public class KafkaRestartingTrafficReplayerTest {
                             List<ITrafficStreamWithKey> chunks = null;
                             chunks = originalTrafficSource.readNextTrafficStreamChunk().get();
                             for (int j = 0; j < chunks.size(); ++j) {
-                                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, chunks.get(j), TEST_TOPIC_NAME,
-                                        "KEY_" + i + "_" + j);
+                                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, chunks.get(j).getStream(),
+                                        TEST_TOPIC_NAME, "KEY_" + i + "_" + j);
                                 Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
                             }
                         }

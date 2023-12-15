@@ -6,8 +6,8 @@ import io.opentelemetry.api.trace.Span;
 
 import java.util.ArrayList;
 
-public interface IWithAttributes {
-    IWithAttributes getEnclosingScope();
+public interface IScopedInstrumentationAttributes {
+    IScopedInstrumentationAttributes getEnclosingScope();
 
     Span getCurrentSpan();
 
@@ -21,7 +21,7 @@ public interface IWithAttributes {
 
     default AttributesBuilder getPopulatedAttributesBuilder() {
         var currentObj = this;
-        var stack = new ArrayList<IWithAttributes>();
+        var stack = new ArrayList<IScopedInstrumentationAttributes>();
         var builder = Attributes.builder();
         while (currentObj != null) {
             stack.add(currentObj);

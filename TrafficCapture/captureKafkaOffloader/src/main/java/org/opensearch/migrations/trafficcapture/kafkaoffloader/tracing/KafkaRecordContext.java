@@ -7,13 +7,13 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-import org.opensearch.migrations.tracing.IWithAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithStartTime;
 
 import java.time.Instant;
 
 @AllArgsConstructor
-public class KafkaRecordContext implements IWithAttributes, IWithStartTime {
+public class KafkaRecordContext implements IScopedInstrumentationAttributes, IWithStartTime {
     static final AttributeKey<String> TOPIC_ATTR = AttributeKey.stringKey("topic");
     static final AttributeKey<String> RECORD_ID_ATTR = AttributeKey.stringKey("recordId");
     static final AttributeKey<Long> RECORD_SIZE_ATTR = AttributeKey.longKey("recordSize");

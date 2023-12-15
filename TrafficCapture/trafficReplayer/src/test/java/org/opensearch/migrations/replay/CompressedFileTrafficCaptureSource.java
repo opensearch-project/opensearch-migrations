@@ -44,12 +44,12 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
         }
         return trafficSource.readNextTrafficStreamChunk()
                 .thenApply(ltswk -> {
-                    var transformed = ltswk.stream().map(this::modifyTrafficStream).collect(Collectors.toList());
+                    var transformedTrafficStream = ltswk.stream().map(this::modifyTrafficStream).collect(Collectors.toList());
                     var oldValue = numberOfTrafficStreamsToRead.get();
-                    var newValue = oldValue - transformed.size();
+                    var newValue = oldValue - transformedTrafficStream.size();
                     var exchangeResult = numberOfTrafficStreamsToRead.compareAndExchange(oldValue, newValue);
                     assert exchangeResult == oldValue : "didn't expect to be running with a race condition here";
-                    return transformed;
+                    return transformedTrafficStream;
                 });
     }
 
