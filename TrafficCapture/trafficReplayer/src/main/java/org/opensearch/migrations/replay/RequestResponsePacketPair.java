@@ -3,8 +3,13 @@ package org.opensearch.migrations.replay;
 import com.google.common.base.Objects;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.tracing.IWithAttributes;
+import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -23,18 +28,59 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    @NonNull final ITrafficStreamKey firstTrafficStreamKeyForRequest;
+    @NonNull final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
-    RequestContext requestContext;
+    // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,
+    // or just leave this null, in which case, the context from the trafficStreamKey should be used
+    private IWithAttributes requestOrResponseAccumulationContext;
 
-    public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey, RequestContext requestContext) {
-        firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
-        this.requestContext = requestContext;
+    public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey,
+                                     int startingSourceRequestIndex, int indexOfCurrentRequest) {
+        this.firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
+        var requestKey = new UniqueReplayerRequestKey(startingAtTrafficStreamKey,
+                startingSourceRequestIndex, indexOfCurrentRequest);
+        var httpTransactionContext = new Contexts.HttpTransactionContext(
+                startingAtTrafficStreamKey.getTrafficStreamsContext(),
+                requestKey,
+                Accumulation.METERING_CLOSURE.makeSpanContinuation("processingChannel"));
+        requestOrResponseAccumulationContext = new Contexts.RequestAccumulationContext(httpTransactionContext,
+                Accumulation.METERING_CLOSURE.makeSpanContinuation("httpTransactionAccumulation"));
     }
 
-    @NonNull ITrafficStreamKey getBeginningTrafficStreamKey() {
+    @NonNull ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
         return firstTrafficStreamKeyForRequest;
+    }
+
+    public IContexts.IReplayerHttpTransactionContext getHttpTransactionContext() {
+        var looseCtx = requestOrResponseAccumulationContext;
+        // the req/response ctx types in the assert below will always implement this with the
+        // IReplayerHttpTransactionContext parameter, but this seems clearer
+        // than trying to engineer a compile time static check
+        assert looseCtx instanceof IWithTypedEnclosingScope;
+        assert looseCtx instanceof IContexts.IRequestAccumulationContext
+                || looseCtx instanceof IContexts.IResponseAccumulationContext;
+        return ((IWithTypedEnclosingScope<IContexts.IReplayerHttpTransactionContext>) looseCtx)
+                .getLogicalEnclosingScope();
+
+    }
+
+    public @NonNull IContexts.IRequestAccumulationContext getRequestContext() {
+        return (IContexts.IRequestAccumulationContext) requestOrResponseAccumulationContext;
+    }
+
+    public @NonNull IContexts.IResponseAccumulationContext getResponseContext() {
+        return (IContexts.IResponseAccumulationContext) requestOrResponseAccumulationContext;
+    }
+
+    public void rotateRequestGatheringToResponse() {
+        var looseCtx = requestOrResponseAccumulationContext;
+        assert looseCtx instanceof IContexts.IRequestAccumulationContext;
+        var ctx = (IContexts.IRequestAccumulationContext) looseCtx;
+        var parentCtx = ctx.getLogicalEnclosingScope();
+        ctx.getCurrentSpan().end();
+        requestOrResponseAccumulationContext = new Contexts.ResponseAccumulationContext(parentCtx,
+                Accumulation.METERING_CLOSURE.makeSpanContinuation("accumulatingResponse"));
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {

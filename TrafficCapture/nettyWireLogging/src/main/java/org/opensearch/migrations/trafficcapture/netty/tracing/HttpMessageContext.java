@@ -1,17 +1,16 @@
 package org.opensearch.migrations.trafficcapture.netty.tracing;
 
 import io.opentelemetry.api.trace.Span;
-import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-import org.opensearch.migrations.tracing.commoncontexts.IRequestContext;
+import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.time.Instant;
 
-public class HttpMessageContext implements IRequestContext, IWithStartTimeAndAttributes<IConnectionContext> {
+public class HttpMessageContext implements IHttpTransactionContext, IWithStartTimeAndAttributes {
     public enum HttpTransactionState {
         REQUEST,
         INTERNALLY_BLOCKED,

@@ -9,8 +9,9 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
@@ -124,19 +125,20 @@ public class ReplayEngine {
     }
 
     public <T> DiagnosticTrackableCompletableFuture<String, T>
-    scheduleTransformationWork(RequestContext requestCtx, Instant originalStart,
+    scheduleTransformationWork(IContexts.IReplayerHttpTransactionContext requestCtx, Instant originalStart,
                                Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "processing";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         logStartOfWork(requestCtx, newCount, start, label);
-        var result = networkSendOrchestrator.scheduleWork(requestCtx.getEnclosingScope(),
+        var result = networkSendOrchestrator.scheduleWork(requestCtx,
                 start.minus(EXPECTED_TRANSFORMATION_DURATION), task);
         return hookWorkFinishingUpdates(result, originalStart, requestCtx, label);
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueReplayerRequestKey requestKey, RequestContext ctx, Instant originalStart, Instant originalEnd,
+    scheduleRequest(UniqueReplayerRequestKey requestKey, IContexts.IReplayerHttpTransactionContext ctx,
+                    Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
@@ -154,7 +156,7 @@ public class ReplayEngine {
     }
 
     public void closeConnection(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                                ChannelKeyContext ctx, Instant timestamp) {
+                                IChannelKeyContext ctx, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);

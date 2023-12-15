@@ -10,7 +10,8 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
-import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -27,18 +28,18 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    private RequestContext requestContext;
+    private IContexts.IReplayerHttpTransactionContext httpTransactionContext;
     static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
-                                                            RequestContext requestContext) {
+                                                            IContexts.IReplayerHttpTransactionContext httpTransactionContext) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;
-        this.diagnosticLabel = "[" + requestContext + "] ";
-        this.requestContext = requestContext;
+        this.diagnosticLabel = "[" + httpTransactionContext + "] ";
+        this.httpTransactionContext = httpTransactionContext;
     }
 
     @Override
@@ -54,8 +55,8 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
                     .append(request.protocolVersion().text())
                     .toString());
             metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
-                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestContext)
-                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestContext.getConnectionId())
+                    .setAttribute(MetricsAttributeKey.REQUEST_ID, httpTransactionContext)
+                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, httpTransactionContext.getConnectionId())
                     .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
                     .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 

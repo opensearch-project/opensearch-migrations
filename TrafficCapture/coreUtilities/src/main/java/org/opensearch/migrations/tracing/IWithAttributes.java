@@ -6,8 +6,8 @@ import io.opentelemetry.api.trace.Span;
 
 import java.util.ArrayList;
 
-public interface IWithAttributes<T extends IWithAttributes> {
-    T getEnclosingScope();
+public interface IWithAttributes {
+    IWithAttributes getEnclosingScope();
 
     Span getCurrentSpan();
 

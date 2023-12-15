@@ -1,12 +1,12 @@
 package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.tracing.IWithAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.time.Instant;
@@ -27,8 +27,7 @@ public class Accumulation {
         ACCUMULATING_WRITES
     }
 
-    public final ISourceTrafficChannelKey trafficChannelKey;
-    public final ChannelKeyContext channelContext;
+    public final ITrafficStreamKey trafficChannelKey;
     private RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
     State state;
@@ -52,8 +51,6 @@ public class Accumulation {
         this.startingSourceRequestIndex = startingSourceRequestIndex;
         this.state =
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
-        channelContext = new ChannelKeyContext(trafficChannelKey,
-                METERING_CLOSURE.makeSpanContinuation("processingChannel", null));
     }
 
     public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
@@ -61,17 +58,9 @@ public class Accumulation {
             return rrPair;
         }
         this.rrPair = new RequestResponsePacketPair(forTrafficStreamKey,
-                new RequestContext(channelContext, getRequestKey(forTrafficStreamKey),
-                        METERING_CLOSURE.makeSpanContinuation("accumulatingRequest")));
+                startingSourceRequestIndex, getIndexOfCurrentRequest());
+        //this.rrPair.getRequestContext()
         return rrPair;
-    }
-
-    public UniqueReplayerRequestKey getRequestKey() {
-        return getRequestKey(getRrPair().getBeginningTrafficStreamKey());
-    }
-
-    private UniqueReplayerRequestKey getRequestKey(@NonNull ITrafficStreamKey tsk) {
-        return new UniqueReplayerRequestKey(tsk, startingSourceRequestIndex, getIndexOfCurrentRequest());
     }
 
     public boolean hasSignaledRequests() {
@@ -90,14 +79,6 @@ public class Accumulation {
     public @NonNull RequestResponsePacketPair getRrPair() {
         assert rrPair != null;
         return rrPair;
-    }
-
-    public void rotateRequestGatheringToResponse() {
-        var ctx = rrPair.requestContext;
-        ctx.getCurrentSpan().end();
-        rrPair.requestContext = new RequestContext(ctx.getEnclosingScope(),
-                ctx.getReplayerRequestKey(),
-                METERING_CLOSURE.makeSpanContinuation("accumulatingResponse"));
     }
 
     public Instant getLastTimestamp() {

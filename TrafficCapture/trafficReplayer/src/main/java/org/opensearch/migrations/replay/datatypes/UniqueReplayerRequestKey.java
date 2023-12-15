@@ -4,11 +4,11 @@ import lombok.EqualsAndHashCode;
 
 @EqualsAndHashCode(callSuper = true)
 public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
-    public final ISourceTrafficChannelKey trafficStreamKey;
+    public final ITrafficStreamKey trafficStreamKey;
     public final int sourceRequestIndexOffsetAtStartOfAccumulation;
     public final int replayerRequestIndex;
 
-    public UniqueReplayerRequestKey(ISourceTrafficChannelKey streamKey, int sourceOffsetAtStartOfAccumulation,
+    public UniqueReplayerRequestKey(ITrafficStreamKey streamKey, int sourceOffsetAtStartOfAccumulation,
                                     int replayerIndex) {
         this.trafficStreamKey = streamKey;
         this.sourceRequestIndexOffsetAtStartOfAccumulation = sourceOffsetAtStartOfAccumulation;

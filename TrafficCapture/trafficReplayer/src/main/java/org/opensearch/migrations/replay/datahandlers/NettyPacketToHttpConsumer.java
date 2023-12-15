@@ -18,17 +18,17 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
-import io.opentelemetry.context.ContextKey;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
@@ -58,15 +58,15 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
-    RequestContext tracingContext;
+    IContexts.IReplayerHttpTransactionContext tracingContext;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
-                                     RequestContext requestContext) {
-        this(createClientConnection(eventLoopGroup, sslContext, serverUri, requestContext.getEnclosingScope()),
-                requestContext);
+                                     Contexts.HttpTransactionContext httpTransactionContext) {
+        this(createClientConnection(eventLoopGroup, sslContext, serverUri,
+                        httpTransactionContext.getLogicalEnclosingScope()), httpTransactionContext);
     }
 
-    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, RequestContext ctx) {
+    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, IContexts.IReplayerHttpTransactionContext ctx) {
         this.tracingContext = ctx;
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
@@ -91,7 +91,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup, SslContext sslContext,
-                                                       URI serverUri, ChannelKeyContext channelKeyContext) {
+                                                       URI serverUri, IChannelKeyContext channelKeyContext) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();

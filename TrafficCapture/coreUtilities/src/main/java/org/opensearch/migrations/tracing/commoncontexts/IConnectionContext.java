@@ -2,10 +2,9 @@ package org.opensearch.migrations.tracing.commoncontexts;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
-import org.opensearch.migrations.tracing.EmptyContext;
 import org.opensearch.migrations.tracing.IWithAttributes;
 
-public interface IConnectionContext extends IWithAttributes<EmptyContext> {
+public interface IConnectionContext extends IWithAttributes {
     static final AttributeKey<String> CONNECTION_ID_ATTR = AttributeKey.stringKey("connectionId");
     static final AttributeKey<String> NODE_ID_ATTR = AttributeKey.stringKey("nodeId");
 
@@ -13,7 +12,7 @@ public interface IConnectionContext extends IWithAttributes<EmptyContext> {
     String getNodeId();
 
     @Override
-    default EmptyContext getEnclosingScope() { return EmptyContext.singleton; }
+    default IWithAttributes getEnclosingScope() { return null; }
 
     @Override
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {

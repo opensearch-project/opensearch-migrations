@@ -4,7 +4,7 @@ import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
 import org.opensearch.migrations.tracing.IWithAttributes;
 
-public interface IRequestContext extends IWithAttributes<IConnectionContext> {
+public interface IHttpTransactionContext extends IWithAttributes {
     static final AttributeKey<Long> SOURCE_REQUEST_INDEX_KEY = AttributeKey.longKey("sourceRequestIndex");
 
     long getSourceRequestIndex();

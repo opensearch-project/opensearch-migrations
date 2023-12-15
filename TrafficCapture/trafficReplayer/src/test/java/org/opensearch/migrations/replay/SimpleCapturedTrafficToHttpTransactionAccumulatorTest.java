@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.vavr.Tuple2;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
@@ -15,8 +14,9 @@ import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -31,7 +31,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.SortedSet;
-import java.util.StringJoiner;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -218,13 +217,15 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueReplayerRequestKey key, RequestContext ctx,
+                            public void onRequestReceived(UniqueReplayerRequestKey key,
+                                                          IContexts.IReplayerHttpTransactionContext ctx,
                                                           HttpMessageAndTimestamp request) {
                                 requestsReceived.incrementAndGet();
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestContext ctx,
+                            public void onFullDataReceived(UniqueReplayerRequestKey requestKey,
+                                                           IContexts.IReplayerHttpTransactionContext ctx,
                                                            RequestResponsePacketPair fullPair) {
                                 var sourceIdx = requestKey.getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
@@ -245,19 +246,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                ChannelKeyContext ctx,
-                                                                List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
+                                                                IChannelKeyContext ctx,
+                                                                @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          ChannelKeyContext ctx,
+                            public void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
+                                                          IChannelKeyContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
-                                                          Instant when,
-                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                                                          @NonNull Instant when,
+                                                          @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
                             @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         ChannelKeyContext ctx) {
+                                                                         IChannelKeyContext ctx) {
                                 tsIndicesReceived.add(tsk.getTrafficStreamIndex());
                             }
                         });

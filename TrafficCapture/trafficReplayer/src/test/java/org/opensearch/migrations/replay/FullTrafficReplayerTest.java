@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -179,13 +181,16 @@ public class FullTrafficReplayerTest {
         public final String connectionId;
         public final String nodeId;
         public final int trafficStreamIndex;
-
+        @Getter public final IContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
 
         public TrafficStreamCursorKey(TrafficStream stream, int arrayIndex) {
             connectionId = stream.getConnectionId();
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
             this.arrayIndex = arrayIndex;
+            var key = new PojoTrafficStreamKey(connectionId, nodeId, trafficStreamIndex);
+            this.trafficStreamsContext = new TestTrafficStreamsLifecycleContext(key);
+            key.setTrafficStreamsContext(this.trafficStreamsContext);
         }
 
         @Override

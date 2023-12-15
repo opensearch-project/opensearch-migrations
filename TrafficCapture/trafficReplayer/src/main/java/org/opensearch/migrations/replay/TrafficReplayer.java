@@ -14,10 +14,11 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
@@ -602,8 +603,8 @@ public class TrafficReplayer {
         private ITrafficCaptureSource trafficCaptureSource;
 
         @Override
-        public void onRequestReceived(UniqueReplayerRequestKey requestKey, RequestContext ctx,
-                                      HttpMessageAndTimestamp request) {
+        public void onRequestReceived(@NonNull UniqueReplayerRequestKey requestKey, IContexts.IReplayerHttpTransactionContext ctx,
+                                      @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             liveTrafficStreamLimiter.addWork(1);
@@ -620,7 +621,8 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey, RequestContext ctx,
+        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
+                                       IContexts.IReplayerHttpTransactionContext ctx,
                                        @NonNull RequestResponsePacketPair rrPair) {
             log.atInfo().setMessage(()->"Done receiving captured stream for " + requestKey +
                     ":" + rrPair.requestData).log();
@@ -636,7 +638,8 @@ public class TrafficReplayer {
             }
         }
 
-        Void handleCompletedTransaction(@NonNull UniqueReplayerRequestKey requestKey, RequestResponsePacketPair rrPair,
+        Void handleCompletedTransaction(@NonNull UniqueReplayerRequestKey requestKey,
+                                        RequestResponsePacketPair rrPair,
                                         TransformedTargetRequestAndResponse summary, Throwable t) {
             try {
                 // if this comes in with a serious Throwable (not an Exception), don't bother
@@ -677,7 +680,8 @@ public class TrafficReplayer {
 
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            ChannelKeyContext ctx, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                                            IChannelKeyContext ctx,
+                                            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             commitTrafficStreams(trafficStreamKeysBeingHeld, status);
         }
 
@@ -698,16 +702,16 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onConnectionClose(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                                      ChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
-                                      Instant timestamp, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+        public void onConnectionClose(@NonNull ISourceTrafficChannelKey channelKey, int channelInteractionNum,
+                                      IChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
+                                      @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
             commitTrafficStreams(trafficStreamKeysBeingHeld, status);
         }
 
         @Override
-        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, ChannelKeyContext ctx) {
+        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, IChannelKeyContext ctx) {
             commitTrafficStreams(List.of(tsk), true);
         }
 
@@ -861,7 +865,7 @@ public class TrafficReplayer {
 
     public DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
     transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request,
-                            UniqueReplayerRequestKey requestKey, RequestContext ctx) {
+                            UniqueReplayerRequestKey requestKey, IContexts.IReplayerHttpTransactionContext ctx) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine, ctx,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
                 request.packetBytes::stream);
@@ -869,7 +873,7 @@ public class TrafficReplayer {
 
     public static DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
     transformAndSendRequest(PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
-                            ReplayEngine replayEngine, RequestContext ctx,
+                            ReplayEngine replayEngine, IContexts.IReplayerHttpTransactionContext ctx,
                             @NonNull Instant start, @NonNull Instant end,
                             UniqueReplayerRequestKey requestKey,
                             Supplier<Stream<byte[]>> packetsSupplier)

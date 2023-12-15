@@ -13,7 +13,7 @@ import org.opensearch.migrations.tracing.IWithStartTime;
 import java.time.Instant;
 
 @AllArgsConstructor
-public class KafkaRecordContext implements IWithAttributes<IConnectionContext>, IWithStartTime {
+public class KafkaRecordContext implements IWithAttributes, IWithStartTime {
     static final AttributeKey<String> TOPIC_ATTR = AttributeKey.stringKey("topic");
     static final AttributeKey<String> RECORD_ID_ATTR = AttributeKey.stringKey("recordId");
     static final AttributeKey<Long> RECORD_SIZE_ATTR = AttributeKey.longKey("recordSize");

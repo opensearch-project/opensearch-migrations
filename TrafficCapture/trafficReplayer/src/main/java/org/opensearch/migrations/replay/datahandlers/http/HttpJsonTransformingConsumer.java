@@ -3,27 +3,24 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.opentelemetry.api.trace.Span;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.slf4j.event.Level;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -58,7 +55,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
     private static final MetricsLogger metricsLogger = new MetricsLogger("HttpJsonTransformingConsumer");
-    private IWithStartTimeAndAttributes<RequestContext> transformationContext;
+    private Contexts.RequestTransformationContext transformationContext;
 
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
@@ -75,19 +72,15 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     public HttpJsonTransformingConsumer(IJsonTransformer transformer,
                                         IAuthTransformerFactory authTransformerFactory,
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
-                                        RequestContext requestContext) {
-        this.transformationContext = new IWithStartTimeAndAttributes<>() {
-            @Getter Span currentSpan = METERING_CLOSURE.makeSpanContinuation("httpRequestTransformation")
-                    .apply(requestContext.getPopulatedAttributes(), requestContext.getCurrentSpan());
-            @Getter Instant startTime = Instant.now();
-            @Override public RequestContext getEnclosingScope() { return requestContext; }
-        };
+                                        IContexts.IReplayerHttpTransactionContext httpTransactionContext) {
+        transformationContext = new Contexts.RequestTransformationContext(httpTransactionContext,
+                METERING_CLOSURE.makeSpanContinuation("transformation"));
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
         pipelineOrchestrator = new RequestPipelineOrchestrator<>(chunkSizes, transformedPacketReceiver,
-                authTransformerFactory, requestContext);
+                authTransformerFactory, httpTransactionContext);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
     }
 
@@ -159,14 +152,14 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                 } else {
                                     metricsLogger.atError(MetricsEvent.TRANSFORMING_REQUEST_FAILED, t)
                                             .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext.toString())
-                                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getEnclosingScope().getConnectionId())
+                                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
                                             .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
                                     throw new CompletionException(t);
                                 }
                             } else {
                                 metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
                                         .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
-                                        .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getEnclosingScope().getConnectionId())
+                                        .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
                                         .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
                                 return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                             }
@@ -193,7 +186,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
         metricsLogger.atError(MetricsEvent.REQUEST_REDRIVEN_WITHOUT_TRANSFORMATION, reason)
                 .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getEnclosingScope().getConnectionId())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.SKIPPED, null) :

@@ -14,12 +14,14 @@ import io.netty.util.concurrent.Future;
 import io.opentelemetry.context.ContextKey;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
@@ -66,7 +68,7 @@ public class ClientConnectionPool {
     }
 
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getResilientClientChannelProducer(EventLoop eventLoop, ChannelKeyContext connectionContext) {
+    getResilientClientChannelProducer(EventLoop eventLoop, IChannelKeyContext connectionContext) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var clientConnectionChannelCreatedFuture =
@@ -140,9 +142,9 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualSessionGet(ChannelKeyContext channelKey, boolean ignoreIfNotPresent, ChannelKeyContext ctx) {
+    submitEventualSessionGet(IChannelKeyContext ctx, boolean ignoreIfNotPresent) {
         ConnectionReplaySession channelFutureAndSchedule =
-                getCachedSession(channelKey, ignoreIfNotPresent);
+                getCachedSession(ctx, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
             var rval = new DefaultPromise<ConnectionReplaySession>(eventLoopGroup.next());
             rval.setSuccess(null);
@@ -158,7 +160,7 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(ChannelKeyContext channelKey, boolean dontCreate) {
+    public ConnectionReplaySession getCachedSession(IChannelKeyContext channelKey, boolean dontCreate) {
         var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKey.getConnectionId()) :
                 connectionId2ChannelCache.get(channelKey.getConnectionId());
         if (crs != null) {

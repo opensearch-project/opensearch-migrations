@@ -10,7 +10,7 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.tracing.RequestContext;
+import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -42,19 +42,19 @@ public class RequestPipelineOrchestrator<R> {
     public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer<R> packetReceiver;
-    private RequestContext requestContext;
+    private IContexts.IReplayerHttpTransactionContext httpTransactionContext;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
                                        IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
-                                       RequestContext requestContext) {
+                                       IContexts.IReplayerHttpTransactionContext httpTransactionContext) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :
                 IAuthTransformerFactory.NullAuthTransformerFactory.instance;
-        this.requestContext = requestContext;
+        this.httpTransactionContext = httpTransactionContext;
     }
 
     static void removeThisAndPreviousHandlers(ChannelPipeline pipeline, ChannelHandler targetHandler) {
@@ -97,7 +97,7 @@ public class RequestPipelineOrchestrator<R> {
         //        HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
         //        NettyDecodedHttpRequestHandler is removed.
         pipeline.addLast(new NettyDecodedHttpRequestPreliminaryConvertHandler<R>(transformer, chunkSizes,
-                this, requestContext));
+                this, httpTransactionContext));
         addLoggingHandler(pipeline, "B");
     }
 
@@ -147,7 +147,7 @@ public class RequestPipelineOrchestrator<R> {
         // OUT: nothing - terminal!  ByteBufs are routed to the packet handler!
         addLoggingHandler(pipeline, "K");
         pipeline.addLast(OFFLOADING_HANDLER_NAME,
-                new NettySendByteBufsToPacketHandlerHandler<R>(packetReceiver, requestContext));
+                new NettySendByteBufsToPacketHandlerHandler<R>(packetReceiver, httpTransactionContext));
     }
 
     private void addLoggingHandler(ChannelPipeline pipeline, String name) {

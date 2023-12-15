@@ -12,8 +12,10 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
+import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.FileInputStream;
@@ -32,8 +34,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 /**
  * Adapt a Kafka stream into a TrafficCaptureSource.
@@ -64,19 +64,26 @@ import java.util.stream.StreamSupport;
 @Slf4j
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
+    public static final String TELEMETRY_SCOPE_NAME = "KafkaSource";
+    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
+
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
     // see https://stackoverflow.com/questions/39730126/difference-between-session-timeout-ms-and-max-poll-interval-ms-for-kafka-0-10
     public static final String DEFAULT_POLL_INTERVAL_MS = "60000";
     private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
 
 
+
     final TrackingKafkaConsumer trackingKafkaConsumer;
     private final ExecutorService kafkaExecutor;
     private final AtomicLong trafficStreamsRead;
     private final KafkaBehavioralPolicy behavioralPolicy;
+    private final ChannelContextManager channelContextManager;
 
-    public KafkaTrafficCaptureSource(Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
-        this(kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
+    public KafkaTrafficCaptureSource(Consumer<String, byte[]> kafkaConsumer,
+                                     String topic, Duration keepAliveInterval) {
+        this(kafkaConsumer, topic, keepAliveInterval,
+                Clock.systemUTC(), new KafkaBehavioralPolicy());
     }
 
     public KafkaTrafficCaptureSource(Consumer<String, byte[]> kafkaConsumer,
@@ -85,20 +92,22 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                                      Clock clock,
                                      @NonNull KafkaBehavioralPolicy behavioralPolicy)
     {
-        trackingKafkaConsumer = new TrackingKafkaConsumer(kafkaConsumer, topic, keepAliveInterval, clock);
+        this.channelContextManager = new ChannelContextManager();
+        trackingKafkaConsumer = new TrackingKafkaConsumer(kafkaConsumer, topic, keepAliveInterval, clock,
+                tskList->tskList.forEach(channelContextManager::releaseContextFor));
         trafficStreamsRead = new AtomicLong();
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor();
     }
 
-    public static KafkaTrafficCaptureSource buildKafkaConsumer(@NonNull String brokers,
-                                                               @NonNull String topic,
-                                                               @NonNull String groupId,
-                                                               boolean enableMSKAuth,
-                                                               String propertyFilePath,
-                                                               @NonNull Clock clock,
-                                                               @NonNull KafkaBehavioralPolicy behavioralPolicy)
+    public static KafkaTrafficCaptureSource buildKafkaSource(@NonNull String brokers,
+                                                             @NonNull String topic,
+                                                             @NonNull String groupId,
+                                                             boolean enableMSKAuth,
+                                                             String propertyFilePath,
+                                                             @NonNull Clock clock,
+                                                             @NonNull KafkaBehavioralPolicy behavioralPolicy)
             throws IOException
     {
         var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
@@ -152,7 +161,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     @SneakyThrows
     public void touch() {
-        CompletableFuture.runAsync(()->trackingKafkaConsumer.touch(), kafkaExecutor).get();
+        CompletableFuture.runAsync(trackingKafkaConsumer::touch, kafkaExecutor).get();
     }
 
     /**
@@ -190,7 +199,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
                             log.atTrace().setMessage(()->"Parsed traffic stream #" + trafficStreamsSoFar +
                                             ": " + offsetData + " " + ts).log();
-                            var key = new TrafficStreamKeyWithKafkaRecordId(ts, offsetData);
+                            var key = new TrafficStreamKeyWithKafkaRecordId(
+                                    channelContextManager::retainOrCreateContext, ts, kafkaRecord.key(), offsetData);
                             return (ITrafficStreamWithKey) new PojoTrafficStreamWithKey(ts, key);
                         } catch (InvalidProtocolBufferException e) {
                             RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);

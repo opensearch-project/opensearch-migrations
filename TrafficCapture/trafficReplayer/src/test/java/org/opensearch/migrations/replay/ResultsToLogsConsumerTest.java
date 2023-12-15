@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.Unpooled;
-import io.opentelemetry.api.GlobalOpenTelemetry;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
@@ -20,9 +19,7 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.RequestContext;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.tracing.EmptyContext;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -232,8 +229,9 @@ class ResultsToLogsConsumerTest {
     @Test
     private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
         var trafficStreamKey = new PojoTrafficStreamKey(NODE_ID,"c",0);
-        var sourcePair = new RequestResponsePacketPair(trafficStreamKey,
-                TestRequestKey.getTestConnectionRequestContext(0));
+        var requestCtx = TestRequestKey.getTestConnectionRequestContext(0);
+        trafficStreamKey.setTrafficStreamsContext(requestCtx.getImmediateEnclosingScope());
+        var sourcePair = new RequestResponsePacketPair(trafficStreamKey, 0, 0);
         var rawRequestData = loadResourceAsBytes("/requests/raw/" + requestResourceName);
         sourcePair.addRequestData(Instant.EPOCH, rawRequestData);
         var rawResponseData = NettyPacketToHttpConsumerTest.EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);

@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.kafka;
 
-import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -8,22 +7,18 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.requests.TxnOffsetCommitRequest;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.slf4j.event.Level;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -65,13 +60,16 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     final Map<Integer, OffsetLifecycleTracker> partitionToOffsetLifecycleTrackerMap;
     // loosening visibility so that a unit test can read this
     final Map<TopicPartition, OffsetAndMetadata> nextSetOfCommitsMap;
+    final Map<TopicPartition, List<ITrafficStreamKey>> nextSetOfKeysBeingCommitted;
+    final java.util.function.Consumer<Stream<ITrafficStreamKey>> onCommitKeysCallback;
     private final Duration keepAliveInterval;
     private final AtomicReference<Instant> lastTouchTimeRef;
-    private AtomicInteger consumerConnectionGeneration;
-    private AtomicInteger kafkaRecordsLeftToCommit;
+    private final AtomicInteger consumerConnectionGeneration;
+    private final AtomicInteger kafkaRecordsLeftToCommit;
 
     public TrackingKafkaConsumer(Consumer<String, byte[]> kafkaConsumer, String topic,
-                                 Duration keepAliveInterval, Clock c) {
+                                 Duration keepAliveInterval, Clock c,
+                                 java.util.function.Consumer<Stream<ITrafficStreamKey>> onCommitKeysCallback) {
         this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
         this.clock = c;
@@ -81,13 +79,17 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         consumerConnectionGeneration = new AtomicInteger();
         kafkaRecordsLeftToCommit = new AtomicInteger();
         this.keepAliveInterval = keepAliveInterval;
+        this.nextSetOfKeysBeingCommitted = new HashMap<>();
+        this.onCommitKeysCallback = onCommitKeysCallback;
     }
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         safeCommit();
         partitions.forEach(p->{
-            nextSetOfCommitsMap.remove(new TopicPartition(topic, p.partition()));
+            var tp = new TopicPartition(topic, p.partition());
+            nextSetOfCommitsMap.remove(tp);
+            nextSetOfKeysBeingCommitted.remove(tp);
             partitionToOffsetLifecycleTrackerMap.remove(p.partition());
         });
         kafkaRecordsLeftToCommit.set(partitionToOffsetLifecycleTrackerMap.values().stream()
@@ -147,11 +149,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         } catch (IllegalStateException e) {
             log.atError().setCause(e).setMessage(()->"Unable to pause the topic partitions: " + topic + ".  " +
                     "The active partitions passed here : " + activePartitions.stream()
-                            .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                            .map(x->""+x).collect(Collectors.joining(",")) + ".  " +
                     "The active partitions as tracked here are: " + getActivePartitions().stream()
-                            .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                            .map(x->""+x).collect(Collectors.joining(",")) + ".  " +
                     "The active partitions according to the consumer:  " + kafkaConsumer.assignment().stream()
-                            .map(x->x.toString()).collect(Collectors.joining(","))
+                            .map(x->""+x).collect(Collectors.joining(","))
                     ).log();
         }
     }
@@ -165,11 +167,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                     "This may not be a fatal error for the entire process as the consumer should eventually"
                     + " rejoin and rebalance.  " +
                     "The active partitions passed here : " + activePartitions.stream()
-                    .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                    .map(x->""+x).collect(Collectors.joining(",")) + ".  " +
                     "The active partitions as tracked here are: " + getActivePartitions().stream()
-                    .map(x->x.toString()).collect(Collectors.joining(",")) + ".  " +
+                    .map(x->""+x).collect(Collectors.joining(",")) + ".  " +
                     "The active partitions according to the consumer:  " + kafkaConsumer.assignment().stream()
-                    .map(x->x.toString()).collect(Collectors.joining(","))
+                    .map(x->""+x).collect(Collectors.joining(","))
             ).log();
         }
     }
@@ -247,6 +249,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             if (!nextSetOfCommitsMap.isEmpty()) {
                 log.atDebug().setMessage(() -> "Committing " + nextSetOfCommitsMap).log();
                 kafkaConsumer.commitSync(nextSetOfCommitsMap);
+                onCommitKeysCallback.accept(nextSetOfKeysBeingCommitted.values().stream().flatMap(Collection::stream));
+                nextSetOfKeysBeingCommitted.clear();
                 nextSetOfCommitsMap.clear();
                 log.trace("partitionToOffsetLifecycleTrackerMap="+partitionToOffsetLifecycleTrackerMap);
                 kafkaRecordsLeftToCommit.set(partitionToOffsetLifecycleTrackerMap.values().stream()
