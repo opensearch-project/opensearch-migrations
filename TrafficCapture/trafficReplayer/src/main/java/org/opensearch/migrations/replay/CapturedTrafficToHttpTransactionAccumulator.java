@@ -105,7 +105,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         public void onRequestReceived(@NonNull Accumulation accum,
                                       IContexts.IRequestAccumulationContext requestCtx,
                                       @NonNull HttpMessageAndTimestamp request) {
-            requestCtx.getCurrentSpan().end();
+            requestCtx.endSpan();
             underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope().getReplayerRequestKey(),
                     requestCtx.getLogicalEnclosingScope(), request);
         }
@@ -113,7 +113,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
                                        @NonNull RequestResponsePacketPair rrpp) {
             var responseCtx = rrpp.getResponseContext();
-            responseCtx.getCurrentSpan().end();
+            responseCtx.endSpan();
             underlying.onFullDataReceived(key, responseCtx.getLogicalEnclosingScope(), rrpp);
         }
 
@@ -122,7 +122,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                       @NonNull Instant when,
                                       @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             var tsCtx = accum.trafficChannelKey.getTrafficStreamsContext();
-            tsCtx.getCurrentSpan().end();
             underlying.onConnectionClose(accum.trafficChannelKey,
                     accum.startingSourceRequestIndex + accum.startingSourceRequestIndex,
                     tsCtx, status, when, trafficStreamKeysBeingHeld);
@@ -131,13 +130,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                             IContexts.ITrafficStreamsLifecycleContext tsCtx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            tsCtx.getCurrentSpan().end();
             underlying.onTrafficStreamsExpired(status, tsCtx.getLogicalEnclosingScope(), trafficStreamKeysBeingHeld);
         }
 
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
             var tsCtx = tsk.getTrafficStreamsContext();
-            tsCtx.getCurrentSpan().end();
             underlying.onTrafficStreamIgnored(tsk, tsk.getTrafficStreamsContext());
         }
     };

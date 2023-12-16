@@ -48,7 +48,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         }
 
         var connectionId = ch.id().asLongText();
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<T>("n", "c",
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<T>("", connectionId,
                 connectionCaptureFactory, requestCapturePredicate, this::shouldGuaranteeMessageOffloading));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }

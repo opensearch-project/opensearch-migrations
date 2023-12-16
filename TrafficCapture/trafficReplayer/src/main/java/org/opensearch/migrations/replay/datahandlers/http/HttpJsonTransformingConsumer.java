@@ -141,7 +141,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return offloadingHandler.getPacketReceiverCompletionFuture()
                 .getDeferredFutureThroughHandle(
                         (v, t) -> {
-                            transformationContext.getCurrentSpan().end();
+                            transformationContext.endSpan();
                             METERING_CLOSURE.meterIncrementEvent(transformationContext,
                                     t != null ? "transformRequestFailed" : "transformRequestSuccess");
                             METERING_CLOSURE.meterHistogramMicros(transformationContext, "transformationDuration");

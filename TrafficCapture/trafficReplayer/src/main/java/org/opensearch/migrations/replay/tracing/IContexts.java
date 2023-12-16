@@ -10,7 +10,7 @@ import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
 public class IContexts {
-    public static interface IKafkaRecordContext
+    public interface IKafkaRecordContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IChannelKeyContext> {
         static final AttributeKey<String> RECORD_ID_KEY = AttributeKey.stringKey("recordId");
 
@@ -21,7 +21,7 @@ public class IContexts {
         }
     }
 
-    public static interface ITrafficStreamsLifecycleContext
+    public interface ITrafficStreamsLifecycleContext
             extends IChannelKeyContext, IWithTypedEnclosingScope<IChannelKeyContext> {
         ITrafficStreamKey getTrafficStreamKey();
         IChannelKeyContext getChannelKeyContext();
@@ -30,7 +30,7 @@ public class IContexts {
         }
     }
 
-    public static interface IReplayerHttpTransactionContext
+    public interface IReplayerHttpTransactionContext
             extends IHttpTransactionContext, IChannelKeyContext, IWithTypedEnclosingScope<IChannelKeyContext> {
         static final AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
 
@@ -56,24 +56,24 @@ public class IContexts {
         }
     }
 
-    public static interface IRequestAccumulationContext
+    public interface IRequestAccumulationContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public static interface IResponseAccumulationContext
+    public interface IResponseAccumulationContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public static interface IRequestTransformationContext
+    public interface IRequestTransformationContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public static interface IWaitingForHttpResponseContext
+    public interface IWaitingForHttpResponseContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public static interface IReceivingHttpResponseContext
+    public interface IReceivingHttpResponseContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public static interface IRequestSendingContext
+    public interface IRequestSendingContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public static interface ITupleHandlingContext
+    public interface ITupleHandlingContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 }

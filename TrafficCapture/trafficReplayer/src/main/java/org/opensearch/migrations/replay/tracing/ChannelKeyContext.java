@@ -15,8 +15,6 @@ public class ChannelKeyContext implements IChannelKeyContext, IWithStartTime {
     final Span currentSpan;
     @Getter
     final Instant startTime;
-    @Getter
-    int refCount;
 
     public ChannelKeyContext(ISourceTrafficChannelKey channelKey, ISpanGenerator spanGenerator) {
         this.channelKey = channelKey;
@@ -29,19 +27,4 @@ public class ChannelKeyContext implements IChannelKeyContext, IWithStartTime {
         return channelKey.toString();
     }
 
-    public ChannelKeyContext retain() {
-        refCount++;
-        return this;
-    }
-
-    /**
-     * Returns true if this was the final release
-     *
-     * @return
-     */
-    public boolean release() {
-        refCount--;
-        assert refCount >= 0;
-        return refCount == 0;
-    }
 }

@@ -11,6 +11,10 @@ public interface IScopedInstrumentationAttributes {
 
     Span getCurrentSpan();
 
+    default void endSpan() {
+        getCurrentSpan().end();
+    }
+
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {
         return builder;
     }

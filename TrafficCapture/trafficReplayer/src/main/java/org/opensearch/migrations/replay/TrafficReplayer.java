@@ -696,6 +696,7 @@ public class TrafficReplayer {
         private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
             if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
+                    tsk.getTrafficStreamsContext().endSpan();
                     trafficCaptureSource.commitTrafficStream(tsk);
                 }
             }

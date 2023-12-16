@@ -76,10 +76,8 @@ public class RequestResponsePacketPair {
     public void rotateRequestGatheringToResponse() {
         var looseCtx = requestOrResponseAccumulationContext;
         assert looseCtx instanceof IContexts.IRequestAccumulationContext;
-        var ctx = (IContexts.IRequestAccumulationContext) looseCtx;
-        var parentCtx = ctx.getLogicalEnclosingScope();
-        ctx.getCurrentSpan().end();
-        requestOrResponseAccumulationContext = new Contexts.ResponseAccumulationContext(parentCtx,
+        requestOrResponseAccumulationContext = new Contexts.ResponseAccumulationContext(
+                getRequestContext().getLogicalEnclosingScope(),
                 Accumulation.METERING_CLOSURE.makeSpanContinuation("accumulatingResponse"));
     }
 

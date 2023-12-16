@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.tracing;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 
 public class Contexts {
@@ -104,6 +105,11 @@ public class Contexts {
                                           ISpanWithParentGenerator spanGenerator) {
             super(enclosingScope);
             setCurrentSpan(spanGenerator);
+        }
+
+        @Override
+        public void endSpan() {
+            super.endSpan();
         }
     }
 

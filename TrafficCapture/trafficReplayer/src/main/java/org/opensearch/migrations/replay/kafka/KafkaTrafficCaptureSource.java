@@ -13,6 +13,8 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
@@ -94,11 +96,22 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     {
         this.channelContextManager = new ChannelContextManager();
         trackingKafkaConsumer = new TrackingKafkaConsumer(kafkaConsumer, topic, keepAliveInterval, clock,
-                tskList->tskList.forEach(channelContextManager::releaseContextFor));
+                this::onKeyFinishedCommitting);
         trafficStreamsRead = new AtomicLong();
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor();
+    }
+
+    private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
+        var looseParentScope = trafficStreamKey.getTrafficStreamsContext().getEnclosingScope();
+        if (!(looseParentScope instanceof Contexts.KafkaRecordContext)) {
+            throw new IllegalArgumentException("Expected parent context of type " + Contexts.KafkaRecordContext.class +
+                    " instead of " + looseParentScope + " (of type=" + looseParentScope.getClass() + ")");
+        }
+        var kafkaCtx = (Contexts.KafkaRecordContext) looseParentScope;
+        kafkaCtx.endSpan();
+        channelContextManager.releaseContextFor((ChannelKeyContext) kafkaCtx.getImmediateEnclosingScope());
     }
 
     public static KafkaTrafficCaptureSource buildKafkaSource(@NonNull String brokers,
@@ -224,7 +237,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             throw new IllegalArgumentException("Expected key of type "+TrafficStreamKeyWithKafkaRecordId.class+
                     " but received "+trafficStreamKey+" (of type="+trafficStreamKey.getClass()+")");
         }
-        trackingKafkaConsumer.commitKafkaKey((TrafficStreamKeyWithKafkaRecordId) trafficStreamKey);
+        trackingKafkaConsumer.commitKafkaKey(trafficStreamKey, (TrafficStreamKeyWithKafkaRecordId) trafficStreamKey);
     }
 
     @Override

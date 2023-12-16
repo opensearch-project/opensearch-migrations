@@ -1,5 +1,8 @@
 package org.opensearch.migrations.replay.kafka;
 
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -13,17 +16,15 @@ import org.slf4j.event.Level;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -36,6 +37,33 @@ import java.util.stream.StreamSupport;
  */
 @Slf4j
 public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
+
+    @AllArgsConstructor
+    private static class OrderedKeyHolder implements Comparable<OrderedKeyHolder> {
+        @Getter final long offset;
+        @Getter @NonNull final ITrafficStreamKey tsk;
+
+        @Override
+        public int compareTo(OrderedKeyHolder o) {
+            return Long.compare(offset, o.offset);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            OrderedKeyHolder that = (OrderedKeyHolder) o;
+
+            if (offset != that.offset) return false;
+            return tsk.equals(that.tsk);
+        }
+
+        @Override
+        public int hashCode() {
+            return Long.valueOf(offset).hashCode();
+        }
+    }
 
     /**
      * The keep-alive should already be set to a fraction of the max poll timeout for
@@ -60,8 +88,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     final Map<Integer, OffsetLifecycleTracker> partitionToOffsetLifecycleTrackerMap;
     // loosening visibility so that a unit test can read this
     final Map<TopicPartition, OffsetAndMetadata> nextSetOfCommitsMap;
-    final Map<TopicPartition, List<ITrafficStreamKey>> nextSetOfKeysBeingCommitted;
-    final java.util.function.Consumer<Stream<ITrafficStreamKey>> onCommitKeysCallback;
+    final Map<TopicPartition, PriorityQueue<OrderedKeyHolder>> nextSetOfKeysContextsBeingCommitted;
+    final java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback;
     private final Duration keepAliveInterval;
     private final AtomicReference<Instant> lastTouchTimeRef;
     private final AtomicInteger consumerConnectionGeneration;
@@ -69,7 +97,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     public TrackingKafkaConsumer(Consumer<String, byte[]> kafkaConsumer, String topic,
                                  Duration keepAliveInterval, Clock c,
-                                 java.util.function.Consumer<Stream<ITrafficStreamKey>> onCommitKeysCallback) {
+                                 java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback) {
         this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
         this.clock = c;
@@ -79,8 +107,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         consumerConnectionGeneration = new AtomicInteger();
         kafkaRecordsLeftToCommit = new AtomicInteger();
         this.keepAliveInterval = keepAliveInterval;
-        this.nextSetOfKeysBeingCommitted = new HashMap<>();
-        this.onCommitKeysCallback = onCommitKeysCallback;
+        this.nextSetOfKeysContextsBeingCommitted = new HashMap<>();
+        this.onCommitKeyCallback = onCommitKeyCallback;
     }
 
     @Override
@@ -89,7 +117,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         partitions.forEach(p->{
             var tp = new TopicPartition(topic, p.partition());
             nextSetOfCommitsMap.remove(tp);
-            nextSetOfKeysBeingCommitted.remove(tp);
+            nextSetOfKeysContextsBeingCommitted.remove(tp);
             partitionToOffsetLifecycleTrackerMap.remove(p.partition());
         });
         kafkaRecordsLeftToCommit.set(partitionToOffsetLifecycleTrackerMap.values().stream()
@@ -221,7 +249,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
-    void commitKafkaKey(KafkaCommitOffsetData kafkaTsk) {
+    void commitKafkaKey(ITrafficStreamKey streamKey, KafkaCommitOffsetData kafkaTsk) {
         var tracker = partitionToOffsetLifecycleTrackerMap.get(kafkaTsk.getPartition());
         if (tracker == null || tracker.consumerConnectionGeneration != kafkaTsk.getGeneration()) {
             log.atWarn().setMessage(()->"trafficKey's generation (" + kafkaTsk.getGeneration() + ") is not current (" +
@@ -232,12 +260,16 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                     kafkaTsk).log();
             return;
         }
+
         var p = kafkaTsk.getPartition();
         Optional<Long> newHeadValue;
 
+        var k = new TopicPartition(topic, p);
+        nextSetOfKeysContextsBeingCommitted.computeIfAbsent(k, k2 -> new PriorityQueue<>())
+                .add(new OrderedKeyHolder(kafkaTsk.getOffset(), streamKey));
+
         newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk.getOffset());
         newHeadValue.ifPresent(o -> {
-            var k = new TopicPartition(topic, p);
             var v = new OffsetAndMetadata(o);
             log.atDebug().setMessage(()->"Adding new commit " + k + "->" + v + " to map").log();
             nextSetOfCommitsMap.put(k, v);
@@ -249,8 +281,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             if (!nextSetOfCommitsMap.isEmpty()) {
                 log.atDebug().setMessage(() -> "Committing " + nextSetOfCommitsMap).log();
                 kafkaConsumer.commitSync(nextSetOfCommitsMap);
-                onCommitKeysCallback.accept(nextSetOfKeysBeingCommitted.values().stream().flatMap(Collection::stream));
-                nextSetOfKeysBeingCommitted.clear();
+                nextSetOfCommitsMap.entrySet().stream()
+                        .forEach(kvp->callbackUpTo(nextSetOfKeysContextsBeingCommitted.get(kvp.getKey()),
+                                kvp.getValue().offset()));
                 nextSetOfCommitsMap.clear();
                 log.trace("partitionToOffsetLifecycleTrackerMap="+partitionToOffsetLifecycleTrackerMap);
                 kafkaRecordsLeftToCommit.set(partitionToOffsetLifecycleTrackerMap.values().stream()
@@ -270,6 +303,15 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                             nextSetOfCommitsMap.entrySet().stream()
                                     .map(kvp -> kvp.getKey() + "->" + kvp.getValue()).collect(Collectors.joining(",")))
                     .log();
+        }
+    }
+
+    private void callbackUpTo(PriorityQueue<OrderedKeyHolder> orderedKeyHolders, long upToOffset) {
+        for (var nextKeyHolder = orderedKeyHolders.peek();
+             nextKeyHolder != null && nextKeyHolder.offset<=upToOffset;
+             nextKeyHolder = orderedKeyHolders.peek()) {
+            onCommitKeyCallback.accept(nextKeyHolder.tsk);
+            orderedKeyHolders.poll();
         }
     }
 

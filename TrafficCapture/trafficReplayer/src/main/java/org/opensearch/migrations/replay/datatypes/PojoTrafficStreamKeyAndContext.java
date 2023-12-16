@@ -18,8 +18,9 @@ public class PojoTrafficStreamKeyAndContext extends PojoTrafficStreamKey {
     @NonNull
     IContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
 
-    public static PojoTrafficStreamKeyAndContext build(TrafficStream stream, Function<ITrafficStreamKey,
-            IContexts.ITrafficStreamsLifecycleContext> contextSupplier) {
+    public static PojoTrafficStreamKeyAndContext
+    build(TrafficStream stream,
+          Function<ITrafficStreamKey, IContexts.ITrafficStreamsLifecycleContext> contextSupplier) {
         var rval = new PojoTrafficStreamKeyAndContext(stream.getNodeId(), stream.getConnectionId(),
                 TrafficStreamUtils.getTrafficStreamIndex(stream));
         rval.setTrafficStreamsContext(contextSupplier.apply(rval));

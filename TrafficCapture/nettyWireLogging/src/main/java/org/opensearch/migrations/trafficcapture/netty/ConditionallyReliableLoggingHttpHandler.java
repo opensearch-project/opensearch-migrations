@@ -38,7 +38,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                         t != null ? "blockedFlushFailure" : "blockedFlushSuccess");
                 METERING_CLOSURE.meterHistogramMicros(messageContext,
                         t==null ? "blockedFlushFailure_micro" : "stream_flush_failure_micro");
-                messageContext.getCurrentSpan().end();
+                messageContext.endSpan();
 
                 if (t != null) {
                     // This is a spot where we would benefit from having a behavioral policy that different users
