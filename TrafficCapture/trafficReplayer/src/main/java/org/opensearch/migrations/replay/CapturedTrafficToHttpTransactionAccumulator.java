@@ -122,8 +122,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                       @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             var tsCtx = accum.trafficChannelKey.getTrafficStreamsContext();
             underlying.onConnectionClose(accum.trafficChannelKey,
-                    accum.startingSourceRequestIndex + accum.startingSourceRequestIndex,
-                    tsCtx, status, when, trafficStreamKeysBeingHeld);
+                    accum.numberOfResets.get(), tsCtx, status, when, trafficStreamKeysBeingHeld);
         }
 
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
@@ -263,10 +262,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                Instant timestamp) {
         if (observation.hasClose()) {
             accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
+            var heldTrafficStreams = getTrafficStreamsHeldByAccum(accum);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             closedConnectionCounter.incrementAndGet();
             listener.onConnectionClose(accum, RequestResponsePacketPair.ReconstructionStatus.COMPLETE,
-                    timestamp, getTrafficStreamsHeldByAccum(accum));
+                    timestamp, heldTrafficStreams);
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
             accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
