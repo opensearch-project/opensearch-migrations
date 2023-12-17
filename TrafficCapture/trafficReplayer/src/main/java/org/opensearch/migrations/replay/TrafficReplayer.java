@@ -603,7 +603,8 @@ public class TrafficReplayer {
         private ITrafficCaptureSource trafficCaptureSource;
 
         @Override
-        public void onRequestReceived(@NonNull UniqueReplayerRequestKey requestKey, IContexts.IReplayerHttpTransactionContext ctx,
+        public void onRequestReceived(@NonNull UniqueReplayerRequestKey requestKey,
+                                      IContexts.IReplayerHttpTransactionContext ctx,
                                       @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
@@ -671,6 +672,7 @@ public class TrafficReplayer {
                         .log();
                 throw e;
             } finally {
+                rrPair.getHttpTransactionContext().endSpan();
                 requestToFinalWorkFuturesMap.remove(requestKey);
                 log.trace("removed rrPair.requestData to " +
                         "targetTransactionInProgressMap for " +
@@ -707,8 +709,10 @@ public class TrafficReplayer {
                                       IChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
-            replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
-            commitTrafficStreams(trafficStreamKeysBeingHeld, status);
+            var cf = replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
+            cf.map(f->f.whenComplete((v,t)->{
+                commitTrafficStreams(trafficStreamKeysBeingHeld, status);
+            }), ()->"closing the channel in the ReplayEngine");
         }
 
         @Override
@@ -879,6 +883,7 @@ public class TrafficReplayer {
                             UniqueReplayerRequestKey requestKey,
                             Supplier<Stream<byte[]>> packetsSupplier)
     {
+        // TODO - add context chaining
         try {
             var transformationCompleteFuture = replayEngine.scheduleTransformationWork(ctx, start, ()->
                     transformAllData(inputRequestTransformerFactory.create(requestKey, ctx), packetsSupplier));
@@ -891,11 +896,11 @@ public class TrafficReplayer {
                         replayEngine.scheduleRequest(requestKey, ctx, start, end,
                                         transformedResult.transformedOutput.size(),
                                         transformedResult.transformedOutput.streamRetained())
-                                .map(future->future.thenApply(t->
+                                .map(future->future.thenApply(t ->
                                                 new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,
                                                         t, transformedResult.transformationStatus, t.error)),
                                         ()->"(if applicable) packaging transformed result into a completed TransformedTargetRequestAndResponse object")
-                                .map(future->future.exceptionally(t->
+                                .map(future->future.exceptionally(t ->
                                                 new TransformedTargetRequestAndResponse(transformedResult.transformedOutput,
                                                         transformedResult.transformationStatus, t)),
                                         ()->"(if applicable) packaging transformed result into a failed TransformedTargetRequestAndResponse object"),

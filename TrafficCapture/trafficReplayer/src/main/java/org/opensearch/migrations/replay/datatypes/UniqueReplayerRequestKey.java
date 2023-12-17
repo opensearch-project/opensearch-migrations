@@ -1,11 +1,13 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
 
 @EqualsAndHashCode(callSuper = true)
 public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     public final ITrafficStreamKey trafficStreamKey;
     public final int sourceRequestIndexOffsetAtStartOfAccumulation;
+    @Getter
     public final int replayerRequestIndex;
 
     public UniqueReplayerRequestKey(ITrafficStreamKey streamKey, int sourceOffsetAtStartOfAccumulation,
@@ -23,10 +25,6 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     @Override
     public int getSourceRequestIndex() {
         return replayerRequestIndex + sourceRequestIndexOffsetAtStartOfAccumulation;
-    }
-
-    public int getReplayerRequestIndex() {
-        return replayerRequestIndex;
     }
 
     @Override

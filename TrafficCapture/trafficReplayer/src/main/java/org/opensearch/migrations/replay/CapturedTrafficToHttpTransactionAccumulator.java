@@ -102,8 +102,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     @AllArgsConstructor
     private static class SpanWrappingAccumulationCallbacks {
         private final AccumulationCallbacks underlying;
-        public void onRequestReceived(@NonNull Accumulation accum,
-                                      IContexts.IRequestAccumulationContext requestCtx,
+        public void onRequestReceived(IContexts.IRequestAccumulationContext requestCtx,
                                       @NonNull HttpMessageAndTimestamp request) {
             requestCtx.endSpan();
             underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope().getReplayerRequestKey(),
@@ -400,17 +399,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private boolean handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
         var rrPair = accumulation.getRrPair();
-        var requestPacketBytes = rrPair.requestData;
+        var httpMessage = rrPair.requestData;
         metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
                 .setAttribute(MetricsAttributeKey.REQUEST_ID,
                         rrPair.getRequestContext().getLogicalEnclosingScope().getReplayerRequestKey().toString())
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID,
                         rrPair.getRequestContext().getLogicalEnclosingScope().getLogicalEnclosingScope().getConnectionId()).emit();
-        assert (requestPacketBytes != null);
-        assert (!requestPacketBytes.hasInProgressSegment());
+        assert (httpMessage != null);
+        assert (!httpMessage.hasInProgressSegment());
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
-        listener.onRequestReceived(accumulation, requestCtx, requestPacketBytes);
+        listener.onRequestReceived(requestCtx, httpMessage);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;
     }

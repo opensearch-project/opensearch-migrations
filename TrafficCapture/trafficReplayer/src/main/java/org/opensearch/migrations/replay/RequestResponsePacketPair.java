@@ -43,9 +43,9 @@ public class RequestResponsePacketPair {
         var httpTransactionContext = new Contexts.HttpTransactionContext(
                 startingAtTrafficStreamKey.getTrafficStreamsContext(),
                 requestKey,
-                Accumulation.METERING_CLOSURE.makeSpanContinuation("processingChannel"));
+                Accumulation.METERING_CLOSURE.makeSpanContinuation("httpTransaction"));
         requestOrResponseAccumulationContext = new Contexts.RequestAccumulationContext(httpTransactionContext,
-                Accumulation.METERING_CLOSURE.makeSpanContinuation("httpTransactionAccumulation"));
+                Accumulation.METERING_CLOSURE.makeSpanContinuation("accumulatingRequest"));
     }
 
     @NonNull ISourceTrafficChannelKey getBeginningTrafficStreamKey() {

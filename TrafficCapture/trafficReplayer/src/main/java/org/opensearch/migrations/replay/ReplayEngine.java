@@ -155,14 +155,15 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }
 
-    public void closeConnection(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                                IChannelKeyContext ctx, Instant timestamp) {
+    public DiagnosticTrackableCompletableFuture<String, Void>
+    closeConnection(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
+                    IChannelKeyContext ctx, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
         var future = networkSendOrchestrator.scheduleClose(ctx, channelInteractionNum, atTime);
-        hookWorkFinishingUpdates(future, timestamp, channelKey, label);
+        return hookWorkFinishingUpdates(future, timestamp, channelKey, label);
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {

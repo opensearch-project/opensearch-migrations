@@ -106,11 +106,6 @@ public class Contexts {
             super(enclosingScope);
             setCurrentSpan(spanGenerator);
         }
-
-        @Override
-        public void endSpan() {
-            super.endSpan();
-        }
     }
 
     public static class RequestTransformationContext
