@@ -188,7 +188,7 @@ public class FullTrafficReplayerTest {
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
             this.arrayIndex = arrayIndex;
-            var key = PojoTrafficStreamKeyAndContext.build(connectionId, nodeId, trafficStreamIndex, tsk->
+            var key = PojoTrafficStreamKeyAndContext.build(nodeId, connectionId, trafficStreamIndex, tsk->
                     new TestTrafficStreamsLifecycleContext(tsk));
             trafficStreamsContext = key.getTrafficStreamsContext();
             key.setTrafficStreamsContext(trafficStreamsContext);

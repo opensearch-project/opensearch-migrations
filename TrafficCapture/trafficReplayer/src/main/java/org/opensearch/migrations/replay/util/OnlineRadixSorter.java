@@ -31,6 +31,7 @@ public class OnlineRadixSorter<T> {
     }
 
     public void add(int index, T item, Consumer<T> sortedItemVisitor) {
+        assert index >= currentOffset;
         if (currentOffset == index) {
             ++currentOffset;
             sortedItemVisitor.accept(item);
