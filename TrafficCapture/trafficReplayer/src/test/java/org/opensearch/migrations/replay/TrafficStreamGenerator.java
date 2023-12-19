@@ -209,9 +209,10 @@ public class TrafficStreamGenerator {
     }
 
     @SneakyThrows
-    private static TrafficStream[] fillCommandsAndSizesForSeed(long rSeed,
-                                                               ArrayList<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands,
-                                                               ArrayList<Integer> sizes) {
+    private static TrafficStream[]
+    fillCommandsAndSizesForSeed(long rSeed, AtomicInteger uniqueIdCounter,
+                                ArrayList<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands,
+                                ArrayList<Integer> sizes) {
         var r2 = new Random(rSeed);
         var bufferSize = r2.nextInt(MAX_BUFFER_SIZE-MIN_BUFFER_SIZE) + MIN_BUFFER_SIZE;
         final var bufferBound = (int)(Math.abs(r2.nextGaussian()) * ((MAX_BUFFER_SIZE_MULTIPLIER * bufferSize)))+1;
@@ -221,7 +222,8 @@ public class TrafficStreamGenerator {
                 .log();
         var flushLikelihood = Math.pow(r2.nextDouble(),2.0);
         fillCommandsAndSizes(r2, flushLikelihood/4, flushLikelihood, bufferBound, commands, sizes);
-        return SimpleCapturedTrafficToHttpTransactionAccumulatorTest.makeTrafficStreams(bufferSize, (int) rSeed, commands);
+        return SimpleCapturedTrafficToHttpTransactionAccumulatorTest.makeTrafficStreams(bufferSize, (int) rSeed,
+                uniqueIdCounter, commands);
     }
 
     /**
@@ -271,7 +273,7 @@ public class TrafficStreamGenerator {
                 generateRandomTrafficStreamsAndSizes(IntStream.range(0,count)) :
                 generateAllIndicativeRandomTrafficStreamsAndSizes();
         var testCaseArr = generatedCases.toArray(RandomTrafficStreamAndTransactionSizes[]::new);
-        log.atInfo().setMessage(()->
+        log.atInfo().setMessage(()-> "test case array = \n" +
                 Arrays.stream(testCaseArr)
                         .flatMap(tc->Arrays.stream(tc.trafficStreams).map(TrafficStreamUtils::summarizeTrafficStream))
                         .collect(Collectors.joining("\n")))
@@ -287,10 +289,11 @@ public class TrafficStreamGenerator {
 
     public static Stream<RandomTrafficStreamAndTransactionSizes>
     generateRandomTrafficStreamsAndSizes(IntStream seedStream) {
+        var uniqueIdCounter = new AtomicInteger();
         return seedStream.mapToObj(rSeed->{
             var commands = new ArrayList<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective>();
             var sizes = new ArrayList<Integer>();
-            var trafficStreams = fillCommandsAndSizesForSeed(rSeed, commands, sizes);
+            var trafficStreams = fillCommandsAndSizesForSeed(rSeed, uniqueIdCounter, commands, sizes);
 
             var splitSizes = SimpleCapturedTrafficToHttpTransactionAccumulatorTest.unzipRequestResponseSizes(sizes);
             return new RandomTrafficStreamAndTransactionSizes(rSeed, trafficStreams,

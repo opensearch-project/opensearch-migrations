@@ -113,8 +113,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         return bb;
     }
 
-    static AtomicInteger uniqueIdCounter = new AtomicInteger();
-    static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset,
+    static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
                                              List<ObservationDirective> directives) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
         var offloader = connectionFactory.createOffloader(new ConnectionContext("n", "test",
@@ -191,8 +190,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     @MethodSource("loadSimpleCombinations")
     void generateAndTest(String testName, int bufferSize, int skipCount,
                          List<ObservationDirective> directives, List<Integer> expectedSizes) throws Exception {
-        var trafficStreams = Arrays.stream(makeTrafficStreams(bufferSize, 0, directives))
-                .skip(skipCount);
+        var trafficStreams = Arrays.stream(makeTrafficStreams(bufferSize, 0, new AtomicInteger(),
+                        directives)).skip(skipCount);
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
         accumulateTrafficStreamsWithNewAccumulator(trafficStreams, reconstructedTransactions, requestsReceived);

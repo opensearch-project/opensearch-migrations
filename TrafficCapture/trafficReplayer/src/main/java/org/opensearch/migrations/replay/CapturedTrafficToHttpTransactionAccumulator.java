@@ -263,7 +263,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         if (observation.hasClose()) {
             accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
             var heldTrafficStreams = getTrafficStreamsHeldByAccum(accum);
-            rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
+            if (rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum)) {
+                heldTrafficStreams = List.of();
+            }
             closedConnectionCounter.incrementAndGet();
             listener.onConnectionClose(accum, RequestResponsePacketPair.ReconstructionStatus.COMPLETE,
                     timestamp, heldTrafficStreams);
