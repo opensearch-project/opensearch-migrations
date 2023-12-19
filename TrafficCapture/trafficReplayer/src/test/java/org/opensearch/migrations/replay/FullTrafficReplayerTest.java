@@ -158,7 +158,7 @@ public class FullTrafficReplayerTest {
     @Tag("longTest")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
-        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
                 response->TestHttpServerContext.makeResponse(random,response));
         var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
         var numExpectedRequests = streamAndConsumer.numHttpTransactions;

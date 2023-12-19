@@ -45,7 +45,36 @@ public class KafkaKeepAliveTests {
     // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
     private final KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
+
     private KafkaTrafficCaptureSource kafkaSource;
+    /**
+     * Set up the test case where we've produced and received 1 message, but have not yet committed it.
+     * Another message is in the process of being produced.
+     * The BlockingTrafficSource is blocked on everything after a point before the beginning of the test.
+     * @throws Exception
+     */
+    @BeforeEach
+    private void setupTestCase() throws Exception {
+        kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
+        this.sendCompleteCount = new AtomicInteger(0);
+        KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 0, sendCompleteCount).get();
+        Assertions.assertEquals(1, sendCompleteCount.get());
+
+        this.kafkaProperties = KafkaTrafficCaptureSource.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
+                TEST_GROUP_CONSUMER_ID, false,  null);
+        Assertions.assertNull(kafkaProperties.get(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY));
+
+        kafkaProperties.put(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY, MAX_POLL_INTERVAL_MS+"");
+        kafkaProperties.put(HEARTBEAT_INTERVAL_MS_KEY, HEARTBEAT_INTERVAL_MS+"");
+        kafkaProperties.put("max.poll.records", 1);
+        var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaProperties);
+        this.kafkaSource = new KafkaTrafficCaptureSource(kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS));
+        this.trafficSource = new BlockingTrafficSource(kafkaSource, Duration.ZERO);
+        this.keysReceived = new ArrayList<>();
+
+        readNextNStreams(trafficSource,  keysReceived, 0, 1);
+        KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1, sendCompleteCount);
+    }
 
     @Test
     @Tag("longTest")

@@ -129,6 +129,9 @@ public class RequestSenderOrchestrator {
                                             runAfterChannelSetup(channelFutureAndRequestSchedule,
                                                     finalTunneledResponse,
                                                     replaySession -> {
+                                                        log.atTrace().setMessage(()->"adding work item at slot " +
+                                                                channelInteractionNumber + " for " + ctx + " with " +
+                                                                replaySession.scheduleSequencer).log();
                                                         replaySession.scheduleSequencer.add(channelInteractionNumber,
                                                                 () -> successFn.accept(channelFutureAndRequestSchedule),
                                                                 x -> x.run());

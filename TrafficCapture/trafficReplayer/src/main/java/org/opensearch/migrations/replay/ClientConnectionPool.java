@@ -143,8 +143,7 @@ public class ClientConnectionPool {
 
     public Future<ConnectionReplaySession>
     submitEventualSessionGet(IChannelKeyContext ctx, boolean ignoreIfNotPresent) {
-        ConnectionReplaySession channelFutureAndSchedule =
-                getCachedSession(ctx, ignoreIfNotPresent);
+        ConnectionReplaySession channelFutureAndSchedule = getCachedSession(ctx, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
             var rval = new DefaultPromise<ConnectionReplaySession>(eventLoopGroup.next());
             rval.setSuccess(null);
@@ -161,11 +160,14 @@ public class ClientConnectionPool {
 
     @SneakyThrows
     public ConnectionReplaySession getCachedSession(IChannelKeyContext channelKey, boolean dontCreate) {
+
         var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKey.getConnectionId()) :
                 connectionId2ChannelCache.get(channelKey.getConnectionId());
         if (crs != null) {
             crs.setChannelContext(channelKey);
         }
+        log.atTrace().setMessage(()->"returning ReplaySession=" + crs + " for " + channelKey.getConnectionId() +
+                " from " + channelKey).log();
         return crs;
     }
 
