@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
@@ -118,7 +117,8 @@ class TrafficReplayerTest {
             var allMatch = new AtomicBoolean(true);
             try (var trafficProducer = new InputStreamOfTraffic(bais)) {
                 while (true) {
-                    trafficProducer.readNextTrafficStreamChunk().get().stream().forEach(ts->{
+                    trafficProducer.readNextTrafficStreamChunk(TestContext.singleton).get().stream()
+                            .forEach(ts->{
                         var i = counter.incrementAndGet();
                         var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
                         var isEqual = ts.getStream().equals(expectedStream);

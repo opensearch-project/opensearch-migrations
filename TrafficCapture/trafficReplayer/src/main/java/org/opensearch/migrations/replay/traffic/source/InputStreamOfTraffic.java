@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -56,7 +57,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
      *
      * @return
      */
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
+    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IScopedInstrumentationAttributes context) {
         return CompletableFuture.supplyAsync(() -> {
             var builder = TrafficStream.newBuilder();
             try {
@@ -82,8 +83,9 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         // do nothing - this datasource isn't transactional
+        return CommitResult.Immediate;
     }
 
     @Override

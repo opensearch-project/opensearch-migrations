@@ -10,6 +10,7 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.TestContext;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -72,13 +73,14 @@ class KafkaTrafficCaptureSourceTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
-                    tsCount.incrementAndGet();
-                    log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
-                    Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
-                    Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
-                            substreamCounts.get(foundStreamsCount.getAndIncrement()));
-                });
+                protobufConsumer.readNextTrafficStreamChunk(TestContext.singleton).get().stream()
+                        .forEach(streamWithKey -> {
+                            tsCount.incrementAndGet();
+                            log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                            Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                            Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                                    substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                        });
             }
         });
         Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
@@ -123,13 +125,14 @@ class KafkaTrafficCaptureSourceTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
-                    tsCount.incrementAndGet();
-                    log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
-                    Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
-                    Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
-                            substreamCounts.get(foundStreamsCount.getAndIncrement()));
-                });
+                protobufConsumer.readNextTrafficStreamChunk(TestContext.singleton).get().stream()
+                        .forEach(streamWithKey->{
+                            tsCount.incrementAndGet();
+                            log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                            Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                            Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                                    substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                        });
             }
         });
 

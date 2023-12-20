@@ -7,7 +7,7 @@ import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 public class DirectNestedSpanContext<T extends IScopedInstrumentationAttributes>
         extends AbstractNestedSpanContext<T>
         implements IWithTypedEnclosingScope<T> {
-    public DirectNestedSpanContext(@NonNull T enclosingScope) {
+    public DirectNestedSpanContext(T enclosingScope) {
         super(enclosingScope);
     }
 

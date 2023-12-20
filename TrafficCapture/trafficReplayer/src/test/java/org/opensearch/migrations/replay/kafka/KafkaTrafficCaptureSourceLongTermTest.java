@@ -5,6 +5,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.TestContext;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -59,7 +60,7 @@ public class KafkaTrafficCaptureSourceLongTermTest {
 
         for (int i=0; i<TEST_RECORD_COUNT; ) {
             Thread.sleep(getSleepAmountMsForProducerRun(i));
-            var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk();
+            var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.singleton);
             var recordsList = nextChunkFuture.get((2+ TEST_RECORD_COUNT)*PRODUCER_SLEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
             for (int j=0; j<recordsList.size(); ++j) {
                 Assertions.assertEquals(KafkaTestUtils.getConnectionId(i+j), recordsList.get(j).getStream().getConnectionId());
@@ -69,7 +70,8 @@ public class KafkaTrafficCaptureSourceLongTermTest {
         }
         Assertions.assertEquals(TEST_RECORD_COUNT, sendCompleteCount.get());
         Assertions.assertThrows(TimeoutException.class, ()-> {
-                var rogueChunk = kafkaTrafficCaptureSource.readNextTrafficStreamChunk().get(1, TimeUnit.SECONDS);
+                var rogueChunk = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.singleton)
+                        .get(1, TimeUnit.SECONDS);
                 if (rogueChunk.isEmpty()) {
                     // TimeoutExceptions cannot be thrown by the supplier of the CompletableFuture today, BUT we
                     // could long-poll on the broker for longer than the timeout value supplied in the get() call above

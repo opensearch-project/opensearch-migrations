@@ -1,10 +1,10 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -12,9 +12,16 @@ import java.util.concurrent.CompletableFuture;
 
 public interface ITrafficCaptureSource extends Closeable {
 
-    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk();
+    enum CommitResult {
+        Immediate, AfterNextRead, BlockedByOtherCommits, Ignored
+    }
 
-    default void commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {}
+    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IScopedInstrumentationAttributes context);
+
+    /**
+     * Returns true if the committed results are immediate
+     */
+    CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
 
     default void close() throws IOException {}
 

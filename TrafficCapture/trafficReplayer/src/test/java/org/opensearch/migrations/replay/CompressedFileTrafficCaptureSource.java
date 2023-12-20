@@ -4,14 +4,12 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.io.EOFException;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -33,16 +31,17 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     }
 
     @Override
-    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         // do nothing
+        return CommitResult.Immediate;
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
+    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IScopedInstrumentationAttributes context) {
         if (numberOfTrafficStreamsToRead.get() <= 0) {
             return CompletableFuture.failedFuture(new EOFException());
         }
-        return trafficSource.readNextTrafficStreamChunk()
+        return trafficSource.readNextTrafficStreamChunk(context)
                 .thenApply(ltswk -> {
                     var transformedTrafficStream = ltswk.stream().map(this::modifyTrafficStream).collect(Collectors.toList());
                     var oldValue = numberOfTrafficStreamsToRead.get();

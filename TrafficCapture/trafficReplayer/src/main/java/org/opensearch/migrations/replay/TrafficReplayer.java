@@ -14,7 +14,6 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
@@ -980,7 +979,7 @@ public class TrafficReplayer {
             if (stopReadingRef.get()) {
                 break;
             }
-            this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk());
+            this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk(null));
             List<ITrafficStreamWithKey> trafficStreams = null;
             try {
                 trafficStreams = this.nextChunkFutureRef.get().get();

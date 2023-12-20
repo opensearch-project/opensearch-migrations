@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSour
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -230,7 +231,7 @@ public class FullTrafficReplayerTest {
         }
 
         @Override
-        public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
+        public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IScopedInstrumentationAttributes context) {
             var idx = readCursor.getAndIncrement();
             log.info("reading chunk from index="+idx);
             if (arrayCursorTrafficSourceFactory.trafficStreamsList.size() <= idx) {
@@ -246,7 +247,7 @@ public class FullTrafficReplayerTest {
         }
 
         @Override
-        public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+        public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             synchronized (pQueue) { // figure out if I need to do something more efficient later
                 log.info("Commit called for "+trafficStreamKey+" with pQueue.size="+pQueue.size());
                 var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;
@@ -265,6 +266,7 @@ public class FullTrafficReplayerTest {
                     log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
                 }
             }
+            return CommitResult.Immediate;
         }
     }
 

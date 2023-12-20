@@ -9,13 +9,13 @@ import org.opensearch.migrations.tracing.IWithStartTime;
 
 import java.time.Instant;
 
-public abstract class AbstractNestedSpanContext<T extends IScopedInstrumentationAttributes> implements
-        IScopedInstrumentationAttributes, IWithStartTime {
+public abstract class AbstractNestedSpanContext<T extends IScopedInstrumentationAttributes>
+        implements IScopedInstrumentationAttributes, IWithStartTime, AutoCloseable {
     final T enclosingScope;
     @Getter final Instant startTime;
     @Getter private Span currentSpan;
 
-    public AbstractNestedSpanContext(@NonNull T enclosingScope) {
+    public AbstractNestedSpanContext(T enclosingScope) {
         this.enclosingScope = enclosingScope;
         this.startTime = Instant.now();
     }
@@ -31,8 +31,17 @@ public abstract class AbstractNestedSpanContext<T extends IScopedInstrumentation
         setCurrentSpan(spanGenerator.apply(getPopulatedAttributes(), enclosingScope.getCurrentSpan()));
     }
 
+    protected void setCurrentSpanWithNoParent(@NonNull ISpanWithParentGenerator spanGenerator) {
+        assert enclosingScope == null;
+        setCurrentSpan(spanGenerator.apply(getPopulatedAttributes(), null));
+    }
+
     protected void setCurrentSpan(@NonNull Span s) {
         assert currentSpan == null : "only expect to set the current span once";
         currentSpan = s;
+    }
+
+    public void close() {
+        endSpan();
     }
 }

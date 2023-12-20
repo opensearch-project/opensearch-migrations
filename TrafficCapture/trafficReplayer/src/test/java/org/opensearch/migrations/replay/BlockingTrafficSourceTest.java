@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -77,7 +78,7 @@ class BlockingTrafficSourceTest {
         }
 
         @Override
-        public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
+        public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IScopedInstrumentationAttributes context) {
             log.atTrace().setMessage(()->"Test.readNextTrafficStreamChunk.counter="+counter).log();
             var i = counter.getAndIncrement();
             if (i >= nStreamsToCreate) {
@@ -105,8 +106,9 @@ class BlockingTrafficSourceTest {
         public void close() throws IOException {}
 
         @Override
-        public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+        public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             // do nothing
+            return CommitResult.Immediate;
         }
     }
 }
