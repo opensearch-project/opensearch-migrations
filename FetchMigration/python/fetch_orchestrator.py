@@ -75,7 +75,7 @@ def write_inline_target_host(pipeline_file_path: str, inline_target_host: str):
         yaml.safe_dump(pipeline_yaml, pipeline_file)
 
 
-def run(params: FetchOrchestratorParams) -> Optional[int]:
+def run(params: FetchOrchestratorParams) -> int:
     # This is expected to be a base64 encoded string
     inline_pipeline = __get_env_string("INLINE_PIPELINE")
     inline_target_host = __get_env_string("INLINE_TARGET_HOST")
@@ -93,6 +93,7 @@ def run(params: FetchOrchestratorParams) -> Optional[int]:
                                                         report=True, dryrun=params.is_dry_run)
     logging.info("Running metadata migration...\n")
     metadata_migration_result = metadata_migration.run(metadata_migration_params)
+    return_code: int = 0
     if metadata_migration_result.target_doc_count == 0:
         logging.warning("Target document count is zero, skipping data migration...")
     elif len(metadata_migration_result.migration_indices) > 0 and not params.is_only_metadata_migration():
@@ -103,8 +104,12 @@ def run(params: FetchOrchestratorParams) -> Optional[int]:
         migration_monitor_params = MigrationMonitorParams(metadata_migration_result.target_doc_count,
                                                           params.get_local_endpoint())
         logging.info("Starting migration monitor...\n")
-        return migration_monitor.run(migration_monitor_params, proc)
+        return_code = migration_monitor.run(migration_monitor_params, proc)
+        # Suppress non-zero return code for graceful termination (SIGTERM)
+        if return_code == 143:
+            return_code = 0
     logging.info("Fetch Migration workflow concluded\n")
+    return return_code
 
 
 if __name__ == '__main__':  # pragma no cover
