@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.TestContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.testcontainers.containers.KafkaContainer;
@@ -82,7 +83,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
     @Test
     @Tag("longTest")
     public void testThatCommitsAndReadsKeepWorking() throws Exception {
-        var kafkaSource = new KafkaTrafficCaptureSource(buildKafkaConsumer(),
+        var kafkaSource = new KafkaTrafficCaptureSource(TestContext.singleton, buildKafkaConsumer(),
                 TEST_TOPIC_NAME, Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS/3));
         var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMinutes(5));
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
@@ -102,7 +103,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
                     var ts = chunks.get(0);
                     Thread.sleep(DEFAULT_POLL_INTERVAL_MS*2);
                     log.info("committing "+ts.getKey());
-                    blockingSource.commitTrafficStream(ts.getKey());
+                    blockingSource.commitTrafficStream(TestContext.singleton, ts.getKey());
                     blockingSource.stopReadsPast(getTimeAtPoint(i));
                 }
             } catch (Exception e) {
@@ -121,10 +122,10 @@ public class KafkaCommitsWorkBetweenLongPolls {
                 }
             }
         }
-
+//
 //        var spans = testSpanExporter.getFinishedSpanItems();
 //        Assertions.assertFalse(spans.isEmpty(), "No spans were found");
-
+//
 //        var metrics = testMetricExporter.getFinishedMetricItems();
 //        Assertions.assertFalse(metrics.isEmpty(), "No metrics were found");
 

@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.io.EOFException;
@@ -25,7 +26,7 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IScopedInstrumentationAttributes context) {
+    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IInstrumentationAttributes context) {
         if (stopReadingRef.get()) {
             return CompletableFuture.failedFuture(new EOFException());
         }
@@ -45,8 +46,9 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
-        return underlyingSource.commitTrafficStream(trafficStreamKey);
+    public CommitResult commitTrafficStream(IInstrumentationAttributes context,
+                                            ITrafficStreamKey trafficStreamKey) throws IOException {
+        return underlyingSource.commitTrafficStream(context, trafficStreamKey);
     }
 
     @Override

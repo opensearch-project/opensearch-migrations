@@ -96,7 +96,7 @@ public class KafkaRestartingTrafficReplayerTest {
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
                 () -> new SentinelSensingTrafficSource(
-                        new KafkaTrafficCaptureSource(buildKafkaConsumer(), TEST_TOPIC_NAME,
+                        new KafkaTrafficCaptureSource(TestContext.singleton, buildKafkaConsumer(), TEST_TOPIC_NAME,
                                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
         log.info("done");
     }
@@ -176,7 +176,7 @@ public class KafkaRestartingTrafficReplayerTest {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-        return () -> new KafkaTrafficCaptureSource(kafkaConsumer, TEST_TOPIC_NAME,
+        return () -> new KafkaTrafficCaptureSource(TestContext.singleton, kafkaConsumer, TEST_TOPIC_NAME,
                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS));
     }
 

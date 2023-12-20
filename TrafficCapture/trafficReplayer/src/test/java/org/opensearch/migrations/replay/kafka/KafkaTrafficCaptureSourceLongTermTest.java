@@ -42,8 +42,8 @@ public class KafkaTrafficCaptureSourceLongTermTest {
         final long MAX_POLL_MS = 10000;
         kafkaConsumerProps.setProperty(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY, MAX_POLL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
-        var kafkaTrafficCaptureSource = new KafkaTrafficCaptureSource(kafkaConsumer, testTopicName,
-                Duration.ofMillis(MAX_POLL_MS));
+        var kafkaTrafficCaptureSource = new KafkaTrafficCaptureSource(TestContext.singleton,
+                kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_MS));
 
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
         var sendCompleteCount = new AtomicInteger(0);

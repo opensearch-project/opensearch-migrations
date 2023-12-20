@@ -16,6 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.tracing.EmptyContext;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.transform.IHttpMessage;
@@ -87,6 +89,7 @@ public class TrafficReplayer {
     private final TrafficStreamLimiter liveTrafficStreamLimiter;
     private final AtomicInteger successfulRequestCount;
     private final AtomicInteger exceptionRequestCount;
+    private final IInstrumentationAttributes topLevelContext;
     private ConcurrentHashMap<UniqueReplayerRequestKey,
             DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap;
     private ConcurrentHashMap<UniqueReplayerRequestKey,
@@ -121,37 +124,41 @@ public class TrafficReplayer {
         }
     }
 
-    public TrafficReplayer(URI serverUri,
+    public TrafficReplayer(IInstrumentationAttributes context,
+                           URI serverUri,
                            String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
                            boolean allowInsecureConnections)
             throws SSLException {
-        this(serverUri, fullTransformerConfig, authTransformerFactory, null, allowInsecureConnections,
+        this(context, serverUri, fullTransformerConfig, authTransformerFactory, null, allowInsecureConnections,
                 0, 1024);
     }
 
 
-    public TrafficReplayer(URI serverUri,
+    public TrafficReplayer(IInstrumentationAttributes context,
+                           URI serverUri,
                            String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
                            String userAgent,
                            boolean allowInsecureConnections,
                            int numSendingThreads, int maxConcurrentOutstandingRequests)
             throws SSLException {
-        this(serverUri, authTransformerFactory, allowInsecureConnections,
+        this(context, serverUri, authTransformerFactory, allowInsecureConnections,
                 numSendingThreads, maxConcurrentOutstandingRequests,
                 new TransformationLoader()
                         .getTransformerFactoryLoader(serverUri.getHost(), userAgent, fullTransformerConfig)
         );
     }
     
-    public TrafficReplayer(URI serverUri,
+    public TrafficReplayer(IInstrumentationAttributes context,
+                           URI serverUri,
                            IAuthTransformerFactory authTransformer,
                            boolean allowInsecureConnections,
                            int numSendingThreads, int maxConcurrentOutstandingRequests,
                            IJsonTransformer jsonTransformer)
             throws SSLException
     {
+        this.topLevelContext = context;
         if (serverUri.getPort() < 0) {
             throw new IllegalArgumentException("Port not present for URI: "+serverUri);
         }
@@ -388,7 +395,8 @@ public class TrafficReplayer {
             SimpleMeteringClosure.initializeOpenTelemetry("replay", params.otelCollectorEndpoint);
         }
 
-        try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(params,
+        var topContext = EmptyContext.singleton;
+        try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
@@ -397,7 +405,7 @@ public class TrafficReplayer {
             {
                 log.info("Transformations config string: ", transformerConfig);
             }
-            var tr = new TrafficReplayer(uri, transformerConfig, authTransformer, params.userAgent,
+            var tr = new TrafficReplayer(topContext, uri, transformerConfig, authTransformer, params.userAgent,
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
 
             setupShutdownHookForReplayer(tr);
@@ -627,7 +635,7 @@ public class TrafficReplayer {
             log.atInfo().setMessage(()->"Done receiving captured stream for " + requestKey +
                     ":" + rrPair.requestData).log();
             var resultantCf = requestFutureMap.remove(requestKey)
-                    .map(f -> f.handle((summary,t)->handleCompletedTransaction(requestKey, rrPair, summary, t)),
+                    .map(f -> f.handle((summary,t)->handleCompletedTransaction(ctx, requestKey, rrPair, summary, t)),
                             () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
             if (!resultantCf.future.isDone()) {
                 log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
@@ -638,7 +646,8 @@ public class TrafficReplayer {
             }
         }
 
-        Void handleCompletedTransaction(@NonNull UniqueReplayerRequestKey requestKey,
+        Void handleCompletedTransaction(IInstrumentationAttributes context,
+                                        @NonNull UniqueReplayerRequestKey requestKey,
                                         RequestResponsePacketPair rrPair,
                                         TransformedTargetRequestAndResponse summary, Throwable t) {
             try {
@@ -647,7 +656,7 @@ public class TrafficReplayer {
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
                     packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
-                    commitTrafficStreams(rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
+                    commitTrafficStreams(context, rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
                     return null;
                 } else {
                     log.atError().setCause(t).setMessage(()->"Throwable passed to handle() for " + requestKey +
@@ -683,22 +692,24 @@ public class TrafficReplayer {
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                             IChannelKeyContext ctx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            commitTrafficStreams(trafficStreamKeysBeingHeld, status);
+            commitTrafficStreams(ctx, trafficStreamKeysBeingHeld, status);
         }
 
         @SneakyThrows
-        private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld,
+        private void commitTrafficStreams(IInstrumentationAttributes context,
+                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld,
                                           RequestResponsePacketPair.ReconstructionStatus status) {
-            commitTrafficStreams(trafficStreamKeysBeingHeld,
+            commitTrafficStreams(context, trafficStreamKeysBeingHeld,
                     status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY);
         }
 
         @SneakyThrows
-        private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
+        private void commitTrafficStreams(IInstrumentationAttributes context,
+                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
             if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     tsk.getTrafficStreamsContext().endSpan();
-                    trafficCaptureSource.commitTrafficStream(tsk);
+                    trafficCaptureSource.commitTrafficStream(context, tsk);
                 }
             }
         }
@@ -710,13 +721,13 @@ public class TrafficReplayer {
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
             cf.map(f->f.whenComplete((v,t)->{
-                commitTrafficStreams(trafficStreamKeysBeingHeld, status);
+                commitTrafficStreams(ctx, trafficStreamKeysBeingHeld, status);
             }), ()->"closing the channel in the ReplayEngine");
         }
 
         @Override
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, IChannelKeyContext ctx) {
-            commitTrafficStreams(List.of(tsk), true);
+            commitTrafficStreams(ctx, List.of(tsk), true);
         }
 
         private TransformedTargetRequestAndResponse

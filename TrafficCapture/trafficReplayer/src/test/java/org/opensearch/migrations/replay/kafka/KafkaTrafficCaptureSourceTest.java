@@ -53,8 +53,8 @@ class KafkaTrafficCaptureSourceTest {
     public void testSupplyTrafficFromSource() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(mockConsumer, TEST_TOPIC_NAME,
-                Duration.ofHours(1));
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.singleton,
+                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
         List<Integer> substreamCounts = new ArrayList<>();
@@ -95,8 +95,8 @@ class KafkaTrafficCaptureSourceTest {
     public void testSupplyTrafficWithUnformattedMessages() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(mockConsumer, TEST_TOPIC_NAME,
-                Duration.ofHours(1));
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.singleton,
+                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
         List<Integer> substreamCounts = new ArrayList<>();

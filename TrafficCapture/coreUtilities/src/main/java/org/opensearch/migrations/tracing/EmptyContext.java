@@ -3,18 +3,13 @@ package org.opensearch.migrations.tracing;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 
-public class EmptyContext implements IScopedInstrumentationAttributes {
+public class EmptyContext implements IInstrumentationAttributes {
     public static final EmptyContext singleton = new EmptyContext();
 
     private EmptyContext() {}
 
     @Override
-    public Span getCurrentSpan() {
-        throw new IllegalStateException("This class doesn't track spans");
-    }
-
-    @Override
-    public IScopedInstrumentationAttributes getEnclosingScope() {
+    public IInstrumentationAttributes getEnclosingScope() {
         return null;
     }
 

@@ -4,6 +4,7 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.io.EOFException;
@@ -31,13 +32,13 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+    public CommitResult commitTrafficStream(IInstrumentationAttributes ctx, ITrafficStreamKey trafficStreamKey) {
         // do nothing
         return CommitResult.Immediate;
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IScopedInstrumentationAttributes context) {
+    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IInstrumentationAttributes context) {
         if (numberOfTrafficStreamsToRead.get() <= 0) {
             return CompletableFuture.failedFuture(new EOFException());
         }

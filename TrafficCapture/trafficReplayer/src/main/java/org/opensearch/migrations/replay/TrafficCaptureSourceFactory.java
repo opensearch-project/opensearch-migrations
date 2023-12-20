@@ -7,6 +7,8 @@ import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -19,12 +21,14 @@ public class TrafficCaptureSourceFactory {
     private TrafficCaptureSourceFactory() {}
 
     public static BlockingTrafficSource
-    createTrafficCaptureSource(TrafficReplayer.Parameters appParams, Duration bufferTimeWindow) throws IOException {
-        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(appParams), bufferTimeWindow);
+    createTrafficCaptureSource(IInstrumentationAttributes ctx,
+                               TrafficReplayer.Parameters appParams, Duration bufferTimeWindow) throws IOException {
+        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(ctx, appParams), bufferTimeWindow);
     }
 
     public static ISimpleTrafficCaptureSource
-    createUnbufferedTrafficCaptureSource(TrafficReplayer.Parameters appParams) throws IOException {
+    createUnbufferedTrafficCaptureSource(IInstrumentationAttributes ctx,
+                                         TrafficReplayer.Parameters appParams) throws IOException {
         boolean isKafkaActive = TrafficReplayer.validateRequiredKafkaParams(appParams.kafkaTrafficBrokers, appParams.kafkaTrafficTopic, appParams.kafkaTrafficGroupId);
         boolean isInputFileActive = appParams.inputFilename != null;
 
@@ -33,7 +37,7 @@ public class TrafficCaptureSourceFactory {
         }
 
         if (isKafkaActive) {
-            return KafkaTrafficCaptureSource.buildKafkaSource(
+            return KafkaTrafficCaptureSource.buildKafkaSource(ctx,
                     appParams.kafkaTrafficBrokers, appParams.kafkaTrafficTopic,
                     appParams.kafkaTrafficGroupId, appParams.kafkaTrafficEnableMSKAuth,
                     appParams.kafkaTrafficPropertyFile,

@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.ISpanGenerator;
 import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
@@ -53,18 +54,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     private final Semaphore readGate;
     private final Duration bufferTimeWindow;
 
-    public static class ReadChunkContext extends DirectNestedSpanContext<IScopedInstrumentationAttributes> {
-        @Getter IScopedInstrumentationAttributes enclosingScope;
-
-        public ReadChunkContext(IScopedInstrumentationAttributes enclosingScope,
+    public static class ReadChunkContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
+        public ReadChunkContext(IInstrumentationAttributes enclosingScope,
                                 ISpanWithParentGenerator spanGenerator) {
             super(enclosingScope);
             setCurrentSpanWithNoParent(spanGenerator);
-        }
-
-        @Override
-        public void close() {
-            endSpan();
         }
     }
 
@@ -132,7 +126,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      */
     @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(IScopedInstrumentationAttributes context) {
+    readNextTrafficStreamChunk(IInstrumentationAttributes context) {
         var readContext = new ReadChunkContext(context,
                 METERING_CLOSURE.makeSpanContinuation("readNextTrafficStreamChunk"));
         log.info("BlockingTrafficSource::readNext");
@@ -187,7 +181,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     log.atDebug().setMessage(() -> "Next touch at " + nextInstant +
                             " ... in " + waitIntervalMs + "ms (now=" + nowTime + ")").log();
                     if (waitIntervalMs <= 0) {
-                        underlyingSource.touch();
+                        underlyingSource.touch(waitContext);
                     } else {
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
@@ -208,8 +202,9 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
-        var commitResult = underlyingSource.commitTrafficStream(trafficStreamKey);
+    public CommitResult commitTrafficStream(IInstrumentationAttributes context,
+                                            ITrafficStreamKey trafficStreamKey) throws IOException {
+        var commitResult = underlyingSource.commitTrafficStream(context, trafficStreamKey);
         if (commitResult == CommitResult.AfterNextRead) {
             readGate.drainPermits();
             readGate.release();
