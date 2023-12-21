@@ -14,6 +14,7 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.tracing.EmptyContext;
@@ -76,6 +77,8 @@ import java.util.stream.Stream;
 public class TrafficReplayer {
 
     private static final MetricsLogger TUPLE_METRICS_LOGGER = new MetricsLogger("SourceTargetCaptureTuple");
+    private static final SimpleMeteringClosure METERING_CLOSURE =
+            new SimpleMeteringClosure("TrafficReplayer");
 
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
@@ -650,12 +653,16 @@ public class TrafficReplayer {
                                         @NonNull UniqueReplayerRequestKey requestKey,
                                         RequestResponsePacketPair rrPair,
                                         TransformedTargetRequestAndResponse summary, Throwable t) {
+            var httpContext = rrPair.getHttpTransactionContext();
             try {
                 // if this comes in with a serious Throwable (not an Exception), don't bother
                 // packaging it up and calling the callback.
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
-                    packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
+                    try (var tupleHandlingContext = new Contexts.TupleHandlingContext(httpContext,
+                            METERING_CLOSURE.makeSpanContinuation("tupleHandling"))) {
+                        packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
+                    }
                     commitTrafficStreams(context, rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
                     return null;
                 } else {
@@ -680,7 +687,7 @@ public class TrafficReplayer {
                         .log();
                 throw e;
             } finally {
-                rrPair.getHttpTransactionContext().endSpan();
+                httpContext.endSpan();
                 requestToFinalWorkFuturesMap.remove(requestKey);
                 log.trace("removed rrPair.requestData to " +
                         "targetTransactionInProgressMap for " +
@@ -893,7 +900,6 @@ public class TrafficReplayer {
                             UniqueReplayerRequestKey requestKey,
                             Supplier<Stream<byte[]>> packetsSupplier)
     {
-        // TODO - add context chaining
         try {
             var transformationCompleteFuture = replayEngine.scheduleTransformationWork(ctx, start, ()->
                     transformAllData(inputRequestTransformerFactory.create(requestKey, ctx), packetsSupplier));

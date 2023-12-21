@@ -164,8 +164,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 blockContext = new BackPressureBlockContext(readContext,
                         METERING_CLOSURE.makeSpanContinuation("backPressureBlock"));
             }
-            try (var waitContext = new WaitForNextSignal(blockContext,
-                    METERING_CLOSURE.makeSpanContinuation("waitForNextBackPressureCheck"))) {
+            try {
                 log.atInfo().setMessage("blocking until signaled to read the next chunk last={} stop={}")
                         .addArgument(lastTimestampSecondsRef.get())
                         .addArgument(stopReadingAtRef.get())
@@ -173,7 +172,10 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
                     log.trace("acquiring readGate semaphore (w/out timeout)");
-                    readGate.acquire();
+                    try (var waitContext = new WaitForNextSignal(blockContext,
+                            METERING_CLOSURE.makeSpanContinuation("waitForNextBackPressureCheck"))) {
+                        readGate.acquire();
+                    }
                 } else {
                     var nextInstant = nextTouchOp.get();
                     final var nowTime = Instant.now();
@@ -181,12 +183,15 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     log.atDebug().setMessage(() -> "Next touch at " + nextInstant +
                             " ... in " + waitIntervalMs + "ms (now=" + nowTime + ")").log();
                     if (waitIntervalMs <= 0) {
-                        underlyingSource.touch(waitContext);
+                        underlyingSource.touch(blockContext);
                     } else {
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
                         log.atTrace().setMessage(() -> "acquring readGate semaphore with timeout=" + waitIntervalMs).log();
-                        readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
+                        try (var waitContext = new WaitForNextSignal(blockContext,
+                                METERING_CLOSURE.makeSpanContinuation("waitForNextBackPressureCheck"))) {
+                            readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
+                        }
                     }
                 }
             } catch (InterruptedException e) {

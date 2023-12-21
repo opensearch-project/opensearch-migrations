@@ -118,31 +118,51 @@ public class Contexts {
         }
     }
 
-    public static class WaitingForHttpResponseContext
+    public static class ScheduledContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
-            implements IContexts.IWaitingForHttpResponseContext {
-    public WaitingForHttpResponseContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                         ISpanWithParentGenerator spanGenerator) {
+            implements IContexts.IScheduledContext {
+        public ScheduledContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
+                                             ISpanWithParentGenerator spanGenerator) {
             super(enclosingScope);
             setCurrentSpan(spanGenerator);
         }
     }
 
-    public static class ReceivingHttpResponseContext
+    public static class TargetRequestContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
-            implements IContexts.IReceivingHttpResponseContext {
-        public ReceivingHttpResponseContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                            ISpanWithParentGenerator spanGenerator) {
+            implements IContexts.ITargetRequestContext {
+        public TargetRequestContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
+                                     ISpanWithParentGenerator spanGenerator) {
             super(enclosingScope);
             setCurrentSpan(spanGenerator);
         }
     }
 
     public static class RequestSendingContext
-            extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<IContexts.ITargetRequestContext>
             implements IContexts.IRequestSendingContext {
-        public RequestSendingContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
+        public RequestSendingContext(IContexts.ITargetRequestContext enclosingScope,
                                      ISpanWithParentGenerator spanGenerator) {
+            super(enclosingScope);
+            setCurrentSpan(spanGenerator);
+        }
+    }
+
+    public static class WaitingForHttpResponseContext
+            extends DirectNestedSpanContext<IContexts.ITargetRequestContext>
+            implements IContexts.IWaitingForHttpResponseContext {
+        public WaitingForHttpResponseContext(IContexts.ITargetRequestContext enclosingScope,
+                                             ISpanWithParentGenerator spanGenerator) {
+            super(enclosingScope);
+            setCurrentSpan(spanGenerator);
+        }
+    }
+
+    public static class ReceivingHttpResponseContext
+            extends DirectNestedSpanContext<IContexts.ITargetRequestContext>
+            implements IContexts.IReceivingHttpResponseContext {
+        public ReceivingHttpResponseContext(IContexts.ITargetRequestContext enclosingScope,
+                                            ISpanWithParentGenerator spanGenerator) {
             super(enclosingScope);
             setCurrentSpan(spanGenerator);
         }

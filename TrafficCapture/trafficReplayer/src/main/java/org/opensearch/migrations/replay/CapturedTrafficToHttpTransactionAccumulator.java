@@ -111,9 +111,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
                                        @NonNull RequestResponsePacketPair rrpp) {
-            var responseCtx = rrpp.getResponseContext();
-            responseCtx.endSpan();
-            underlying.onFullDataReceived(key, responseCtx.getLogicalEnclosingScope(), rrpp);
+            rrpp.getResponseContext().endSpan();
+            underlying.onFullDataReceived(key, rrpp.getHttpTransactionContext(), rrpp);
         }
 
         public void onConnectionClose(@NonNull Accumulation accum,
@@ -419,7 +418,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         var rrPair = accumulation.getRrPair();
-        var requestKey = rrPair.getResponseContext().getLogicalEnclosingScope().getReplayerRequestKey();
+        var requestKey = rrPair.getHttpTransactionContext().getReplayerRequestKey();
         metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
                 .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID,

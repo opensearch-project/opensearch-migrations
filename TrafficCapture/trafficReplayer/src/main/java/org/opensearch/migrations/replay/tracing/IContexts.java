@@ -65,14 +65,20 @@ public class IContexts {
     public interface IRequestTransformationContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public interface IWaitingForHttpResponseContext
+    public interface IScheduledContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
-    public interface IReceivingHttpResponseContext
+    public interface ITargetRequestContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
 
     public interface IRequestSendingContext
-            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<ITargetRequestContext> { }
+
+    public interface IWaitingForHttpResponseContext
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<ITargetRequestContext> { }
+
+    public interface IReceivingHttpResponseContext
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<ITargetRequestContext> { }
 
     public interface ITupleHandlingContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> { }

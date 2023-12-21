@@ -15,6 +15,7 @@ import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -45,20 +46,24 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm processing work has finished");
         log.atDebug().setMessage(()->"Scheduling work for "+ctx.getConnectionId()+" at time "+timestamp).log();
+        var scheduledContext = new Contexts.ScheduledContext(ctx,
+                new SimpleMeteringClosure("RSO").makeSpanContinuation("scheduled"));
         // this method doesn't use the scheduling that scheduleRequest and scheduleClose use because
         // doing work associated with a connection is considered to be preprocessing work independent
         // of the underlying network connection itself, so it's fair to be able to do this without
         // first needing to wait for a connection to succeed.  In fact, making them more independent
         // means that the work item being enqueued is less likely to cause a connection timeout.
-        connectionSession.eventLoop.schedule(()->
-                        task.get().map(f->f.whenComplete((v,t) -> {
-                                    if (t!=null) {
-                                        finalTunneledResponse.future.completeExceptionally(t);
-                                    } else {
-                                        finalTunneledResponse.future.complete(v);
-                                    }
-                                }),
-                                ()->""),
+        connectionSession.eventLoop.schedule(()-> {
+                    scheduledContext.close();
+                    return task.get().map(f -> f.whenComplete((v, t) -> {
+                                if (t != null) {
+                                    finalTunneledResponse.future.completeExceptionally(t);
+                                } else {
+                                    finalTunneledResponse.future.complete(v);
+                                }
+                            }),
+                            () -> "");
+                },
                 getDelayFromNowMs(timestamp), TimeUnit.MILLISECONDS);
         return finalTunneledResponse;
     }
@@ -169,9 +174,11 @@ public class RequestSenderOrchestrator {
                     eventLoop.schedule(task.runnable, getDelayFromNowMs(atTime), TimeUnit.MILLISECONDS);
             scheduledFuture.addListener(f->{
                 if (!f.isSuccess()) {
-                    log.atError().setCause(f.cause()).setMessage(()->"Error scheduling task for " + ctx).log();
+                    log.atError().setCause(f.cause()).setMessage(()->"Error running the scheduled task: " + ctx +
+                            " interaction: " + channelInteraction).log();
                 } else {
-                    log.atInfo().setMessage(()->"scheduled future has finished for "+channelInteraction).log();
+                    log.atInfo().setMessage(()->"scheduled task has finished for " + ctx + " interaction: " +
+                            channelInteraction).log();
                 }
             });
         } else {
@@ -194,7 +201,7 @@ public class RequestSenderOrchestrator {
                 var sf = eventLoop.schedule(runnable, getDelayFromNowMs(kvp.getKey()), TimeUnit.MILLISECONDS);
                 sf.addListener(sfp->{
                     if (!sfp.isSuccess()) {
-                        log.atWarn().setCause(sfp.cause()).setMessage(()->"Scheduled future was not successful for " +
+                        log.atWarn().setCause(sfp.cause()).setMessage(()->"Scheduled future did not successfully run " +
                                 channelInteraction).log();
                     }
                 });
@@ -208,10 +215,18 @@ public class RequestSenderOrchestrator {
                                                        Instant start, Duration interval, Stream<ByteBuf> packets) {
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
         var packetReceiverRef = new AtomicReference<NettyPacketToHttpConsumer>();
-        Runnable packetSender = () -> sendNextPartAndContinue(() ->
-                        getPacketReceiver(ctx, channelFutureAndRequestSchedule.getInnerChannelFuture(),
-                                packetReceiverRef),
-                eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
+        Runnable packetSender = () -> {
+            try (var targetContext = new Contexts.TargetRequestContext(ctx,
+                    new SimpleMeteringClosure("RSO").makeSpanContinuation("targetTransaction"));
+            var requestContext = new Contexts.RequestSendingContext(targetContext,
+                    new SimpleMeteringClosure("RSO").makeSpanContinuation("requestSending"))) {
+                sendNextPartAndContinue(() ->
+                                memoizePacketConsumer(ctx, channelFutureAndRequestSchedule.getInnerChannelFuture(),
+                                        packetReceiverRef),
+                        eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture,
+                        targetContext, requestContext);
+            }
+        };
         scheduleOnConnectionReplaySession(ctx.getLogicalEnclosingScope(),
                 ctx.getReplayerRequestKey().getSourceRequestIndex(),
                 channelFutureAndRequestSchedule, responseFuture, start,
@@ -242,18 +257,21 @@ public class RequestSenderOrchestrator {
     }
 
     private static NettyPacketToHttpConsumer
-    getPacketReceiver(IContexts.IReplayerHttpTransactionContext httpTransactionContext, ChannelFuture channelFuture,
-                      AtomicReference<NettyPacketToHttpConsumer> packetReceiver) {
+    memoizePacketConsumer(IContexts.IReplayerHttpTransactionContext httpTransactionContext, ChannelFuture channelFuture,
+                          AtomicReference<NettyPacketToHttpConsumer> packetReceiver) {
         if (packetReceiver.get() == null) {
             packetReceiver.set(new NettyPacketToHttpConsumer(channelFuture, httpTransactionContext));
         }
         return packetReceiver.get();
     }
 
+    // TODO - rewrite this - the recursion (at least as it is) is terribly confusing
     private void sendNextPartAndContinue(Supplier<NettyPacketToHttpConsumer> packetHandlerSupplier,
                                          EventLoop eventLoop, Iterator<ByteBuf> iterator,
                                          Instant start, Duration interval, AtomicInteger counter,
-                                         StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture) {
+                                         StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
+                                         Contexts.TargetRequestContext targetContext,
+                                         Contexts.RequestSendingContext requestContext) {
         log.atTrace().setMessage(()->"sendNextPartAndContinue: counter=" + counter.get()).log();
         var packetReceiver = packetHandlerSupplier.get();
         assert iterator.hasNext() : "Should not have called this with no items to send";
@@ -262,12 +280,13 @@ public class RequestSenderOrchestrator {
         if (iterator.hasNext()) {
             counter.incrementAndGet();
             Runnable packetSender = () -> sendNextPartAndContinue(packetHandlerSupplier, eventLoop,
-                    iterator, start, interval, counter, responseFuture);
+                    iterator, start, interval, counter, responseFuture, targetContext, requestContext);
             var delayMs = Duration.between(now(),
                     start.plus(interval.multipliedBy(counter.get()))).toMillis();
             eventLoop.schedule(packetSender, Math.min(0, delayMs), TimeUnit.MILLISECONDS);
         } else {
             packetReceiver.finalizeRequest().handle((v,t)-> {
+                targetContext.close();
                 if (t != null) {
                     responseFuture.future.completeExceptionally(t);
                 } else {

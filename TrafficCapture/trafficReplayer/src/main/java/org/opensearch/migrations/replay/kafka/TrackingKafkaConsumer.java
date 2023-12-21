@@ -75,6 +75,14 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
+    public static class TouchScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
+        public TouchScopeContext(@NonNull IInstrumentationAttributes enclosingScope,
+                                @NonNull ISpanWithParentGenerator spanGenerator) {
+            super(enclosingScope);
+            setCurrentSpan(spanGenerator);
+        }
+    }
+
     public static class PollScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
         public PollScopeContext(@NonNull IInstrumentationAttributes enclosingScope,
                                 @NonNull ISpanWithParentGenerator spanGenerator) {
@@ -86,6 +94,14 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public static class CommitScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
         public CommitScopeContext(@NonNull IInstrumentationAttributes enclosingScope,
                                   @NonNull ISpanWithParentGenerator spanGenerator) {
+            super(enclosingScope);
+            setCurrentSpan(spanGenerator);
+        }
+    }
+
+    public static class KafkaCommitScopeContext extends DirectNestedSpanContext<CommitScopeContext> {
+        public KafkaCommitScopeContext(@NonNull CommitScopeContext enclosingScope,
+                                       @NonNull ISpanWithParentGenerator spanGenerator) {
             super(enclosingScope);
             setCurrentSpan(spanGenerator);
         }
@@ -188,24 +204,28 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public void touch(IInstrumentationAttributes context) {
-        log.trace("touch() called.");
-        pause();
-        try {
-            var records = kafkaConsumer.poll(Duration.ZERO);
-            if (!records.isEmpty()) {
-                throw new IllegalStateException("Expected no entries once the consumer was paused.  " +
-                        "This may have happened because a new assignment slipped into the consumer AFTER pause calls.");
+        try (var touchCtx = new TouchScopeContext(context,
+                METERING_CLOSURE.makeSpanContinuation("touch"))) {
+            log.trace("touch() called.");
+            pause();
+            try (var pollCtx = new PollScopeContext(touchCtx,
+                    METERING_CLOSURE.makeSpanContinuation("kafkaPoll"))) {
+                var records = kafkaConsumer.poll(Duration.ZERO);
+                if (!records.isEmpty()) {
+                    throw new IllegalStateException("Expected no entries once the consumer was paused.  " +
+                            "This may have happened because a new assignment slipped into the consumer AFTER pause calls.");
+                }
+            } catch (IllegalStateException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                log.atWarn().setCause(e).setMessage("Unable to poll the topic: " + topic + " with our Kafka consumer. " +
+                        "Swallowing and awaiting next metadata refresh to try again.").log();
+            } finally {
+                resume();
             }
-        } catch (IllegalStateException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            log.atWarn().setCause(e).setMessage("Unable to poll the topic: " + topic + " with our Kafka consumer. " +
-                    "Swallowing and awaiting next metadata refresh to try again.").log();
-        } finally {
-            resume();
+            safeCommit(context);
+            lastTouchTimeRef.set(clock.instant());
         }
-        safeCommit(context);
-        lastTouchTimeRef.set(clock.instant());
     }
 
     private void pause() {
@@ -388,7 +408,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                                          HashMap<TopicPartition, OffsetAndMetadata> nextCommitsMap) {
         assert !nextCommitsMap.isEmpty();
         log.atDebug().setMessage(() -> "Committing " + nextCommitsMap).log();
-        kafkaConsumer.commitSync(nextCommitsMap);
+        try (var kafkaContext = new KafkaCommitScopeContext(context,
+                METERING_CLOSURE.makeSpanContinuation("kafkaCommit"));) {
+            kafkaConsumer.commitSync(nextCommitsMap);
+        }
     }
 
     private static void callbackUpTo(java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback,

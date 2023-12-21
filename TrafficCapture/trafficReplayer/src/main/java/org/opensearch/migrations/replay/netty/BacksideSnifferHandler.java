@@ -13,10 +13,13 @@ import org.opensearch.migrations.replay.AggregatedRawResponse;
 public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
 
     private final AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
+    private Runnable firstByteReceivedCallback;
     private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideSnifferHandler");
 
-    public BacksideSnifferHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder) {
+    public BacksideSnifferHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder,
+                                  Runnable firstByteReceivedCallback) {
         this.aggregatedRawResponseBuilder = aggregatedRawResponseBuilder;
+        this.firstByteReceivedCallback = firstByteReceivedCallback;
     }
 
     @Override
@@ -28,6 +31,10 @@ public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         var bb = (ByteBuf) msg;
+        if (firstByteReceivedCallback != null && bb.readableBytes() > 0) {
+            firstByteReceivedCallback.run();
+            firstByteReceivedCallback = null;
+        }
         byte[] output = new byte[bb.readableBytes()];
         bb.readBytes(output);
         aggregatedRawResponseBuilder.addResponsePacket(output);
