@@ -15,9 +15,6 @@ import java.util.function.Function;
 @EqualsAndHashCode(callSuper = true)
 @Getter
 class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext implements KafkaCommitOffsetData {
-    public static final String TELEMETRY_SCOPE_NAME = "KafkaRecords";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
-
     private final int generation;
     private final int partition;
     private final long offset;
@@ -35,10 +32,8 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
         this.partition = partition;
         this.offset = offset;
         var channelKeyContext = contextFactory.apply(this);
-        var kafkaContext = new Contexts.KafkaRecordContext(channelKeyContext, recordId,
-                METERING_CLOSURE.makeSpanContinuation("kafkaRecord"));
-        this.setTrafficStreamsContext(new Contexts.TrafficStreamsLifecycleContext(kafkaContext, this,
-                METERING_CLOSURE.makeSpanContinuation("trafficStreamLifecycle")));
+        var kafkaContext = new Contexts.KafkaRecordContext(channelKeyContext, recordId);
+        this.setTrafficStreamsContext(new Contexts.TrafficStreamsLifecycleContext(kafkaContext, this));
     }
 
     @Override

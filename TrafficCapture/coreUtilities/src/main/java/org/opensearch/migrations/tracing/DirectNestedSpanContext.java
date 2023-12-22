@@ -1,9 +1,4 @@
-package org.opensearch.migrations.replay.tracing;
-
-import lombok.NonNull;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
+package org.opensearch.migrations.tracing;
 
 public class DirectNestedSpanContext<T extends IInstrumentationAttributes>
         extends AbstractNestedSpanContext<T>

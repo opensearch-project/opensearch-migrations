@@ -70,10 +70,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     public NettyPacketToHttpConsumer(ChannelFuture clientConnection, IContexts.IReplayerHttpTransactionContext ctx) {
-        this.parentContext = new Contexts.TargetRequestContext(ctx,
-                METERING_CLOSURE.makeSpanContinuation("targetTransaction"));
-        this.currentRequestContext = new Contexts.RequestSendingContext(this.parentContext,
-                METERING_CLOSURE.makeSpanContinuation("sendingRequest"));
+        this.parentContext = new Contexts.TargetRequestContext(ctx);
+        this.currentRequestContext = new Contexts.RequestSendingContext(this.parentContext);
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
@@ -164,8 +162,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         addLoggingHandler(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder, ()->{
             this.currentRequestContext.close();
-            this.currentRequestContext = new Contexts.ReceivingHttpResponseContext(this.parentContext,
-                            METERING_CLOSURE.makeSpanContinuation("receivingRequest"));
+            this.currentRequestContext = new Contexts.ReceivingHttpResponseContext(this.parentContext);
 
         }));
         addLoggingHandler(pipeline, "C");
@@ -280,8 +277,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
                     this.currentRequestContext.close();
-                    this.currentRequestContext = new Contexts.WaitingForHttpResponseContext(parentContext,
-                            new SimpleMeteringClosure("RSO").makeSpanContinuation("waitingForResponse"));
+                    this.currentRequestContext = new Contexts.WaitingForHttpResponseContext(parentContext);
 
                     var future = new CompletableFuture<AggregatedRawResponse>();
                     var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,

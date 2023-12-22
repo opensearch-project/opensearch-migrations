@@ -13,6 +13,7 @@ import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -115,7 +116,7 @@ class TrafficReplayerTest {
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger(0);
             var allMatch = new AtomicBoolean(true);
-            try (var trafficProducer = new InputStreamOfTraffic(bais)) {
+            try (var trafficProducer = new InputStreamOfTraffic(TestContext.singleton, bais)) {
                 while (true) {
                     trafficProducer.readNextTrafficStreamChunk(TestContext.singleton).get().stream()
                             .forEach(ts->{
@@ -193,7 +194,7 @@ class TrafficReplayerTest {
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
-            try (var trafficSource = new InputStreamOfTraffic(bais)) {
+            try (var trafficSource = new InputStreamOfTraffic(TestContext.singleton, bais)) {
                 tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
@@ -262,7 +263,7 @@ class TrafficReplayerTest {
         }
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
-            try (var trafficSource = new InputStreamOfTraffic(bais)) {
+            try (var trafficSource = new InputStreamOfTraffic(TestContext.singleton, bais)) {
                 tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }

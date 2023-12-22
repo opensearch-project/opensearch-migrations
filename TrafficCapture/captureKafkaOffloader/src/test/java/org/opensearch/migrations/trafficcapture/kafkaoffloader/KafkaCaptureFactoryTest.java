@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.opensearch.migrations.tracing.EmptyContext;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
@@ -77,8 +77,7 @@ public class KafkaCaptureFactoryTest {
     }
 
     private static ConnectionContext createCtx() {
-        return new ConnectionContext("test", "test",
-                x->GlobalOpenTelemetry.getTracer("test").spanBuilder("test").startSpan());
+        return new ConnectionContext(new RootOtelContext(), "test", "test");
     }
 
     /**

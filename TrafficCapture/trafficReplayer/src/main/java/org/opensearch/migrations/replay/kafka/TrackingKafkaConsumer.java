@@ -11,12 +11,9 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.ISpanGenerator;
-import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.slf4j.event.Level;
 
@@ -45,8 +42,9 @@ import java.util.stream.StreamSupport;
  */
 @Slf4j
 public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
+    public static final String TELEMETRY_SCOPE_NAME = "TrackingKafkaConsumer";
     private static final SimpleMeteringClosure METERING_CLOSURE =
-            new SimpleMeteringClosure("TrackingKafkaConsumer");
+            new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 
     @AllArgsConstructor
     private static class OrderedKeyHolder implements Comparable<OrderedKeyHolder> {
@@ -76,34 +74,30 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public static class TouchScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
-        public TouchScopeContext(@NonNull IInstrumentationAttributes enclosingScope,
-                                @NonNull ISpanWithParentGenerator spanGenerator) {
+        public TouchScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "touch");
         }
     }
 
     public static class PollScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
-        public PollScopeContext(@NonNull IInstrumentationAttributes enclosingScope,
-                                @NonNull ISpanWithParentGenerator spanGenerator) {
+        public PollScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "kafkaPoll");
         }
     }
 
     public static class CommitScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
-        public CommitScopeContext(@NonNull IInstrumentationAttributes enclosingScope,
-                                  @NonNull ISpanWithParentGenerator spanGenerator) {
+        public CommitScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "commit");
         }
     }
 
     public static class KafkaCommitScopeContext extends DirectNestedSpanContext<CommitScopeContext> {
-        public KafkaCommitScopeContext(@NonNull CommitScopeContext enclosingScope,
-                                       @NonNull ISpanWithParentGenerator spanGenerator) {
+        public KafkaCommitScopeContext(@NonNull CommitScopeContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "kafkaCommit");
         }
     }
 
@@ -204,12 +198,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public void touch(IInstrumentationAttributes context) {
-        try (var touchCtx = new TouchScopeContext(context,
-                METERING_CLOSURE.makeSpanContinuation("touch"))) {
+        try (var touchCtx = new TouchScopeContext(context)) {
             log.trace("touch() called.");
             pause();
-            try (var pollCtx = new PollScopeContext(touchCtx,
-                    METERING_CLOSURE.makeSpanContinuation("kafkaPoll"))) {
+            try (var pollCtx = new PollScopeContext(touchCtx)) {
                 var records = kafkaConsumer.poll(Duration.ZERO);
                 if (!records.isEmpty()) {
                     throw new IllegalStateException("Expected no entries once the consumer was paused.  " +
@@ -295,8 +287,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         try {
             lastTouchTimeRef.set(clock.instant());
             ConsumerRecords<String, byte[]> records;
-            try (var pollContext = new PollScopeContext(context,
-                    METERING_CLOSURE.makeSpanContinuation("kafkaPoll"))) {
+            try (var pollContext = new PollScopeContext(context)) {
                 records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             }
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
@@ -363,8 +354,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             if (nextSetOfCommitsMap.isEmpty()) {
                 return;
             }
-            context = new CommitScopeContext(incomingContext,
-                    METERING_CLOSURE.makeSpanContinuation("commit"));
+            context = new CommitScopeContext(incomingContext);
             nextCommitsMapCopy = new HashMap<>();
             nextCommitsMapCopy.putAll(nextSetOfCommitsMap);
         }
@@ -408,8 +398,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                                          HashMap<TopicPartition, OffsetAndMetadata> nextCommitsMap) {
         assert !nextCommitsMap.isEmpty();
         log.atDebug().setMessage(() -> "Committing " + nextCommitsMap).log();
-        try (var kafkaContext = new KafkaCommitScopeContext(context,
-                METERING_CLOSURE.makeSpanContinuation("kafkaCommit"));) {
+        try (var kafkaContext = new KafkaCommitScopeContext(context)) {
             kafkaConsumer.commitSync(nextCommitsMap);
         }
     }

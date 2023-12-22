@@ -16,6 +16,8 @@ import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.testcontainers.containers.KafkaContainer;
@@ -157,10 +159,12 @@ public class KafkaRestartingTrafficReplayerTest {
     }
 
     private Supplier<ISimpleTrafficCaptureSource>
-    loadStreamsToKafkaFromCompressedFile(KafkaConsumer<String, byte[]> kafkaConsumer,
+    loadStreamsToKafkaFromCompressedFile(IInstrumentationAttributes context,
+                                         KafkaConsumer<String, byte[]> kafkaConsumer,
                                          String filename, int recordCount) throws Exception {
         var kafkaProducer = buildKafkaProducer();
-        loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer, new V0_1TrafficCaptureSource(filename),
+        loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer,
+                new V0_1TrafficCaptureSource(context, filename),
                 originalTrafficSource -> {
                     try {
                         for (int i = 0; i < recordCount; ++i) {

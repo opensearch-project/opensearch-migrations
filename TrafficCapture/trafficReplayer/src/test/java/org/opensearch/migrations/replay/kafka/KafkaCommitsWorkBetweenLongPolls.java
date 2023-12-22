@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.TestContext;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.testcontainers.containers.KafkaContainer;
@@ -113,7 +113,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
 
         for (int i=0; i<NUM_RUNS; ++i) {
             while (true) {
-                var chunks = blockingSource.readNextTrafficStreamChunk().get();
+                var chunks = blockingSource.readNextTrafficStreamChunk(TestContext.singleton).get();
                 if (!chunks.isEmpty()) {
                     Assertions.assertEquals(1, chunks.size());
                     log.info("GETMSG\n\n");

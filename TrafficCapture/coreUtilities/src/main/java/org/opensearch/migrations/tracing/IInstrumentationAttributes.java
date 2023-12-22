@@ -2,11 +2,15 @@ package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.trace.Span;
+import lombok.NonNull;
 
 import java.util.ArrayList;
 
 public interface IInstrumentationAttributes {
     IInstrumentationAttributes getEnclosingScope();
+    @NonNull IInstrumentConstructor getRootInstrumentationScope();
+    default Span getCurrentSpan() { return null; }
 
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {
         return builder;

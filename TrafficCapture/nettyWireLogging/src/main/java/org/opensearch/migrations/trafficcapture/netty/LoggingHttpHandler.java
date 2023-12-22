@@ -21,6 +21,8 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
@@ -36,10 +38,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     public static final String TELEMETRY_SCOPE_NAME = "CapturingHttpHandler";
     public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
-    public static final String GATHERING_REQUEST = "gatheringRequest";
-    public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
-    public static final String GATHERING_RESPONSE = "gatheringResponse";
-    public static final String BLOCKED = "blocked";
 
     static class CaptureIgnoreState {
         static final byte CAPTURE = 0;
@@ -143,15 +141,13 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected HttpMessageContext messageContext;
 
-    public LoggingHttpHandler(String nodeId, String channelKey,
+    public LoggingHttpHandler(@NonNull IInstrumentConstructor contextConstructor, String nodeId, String channelKey,
                               @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
                               @NonNull RequestCapturePredicate httpHeadersCapturePredicate)
     throws IOException {
-        var parentContext = new ConnectionContext(channelKey, nodeId,
-                METERING_CLOSURE.makeSpanContinuation("connectionLifetime", null));
+        var parentContext = new ConnectionContext(contextConstructor, channelKey, nodeId);
 
-        this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.HttpTransactionState.REQUEST,
-                METERING_CLOSURE.makeSpanContinuation(GATHERING_REQUEST));
+        this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.HttpTransactionState.REQUEST);
         METERING_CLOSURE.meterIncrementEvent(messageContext, "requestStarted");
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext, channelKey);
@@ -162,27 +158,11 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         );
     }
 
-    static String getSpanLabelForState(HttpMessageContext.HttpTransactionState state) {
-        switch (state) {
-            case REQUEST:
-                return GATHERING_REQUEST;
-            case INTERNALLY_BLOCKED:
-                return BLOCKED;
-            case WAITING:
-                return WAITING_FOR_RESPONSE;
-            case RESPONSE:
-                return GATHERING_RESPONSE;
-            default:
-                throw new IllegalStateException("Unknown enum value: "+state);
-        }
-    }
-
     protected void rotateNextMessageContext(HttpMessageContext.HttpTransactionState nextState) {
-        messageContext = new HttpMessageContext(messageContext.getEnclosingScope(),
+        messageContext = new HttpMessageContext(messageContext.getLogicalEnclosingScope(),
                 (nextState== HttpMessageContext.HttpTransactionState.REQUEST ? 1 : 0)
                         + messageContext.getSourceRequestIndex(),
-                nextState,
-                METERING_CLOSURE.makeSpanContinuation(getSpanLabelForState(nextState)));
+                nextState);
     }
 
     private SimpleDecodedHttpRequestHandler getHandlerThatHoldsParsedHttpRequest() {
@@ -210,8 +190,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         METERING_CLOSURE.meterIncrementEvent(messageContext, "handlerRemoved");
-        messageContext.endSpan();
-        messageContext.getEnclosingScope().currentSpan.end();
+        messageContext.close();
+        messageContext.getLogicalEnclosingScope().close();
 
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {

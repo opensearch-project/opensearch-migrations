@@ -6,6 +6,7 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
 
@@ -16,12 +17,13 @@ import java.util.function.Predicate;
 public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpHandler(@NonNull String nodeId, String connectionId,
+    public ConditionallyReliableLoggingHttpHandler(@NonNull IInstrumentConstructor contextConstructor,
+                                                   @NonNull String nodeId, String connectionId,
                                                    @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
                                                    @NonNull RequestCapturePredicate requestCapturePredicate,
                                                    @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock)
     throws IOException {
-        super(nodeId, connectionId, trafficOffloaderFactory, requestCapturePredicate);
+        super(contextConstructor, nodeId, connectionId, trafficOffloaderFactory, requestCapturePredicate);
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
     }
 

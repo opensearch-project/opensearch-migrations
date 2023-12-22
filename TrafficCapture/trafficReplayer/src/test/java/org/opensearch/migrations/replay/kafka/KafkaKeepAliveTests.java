@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.TestContext;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.testcontainers.containers.KafkaContainer;
@@ -159,7 +159,7 @@ public class KafkaKeepAliveTests {
                                          int from, int count) {
         Assertions.assertEquals(from, keysReceived.size());
         for (int i=0; i<count; ) {
-            var trafficStreams = kafkaSource.readNextTrafficStreamChunk().get();
+            var trafficStreams = kafkaSource.readNextTrafficStreamChunk(TestContext.singleton).get();
             trafficStreams.forEach(ts->{
                 var tsk = ts.getKey();
                 log.atInfo().setMessage(()->"checking for "+tsk).log();

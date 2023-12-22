@@ -2,8 +2,8 @@ package org.opensearch.migrations.replay.tracing;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
+import org.opensearch.migrations.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.tracing.IndirectNestedSpanContext;
 
 public class Contexts {
 
@@ -13,11 +13,10 @@ public class Contexts {
             implements IContexts.IKafkaRecordContext {
         final String recordId;
 
-        public KafkaRecordContext(IChannelKeyContext enclosingScope, String recordId,
-                                  ISpanWithParentGenerator spanGenerator) {
+        public KafkaRecordContext(IChannelKeyContext enclosingScope, String recordId) {
             super(enclosingScope);
             this.recordId = recordId;
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("Kafka", "recordLifetime");
         }
 
         @Override
@@ -32,11 +31,10 @@ public class Contexts {
         private final ITrafficStreamKey trafficStreamKey;
 
         public TrafficStreamsLifecycleContext(IContexts.IKafkaRecordContext enclosingScope,
-                                              ITrafficStreamKey trafficStreamKey,
-                                              ISpanWithParentGenerator spanGenerator) {
+                                              ITrafficStreamKey trafficStreamKey) {
             super(enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("KafkaRecords", "trafficStreamLifetime");
         }
 
         @Override
@@ -51,7 +49,7 @@ public class Contexts {
 
         @Override
         public IChannelKeyContext getLogicalEnclosingScope() {
-            return enclosingScope.getLogicalEnclosingScope();
+            return getImmediateEnclosingScope().getLogicalEnclosingScope();
         }
     }
 
@@ -61,11 +59,10 @@ public class Contexts {
         final UniqueReplayerRequestKey replayerRequestKey;
 
         public HttpTransactionContext(IContexts.ITrafficStreamsLifecycleContext enclosingScope,
-                                      UniqueReplayerRequestKey replayerRequestKey,
-                                      ISpanWithParentGenerator spanGenerator) {
+                                      UniqueReplayerRequestKey replayerRequestKey) {
             super(enclosingScope);
             this.replayerRequestKey = replayerRequestKey;
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("Accumulator", "httpTransaction");
         }
 
         public IChannelKeyContext getChannelKeyContext() {
@@ -84,97 +81,88 @@ public class Contexts {
 
         @Override
         public IChannelKeyContext getLogicalEnclosingScope() {
-            return enclosingScope.getLogicalEnclosingScope();
+            return getImmediateEnclosingScope().getLogicalEnclosingScope();
         }
     }
 
     public static class RequestAccumulationContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
             implements IContexts.IRequestAccumulationContext {
-        public RequestAccumulationContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                          ISpanWithParentGenerator spanGenerator) {
+        public RequestAccumulationContext(IContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("Accumulator", "accumulatingRequest");
         }
     }
 
     public static class ResponseAccumulationContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
             implements IContexts.IResponseAccumulationContext {
-        public ResponseAccumulationContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                          ISpanWithParentGenerator spanGenerator) {
+        public ResponseAccumulationContext(IContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("Accumulator", "accumulatingResponse");
         }
     }
 
     public static class RequestTransformationContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
             implements IContexts.IRequestTransformationContext {
-        public RequestTransformationContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                            ISpanWithParentGenerator spanGenerator) {
+        public RequestTransformationContext(IContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("HttpTransformer", "transformation");
         }
     }
 
     public static class ScheduledContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
             implements IContexts.IScheduledContext {
-        public ScheduledContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                             ISpanWithParentGenerator spanGenerator) {
+        public ScheduledContext(IContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("RequestSender", "scheduled");
         }
     }
 
     public static class TargetRequestContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
             implements IContexts.ITargetRequestContext {
-        public TargetRequestContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                     ISpanWithParentGenerator spanGenerator) {
+        public TargetRequestContext(IContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("RequestSender", "targetTransaction");
         }
     }
 
     public static class RequestSendingContext
             extends DirectNestedSpanContext<IContexts.ITargetRequestContext>
             implements IContexts.IRequestSendingContext {
-        public RequestSendingContext(IContexts.ITargetRequestContext enclosingScope,
-                                     ISpanWithParentGenerator spanGenerator) {
+        public RequestSendingContext(IContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("RequestSender","requestSending");
         }
     }
 
     public static class WaitingForHttpResponseContext
             extends DirectNestedSpanContext<IContexts.ITargetRequestContext>
             implements IContexts.IWaitingForHttpResponseContext {
-        public WaitingForHttpResponseContext(IContexts.ITargetRequestContext enclosingScope,
-                                             ISpanWithParentGenerator spanGenerator) {
+        public WaitingForHttpResponseContext(IContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("RequestSender", "waitingForResponse");
         }
     }
 
     public static class ReceivingHttpResponseContext
             extends DirectNestedSpanContext<IContexts.ITargetRequestContext>
             implements IContexts.IReceivingHttpResponseContext {
-        public ReceivingHttpResponseContext(IContexts.ITargetRequestContext enclosingScope,
-                                            ISpanWithParentGenerator spanGenerator) {
+        public ReceivingHttpResponseContext(IContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("HttpSender", "receivingRequest");
         }
     }
 
     public static class TupleHandlingContext
             extends DirectNestedSpanContext<IContexts.IReplayerHttpTransactionContext>
             implements IContexts.ITupleHandlingContext {
-        public TupleHandlingContext(IContexts.IReplayerHttpTransactionContext enclosingScope,
-                                    ISpanWithParentGenerator spanGenerator) {
+        public TupleHandlingContext(IContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan("TrafficReplayer", "tupleHandling");
         }
     }
 }

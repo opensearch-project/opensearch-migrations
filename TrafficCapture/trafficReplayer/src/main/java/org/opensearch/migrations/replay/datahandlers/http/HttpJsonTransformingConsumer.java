@@ -73,8 +73,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                         IAuthTransformerFactory authTransformerFactory,
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
                                         IContexts.IReplayerHttpTransactionContext httpTransactionContext) {
-        transformationContext = new Contexts.RequestTransformationContext(httpTransactionContext,
-                METERING_CLOSURE.makeSpanContinuation("transformation"));
+        transformationContext = new Contexts.RequestTransformationContext(httpTransactionContext);
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);

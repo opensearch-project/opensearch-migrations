@@ -19,7 +19,6 @@ import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -97,7 +96,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                                      Clock clock,
                                      @NonNull KafkaBehavioralPolicy behavioralPolicy)
     {
-        this.channelContextManager = new ChannelContextManager();
+        this.channelContextManager = new ChannelContextManager(globalContext);
         trackingKafkaConsumer = new TrackingKafkaConsumer(globalContext, kafkaConsumer, topic, keepAliveInterval, clock,
                 this::onKeyFinishedCommitting);
         trafficStreamsRead = new AtomicLong();

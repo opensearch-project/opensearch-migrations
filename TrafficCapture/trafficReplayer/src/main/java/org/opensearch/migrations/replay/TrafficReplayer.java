@@ -8,6 +8,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.Future;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.NonNull;
@@ -17,7 +18,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.tracing.Contexts;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
-import org.opensearch.migrations.tracing.EmptyContext;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
@@ -394,11 +395,7 @@ public class TrafficReplayer {
             System.exit(3);
             return;
         }
-        if (params.otelCollectorEndpoint != null) {
-            SimpleMeteringClosure.initializeOpenTelemetry("replay", params.otelCollectorEndpoint);
-        }
-
-        var topContext = EmptyContext.singleton;
+        var topContext = new RootOtelContext(params.otelCollectorEndpoint, "replay");
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
@@ -659,8 +656,7 @@ public class TrafficReplayer {
                 // packaging it up and calling the callback.
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
-                    try (var tupleHandlingContext = new Contexts.TupleHandlingContext(httpContext,
-                            METERING_CLOSURE.makeSpanContinuation("tupleHandling"))) {
+                    try (var tupleHandlingContext = new Contexts.TupleHandlingContext(httpContext)) {
                         packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
                     }
                     commitTrafficStreams(context, rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
@@ -996,7 +992,7 @@ public class TrafficReplayer {
             if (stopReadingRef.get()) {
                 break;
             }
-            this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk(null));
+            this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk(topLevelContext));
             List<ITrafficStreamWithKey> trafficStreams = null;
             try {
                 trafficStreams = this.nextChunkFutureRef.get().get();

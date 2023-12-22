@@ -23,7 +23,6 @@ public class TestRequestKey {
                 PojoTrafficStreamKeyAndContext.build(TEST_NODE_ID, connectionId, 0,
                         tsk -> new TestTrafficStreamsLifecycleContext(tsk)),
                 0, replayerIdx);
-        return new Contexts.HttpTransactionContext(rk.trafficStreamKey.getTrafficStreamsContext(),
-                rk, METERING_CLOSURE.makeSpanContinuation("test2"));
+        return new Contexts.HttpTransactionContext(rk.trafficStreamKey.getTrafficStreamsContext(), rk);
     }
 }

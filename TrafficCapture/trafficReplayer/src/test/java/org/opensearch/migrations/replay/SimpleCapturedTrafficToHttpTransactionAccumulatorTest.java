@@ -18,6 +18,7 @@ import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
@@ -116,8 +117,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
                                              List<ObservationDirective> directives) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
-        var offloader = connectionFactory.createOffloader(new ConnectionContext("n", "test",
-                        new SimpleMeteringClosure("test").makeSpanContinuation("test", null)),
+        var offloader = connectionFactory.createOffloader(new ConnectionContext(new RootOtelContext(),
+                        "n", "test"),
                 "TEST_"+uniqueIdCounter.incrementAndGet());
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);

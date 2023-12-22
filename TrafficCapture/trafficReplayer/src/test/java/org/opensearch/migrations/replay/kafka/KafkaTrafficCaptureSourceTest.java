@@ -10,9 +10,10 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.TestContext;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -44,7 +45,7 @@ class KafkaTrafficCaptureSourceTest {
                 .setNodeId("n")
                 .setNumber(7)
                 .build();
-        var contextFactory = new ChannelContextManager();
+        var contextFactory = new ChannelContextManager(TestContext.singleton);
         var tsk = new TrafficStreamKeyWithKafkaRecordId(contextFactory, ts, "testRecord", 1, 2, 123);
         Assertions.assertEquals("n.c.7|partition=2|offset=123", tsk.toString());
     }

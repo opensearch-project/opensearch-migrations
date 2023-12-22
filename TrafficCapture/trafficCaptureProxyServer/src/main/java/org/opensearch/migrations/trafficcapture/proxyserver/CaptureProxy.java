@@ -17,6 +17,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
@@ -303,9 +304,7 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
-        if (params.otelCollectorEndpoint != null) {
-            SimpleMeteringClosure.initializeOpenTelemetry("capture", params.otelCollectorEndpoint);
-        }
+        var rootContext = new RootOtelContext(params.otelCollectorEndpoint, "capture");
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),
@@ -328,7 +327,7 @@ public class CaptureProxy {
             }).orElse(null);
             var headerCapturePredicate =
                     new HeaderValueFilteringCapturePredicate(convertPairListToMap(params.suppressCaptureHeaderPairs));
-            proxy.start(backsideConnectionPool, params.numThreads, sslEngineSupplier,
+            proxy.start(rootContext, backsideConnectionPool, params.numThreads, sslEngineSupplier,
                     getConnectionCaptureFactory(params), headerCapturePredicate);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();

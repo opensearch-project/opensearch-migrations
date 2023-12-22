@@ -128,7 +128,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
                 var flushContext = new KafkaRecordContext(telemetryContext,
-                        METERING_CLOSURE.makeSpanContinuation("flushRecord"),
                         topicNameForTraffic, recordId, kafkaRecord.value().length);
                 METERING_CLOSURE.meterIncrementEvent(telemetryContext, "stream_flush_called");
 
@@ -173,7 +172,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             METERING_CLOSURE.meterIncrementEvent(flushContext,
                     exception==null ? "stream_flush_success_bytes" : "stream_flush_failure_bytes",
                     flushContext.getRecordSize());
-            flushContext.currentSpan.end();
+            flushContext.close();
 
             if (exception != null) {
                 log.error("Error sending producer record: {}", recordId, exception);

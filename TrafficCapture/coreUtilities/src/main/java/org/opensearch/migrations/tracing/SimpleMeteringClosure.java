@@ -27,58 +27,9 @@ import java.util.concurrent.TimeUnit;
 
 public class SimpleMeteringClosure {
     public final Meter meter;
-    public final Tracer tracer;
 
     public SimpleMeteringClosure(String scopeName) {
         meter = GlobalOpenTelemetry.getMeter(scopeName);
-        tracer = GlobalOpenTelemetry.getTracer(scopeName);
-    }
-
-    public static void initializeOpenTelemetry(String serviceName, String collectorEndpoint) {
-        var serviceResource = Resource.getDefault().toBuilder()
-                .put(ResourceAttributes.SERVICE_NAME, serviceName)
-                .build();
-
-        OpenTelemetrySdk openTelemetrySdk =
-                OpenTelemetrySdk.builder()
-                        .setLoggerProvider(
-                                SdkLoggerProvider.builder()
-                                        .setResource(serviceResource)
-                                        .addLogRecordProcessor(
-                                                BatchLogRecordProcessor.builder(
-                                                                OtlpGrpcLogRecordExporter.builder()
-                                                                        .setEndpoint(collectorEndpoint)
-                                                                        .build())
-                                                        .build())
-                                        .build())
-                        .setTracerProvider(
-                                SdkTracerProvider.builder()
-                                        .setResource(serviceResource)
-                                        .addSpanProcessor(
-                                                BatchSpanProcessor.builder(
-                                                                OtlpGrpcSpanExporter.builder()
-                                                                        .setEndpoint(collectorEndpoint)
-                                                                        .setTimeout(2, TimeUnit.SECONDS)
-                                                                        .build())
-                                                        .setScheduleDelay(100, TimeUnit.MILLISECONDS)
-                                                        .build())
-                                        .build())
-                        .setMeterProvider(
-                                SdkMeterProvider.builder()
-                                        .setResource(serviceResource)
-                                        .registerMetricReader(
-                                                PeriodicMetricReader.builder(
-                                                                OtlpGrpcMetricExporter.builder()
-                                                                        .setEndpoint(collectorEndpoint)
-                                                                        .build())
-                                                        .setInterval(Duration.ofMillis(1000))
-                                                        .build())
-                                        .build())
-                        .buildAndRegisterGlobal();
-
-        // Add hook to close SDK, which flushes logs
-        Runtime.getRuntime().addShutdownHook(new Thread(openTelemetrySdk::close));
-        //OpenTelemetryAppender.install(GlobalOpenTelemetry.get());
     }
 
     public void meterIncrementEvent(IInstrumentationAttributes ctx, String eventName) {
@@ -131,21 +82,5 @@ public class SimpleMeteringClosure {
                 .build().record(value, ctx.getPopulatedAttributesBuilder()
                         .put("labelName", eventName)
                         .build());
-    }
-
-    public ISpanGenerator makeSpanContinuation(String spanName, Span parentSpan) {
-        var builder = tracer.spanBuilder(spanName);
-        return (attrs) -> getSpanWithParent(builder, attrs, parentSpan);
-    }
-
-    public static Span getSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan) {
-        return Optional.ofNullable(parentSpan).map(p -> builder.setParent(Context.current().with(p)))
-                .orElseGet(builder::setNoParent)
-                .startSpan().setAllAttributes(attrs);
-    }
-
-    public ISpanWithParentGenerator makeSpanContinuation(String spanName) {
-        var builder = tracer.spanBuilder(spanName);
-        return (attrs,parentSpan) -> getSpanWithParent(builder, attrs, parentSpan);
     }
 }

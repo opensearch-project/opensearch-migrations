@@ -5,8 +5,8 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import lombok.NonNull;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
@@ -16,16 +16,18 @@ import java.io.IOException;
 import java.util.function.Supplier;
 
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
-    static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure("FrontendConnection");
-
     private final IConnectionCaptureFactory<T> connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
+    private final IInstrumentConstructor instrumentationConstructor;
     private final BacksideConnectionPool backsideConnectionPool;
     private final RequestCapturePredicate requestCapturePredicate;
 
-    public ProxyChannelInitializer(BacksideConnectionPool backsideConnectionPool, Supplier<SSLEngine> sslEngineSupplier,
+    public ProxyChannelInitializer(IInstrumentConstructor instrumentationConstructor,
+                                   BacksideConnectionPool backsideConnectionPool,
+                                   Supplier<SSLEngine> sslEngineSupplier,
                                    IConnectionCaptureFactory<T> connectionCaptureFactory,
                                    @NonNull RequestCapturePredicate requestCapturePredicate) {
+        this.instrumentationConstructor = instrumentationConstructor;
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
@@ -48,8 +50,9 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         }
 
         var connectionId = ch.id().asLongText();
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<T>("", connectionId,
-                connectionCaptureFactory, requestCapturePredicate, this::shouldGuaranteeMessageOffloading));
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<T>(instrumentationConstructor,
+                "", connectionId, connectionCaptureFactory, requestCapturePredicate,
+                this::shouldGuaranteeMessageOffloading));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }
 }

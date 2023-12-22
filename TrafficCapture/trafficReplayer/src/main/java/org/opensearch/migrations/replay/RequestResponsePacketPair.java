@@ -42,10 +42,8 @@ public class RequestResponsePacketPair {
                 startingSourceRequestIndex, indexOfCurrentRequest);
         var httpTransactionContext = new Contexts.HttpTransactionContext(
                 startingAtTrafficStreamKey.getTrafficStreamsContext(),
-                requestKey,
-                Accumulation.METERING_CLOSURE.makeSpanContinuation("httpTransaction"));
-        requestOrResponseAccumulationContext = new Contexts.RequestAccumulationContext(httpTransactionContext,
-                Accumulation.METERING_CLOSURE.makeSpanContinuation("accumulatingRequest"));
+                requestKey);
+        requestOrResponseAccumulationContext = new Contexts.RequestAccumulationContext(httpTransactionContext);
     }
 
     @NonNull ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
@@ -77,8 +75,7 @@ public class RequestResponsePacketPair {
         var looseCtx = requestOrResponseAccumulationContext;
         assert looseCtx instanceof IContexts.IRequestAccumulationContext;
         requestOrResponseAccumulationContext = new Contexts.ResponseAccumulationContext(
-                getRequestContext().getLogicalEnclosingScope(),
-                Accumulation.METERING_CLOSURE.makeSpanContinuation("accumulatingResponse"));
+                getRequestContext().getLogicalEnclosingScope());
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {

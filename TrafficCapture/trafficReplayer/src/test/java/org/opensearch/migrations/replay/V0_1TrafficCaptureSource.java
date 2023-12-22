@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.IOException;
@@ -12,8 +13,8 @@ public class V0_1TrafficCaptureSource extends CompressedFileTrafficCaptureSource
 
     protected final HashMap<String, Progress> connectionProgressMap;
 
-    public V0_1TrafficCaptureSource(String filename) throws IOException {
-        super(filename);
+    public V0_1TrafficCaptureSource(IInstrumentationAttributes context, String filename) throws IOException {
+        super(context, filename);
         connectionProgressMap = new HashMap<>();
     }
 

@@ -42,10 +42,9 @@ public class TrafficCaptureSourceFactory {
                     appParams.kafkaTrafficGroupId, appParams.kafkaTrafficEnableMSKAuth,
                     appParams.kafkaTrafficPropertyFile,
                     Clock.systemUTC(), new KafkaBehavioralPolicy());
-        } else if (isInputFileActive) {
-            return new InputStreamOfTraffic(new FileInputStream(appParams.inputFilename));
         } else {
-            return new InputStreamOfTraffic(System.in);
+            return new InputStreamOfTraffic(ctx,
+                    isInputFileActive ? new FileInputStream(appParams.inputFilename) : System.in);
         }
     }
 }

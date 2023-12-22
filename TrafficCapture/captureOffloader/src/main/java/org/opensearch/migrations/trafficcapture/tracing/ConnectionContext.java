@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.tracing;
 
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.ISpanGenerator;
 import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
@@ -18,18 +19,15 @@ public class ConnectionContext implements IConnectionContext, IWithStartTime {
     public final Span currentSpan;
     @Getter
     private final Instant startTime;
+    @Getter
+    final IInstrumentConstructor rootInstrumentationScope;
 
-    public ConnectionContext(IConnectionContext oldContext, ISpanWithParentGenerator spanGenerator) {
-        this.connectionId = oldContext.getConnectionId();
-        this.nodeId = oldContext.getNodeId();
-        this.startTime = Instant.now();
-        this.currentSpan = spanGenerator.apply(getPopulatedAttributes(), oldContext.getCurrentSpan());
-    }
-
-    public ConnectionContext(String connectionId, String nodeId, ISpanGenerator spanGenerator) {
+    public ConnectionContext(IInstrumentConstructor rootInstrumentationScope,
+                             String connectionId, String nodeId) {
+        this.rootInstrumentationScope = rootInstrumentationScope;
         this.connectionId = connectionId;
         this.nodeId = nodeId;
-        this.currentSpan = spanGenerator.apply(getPopulatedAttributes());
+        this.currentSpan = rootInstrumentationScope.buildSpanWithoutParent("","connectionLifetime");
         this.startTime = Instant.now();
     }
 }

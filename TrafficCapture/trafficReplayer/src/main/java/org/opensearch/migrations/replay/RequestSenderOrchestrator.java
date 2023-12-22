@@ -46,8 +46,7 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm processing work has finished");
         log.atDebug().setMessage(()->"Scheduling work for "+ctx.getConnectionId()+" at time "+timestamp).log();
-        var scheduledContext = new Contexts.ScheduledContext(ctx,
-                new SimpleMeteringClosure("RSO").makeSpanContinuation("scheduled"));
+        var scheduledContext = new Contexts.ScheduledContext(ctx);
         // this method doesn't use the scheduling that scheduleRequest and scheduleClose use because
         // doing work associated with a connection is considered to be preprocessing work independent
         // of the underlying network connection itself, so it's fair to be able to do this without
@@ -216,10 +215,8 @@ public class RequestSenderOrchestrator {
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
         var packetReceiverRef = new AtomicReference<NettyPacketToHttpConsumer>();
         Runnable packetSender = () -> {
-            try (var targetContext = new Contexts.TargetRequestContext(ctx,
-                    new SimpleMeteringClosure("RSO").makeSpanContinuation("targetTransaction"));
-            var requestContext = new Contexts.RequestSendingContext(targetContext,
-                    new SimpleMeteringClosure("RSO").makeSpanContinuation("requestSending"))) {
+            try (var targetContext = new Contexts.TargetRequestContext(ctx);
+                 var requestContext = new Contexts.RequestSendingContext(targetContext)) {
                 sendNextPartAndContinue(() ->
                                 memoizePacketConsumer(ctx, channelFutureAndRequestSchedule.getInnerChannelFuture(),
                                         packetReceiverRef),

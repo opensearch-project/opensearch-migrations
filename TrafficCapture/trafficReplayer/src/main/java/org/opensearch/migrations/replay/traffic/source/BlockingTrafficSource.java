@@ -1,18 +1,12 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import com.google.protobuf.Timestamp;
-import io.opentelemetry.api.trace.Span;
-import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.ISpanGenerator;
-import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.slf4j.event.Level;
 
@@ -42,8 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Slf4j
 public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlowController {
-    private static final SimpleMeteringClosure METERING_CLOSURE =
-            new SimpleMeteringClosure("BlockingTrafficSource");
+    private static final String TELEMETRY_SCOPE_NAME = "BlockingTrafficSource";
 
     private final ISimpleTrafficCaptureSource underlyingSource;
     private final AtomicReference<Instant> lastTimestampSecondsRef;
@@ -54,27 +47,25 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     private final Semaphore readGate;
     private final Duration bufferTimeWindow;
 
-    public static class ReadChunkContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
-        public ReadChunkContext(IInstrumentationAttributes enclosingScope,
-                                ISpanWithParentGenerator spanGenerator) {
+    public static class ReadChunkContext<T extends IInstrumentationAttributes>
+            extends DirectNestedSpanContext<T> {
+        public ReadChunkContext(T enclosingScope) {
             super(enclosingScope);
-            setCurrentSpanWithNoParent(spanGenerator);
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "readNextTrafficStreamChunk");
         }
     }
 
     public static class BackPressureBlockContext extends DirectNestedSpanContext<ReadChunkContext> {
-        public BackPressureBlockContext(@NonNull ReadChunkContext enclosingScope,
-                                        ISpanWithParentGenerator spanGenerator) {
+        public BackPressureBlockContext(@NonNull ReadChunkContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "backPressureBlock");
         }
     }
 
     public static class WaitForNextSignal extends DirectNestedSpanContext<BackPressureBlockContext> {
-        public WaitForNextSignal(@NonNull BackPressureBlockContext enclosingScope,
-                                 ISpanWithParentGenerator spanGenerator) {
+        public WaitForNextSignal(@NonNull BackPressureBlockContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(spanGenerator);
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "waitForNextBackPressureCheck");
         }
     }
 
@@ -114,10 +105,6 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         return bufferTimeWindow;
     }
 
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
-        return readNextTrafficStreamChunk(null);
-    }
-
     /**
      * Reads the next chunk that is available before the current stopReading barrier.  However,
      * that barrier isn't meant to be a tight barrier with immediate effect.
@@ -127,8 +114,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
     readNextTrafficStreamChunk(IInstrumentationAttributes context) {
-        var readContext = new ReadChunkContext(context,
-                METERING_CLOSURE.makeSpanContinuation("readNextTrafficStreamChunk"));
+        var readContext = new ReadChunkContext(context);
         log.info("BlockingTrafficSource::readNext");
         var trafficStreamListFuture = CompletableFuture
                 .supplyAsync(() -> blockIfNeeded(readContext), task -> new Thread(task).start())
@@ -161,8 +147,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         BackPressureBlockContext blockContext = null;
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
             if (blockContext == null) {
-                blockContext = new BackPressureBlockContext(readContext,
-                        METERING_CLOSURE.makeSpanContinuation("backPressureBlock"));
+                blockContext = new BackPressureBlockContext(readContext);
             }
             try {
                 log.atInfo().setMessage("blocking until signaled to read the next chunk last={} stop={}")
@@ -172,8 +157,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
                     log.trace("acquiring readGate semaphore (w/out timeout)");
-                    try (var waitContext = new WaitForNextSignal(blockContext,
-                            METERING_CLOSURE.makeSpanContinuation("waitForNextBackPressureCheck"))) {
+                    try (var waitContext = new WaitForNextSignal(blockContext)) {
                         readGate.acquire();
                     }
                 } else {
@@ -188,8 +172,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
                         log.atTrace().setMessage(() -> "acquring readGate semaphore with timeout=" + waitIntervalMs).log();
-                        try (var waitContext = new WaitForNextSignal(blockContext,
-                                METERING_CLOSURE.makeSpanContinuation("waitForNextBackPressureCheck"))) {
+                        try (var waitContext = new WaitForNextSignal(blockContext)) {
                             readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
                         }
                     }

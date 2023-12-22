@@ -1,12 +1,8 @@
-package org.opensearch.migrations.replay.tracing;
+package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import lombok.NonNull;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IWithStartTime;
 
 import java.time.Instant;
 
@@ -15,10 +11,12 @@ public abstract class AbstractNestedSpanContext<T extends IInstrumentationAttrib
     final T enclosingScope;
     @Getter final Instant startTime;
     @Getter private Span currentSpan;
+    @Getter private final IInstrumentConstructor rootInstrumentationScope;
 
-    public AbstractNestedSpanContext(T enclosingScope) {
+    protected AbstractNestedSpanContext(T enclosingScope) {
         this.enclosingScope = enclosingScope;
         this.startTime = Instant.now();
+        this.rootInstrumentationScope = enclosingScope.getRootInstrumentationScope();
     }
 
     @Override
@@ -28,14 +26,8 @@ public abstract class AbstractNestedSpanContext<T extends IInstrumentationAttrib
 
     public T getImmediateEnclosingScope() { return enclosingScope; }
 
-    protected void setCurrentSpan(@NonNull ISpanWithParentGenerator spanGenerator) {
-        // TODO - switch this to use a virtual function?
-        if (enclosingScope instanceof IScopedInstrumentationAttributes) {
-            setCurrentSpan(spanGenerator.apply(getPopulatedAttributes(),
-                    ((IScopedInstrumentationAttributes) enclosingScope).getCurrentSpan()));
-        } else {
-            setCurrentSpan(spanGenerator.apply(getPopulatedAttributes(), null));
-        }
+    protected void setCurrentSpan(String scopeName, String spanName) {
+        setCurrentSpan(rootInstrumentationScope.buildSpan(enclosingScope, scopeName, spanName));
     }
 
     protected void setCurrentSpanWithNoParent(@NonNull ISpanWithParentGenerator spanGenerator) {

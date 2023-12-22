@@ -67,6 +67,7 @@ dependencies {
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation project(':coreUtilities')
+    testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
 
     testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
@@ -81,6 +82,7 @@ dependencies {
     testImplementation project(':captureOffloader')
     testImplementation testFixtures(project(path: ':captureOffloader'))
     testImplementation testFixtures(project(path: ':testUtilities'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')

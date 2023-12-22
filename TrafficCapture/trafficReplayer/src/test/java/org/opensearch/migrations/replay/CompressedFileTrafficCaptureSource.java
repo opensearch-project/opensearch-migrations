@@ -21,14 +21,15 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     protected final ISimpleTrafficCaptureSource trafficSource;
     private final AtomicInteger numberOfTrafficStreamsToRead = new AtomicInteger(NUM_TRAFFIC_STREAMS_TO_READ);
 
-    public CompressedFileTrafficCaptureSource(String filename) throws IOException {
-        this.trafficSource = getTrafficSource(filename);
+    public CompressedFileTrafficCaptureSource(IInstrumentationAttributes context, String filename) throws IOException {
+        this.trafficSource = getTrafficSource(context, filename);
     }
 
-    private static InputStreamOfTraffic getTrafficSource(String filename) throws IOException {
+    private static InputStreamOfTraffic
+    getTrafficSource(IInstrumentationAttributes context, String filename) throws IOException {
         var compressedIs = new FileInputStream(filename);
         var is = new GZIPInputStream(compressedIs);
-        return new InputStreamOfTraffic(is);
+        return new InputStreamOfTraffic(context, is);
     }
 
     @Override

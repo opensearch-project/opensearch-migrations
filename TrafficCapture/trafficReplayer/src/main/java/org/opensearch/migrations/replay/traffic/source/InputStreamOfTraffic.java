@@ -8,12 +8,10 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
-import org.opensearch.migrations.replay.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
 import org.opensearch.migrations.replay.tracing.IContexts;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.EOFException;
@@ -25,13 +23,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
-    private static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure("InputStreamOfTraffic");
+    private static final String TELEMETRY_SCOPE_NAME = "InputStreamOfTraffic";
     private final InputStream inputStream;
     private final AtomicInteger trafficStreamsRead = new AtomicInteger();
     private final ChannelContextManager channelContextManager;
 
-    public InputStreamOfTraffic(InputStream inputStream) {
-        this.channelContextManager = new ChannelContextManager();
+    public InputStreamOfTraffic(IInstrumentationAttributes context, InputStream inputStream) {
+        this.channelContextManager = new ChannelContextManager(context);
         this.inputStream = inputStream;
     }
 
@@ -43,7 +41,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
         public IOSTrafficStreamContext(@NonNull IChannelKeyContext ctx, ITrafficStreamKey tsk) {
             super(ctx);
             this.trafficStreamKey = tsk;
-            setCurrentSpan(METERING_CLOSURE.makeSpanContinuation("trafficStreamLifecycle"));
+            setCurrentSpan(TELEMETRY_SCOPE_NAME, "trafficStreamLifecycle");
         }
 
         @Override

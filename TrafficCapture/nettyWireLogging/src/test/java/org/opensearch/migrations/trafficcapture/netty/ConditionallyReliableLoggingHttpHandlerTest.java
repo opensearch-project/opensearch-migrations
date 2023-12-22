@@ -17,6 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWrapper;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
@@ -45,8 +46,6 @@ import java.util.stream.Stream;
 public class ConditionallyReliableLoggingHttpHandlerTest {
     @RegisterExtension
     static final OpenTelemetryExtension otelTesting = OpenTelemetryExtension.create();
-    private final Tracer tracer = otelTesting.getOpenTelemetry().getTracer("test");
-    private final Meter meter = otelTesting.getOpenTelemetry().getMeter("test");
 
     static class TestStreamManager extends OrderedStreamLifecyleManager implements AutoCloseable {
         AtomicReference<ByteBuffer> byteBufferAtomicReference = new AtomicReference<>();
@@ -82,11 +81,13 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter)
             throws IOException {
+        var rootInstrumenter = new RootOtelContext(otelTesting.getOpenTelemetry());
         var streamManager = new TestStreamManager();
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "c", streamManager);
 
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpHandler("n", "c", (ctx, connectionId) -> offloader,
+                new ConditionallyReliableLoggingHttpHandler(rootInstrumenter,
+                        "n", "c", (ctx, connectionId) -> offloader,
                         new RequestCapturePredicate(), x->true)); // true: block every request
         channelWriter.accept(channel);
 
@@ -154,12 +155,13 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     @Test
     @ValueSource(booleans = {false, true})
     public void testThatSuppressedCaptureWorks() throws Exception {
+        var rootInstrumenter = new RootOtelContext();
         var streamMgr = new TestStreamManager();
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
 
         var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", "uploader"));
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpHandler("n", "c",
+                new ConditionallyReliableLoggingHttpHandler(rootInstrumenter,"n", "c",
                         (ctx, connectionId) -> offloader, headerCapturePredicate, x->true));
         getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
         channel.close();
@@ -178,12 +180,13 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testThatHealthCheckCaptureCanBeSuppressed(boolean singleBytes) throws Exception {
+        var rootInstrumenter = new RootOtelContext();
         var streamMgr = new TestStreamManager();
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
 
         var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", ".*uploader.*"));
         EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpHandler("n", "c",
+                new ConditionallyReliableLoggingHttpHandler(rootInstrumenter,"n", "c",
                         (ctx, connectionId) -> offloader, headerCapturePredicate, x->false));
         getWriter(singleBytes, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
         channel.writeOutbound(Unpooled.wrappedBuffer("response1".getBytes(StandardCharsets.UTF_8)));
