@@ -35,8 +35,6 @@ import java.time.Instant;
 
 @Slf4j
 public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
-    public static final String TELEMETRY_SCOPE_NAME = "CapturingHttpHandler";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
 
     static class CaptureIgnoreState {
@@ -148,7 +146,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         var parentContext = new ConnectionContext(contextConstructor, channelKey, nodeId);
 
         this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.HttpTransactionState.REQUEST);
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "requestStarted");
+        messageContext.meterIncrementEvent("requestStarted");
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext, channelKey);
         var captureState = new CaptureState();
@@ -172,7 +170,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
         trafficOffloader.addCloseEvent(Instant.now());
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "unregistered");
+        messageContext.meterIncrementEvent("unregistered");
         trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
             if (t != null) {
                 log.warn("Got error: " + t.getMessage());
@@ -189,7 +187,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "handlerRemoved");
+        messageContext.meterIncrementEvent("handlerRemoved");
         messageContext.close();
         messageContext.getLogicalEnclosingScope().close();
 
@@ -210,7 +208,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                                                        HttpRequest httpRequest) throws Exception {
         rotateNextMessageContext(HttpMessageContext.HttpTransactionState.WAITING);
         super.channelRead(ctx, msg);
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "requestReceived");
+        messageContext.meterIncrementEvent("requestReceived");
 
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_REQUEST)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
@@ -229,8 +227,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         var bb = ((ByteBuf) msg);
         httpDecoderChannel.writeInbound(bb.retainedDuplicate()); // the ByteBuf is consumed/release by this method
 
-        METERING_CLOSURE.meterIncrementEvent(messageContext,
-                getHandlerThatHoldsParsedHttpRequest().haveParsedFullRequest ? "requestFullyParsed" : "requestPartiallyParsed");
+        messageContext.meterIncrementEvent(getHandlerThatHoldsParsedHttpRequest().haveParsedFullRequest
+                ? "requestFullyParsed" : "requestPartiallyParsed");
 
         var captureState = requestParsingHandler.captureState;
         var shouldCapture = captureState.shouldCapture();
@@ -244,8 +242,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "read");
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "readBytes", bb.readableBytes());
+        messageContext.meterIncrementEvent("read");
+        messageContext.meterIncrementEvent("readBytes", bb.readableBytes());
 
 
         if (requestParsingHandler.haveParsedFullRequest) {
@@ -281,8 +279,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_RESPONSE_COMPONENT)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "write");
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "writeBytes", bb.readableBytes());
+        messageContext.meterIncrementEvent("write");
+        messageContext.meterIncrementEvent("writeBytes", bb.readableBytes());
 
         super.write(ctx, msg, promise);
     }
@@ -290,7 +288,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
-        METERING_CLOSURE.meterIncrementEvent(messageContext, "exception");
+        messageContext.meterIncrementEvent("exception");
         httpDecoderChannel.close();
         super.exceptionCaught(ctx, cause);
     }

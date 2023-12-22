@@ -8,6 +8,7 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 public interface IConnectionContext extends IScopedInstrumentationAttributes {
     static final AttributeKey<String> CONNECTION_ID_ATTR = AttributeKey.stringKey("connectionId");
     static final AttributeKey<String> NODE_ID_ATTR = AttributeKey.stringKey("nodeId");
+    String CHANNEL_SCOPE = "Channel";
 
     String getConnectionId();
     String getNodeId();
@@ -20,4 +21,5 @@ public interface IConnectionContext extends IScopedInstrumentationAttributes {
         return builder.put(CONNECTION_ID_ATTR, getConnectionId())
                 .put(NODE_ID_ATTR, getNodeId());
     }
+    default String getScopeName() { return CHANNEL_SCOPE; }
 }

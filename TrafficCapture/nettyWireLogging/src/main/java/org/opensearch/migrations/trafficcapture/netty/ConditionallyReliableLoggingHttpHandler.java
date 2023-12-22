@@ -32,13 +32,12 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                                                        boolean shouldCapture, HttpRequest httpRequest)
             throws Exception {
         if (shouldCapture && shouldBlockPredicate.test(httpRequest)) {
-            METERING_CLOSURE.meterIncrementEvent(messageContext, "blockingRequestUntilFlush");
+            messageContext.meterIncrementEvent("blockingRequestUntilFlush");
             rotateNextMessageContext(HttpMessageContext.HttpTransactionState.INTERNALLY_BLOCKED);
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 log.atInfo().setMessage(()->"Done flushing").log();
-                METERING_CLOSURE.meterIncrementEvent(messageContext,
-                        t != null ? "blockedFlushFailure" : "blockedFlushSuccess");
-                METERING_CLOSURE.meterHistogramMicros(messageContext,
+                messageContext.meterIncrementEvent(t != null ? "blockedFlushFailure" : "blockedFlushSuccess");
+                messageContext.meterHistogramMicros(
                         t==null ? "blockedFlushFailure_micro" : "stream_flush_failure_micro");
                 messageContext.endSpan();
 
@@ -57,7 +56,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                 }
             });
         } else {
-            METERING_CLOSURE.meterIncrementEvent(messageContext, "nonBlockingRequest");
+            messageContext.meterIncrementEvent("nonBlockingRequest");
             // TODO - log capturing vs non-capturing too
             super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
         }

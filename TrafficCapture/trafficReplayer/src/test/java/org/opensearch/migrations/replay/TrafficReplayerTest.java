@@ -9,8 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.TestContext;
@@ -160,7 +159,7 @@ class TrafficReplayerTest {
                         new AccumulationCallbacks() {
                             @Override
                             public void onRequestReceived(UniqueReplayerRequestKey id,
-                                                          IContexts.IReplayerHttpTransactionContext ctx,
+                                                          IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                           HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
@@ -169,7 +168,7 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onFullDataReceived(UniqueReplayerRequestKey key,
-                                                           IContexts.IReplayerHttpTransactionContext ctx,
+                                                           IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                            RequestResponsePacketPair fullPair) {
                                 var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
@@ -177,19 +176,19 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                IChannelKeyContext ctx,
+                                                                IReplayContexts.IChannelKeyContext ctx,
                                                                 @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
                             public void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          IChannelKeyContext ctx,
+                                                          IReplayContexts.IChannelKeyContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
                             @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         IChannelKeyContext ctx) {}
+                                                                         IReplayContexts.IChannelKeyContext ctx) {}
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
@@ -215,7 +214,7 @@ class TrafficReplayerTest {
                         new AccumulationCallbacks() {
                             @Override
                             public void onRequestReceived(UniqueReplayerRequestKey id,
-                                                          IContexts.IReplayerHttpTransactionContext ctx,
+                                                          IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                           HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
@@ -224,7 +223,7 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onFullDataReceived(UniqueReplayerRequestKey key,
-                                                           IContexts.IReplayerHttpTransactionContext ctx,
+                                                           IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                            RequestResponsePacketPair fullPair) {
                                 var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
@@ -232,17 +231,17 @@ class TrafficReplayerTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                IChannelKeyContext ctx,
+                                                                IReplayContexts.IChannelKeyContext ctx,
                                                                 @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
                             public void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          IChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
+                                                          IReplayContexts.IChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
                             @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         IChannelKeyContext ctx) {}
+                                                                         IReplayContexts.IChannelKeyContext ctx) {}
                         }
                 );
         byte[] serializedChunks;

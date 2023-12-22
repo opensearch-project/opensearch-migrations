@@ -4,9 +4,8 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
-import org.opensearch.migrations.replay.tracing.Contexts;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.util.StringJoiner;
@@ -19,12 +18,12 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
     private final int partition;
     private final long offset;
 
-    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IChannelKeyContext> contextFactory,
+    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> contextFactory,
                                       TrafficStream trafficStream, String recordId, KafkaCommitOffsetData ok) {
         this(contextFactory, trafficStream, recordId, ok.getGeneration(), ok.getPartition(), ok.getOffset());
     }
 
-    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IChannelKeyContext> contextFactory,
+    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> contextFactory,
                                       TrafficStream trafficStream, String recordId,
                                       int generation, int partition, long offset) {
         super(trafficStream);
@@ -32,8 +31,8 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
         this.partition = partition;
         this.offset = offset;
         var channelKeyContext = contextFactory.apply(this);
-        var kafkaContext = new Contexts.KafkaRecordContext(channelKeyContext, recordId);
-        this.setTrafficStreamsContext(new Contexts.TrafficStreamsLifecycleContext(kafkaContext, this));
+        var kafkaContext = new ReplayContexts.KafkaRecordContext(channelKeyContext, recordId);
+        this.setTrafficStreamsContext(new ReplayContexts.TrafficStreamsLifecycleContext(kafkaContext, this));
     }
 
     @Override

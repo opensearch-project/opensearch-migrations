@@ -2,17 +2,12 @@ package org.opensearch.migrations.replay.tracing;
 
 import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.ISpanGenerator;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 
 import java.util.HashMap;
 import java.util.function.Function;
 
-public class ChannelContextManager implements Function<ITrafficStreamKey, IChannelKeyContext> {
-    public static final String TELEMETRY_SCOPE_NAME = "Channel";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
+public class ChannelContextManager implements Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> {
     private final IInstrumentationAttributes globalContext;
 
     public ChannelContextManager(IInstrumentationAttributes globalContext) {
@@ -20,14 +15,14 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IChann
     }
 
     private static class RefCountedContext {
-        @Getter final ChannelKeyContext context;
+        @Getter final ReplayContexts.ChannelKeyContext context;
         private int refCount;
 
-        private RefCountedContext(ChannelKeyContext context) {
+        private RefCountedContext(ReplayContexts.ChannelKeyContext context) {
             this.context = context;
         }
 
-        ChannelKeyContext retain() {
+        ReplayContexts.ChannelKeyContext retain() {
             refCount++;
             return context;
         }
@@ -46,16 +41,16 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IChann
 
     HashMap<String, RefCountedContext> connectionToChannelContextMap = new HashMap<>();
 
-    public ChannelKeyContext apply(ITrafficStreamKey tsk) {
+    public ReplayContexts.ChannelKeyContext apply(ITrafficStreamKey tsk) {
         return retainOrCreateContext(tsk);
     }
 
-    public ChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
+    public ReplayContexts.ChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
         return connectionToChannelContextMap.computeIfAbsent(tsk.getConnectionId(),
-                k-> new RefCountedContext(new ChannelKeyContext(globalContext, tsk))).retain();
+                k-> new RefCountedContext(new ReplayContexts.ChannelKeyContext(globalContext, tsk))).retain();
     }
 
-    public ChannelKeyContext releaseContextFor(ChannelKeyContext ctx) {
+    public ReplayContexts.ChannelKeyContext releaseContextFor(ReplayContexts.ChannelKeyContext ctx) {
         var connId = ctx.getConnectionId();
         var refCountedCtx = connectionToChannelContextMap.get(connId);
         assert ctx == refCountedCtx.context;

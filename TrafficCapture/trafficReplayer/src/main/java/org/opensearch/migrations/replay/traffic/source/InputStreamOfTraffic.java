@@ -9,8 +9,7 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -34,20 +33,21 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     }
 
     private static class IOSTrafficStreamContext
-            extends DirectNestedSpanContext<IChannelKeyContext>
-            implements IContexts.ITrafficStreamsLifecycleContext {
+            extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
+            implements IReplayContexts.ITrafficStreamsLifecycleContext {
         @Getter private final ITrafficStreamKey trafficStreamKey;
 
-        public IOSTrafficStreamContext(@NonNull IChannelKeyContext ctx, ITrafficStreamKey tsk) {
+        public IOSTrafficStreamContext(@NonNull IReplayContexts.IChannelKeyContext ctx, ITrafficStreamKey tsk) {
             super(ctx);
             this.trafficStreamKey = tsk;
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "trafficStreamLifecycle");
+            setCurrentSpan("trafficStreamLifecycle");
         }
 
         @Override
-        public IChannelKeyContext getChannelKeyContext() {
+        public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
             return getImmediateEnclosingScope();
         }
+        @Override public String getScopeName() { return TELEMETRY_SCOPE_NAME; }
     }
 
     /**

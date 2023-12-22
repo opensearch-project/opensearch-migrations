@@ -14,14 +14,13 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -184,7 +183,7 @@ public class FullTrafficReplayerTest {
         public final String connectionId;
         public final String nodeId;
         public final int trafficStreamIndex;
-        @Getter public final IContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
+        @Getter public final IReplayContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
 
         public TrafficStreamCursorKey(TrafficStream stream, int arrayIndex) {
             connectionId = stream.getConnectionId();

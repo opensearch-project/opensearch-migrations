@@ -10,7 +10,7 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -42,14 +42,14 @@ public class RequestPipelineOrchestrator<R> {
     public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer<R> packetReceiver;
-    private IContexts.IReplayerHttpTransactionContext httpTransactionContext;
+    private IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
                                        IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
-                                       IContexts.IReplayerHttpTransactionContext httpTransactionContext) {
+                                       IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :

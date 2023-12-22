@@ -1,28 +1,28 @@
 package org.opensearch.migrations.replay;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 
 class TestTrafficStreamsLifecycleContext
-        extends DirectNestedSpanContext<IChannelKeyContext>
-        implements IContexts.ITrafficStreamsLifecycleContext {
-    private static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure("test");
+        extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
+        implements IReplayContexts.ITrafficStreamsLifecycleContext {
 
     private final ITrafficStreamKey trafficStreamKey;
 
     public TestTrafficStreamsLifecycleContext(ITrafficStreamKey tsk) {
-        super(new ChannelKeyContext(new RootOtelContext(), tsk));
+        super(new ReplayContexts.ChannelKeyContext(new RootOtelContext(), tsk));
         this.trafficStreamKey = tsk;
-        setCurrentSpan("testScope","testSpan");
+        setCurrentSpan("testSpan");
     }
 
     @Override
-    public IChannelKeyContext getChannelKeyContext() {
+    public String getScopeName() { return "testScope"; }
+
+    @Override
+    public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
         return getLogicalEnclosingScope();
     }
 

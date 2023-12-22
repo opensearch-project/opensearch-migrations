@@ -7,8 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.tracing.Contexts;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
@@ -47,15 +47,12 @@ import java.util.concurrent.CompletionException;
  */
 @Slf4j
 public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsumer<TransformedOutputAndResult<R>> {
-    public static final String TELEMETRY_SCOPE_NAME = "HttpTransformer";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
-
     public static final int HTTP_MESSAGE_NUM_SEGMENTS = 2;
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
     private static final MetricsLogger metricsLogger = new MetricsLogger("HttpJsonTransformingConsumer");
-    private Contexts.RequestTransformationContext transformationContext;
+    private ReplayContexts.RequestTransformationContext transformationContext;
 
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
@@ -72,8 +69,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     public HttpJsonTransformingConsumer(IJsonTransformer transformer,
                                         IAuthTransformerFactory authTransformerFactory,
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
-                                        IContexts.IReplayerHttpTransactionContext httpTransactionContext) {
-        transformationContext = new Contexts.RequestTransformationContext(httpTransactionContext);
+                                        IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
+        transformationContext = new ReplayContexts.RequestTransformationContext(httpTransactionContext);
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
@@ -141,9 +138,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 .getDeferredFutureThroughHandle(
                         (v, t) -> {
                             transformationContext.endSpan();
-                            METERING_CLOSURE.meterIncrementEvent(transformationContext,
-                                    t != null ? "transformRequestFailed" : "transformRequestSuccess");
-                            METERING_CLOSURE.meterHistogramMicros(transformationContext, "transformationDuration");
+                            transformationContext.meterIncrementEvent(t != null ? "transformRequestFailed" :
+                                    "transformRequestSuccess");
+                            transformationContext.meterHistogramMicros("transformationDuration");
                             if (t != null) {
                                 t = unwindPossibleCompletionException(t);
                                 if (t instanceof NoContentException) {

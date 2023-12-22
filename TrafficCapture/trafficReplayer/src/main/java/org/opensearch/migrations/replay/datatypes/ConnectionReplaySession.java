@@ -6,7 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
 
@@ -34,7 +34,7 @@ public class ConnectionReplaySession {
 
     @Getter
     @Setter
-    private IChannelKeyContext channelContext;
+    private IReplayContexts.IChannelKeyContext channelContext;
 
     public ConnectionReplaySession(EventLoop eventLoop) {
         this.eventLoop = eventLoop;

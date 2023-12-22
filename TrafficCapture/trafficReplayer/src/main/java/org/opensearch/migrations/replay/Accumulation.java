@@ -10,8 +10,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Accumulation {
-    public static final String TELEMETRY_SCOPE_NAME = "Accumulator";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
 
     enum State {
         // Ignore all initial READs, the first EOM & the following WRITEs (if they or EOMs exist)

@@ -14,8 +14,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.Contexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
@@ -67,15 +66,10 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
-
-    public static final String TELEMETRY_SCOPE_NAME = "KafkaSource";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
-
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
     // see https://stackoverflow.com/questions/39730126/difference-between-session-timeout-ms-and-max-poll-interval-ms-for-kafka-0-10
     public static final String DEFAULT_POLL_INTERVAL_MS = "60000";
     private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
-
 
 
     final TrackingKafkaConsumer trackingKafkaConsumer;
@@ -107,13 +101,13 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
         var looseParentScope = trafficStreamKey.getTrafficStreamsContext().getEnclosingScope();
-        if (!(looseParentScope instanceof Contexts.KafkaRecordContext)) {
-            throw new IllegalArgumentException("Expected parent context of type " + Contexts.KafkaRecordContext.class +
+        if (!(looseParentScope instanceof ReplayContexts.KafkaRecordContext)) {
+            throw new IllegalArgumentException("Expected parent context of type " + ReplayContexts.KafkaRecordContext.class +
                     " instead of " + looseParentScope + " (of type=" + looseParentScope.getClass() + ")");
         }
-        var kafkaCtx = (Contexts.KafkaRecordContext) looseParentScope;
+        var kafkaCtx = (ReplayContexts.KafkaRecordContext) looseParentScope;
         kafkaCtx.endSpan();
-        channelContextManager.releaseContextFor((ChannelKeyContext) kafkaCtx.getImmediateEnclosingScope());
+        channelContextManager.releaseContextFor((ReplayContexts.ChannelKeyContext) kafkaCtx.getImmediateEnclosingScope());
     }
 
     public static KafkaTrafficCaptureSource buildKafkaSource(@NonNull IInstrumentationAttributes globalContext,

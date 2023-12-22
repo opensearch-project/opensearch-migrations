@@ -9,9 +9,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.Contexts;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 
@@ -125,7 +123,7 @@ public class ReplayEngine {
     }
 
     public <T> DiagnosticTrackableCompletableFuture<String, T>
-    scheduleTransformationWork(IContexts.IReplayerHttpTransactionContext requestCtx, Instant originalStart,
+    scheduleTransformationWork(IReplayContexts.IReplayerHttpTransactionContext requestCtx, Instant originalStart,
                                Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "processing";
@@ -137,7 +135,7 @@ public class ReplayEngine {
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueReplayerRequestKey requestKey, IContexts.IReplayerHttpTransactionContext ctx,
+    scheduleRequest(UniqueReplayerRequestKey requestKey, IReplayContexts.IReplayerHttpTransactionContext ctx,
                     Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
@@ -157,7 +155,7 @@ public class ReplayEngine {
 
     public DiagnosticTrackableCompletableFuture<String, Void>
     closeConnection(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                    IChannelKeyContext ctx, Instant timestamp) {
+                    IReplayContexts.IChannelKeyContext ctx, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);

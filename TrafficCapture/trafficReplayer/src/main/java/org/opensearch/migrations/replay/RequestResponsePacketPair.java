@@ -6,8 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.Contexts;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
@@ -40,41 +40,41 @@ public class RequestResponsePacketPair {
         this.firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
         var requestKey = new UniqueReplayerRequestKey(startingAtTrafficStreamKey,
                 startingSourceRequestIndex, indexOfCurrentRequest);
-        var httpTransactionContext = new Contexts.HttpTransactionContext(
+        var httpTransactionContext = new ReplayContexts.HttpTransactionContext(
                 startingAtTrafficStreamKey.getTrafficStreamsContext(),
                 requestKey);
-        requestOrResponseAccumulationContext = new Contexts.RequestAccumulationContext(httpTransactionContext);
+        requestOrResponseAccumulationContext = new ReplayContexts.RequestAccumulationContext(httpTransactionContext);
     }
 
     @NonNull ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
         return firstTrafficStreamKeyForRequest;
     }
 
-    public IContexts.IReplayerHttpTransactionContext getHttpTransactionContext() {
+    public IReplayContexts.IReplayerHttpTransactionContext getHttpTransactionContext() {
         var looseCtx = requestOrResponseAccumulationContext;
         // the req/response ctx types in the assert below will always implement this with the
         // IReplayerHttpTransactionContext parameter, but this seems clearer
         // than trying to engineer a compile time static check
         assert looseCtx instanceof IWithTypedEnclosingScope;
-        assert looseCtx instanceof IContexts.IRequestAccumulationContext
-                || looseCtx instanceof IContexts.IResponseAccumulationContext;
-        return ((IWithTypedEnclosingScope<IContexts.IReplayerHttpTransactionContext>) looseCtx)
+        assert looseCtx instanceof IReplayContexts.IRequestAccumulationContext
+                || looseCtx instanceof IReplayContexts.IResponseAccumulationContext;
+        return ((IWithTypedEnclosingScope<IReplayContexts.IReplayerHttpTransactionContext>) looseCtx)
                 .getLogicalEnclosingScope();
 
     }
 
-    public @NonNull IContexts.IRequestAccumulationContext getRequestContext() {
-        return (IContexts.IRequestAccumulationContext) requestOrResponseAccumulationContext;
+    public @NonNull IReplayContexts.IRequestAccumulationContext getRequestContext() {
+        return (IReplayContexts.IRequestAccumulationContext) requestOrResponseAccumulationContext;
     }
 
-    public @NonNull IContexts.IResponseAccumulationContext getResponseContext() {
-        return (IContexts.IResponseAccumulationContext) requestOrResponseAccumulationContext;
+    public @NonNull IReplayContexts.IResponseAccumulationContext getResponseContext() {
+        return (IReplayContexts.IResponseAccumulationContext) requestOrResponseAccumulationContext;
     }
 
     public void rotateRequestGatheringToResponse() {
         var looseCtx = requestOrResponseAccumulationContext;
-        assert looseCtx instanceof IContexts.IRequestAccumulationContext;
-        requestOrResponseAccumulationContext = new Contexts.ResponseAccumulationContext(
+        assert looseCtx instanceof IReplayContexts.IRequestAccumulationContext;
+        requestOrResponseAccumulationContext = new ReplayContexts.ResponseAccumulationContext(
                 getRequestContext().getLogicalEnclosingScope());
     }
 

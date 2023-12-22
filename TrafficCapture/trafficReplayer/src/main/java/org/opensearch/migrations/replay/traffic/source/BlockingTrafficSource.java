@@ -1,11 +1,11 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import com.google.protobuf.Timestamp;
-import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.replay.tracing.TrafficSourceContexts;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.slf4j.event.Level;
@@ -36,7 +36,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Slf4j
 public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlowController {
-    private static final String TELEMETRY_SCOPE_NAME = "BlockingTrafficSource";
 
     private final ISimpleTrafficCaptureSource underlyingSource;
     private final AtomicReference<Instant> lastTimestampSecondsRef;
@@ -46,28 +45,6 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      */
     private final Semaphore readGate;
     private final Duration bufferTimeWindow;
-
-    public static class ReadChunkContext<T extends IInstrumentationAttributes>
-            extends DirectNestedSpanContext<T> {
-        public ReadChunkContext(T enclosingScope) {
-            super(enclosingScope);
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "readNextTrafficStreamChunk");
-        }
-    }
-
-    public static class BackPressureBlockContext extends DirectNestedSpanContext<ReadChunkContext> {
-        public BackPressureBlockContext(@NonNull ReadChunkContext enclosingScope) {
-            super(enclosingScope);
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "backPressureBlock");
-        }
-    }
-
-    public static class WaitForNextSignal extends DirectNestedSpanContext<BackPressureBlockContext> {
-        public WaitForNextSignal(@NonNull BackPressureBlockContext enclosingScope) {
-            super(enclosingScope);
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "waitForNextBackPressureCheck");
-        }
-    }
 
     public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying, Duration bufferTimeWindow) {
         this.underlyingSource = underlying;
@@ -114,7 +91,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
     readNextTrafficStreamChunk(IInstrumentationAttributes context) {
-        var readContext = new ReadChunkContext(context);
+        var readContext = new TrafficSourceContexts.ReadChunkContext(context);
         log.info("BlockingTrafficSource::readNext");
         var trafficStreamListFuture = CompletableFuture
                 .supplyAsync(() -> blockIfNeeded(readContext), task -> new Thread(task).start())
@@ -140,14 +117,14 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         });
     }
 
-    private Void blockIfNeeded(ReadChunkContext readContext) {
+    private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext readContext) {
         if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
         log.atInfo().setMessage(() -> "stopReadingAtRef=" + stopReadingAtRef +
                 " lastTimestampSecondsRef=" + lastTimestampSecondsRef).log();
-        BackPressureBlockContext blockContext = null;
+        ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
             if (blockContext == null) {
-                blockContext = new BackPressureBlockContext(readContext);
+                blockContext = new TrafficSourceContexts.BackPressureBlockContext(readContext);
             }
             try {
                 log.atInfo().setMessage("blocking until signaled to read the next chunk last={} stop={}")
@@ -157,7 +134,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
                     log.trace("acquiring readGate semaphore (w/out timeout)");
-                    try (var waitContext = new WaitForNextSignal(blockContext)) {
+                    try (var waitContext = new TrafficSourceContexts.WaitForNextSignal(blockContext)) {
                         readGate.acquire();
                     }
                 } else {
@@ -172,7 +149,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
                         log.atTrace().setMessage(() -> "acquring readGate semaphore with timeout=" + waitIntervalMs).log();
-                        try (var waitContext = new WaitForNextSignal(blockContext)) {
+                        try (var waitContext = new TrafficSourceContexts.WaitForNextSignal(blockContext)) {
                             readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
                         }
                     }

@@ -56,6 +56,8 @@ public class HttpMessageContext extends DirectNestedSpanContext<IConnectionConte
         this.sourceRequestIndex = sourceRequestIndex;
         this.startTime = Instant.now();
         this.state = state;
-        setCurrentSpan("CapturingHttpHandler",getSpanLabelForState(state));
+        setCurrentSpan(getSpanLabelForState(state));
     }
+
+    @Override public String getScopeName() { return "CapturingHttpHandler"; }
 }

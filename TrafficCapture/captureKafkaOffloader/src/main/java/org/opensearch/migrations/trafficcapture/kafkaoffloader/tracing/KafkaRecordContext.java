@@ -12,8 +12,6 @@ import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithStartTime;
 
-import java.time.Instant;
-
 public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionContext>
         implements IScopedInstrumentationAttributes, IWithStartTime {
     static final AttributeKey<String> TOPIC_ATTR = AttributeKey.stringKey("topic");
@@ -32,8 +30,10 @@ public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionConte
         this.topic = topic;
         this.recordId = recordId;
         this.recordSize = recordSize;
-        setCurrentSpan("KafkaCapture", "stream_flush_called");
+        setCurrentSpan("stream_flush_called");
     }
+
+    @Override public String getScopeName() { return "KafkaCapture"; }
 
     @Override
     public AttributesBuilder fillAttributes(AttributesBuilder builder) {

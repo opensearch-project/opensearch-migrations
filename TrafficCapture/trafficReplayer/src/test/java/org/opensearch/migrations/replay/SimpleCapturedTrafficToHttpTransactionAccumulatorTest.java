@@ -16,10 +16,8 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -218,14 +216,14 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                         new AccumulationCallbacks() {
                             @Override
                             public void onRequestReceived(UniqueReplayerRequestKey key,
-                                                          IContexts.IReplayerHttpTransactionContext ctx,
+                                                          IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                           HttpMessageAndTimestamp request) {
                                 requestsReceived.incrementAndGet();
                             }
 
                             @Override
                             public void onFullDataReceived(UniqueReplayerRequestKey requestKey,
-                                                           IContexts.IReplayerHttpTransactionContext ctx,
+                                                           IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                            RequestResponsePacketPair fullPair) {
                                 var sourceIdx = requestKey.getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
@@ -246,19 +244,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                IChannelKeyContext ctx,
+                                                                IReplayContexts.IChannelKeyContext ctx,
                                                                 @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
                             public void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          IChannelKeyContext ctx,
+                                                          IReplayContexts.IChannelKeyContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
                             @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         IChannelKeyContext ctx) {
+                                                                         IReplayContexts.IChannelKeyContext ctx) {
                                 tsIndicesReceived.add(tsk.getTrafficStreamIndex());
                             }
                         });

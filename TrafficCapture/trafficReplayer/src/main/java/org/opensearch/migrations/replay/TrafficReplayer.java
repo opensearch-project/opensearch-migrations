@@ -8,16 +8,14 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.Future;
-import io.opentelemetry.sdk.OpenTelemetrySdk;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.tracing.Contexts;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
@@ -78,8 +76,6 @@ import java.util.stream.Stream;
 public class TrafficReplayer {
 
     private static final MetricsLogger TUPLE_METRICS_LOGGER = new MetricsLogger("SourceTargetCaptureTuple");
-    private static final SimpleMeteringClosure METERING_CLOSURE =
-            new SimpleMeteringClosure("TrafficReplayer");
 
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
@@ -611,7 +607,7 @@ public class TrafficReplayer {
 
         @Override
         public void onRequestReceived(@NonNull UniqueReplayerRequestKey requestKey,
-                                      IContexts.IReplayerHttpTransactionContext ctx,
+                                      IReplayContexts.IReplayerHttpTransactionContext ctx,
                                       @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
@@ -630,7 +626,7 @@ public class TrafficReplayer {
 
         @Override
         public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
-                                       IContexts.IReplayerHttpTransactionContext ctx,
+                                       IReplayContexts.IReplayerHttpTransactionContext ctx,
                                        @NonNull RequestResponsePacketPair rrPair) {
             log.atInfo().setMessage(()->"Done receiving captured stream for " + requestKey +
                     ":" + rrPair.requestData).log();
@@ -656,7 +652,7 @@ public class TrafficReplayer {
                 // packaging it up and calling the callback.
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
-                    try (var tupleHandlingContext = new Contexts.TupleHandlingContext(httpContext)) {
+                    try (var tupleHandlingContext = new ReplayContexts.TupleHandlingContext(httpContext)) {
                         packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
                     }
                     commitTrafficStreams(context, rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
@@ -693,7 +689,7 @@ public class TrafficReplayer {
 
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            IChannelKeyContext ctx,
+                                            IReplayContexts.IChannelKeyContext ctx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             commitTrafficStreams(ctx, trafficStreamKeysBeingHeld, status);
         }
@@ -719,7 +715,7 @@ public class TrafficReplayer {
 
         @Override
         public void onConnectionClose(@NonNull ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                                      IChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
+                                      IReplayContexts.IChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
@@ -729,7 +725,7 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, IChannelKeyContext ctx) {
+        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, IReplayContexts.IChannelKeyContext ctx) {
             commitTrafficStreams(ctx, List.of(tsk), true);
         }
 
@@ -883,7 +879,7 @@ public class TrafficReplayer {
 
     public DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
     transformAndSendRequest(ReplayEngine replayEngine, HttpMessageAndTimestamp request,
-                            UniqueReplayerRequestKey requestKey, IContexts.IReplayerHttpTransactionContext ctx) {
+                            UniqueReplayerRequestKey requestKey, IReplayContexts.IReplayerHttpTransactionContext ctx) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine, ctx,
                 request.getFirstPacketTimestamp(), request.getLastPacketTimestamp(), requestKey,
                 request.packetBytes::stream);
@@ -891,7 +887,7 @@ public class TrafficReplayer {
 
     public static DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
     transformAndSendRequest(PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
-                            ReplayEngine replayEngine, IContexts.IReplayerHttpTransactionContext ctx,
+                            ReplayEngine replayEngine, IReplayContexts.IReplayerHttpTransactionContext ctx,
                             @NonNull Instant start, @NonNull Instant end,
                             UniqueReplayerRequestKey requestKey,
                             Supplier<Stream<byte[]>> packetsSupplier)

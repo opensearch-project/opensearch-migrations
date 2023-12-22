@@ -8,7 +8,7 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.IContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -102,7 +102,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     @AllArgsConstructor
     private static class SpanWrappingAccumulationCallbacks {
         private final AccumulationCallbacks underlying;
-        public void onRequestReceived(IContexts.IRequestAccumulationContext requestCtx,
+        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
                                       @NonNull HttpMessageAndTimestamp request) {
             requestCtx.endSpan();
             underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope().getReplayerRequestKey(),
@@ -125,7 +125,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            IContexts.ITrafficStreamsLifecycleContext tsCtx,
+                                            IReplayContexts.ITrafficStreamsLifecycleContext tsCtx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             underlying.onTrafficStreamsExpired(status, tsCtx.getLogicalEnclosingScope(), trafficStreamKeysBeingHeld);
         }

@@ -11,10 +11,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.slf4j.event.Level;
 
 import java.time.Clock;
@@ -42,10 +42,6 @@ import java.util.stream.StreamSupport;
  */
 @Slf4j
 public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
-    public static final String TELEMETRY_SCOPE_NAME = "TrackingKafkaConsumer";
-    private static final SimpleMeteringClosure METERING_CLOSURE =
-            new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
-
     @AllArgsConstructor
     private static class OrderedKeyHolder implements Comparable<OrderedKeyHolder> {
         @Getter final long offset;
@@ -76,28 +72,46 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public static class TouchScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
         public TouchScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "touch");
+            setCurrentSpan("touch");
+        }
+
+        @Override
+        public String getScopeName() {
+            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
         }
     }
 
     public static class PollScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
         public PollScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "kafkaPoll");
+            setCurrentSpan("kafkaPoll");
         }
+        @Override
+        public String getScopeName() {
+            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
+        }
+
     }
 
     public static class CommitScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
         public CommitScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "commit");
+            setCurrentSpan("commit");
+        }
+        @Override
+        public String getScopeName() {
+            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
         }
     }
 
     public static class KafkaCommitScopeContext extends DirectNestedSpanContext<CommitScopeContext> {
         public KafkaCommitScopeContext(@NonNull CommitScopeContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan(TELEMETRY_SCOPE_NAME, "kafkaCommit");
+            setCurrentSpan("kafkaCommit");
+        }
+        @Override
+        public String getScopeName() {
+            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
         }
     }
 

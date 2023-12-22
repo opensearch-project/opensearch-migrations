@@ -14,14 +14,12 @@ import io.netty.util.concurrent.Future;
 import io.opentelemetry.context.ContextKey;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.tracing.ChannelKeyContext;
-import org.opensearch.migrations.replay.tracing.IChannelKeyContext;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
@@ -32,8 +30,6 @@ import java.util.stream.Collectors;
 public class ClientConnectionPool {
     private static final ContextKey<String> RECORD_ID_KEY = ContextKey.named("recordId");
     public static final String TELEMETRY_SCOPE_NAME = "ClientConnectionPool";
-    public static final SimpleMeteringClosure METERING_CLOSURE = new SimpleMeteringClosure(TELEMETRY_SCOPE_NAME);
-
     public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
     private final URI serverUri;
     private final SslContext sslContext;
@@ -68,7 +64,7 @@ public class ClientConnectionPool {
     }
 
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getResilientClientChannelProducer(EventLoop eventLoop, IChannelKeyContext connectionContext) {
+    getResilientClientChannelProducer(EventLoop eventLoop, IReplayContexts.IChannelKeyContext connectionContext) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var clientConnectionChannelCreatedFuture =
@@ -142,7 +138,7 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualSessionGet(IChannelKeyContext ctx, boolean ignoreIfNotPresent) {
+    submitEventualSessionGet(IReplayContexts.IChannelKeyContext ctx, boolean ignoreIfNotPresent) {
         ConnectionReplaySession channelFutureAndSchedule = getCachedSession(ctx, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
             var rval = new DefaultPromise<ConnectionReplaySession>(eventLoopGroup.next());
@@ -159,7 +155,7 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(IChannelKeyContext channelKey, boolean dontCreate) {
+    public ConnectionReplaySession getCachedSession(IReplayContexts.IChannelKeyContext channelKey, boolean dontCreate) {
 
         var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKey.getConnectionId()) :
                 connectionId2ChannelCache.get(channelKey.getConnectionId());

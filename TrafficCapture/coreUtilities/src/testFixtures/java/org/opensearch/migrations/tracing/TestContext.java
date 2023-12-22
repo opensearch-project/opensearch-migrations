@@ -7,6 +7,11 @@ public class TestContext implements IScopedInstrumentationAttributes {
     public static final TestContext singleton = new TestContext();
 
     @Override
+    public String getScopeName() {
+        return "TestContext";
+    }
+
+    @Override
     public IInstrumentationAttributes getEnclosingScope() {
         return null;
     }
