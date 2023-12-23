@@ -178,7 +178,7 @@ public class FullTrafficReplayerTest {
         chk.accept(numRequests, "httpTransaction");
         chk.accept(numRequests, "transformation");
         chk.accept(numRequests, "targetTransaction");
-        chk.accept(numRequests, "scheduled");
+        chk.accept(numRequests*2, "scheduled");
         chk.accept(numRequests, "requestSending");
         chk.accept(numRequests, "waitingForResponse");
         chk.accept(numRequests, "tupleHandling");

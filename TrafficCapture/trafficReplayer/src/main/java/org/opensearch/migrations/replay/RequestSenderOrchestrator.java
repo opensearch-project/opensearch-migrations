@@ -218,10 +218,14 @@ public class RequestSenderOrchestrator {
                                     packetReceiverRef),
                     eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
         };
+        var scheduledContext = new ReplayContexts.ScheduledContext(ctx);
         scheduleOnConnectionReplaySession(ctx.getLogicalEnclosingScope(),
                 ctx.getReplayerRequestKey().getSourceRequestIndex(),
                 channelFutureAndRequestSchedule, responseFuture, start,
-                new ChannelTask(ChannelTaskType.TRANSMIT, packetSender));
+                new ChannelTask(ChannelTaskType.TRANSMIT, ()->{
+                    scheduledContext.close();
+                    packetSender.run();
+                }));
     }
 
     private <T> void runAfterChannelSetup(ConnectionReplaySession channelFutureAndItsFutureRequests,
