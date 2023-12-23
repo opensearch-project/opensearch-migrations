@@ -141,7 +141,7 @@ public class TrafficReplayerRunner {
                                            URI endpoint,
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
         log.info("Starting a new replayer and running it");
-        var tr = new TrafficReplayer(TestContext.singleton, endpoint, null,
+        var tr = new TrafficReplayer(TestContext.noTracking(), endpoint, null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10*1024);
 

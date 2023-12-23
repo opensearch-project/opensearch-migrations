@@ -42,7 +42,7 @@ public class KafkaTrafficCaptureSourceLongTermTest {
         final long MAX_POLL_MS = 10000;
         kafkaConsumerProps.setProperty(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY, MAX_POLL_MS+"");
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaConsumerProps);
-        var kafkaTrafficCaptureSource = new KafkaTrafficCaptureSource(TestContext.singleton,
+        var kafkaTrafficCaptureSource = new KafkaTrafficCaptureSource(TestContext.noTracking(),
                 kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_MS));
 
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
@@ -60,7 +60,7 @@ public class KafkaTrafficCaptureSourceLongTermTest {
 
         for (int i=0; i<TEST_RECORD_COUNT; ) {
             Thread.sleep(getSleepAmountMsForProducerRun(i));
-            var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.singleton);
+            var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.noTracking());
             var recordsList = nextChunkFuture.get((2+ TEST_RECORD_COUNT)*PRODUCER_SLEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
             for (int j=0; j<recordsList.size(); ++j) {
                 Assertions.assertEquals(KafkaTestUtils.getConnectionId(i+j), recordsList.get(j).getStream().getConnectionId());
@@ -70,7 +70,7 @@ public class KafkaTrafficCaptureSourceLongTermTest {
         }
         Assertions.assertEquals(TEST_RECORD_COUNT, sendCompleteCount.get());
         Assertions.assertThrows(TimeoutException.class, ()-> {
-                var rogueChunk = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.singleton)
+                var rogueChunk = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.noTracking())
                         .get(1, TimeUnit.SECONDS);
                 if (rogueChunk.isEmpty()) {
                     // TimeoutExceptions cannot be thrown by the supplier of the CompletableFuture today, BUT we

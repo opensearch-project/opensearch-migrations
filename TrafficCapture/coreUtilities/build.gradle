@@ -70,7 +70,7 @@ dependencies {
 
     testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
     testFixturesImplementation group: 'io.opentelemetry', name:'opentelemetry-api'
-    testFixturesImplementation group: 'io.opentelemetry', name:'opentelemetry-sdk'
+    testFixturesImplementation group: 'io.opentelemetry', name:'opentelemetry-sdk-testing'
 }
 
 configurations.all {

@@ -43,33 +43,6 @@ public class KafkaCommitsWorkBetweenLongPolls {
     private final KafkaContainer embeddedKafkaBroker =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
-    private InMemorySpanExporter testSpanExporter;
-    private InMemoryMetricExporter testMetricExporter;
-
-    @BeforeEach
-    void setup() {
-        GlobalOpenTelemetry.resetForTest();
-        testSpanExporter = InMemorySpanExporter.create();
-        testMetricExporter = InMemoryMetricExporter.create();
-
-        OpenTelemetrySdk.builder()
-                .setTracerProvider(
-                        SdkTracerProvider.builder()
-                                .addSpanProcessor(SimpleSpanProcessor.create(testSpanExporter)).build())
-                .setMeterProvider(
-                        SdkMeterProvider.builder()
-                                .registerMetricReader(PeriodicMetricReader.builder(testMetricExporter)
-                                        .setInterval(Duration.ofMillis(100))
-                                        .build())
-                                .build())
-                .buildAndRegisterGlobal();
-    }
-
-    @AfterEach
-    void tearDown() {
-        GlobalOpenTelemetry.resetForTest();
-    }
-
     @SneakyThrows
     private KafkaConsumer<String, byte[]> buildKafkaConsumer() {
         var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
@@ -83,7 +56,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
     @Test
     @Tag("longTest")
     public void testThatCommitsAndReadsKeepWorking() throws Exception {
-        var kafkaSource = new KafkaTrafficCaptureSource(TestContext.singleton, buildKafkaConsumer(),
+        var kafkaSource = new KafkaTrafficCaptureSource(TestContext.noTracking(), buildKafkaConsumer(),
                 TEST_TOPIC_NAME, Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS/3));
         var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMinutes(5));
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
@@ -103,7 +76,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
                     var ts = chunks.get(0);
                     Thread.sleep(DEFAULT_POLL_INTERVAL_MS*2);
                     log.info("committing "+ts.getKey());
-                    blockingSource.commitTrafficStream(TestContext.singleton, ts.getKey());
+                    blockingSource.commitTrafficStream(TestContext.noTracking(), ts.getKey());
                     blockingSource.stopReadsPast(getTimeAtPoint(i));
                 }
             } catch (Exception e) {
@@ -113,7 +86,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
 
         for (int i=0; i<NUM_RUNS; ++i) {
             while (true) {
-                var chunks = blockingSource.readNextTrafficStreamChunk(TestContext.singleton).get();
+                var chunks = blockingSource.readNextTrafficStreamChunk(TestContext.noTracking()).get();
                 if (!chunks.isEmpty()) {
                     Assertions.assertEquals(1, chunks.size());
                     log.info("GETMSG\n\n");

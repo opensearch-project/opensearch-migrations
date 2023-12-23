@@ -115,9 +115,9 @@ class TrafficReplayerTest {
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger(0);
             var allMatch = new AtomicBoolean(true);
-            try (var trafficProducer = new InputStreamOfTraffic(TestContext.singleton, bais)) {
+            try (var trafficProducer = new InputStreamOfTraffic(TestContext.noTracking(), bais)) {
                 while (true) {
-                    trafficProducer.readNextTrafficStreamChunk(TestContext.singleton).get().stream()
+                    trafficProducer.readNextTrafficStreamChunk(TestContext.noTracking()).get().stream()
                             .forEach(ts->{
                         var i = counter.incrementAndGet();
                         var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
@@ -151,7 +151,7 @@ class TrafficReplayerTest {
 
     @Test
     public void testReader() throws Exception {
-        var tr = new TrafficReplayer(TestContext.singleton,
+        var tr = new TrafficReplayer(TestContext.noTracking(),
                 new URI("http://localhost:9200"), null, null, false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
@@ -193,7 +193,7 @@ class TrafficReplayerTest {
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
-            try (var trafficSource = new InputStreamOfTraffic(TestContext.singleton, bais)) {
+            try (var trafficSource = new InputStreamOfTraffic(TestContext.noTracking(), bais)) {
                 tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
@@ -203,7 +203,7 @@ class TrafficReplayerTest {
 
     @Test
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
-        var tr = new TrafficReplayer(TestContext.singleton,
+        var tr = new TrafficReplayer(TestContext.noTracking(),
                 new URI("http://localhost:9200"), null, null, false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         var remainingAccumulations = new AtomicInteger();
@@ -262,7 +262,7 @@ class TrafficReplayerTest {
         }
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
-            try (var trafficSource = new InputStreamOfTraffic(TestContext.singleton, bais)) {
+            try (var trafficSource = new InputStreamOfTraffic(TestContext.noTracking(), bais)) {
                 tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }

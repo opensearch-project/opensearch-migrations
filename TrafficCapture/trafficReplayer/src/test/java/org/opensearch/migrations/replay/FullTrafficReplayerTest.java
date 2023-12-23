@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
@@ -96,8 +97,9 @@ public class FullTrafficReplayerTest {
         log.info("done");
     }
 
-    @Test
-    public void testDoubleRequestWithCloseIsCommittedOnce() throws Throwable {
+    @ParameterizedTest
+    @ValueSource(ints = {1,2})
+    public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response->TestHttpServerContext.makeResponse(random, response));
@@ -105,7 +107,7 @@ public class FullTrafficReplayerTest {
         var fixedTimestamp =
                 Timestamp.newBuilder().setSeconds(baseTime.getEpochSecond()).setNanos(baseTime.getNano()).build();
         var tsb = TrafficStream.newBuilder().setConnectionId("C");
-        for (int i=0; i<2; ++i) {
+        for (int i=0; i<numRequests; ++i) {
             tsb = tsb
                     .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                             .setRead(ReadObservation.newBuilder()
@@ -130,7 +132,7 @@ public class FullTrafficReplayerTest {
                 .build();
         var trafficSource =
                 new ArrayCursorTrafficCaptureSource(new ArrayCursorTrafficSourceFactory(List.of(trafficStream)));
-        var tr = new TrafficReplayer(TestContext.singleton, httpServer.localhostEndpoint(), null,
+        var tr = new TrafficReplayer(TestContext.noTracking(), httpServer.localhostEndpoint(), null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10*1024);
 
@@ -146,7 +148,7 @@ public class FullTrafficReplayerTest {
             tr.shutdown(null);
         }
 
-        Assertions.assertEquals(2, tuplesReceived.size());
+        Assertions.assertEquals(numRequests, tuplesReceived.size());
         log.info("done");
     }
 

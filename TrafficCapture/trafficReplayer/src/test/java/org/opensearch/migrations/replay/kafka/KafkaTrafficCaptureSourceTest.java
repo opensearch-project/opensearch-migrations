@@ -45,7 +45,7 @@ class KafkaTrafficCaptureSourceTest {
                 .setNodeId("n")
                 .setNumber(7)
                 .build();
-        var contextFactory = new ChannelContextManager(TestContext.singleton);
+        var contextFactory = new ChannelContextManager(TestContext.noTracking());
         var tsk = new TrafficStreamKeyWithKafkaRecordId(contextFactory, ts, "testRecord", 1, 2, 123);
         Assertions.assertEquals("n.c.7|partition=2|offset=123", tsk.toString());
     }
@@ -54,7 +54,7 @@ class KafkaTrafficCaptureSourceTest {
     public void testSupplyTrafficFromSource() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.singleton,
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.noTracking(),
                 mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
@@ -74,7 +74,7 @@ class KafkaTrafficCaptureSourceTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk(TestContext.singleton).get().stream()
+                protobufConsumer.readNextTrafficStreamChunk(TestContext.noTracking()).get().stream()
                         .forEach(streamWithKey -> {
                             tsCount.incrementAndGet();
                             log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
@@ -96,7 +96,7 @@ class KafkaTrafficCaptureSourceTest {
     public void testSupplyTrafficWithUnformattedMessages() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.singleton,
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.noTracking(),
                 mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
@@ -126,7 +126,7 @@ class KafkaTrafficCaptureSourceTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk(TestContext.singleton).get().stream()
+                protobufConsumer.readNextTrafficStreamChunk(TestContext.noTracking()).get().stream()
                         .forEach(streamWithKey->{
                             tsCount.incrementAndGet();
                             log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());

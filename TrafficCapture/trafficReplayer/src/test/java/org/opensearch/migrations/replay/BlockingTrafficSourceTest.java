@@ -46,7 +46,7 @@ class BlockingTrafficSourceTest {
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
         var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i<=BUFFER_MILLIS+SHIFT; ++i) {
-            var nextPieceFuture = blockingSource.readNextTrafficStreamChunk(TestContext.singleton);
+            var nextPieceFuture = blockingSource.readNextTrafficStreamChunk(TestContext.noTracking());
             nextPieceFuture.get(500000, TimeUnit.MILLISECONDS)
                 .forEach(ts->firstChunk.add(ts));
         }
@@ -54,7 +54,7 @@ class BlockingTrafficSourceTest {
         Assertions.assertTrue(BUFFER_MILLIS+SHIFT <= firstChunk.size());
         Instant lastTime = null;
         for (int i =SHIFT; i<nStreamsToCreate-BUFFER_MILLIS-SHIFT; ++i) {
-            var blockedFuture = blockingSource.readNextTrafficStreamChunk(TestContext.singleton);
+            var blockedFuture = blockingSource.readNextTrafficStreamChunk(TestContext.noTracking());
             Thread.sleep(5);
             Assertions.assertFalse(blockedFuture.isDone(), "for i="+i+" and coounter="+testSource.counter.get());
             Assertions.assertEquals(i+BUFFER_MILLIS+SHIFT, testSource.counter.get());
@@ -66,7 +66,7 @@ class BlockingTrafficSourceTest {
         Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate-SHIFT)), lastTime);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
         var exception = Assertions.assertThrows(ExecutionException.class,
-                ()->blockingSource.readNextTrafficStreamChunk(TestContext.singleton).get(10, TimeUnit.MILLISECONDS));
+                ()->blockingSource.readNextTrafficStreamChunk(TestContext.noTracking()).get(10, TimeUnit.MILLISECONDS));
         Assertions.assertInstanceOf(EOFException.class, exception.getCause());
     }
 

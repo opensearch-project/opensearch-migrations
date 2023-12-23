@@ -32,7 +32,7 @@ public class ReplayContexts {
 
         @Override public String getScopeName() { return "Connection"; }
     }
-    
+
     public static class KafkaRecordContext extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
             implements IReplayContexts.IKafkaRecordContext {
         final String recordId;
