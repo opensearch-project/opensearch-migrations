@@ -9,6 +9,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 
@@ -59,8 +60,8 @@ public class PayloadRepackingTest {
         expectedRequestHeaders.add("host", "localhost");
         expectedRequestHeaders.add("Content-Length", "46");
 
-        TestUtils.runPipelineAndValidate(transformerBuilder.build(), null,null,
-                stringParts, expectedRequestHeaders,
+        TestUtils.runPipelineAndValidate(TestContext.noTracking(), transformerBuilder.build(), null,
+                null, stringParts, expectedRequestHeaders,
                 referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder));
     }
 
@@ -104,7 +105,7 @@ public class PayloadRepackingTest {
         expectedRequestHeaders.add("content-type", "application/json; charset=UTF-8");
         expectedRequestHeaders.add("Content-Length", "55");
 
-        TestUtils.runPipelineAndValidate(transformerBuilder.build(), null,
+        TestUtils.runPipelineAndValidate(TestContext.noTracking(), transformerBuilder.build(), null,
                 extraHeaders, List.of(jsonPayload), expectedRequestHeaders,
                 x -> "{\"top\":[{\"Name\":\"A\",\"Value\":1},{\"Name\":\"B\",\"Value\":2}]}");
     }

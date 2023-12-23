@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -83,6 +84,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
 
     void accumulateWithAccumulatorPairAtPoint(TrafficStream[] trafficStreams, int cutPoint,
                                               int[] expectedRequestSizes, int[] expectedResponseSizes) {
+        var ctx = TestContext.noTracking();
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
         // some of the messages up to the cutPoint may not have been able to be fully committed (when the
@@ -92,11 +94,11 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
         //
         // Notice that this may cause duplicates.  That's by design.  The system has an at-least-once guarantee.
         var indicesProcessedPass1 =
-                SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(
+                SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(ctx,
                         Arrays.stream(trafficStreams).limit(cutPoint), reconstructedTransactions, requestsReceived);
         cutPoint = indicesProcessedPass1.isEmpty() ? 0 : indicesProcessedPass1.last();
         var indicesProcessedPass2 =
-            SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(
+            SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(ctx,
                     Arrays.stream(trafficStreams).skip(cutPoint), reconstructedTransactions, requestsReceived);
 
         // three checks to do w/ the indicesProcessed sets.

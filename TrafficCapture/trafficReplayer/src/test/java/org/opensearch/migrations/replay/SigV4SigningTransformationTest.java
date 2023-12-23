@@ -6,6 +6,7 @@ import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.util.ResourceLeakDetector;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -55,7 +56,7 @@ public class SigV4SigningTransformationTest {
                         "fc0e8e9a1f7697f510bfdd4d55b8612df8a0140b4210967efd87ee9cb7104362");
         expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
 
-        TestUtils.runPipelineAndValidate(
+        TestUtils.runPipelineAndValidate(TestContext.noTracking(),
                 msg -> new SigV4Signer(mockCredentialsProvider, "es", "us-east-1", "https",
                         () ->  Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)),
                 null, stringParts, expectedRequestHeaders,

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.MockMetricsBuilder;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
+import org.opensearch.migrations.tracing.TestContext;
 
 import java.util.Map;
 import java.util.Optional;
@@ -12,7 +13,8 @@ import java.util.Optional;
 class ParsedHttpMessagesAsDictsTest {
 
     private static final PojoTrafficStreamKeyAndContext TEST_TRAFFIC_STREAM_KEY =
-            PojoTrafficStreamKeyAndContext.build("N","C",1, TestTrafficStreamsLifecycleContext::new);
+            PojoTrafficStreamKeyAndContext.build("N","C",1,
+                    k->new TestTrafficStreamsLifecycleContext(TestContext.noTracking(), k));
 
     ParsedHttpMessagesAsDicts makeTestData() {
         return makeTestData(null, null);

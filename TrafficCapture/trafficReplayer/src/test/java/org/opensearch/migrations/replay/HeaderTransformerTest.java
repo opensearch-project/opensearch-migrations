@@ -7,6 +7,7 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import java.time.Duration;
@@ -28,13 +29,14 @@ public class HeaderTransformerTest {
 
     @Test
     public void testTransformer() throws Exception {
+        var context = TestContext.noTracking();
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 17, null,
                 null, HttpRequestTransformationStatus.COMPLETED, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, null, testPacketCapture,
-                TestRequestKey.getTestConnectionRequestContext(0));
+                TestRequestKey.getTestConnectionRequestContext(context, 0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
@@ -78,7 +80,7 @@ public class HeaderTransformerTest {
 
     @Test
     public void testMalformedPayloadIsPassedThrough() throws Exception {
-        var referenceStringBuilder = new StringBuilder();
+        var context = TestContext.noTracking();
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 12, null,
                 null, HttpRequestTransformationStatus.COMPLETED, null);
@@ -87,7 +89,7 @@ public class HeaderTransformerTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
                 httpBasicAuthTransformer, testPacketCapture,
-                TestRequestKey.getTestConnectionRequestContext(0));
+                TestRequestKey.getTestConnectionRequestContext(context, 0));
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
@@ -104,6 +106,7 @@ public class HeaderTransformerTest {
      */
     @Test
     public void testMalformedPayload_andTypeMappingUri_IsPassedThrough() throws Exception {
+        var ctx = TestContext.noTracking();
         var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 12, null,
@@ -113,7 +116,7 @@ public class HeaderTransformerTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME, null,
                         "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
-                null, testPacketCapture, TestRequestKey.getTestConnectionRequestContext(0));
+                null, testPacketCapture, TestRequestKey.getTestConnectionRequestContext(ctx, 0));
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)

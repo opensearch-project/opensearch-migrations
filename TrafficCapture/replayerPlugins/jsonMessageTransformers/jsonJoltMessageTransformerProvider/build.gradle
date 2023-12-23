@@ -15,6 +15,7 @@ dependencies {
     testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
     testImplementation project(':coreUtilities')
     testImplementation project(':trafficReplayer')
+    testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':trafficReplayer'))
 

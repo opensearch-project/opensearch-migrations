@@ -101,7 +101,8 @@ class BlockingTrafficSourceTest {
                             .setClose(CloseObservation.getDefaultInstance())
                             .build())
                     .build();
-            var key = PojoTrafficStreamKeyAndContext.build(ts, TestTrafficStreamsLifecycleContext::new);
+            var key = PojoTrafficStreamKeyAndContext.build(ts,
+                    tsk->new TestTrafficStreamsLifecycleContext(context, tsk));
             return CompletableFuture.completedFuture(List.of(new PojoTrafficStreamAndKey(ts, key)));
         }
 

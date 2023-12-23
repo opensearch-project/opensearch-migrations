@@ -20,6 +20,20 @@ public class IReplayContexts {
     public static final String REQUEST_SENDER_SCOPE = "RequestSender";
     public static final String TRAFFIC_REPLAYER_SCOPE = "TrafficReplayer";
 
+    public interface IChannelKeyContext extends IConnectionContext {
+        // do not add this as a property
+        // because its components are already being added in the IConnectionContext implementation
+        ISourceTrafficChannelKey getChannelKey();
+
+        default String getConnectionId() {
+            return getChannelKey().getConnectionId();
+        }
+
+        default String getNodeId() {
+            return getChannelKey().getNodeId();
+        }
+    }
+
     public interface IKafkaRecordContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IChannelKeyContext> {
         static final AttributeKey<String> RECORD_ID_KEY = AttributeKey.stringKey("recordId");
@@ -112,19 +126,5 @@ public class IReplayContexts {
     public interface ITupleHandlingContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         default String getScopeName() { return TRAFFIC_REPLAYER_SCOPE; }
-    }
-
-    public static interface IChannelKeyContext extends IConnectionContext {
-        // do not add this as a property
-        // because its components are already being added in the IConnectionContext implementation
-        ISourceTrafficChannelKey getChannelKey();
-
-        default String getConnectionId() {
-            return getChannelKey().getConnectionId();
-        }
-
-        default String getNodeId() {
-            return getChannelKey().getNodeId();
-        }
     }
 }

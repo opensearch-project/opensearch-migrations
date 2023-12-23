@@ -17,7 +17,9 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.RootOtelContext;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -189,11 +191,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     @MethodSource("loadSimpleCombinations")
     void generateAndTest(String testName, int bufferSize, int skipCount,
                          List<ObservationDirective> directives, List<Integer> expectedSizes) throws Exception {
+        var context = TestContext.noTracking();
         var trafficStreams = Arrays.stream(makeTrafficStreams(bufferSize, 0, new AtomicInteger(),
                         directives)).skip(skipCount);
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
-        accumulateTrafficStreamsWithNewAccumulator(trafficStreams, reconstructedTransactions, requestsReceived);
+        accumulateTrafficStreamsWithNewAccumulator(context, trafficStreams, reconstructedTransactions, requestsReceived);
         var splitSizes = unzipRequestResponseSizes(expectedSizes);
         assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, splitSizes._1, splitSizes._2);
         Assertions.assertEquals(requestsReceived.get(), reconstructedTransactions.size());
@@ -207,9 +210,10 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
      * @return
      */
     static SortedSet<Integer>
-    accumulateTrafficStreamsWithNewAccumulator(Stream<TrafficStream> trafficStreams,
-                                                           List<RequestResponsePacketPair> aggregations,
-                                                           AtomicInteger requestsReceived) {
+    accumulateTrafficStreamsWithNewAccumulator(IInstrumentationAttributes context,
+                                               Stream<TrafficStream> trafficStreams,
+                                               List<RequestResponsePacketPair> aggregations,
+                                               AtomicInteger requestsReceived) {
         var tsIndicesReceived = new TreeSet<Integer>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
@@ -264,7 +268,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         trafficStreams = tsList.stream();
         ;
         trafficStreams.forEach(ts->trafficAccumulator.accept(
-                new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts, TestTrafficStreamsLifecycleContext::new)
+                new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts,
+                        k->new TestTrafficStreamsLifecycleContext(context, k))
                 )));
         trafficAccumulator.close();
         return tsIndicesReceived;

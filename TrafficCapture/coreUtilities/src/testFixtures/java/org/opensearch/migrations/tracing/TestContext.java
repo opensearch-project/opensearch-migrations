@@ -19,7 +19,7 @@ import java.util.Optional;
 
 public class TestContext implements IScopedInstrumentationAttributes {
     @Getter
-    public IInstrumentConstructor rootInstrumentationScope = new RootOtelContext();
+    public IInstrumentConstructor rootInstrumentationScope;
     @Getter
     public Span currentSpan;
     @Getter
@@ -52,8 +52,8 @@ public class TestContext implements IScopedInstrumentationAttributes {
                     .build());
         }
         var openTel = otelBuilder.build();
-        currentSpan = new RootOtelContext(openTel)
-                .buildSpanWithoutParent("testScope", "testSpan");
+        rootInstrumentationScope = new RootOtelContext(openTel);
+        currentSpan = null;
     }
     @Override
     public String getScopeName() {

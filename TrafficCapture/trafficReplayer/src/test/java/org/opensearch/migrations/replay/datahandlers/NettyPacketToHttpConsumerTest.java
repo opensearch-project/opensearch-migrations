@@ -27,6 +27,7 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
@@ -122,6 +123,7 @@ public class NettyPacketToHttpConsumerTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testHttpResponseIsSuccessfullyCaptured(boolean useTls) throws Exception {
+        var ctx = TestContext.noTracking();
         for (int i = 0; i < 3; ++i) {
             var testServer = testServers.get(useTls);
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
@@ -130,7 +132,7 @@ public class NettyPacketToHttpConsumerTest {
                     new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
                     testServer.localhostEndpoint(),
                     sslContext,
-                    TestRequestKey.getTestConnectionRequestContext(0));
+                    TestRequestKey.getTestConnectionRequestContext(ctx, 0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -147,6 +149,7 @@ public class NettyPacketToHttpConsumerTest {
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
             throws SSLException, ExecutionException, InterruptedException
     {
+        var rootCtx = TestContext.noTracking();
         var testServer = testServers.get(useTls);
         var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
@@ -160,7 +163,7 @@ public class NettyPacketToHttpConsumerTest {
                 new TestFlowController(), timeShifter);
         for (int j=0; j<2; ++j) {
             for (int i = 0; i < 2; ++i) {
-                var ctx = TestRequestKey.getTestConnectionRequestContext("TEST_"+i, j);
+                var ctx = TestRequestKey.getTestConnectionRequestContext(rootCtx, "TEST_"+i, j);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(), ctx.getReplayerRequestKey(),
                         ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));

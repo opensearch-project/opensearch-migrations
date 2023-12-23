@@ -186,7 +186,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
         return finalizedFuture.map(f->f.thenApply(r->reason == null ?
                         new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.SKIPPED, null) :
-                        new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.ERROR, reason)),
+                        new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.ERROR, reason))
+                        .whenComplete((v,t)->transformationContext.close()),
                 ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }
 }

@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
+import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -43,9 +45,12 @@ import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 // It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
@@ -132,7 +137,8 @@ public class FullTrafficReplayerTest {
                 .build();
         var trafficSource =
                 new ArrayCursorTrafficCaptureSource(new ArrayCursorTrafficSourceFactory(List.of(trafficStream)));
-        var tr = new TrafficReplayer(TestContext.noTracking(), httpServer.localhostEndpoint(), null,
+        var trackingContext = TestContext.withTracking();
+        var tr = new TrafficReplayer(trackingContext, httpServer.localhostEndpoint(), null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10*1024);
 
@@ -149,7 +155,47 @@ public class FullTrafficReplayerTest {
         }
 
         Assertions.assertEquals(numRequests, tuplesReceived.size());
+        checkSpansForSimpleReplayedTransactions(trackingContext.testSpanExporter, numRequests);
         log.info("done");
+    }
+
+    /**
+     * This function is written like this rather than with a loop so that the backtrace will show WHICH
+     * key was corrupted.
+     */
+    private void checkSpansForSimpleReplayedTransactions(InMemorySpanExporter testSpanExporter, int numRequests) {
+        var byName = testSpanExporter.getFinishedSpanItems().stream().collect(Collectors.groupingBy(SpanData::getName));
+        BiConsumer<Integer, String> chk = (i, k)-> {
+            Assertions.assertNotNull(byName.get(k));
+            Assertions.assertEquals(i, byName.get(k).size());
+            byName.remove(k);
+        };
+        chk.accept(1,"channel");
+        chk.accept(1, "testTrafficSpan");
+
+        chk.accept(numRequests, "accumulatingRequest");
+        chk.accept(numRequests, "accumulatingResponse");
+        chk.accept(numRequests, "httpTransaction");
+        chk.accept(numRequests, "transformation");
+        chk.accept(numRequests, "targetTransaction");
+        chk.accept(numRequests, "scheduled");
+        chk.accept(numRequests, "requestSending");
+        chk.accept(numRequests, "waitingForResponse");
+        chk.accept(numRequests, "tupleHandling");
+
+        Consumer<String> chkNonZero = k-> {
+            Assertions.assertNotNull(byName.get(k));
+            Assertions.assertFalse(byName.get(k).isEmpty());
+            byName.remove(k);
+        };
+        chkNonZero.accept("readNextTrafficStreamChunk");
+        // ideally, we'd be getting these back too, but our requests are malformed, so the server closes, which
+        // may occur before we've started to accumulate the response.  So - just ignore these, but make sure that
+        // there isn't anything else that we've missed.
+        byName.remove("receivingRequest");
+
+        Assertions.assertEquals("", byName.entrySet().stream()
+                .map(kvp->kvp.getKey()+":"+kvp.getValue()).collect(Collectors.joining()));
     }
 
     @ParameterizedTest
@@ -187,13 +233,13 @@ public class FullTrafficReplayerTest {
         public final int trafficStreamIndex;
         @Getter public final IReplayContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
 
-        public TrafficStreamCursorKey(TrafficStream stream, int arrayIndex) {
+        public TrafficStreamCursorKey(IInstrumentationAttributes ctx, TrafficStream stream, int arrayIndex) {
             connectionId = stream.getConnectionId();
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
             this.arrayIndex = arrayIndex;
             var key = PojoTrafficStreamKeyAndContext.build(nodeId, connectionId, trafficStreamIndex, tsk->
-                    new TestTrafficStreamsLifecycleContext(tsk));
+                    new TestTrafficStreamsLifecycleContext(ctx, tsk));
             trafficStreamsContext = key.getTrafficStreamsContext();
             key.setTrafficStreamsContext(trafficStreamsContext);
         }
@@ -241,7 +287,7 @@ public class FullTrafficReplayerTest {
                 return CompletableFuture.failedFuture(new EOFException());
             }
             var stream = arrayCursorTrafficSourceFactory.trafficStreamsList.get(idx);
-            var key = new TrafficStreamCursorKey(stream, idx);
+            var key = new TrafficStreamCursorKey(context, stream, idx);
             synchronized (pQueue) {
                 pQueue.add(key);
                 cursorHighWatermark = idx;

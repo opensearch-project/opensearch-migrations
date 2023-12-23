@@ -213,14 +213,10 @@ public class RequestSenderOrchestrator {
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
         var packetReceiverRef = new AtomicReference<NettyPacketToHttpConsumer>();
         Runnable packetSender = () -> {
-            try (var targetContext = new ReplayContexts.TargetRequestContext(ctx);
-                 var requestContext = new ReplayContexts.RequestSendingContext(targetContext)) {
-                sendNextPartAndContinue(() ->
-                                memoizePacketConsumer(ctx, channelFutureAndRequestSchedule.getInnerChannelFuture(),
-                                        packetReceiverRef),
-                        eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture,
-                        targetContext, requestContext);
-            }
+            sendNextPartAndContinue(() ->
+                            memoizePacketConsumer(ctx, channelFutureAndRequestSchedule.getInnerChannelFuture(),
+                                    packetReceiverRef),
+                    eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
         };
         scheduleOnConnectionReplaySession(ctx.getLogicalEnclosingScope(),
                 ctx.getReplayerRequestKey().getSourceRequestIndex(),
@@ -264,9 +260,7 @@ public class RequestSenderOrchestrator {
     private void sendNextPartAndContinue(Supplier<NettyPacketToHttpConsumer> packetHandlerSupplier,
                                          EventLoop eventLoop, Iterator<ByteBuf> iterator,
                                          Instant start, Duration interval, AtomicInteger counter,
-                                         StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
-                                         ReplayContexts.TargetRequestContext targetContext,
-                                         ReplayContexts.RequestSendingContext requestContext) {
+                                         StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture) {
         log.atTrace().setMessage(()->"sendNextPartAndContinue: counter=" + counter.get()).log();
         var packetReceiver = packetHandlerSupplier.get();
         assert iterator.hasNext() : "Should not have called this with no items to send";
@@ -275,13 +269,12 @@ public class RequestSenderOrchestrator {
         if (iterator.hasNext()) {
             counter.incrementAndGet();
             Runnable packetSender = () -> sendNextPartAndContinue(packetHandlerSupplier, eventLoop,
-                    iterator, start, interval, counter, responseFuture, targetContext, requestContext);
+                    iterator, start, interval, counter, responseFuture);
             var delayMs = Duration.between(now(),
                     start.plus(interval.multipliedBy(counter.get()))).toMillis();
             eventLoop.schedule(packetSender, Math.min(0, delayMs), TimeUnit.MILLISECONDS);
         } else {
             packetReceiver.finalizeRequest().handle((v,t)-> {
-                targetContext.close();
                 if (t != null) {
                     responseFuture.future.completeExceptionally(t);
                 } else {

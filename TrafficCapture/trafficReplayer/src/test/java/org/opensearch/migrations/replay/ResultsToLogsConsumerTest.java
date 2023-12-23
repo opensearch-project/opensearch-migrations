@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -76,9 +77,10 @@ class ResultsToLogsConsumerTest {
 
     @Test
     public void testOutputterWithNulls() throws IOException {
+        var context = TestContext.noTracking();
         var emptyTuple = new SourceTargetCaptureTuple(
                 new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                        TestTrafficStreamsLifecycleContext::new), 0, 0),
+                        k->new TestTrafficStreamsLifecycleContext(context, k)), 0, 0),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             var consumer = new TupleParserChainConsumer(null, new ResultsToLogsConsumer());
@@ -92,10 +94,11 @@ class ResultsToLogsConsumerTest {
 
     @Test
     public void testOutputterWithException() throws IOException {
+        var context = TestContext.noTracking();
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(
                 new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                        TestTrafficStreamsLifecycleContext::new), 0, 0),
+                        k->new TestTrafficStreamsLifecycleContext(context, k)), 0, 0),
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
@@ -230,9 +233,10 @@ class ResultsToLogsConsumerTest {
 
     @Test
     private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
+        var context = TestContext.noTracking();
         var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                TestTrafficStreamsLifecycleContext::new);
-        var requestCtx = TestRequestKey.getTestConnectionRequestContext(0);
+                k->new TestTrafficStreamsLifecycleContext(context, k));
+        var requestCtx = TestRequestKey.getTestConnectionRequestContext(context, 0);
         trafficStreamKey.setTrafficStreamsContext(requestCtx.getImmediateEnclosingScope());
         var sourcePair = new RequestResponsePacketPair(trafficStreamKey, 0, 0);
         var rawRequestData = loadResourceAsBytes("/requests/raw/" + requestResourceName);
