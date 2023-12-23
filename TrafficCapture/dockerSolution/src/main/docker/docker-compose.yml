@@ -41,7 +41,6 @@ services:
     volumes:
 #      - ./otel-collector-config-demo.yaml:/etc/otel-collector-config-demo.yaml
       - ./otel-collector-config-demo.yaml:/etc/otelcol/config.yaml
-      - /Users/schohn/dev/opensearch-migrations/TrafficCapture/containerLogs:/logs
     ports:
       - "1888:1888"   # pprof extension
       - "8888:8888"   # Prometheus metrics exposed by the collector
@@ -88,7 +87,6 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
-      - /Users/schohn/dev/opensearch-migrations/TrafficCapture/containerLogs:/logs
     environment:
       - TUPLE_DIR_PATH=/shared-replayer-output/traffic-replayer-default
     depends_on:
@@ -138,7 +136,6 @@ services:
 #      - "13133:13133"
 #    volumes:
 #      - ./otelcol/otel-config.yml:/etc/otel-config.yml
-#      - /Users/schohn/dev/opensearch-migrations/TrafficCapture/containerLogs:/logs
 #    networks:
 #      - migrations
 #    depends_on:
