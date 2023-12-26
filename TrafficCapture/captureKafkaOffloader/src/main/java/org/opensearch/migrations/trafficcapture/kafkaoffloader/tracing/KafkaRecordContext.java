@@ -30,10 +30,13 @@ public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionConte
         this.topic = topic;
         this.recordId = recordId;
         this.recordSize = recordSize;
-        setCurrentSpan("stream_flush_called");
+        setCurrentSpan();
     }
 
     @Override public String getScopeName() { return "KafkaCapture"; }
+
+    @Override
+    public String getActivityName() { return "stream_flush_called"; }
 
     @Override
     public AttributesBuilder fillAttributes(AttributesBuilder builder) {

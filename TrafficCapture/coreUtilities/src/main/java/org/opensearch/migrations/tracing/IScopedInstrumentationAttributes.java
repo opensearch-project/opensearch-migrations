@@ -5,6 +5,8 @@ import lombok.NonNull;
 
 public interface IScopedInstrumentationAttributes extends IInstrumentationAttributes, AutoCloseable {
 
+    String getActivityName();
+
     @Override
     @NonNull Span getCurrentSpan();
 

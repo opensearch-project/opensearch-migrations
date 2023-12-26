@@ -6,12 +6,15 @@ import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 
 public class KafkaConsumerContexts {
+
+    private KafkaConsumerContexts() {}
+
     public static class TouchScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes>
         implements IKafkaConsumerContexts.ITouchScopeContext
     {
         public TouchScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("touch");
+            setCurrentSpan();
         }
     }
 
@@ -19,7 +22,7 @@ public class KafkaConsumerContexts {
         implements IKafkaConsumerContexts.IPollScopeContext {
         public PollScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("kafkaPoll");
+            setCurrentSpan();
         }
     }
 
@@ -27,16 +30,17 @@ public class KafkaConsumerContexts {
         implements IKafkaConsumerContexts.ICommitScopeContext {
         public CommitScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("commit");
+            setCurrentSpan();
         }
     }
 
     public static class KafkaCommitScopeContext
-            extends DirectNestedSpanContext<TrackingKafkaConsumer.CommitScopeContext>
+            extends DirectNestedSpanContext<KafkaConsumerContexts.CommitScopeContext>
             implements IKafkaConsumerContexts.IKafkaCommitScopeContext {
-        public KafkaCommitScopeContext(@NonNull TrackingKafkaConsumer.CommitScopeContext enclosingScope) {
+
+        public KafkaCommitScopeContext(@NonNull KafkaConsumerContexts.CommitScopeContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("kafkaCommit");
+            setCurrentSpan();
         }
     }
 }

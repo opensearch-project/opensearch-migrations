@@ -22,7 +22,7 @@ public class ReplayContexts {
         public ChannelKeyContext(IInstrumentationAttributes enclosingScope, ISourceTrafficChannelKey channelKey) {
             super(enclosingScope);
             this.channelKey = channelKey;
-            setCurrentSpan("channel");
+            setCurrentSpan();
         }
 
         @Override
@@ -40,7 +40,7 @@ public class ReplayContexts {
         public KafkaRecordContext(IReplayContexts.IChannelKeyContext enclosingScope, String recordId) {
             super(enclosingScope);
             this.recordId = recordId;
-            setCurrentSpan("recordLifetime");
+            setCurrentSpan();
         }
 
         @Override
@@ -58,7 +58,7 @@ public class ReplayContexts {
                                               ITrafficStreamKey trafficStreamKey) {
             super(enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
-            setCurrentSpan("trafficStreamLifetime");
+            setCurrentSpan();
         }
 
         @Override
@@ -86,7 +86,7 @@ public class ReplayContexts {
                                       UniqueReplayerRequestKey replayerRequestKey) {
             super(enclosingScope);
             this.replayerRequestKey = replayerRequestKey;
-            setCurrentSpan("httpTransaction");
+            setCurrentSpan();
         }
 
         public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
@@ -114,7 +114,7 @@ public class ReplayContexts {
             implements IReplayContexts.IRequestAccumulationContext {
         public RequestAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("accumulatingRequest");
+            setCurrentSpan();
         }
     }
 
@@ -123,7 +123,7 @@ public class ReplayContexts {
             implements IReplayContexts.IResponseAccumulationContext {
         public ResponseAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("accumulatingResponse");
+            setCurrentSpan();
         }
     }
 
@@ -132,7 +132,7 @@ public class ReplayContexts {
             implements IReplayContexts.IRequestTransformationContext {
         public RequestTransformationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("transformation");
+            setCurrentSpan();
         }
     }
 
@@ -141,7 +141,7 @@ public class ReplayContexts {
             implements IReplayContexts.IScheduledContext {
         public ScheduledContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("scheduled");
+            setCurrentSpan();
         }
     }
 
@@ -150,7 +150,7 @@ public class ReplayContexts {
             implements IReplayContexts.ITargetRequestContext {
         public TargetRequestContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("targetTransaction");
+            setCurrentSpan();
         }
     }
 
@@ -159,7 +159,7 @@ public class ReplayContexts {
             implements IReplayContexts.IRequestSendingContext {
         public RequestSendingContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("requestSending");
+            setCurrentSpan();
         }
     }
 
@@ -168,7 +168,7 @@ public class ReplayContexts {
             implements IReplayContexts.IWaitingForHttpResponseContext {
         public WaitingForHttpResponseContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("waitingForResponse");
+            setCurrentSpan();
         }
     }
 
@@ -177,7 +177,7 @@ public class ReplayContexts {
             implements IReplayContexts.IReceivingHttpResponseContext {
         public ReceivingHttpResponseContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("receivingRequest");
+            setCurrentSpan();
         }
     }
 
@@ -186,7 +186,7 @@ public class ReplayContexts {
             implements IReplayContexts.ITupleHandlingContext {
         public TupleHandlingContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("tupleHandling");
+            setCurrentSpan();
         }
     }
 }

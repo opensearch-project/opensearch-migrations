@@ -5,7 +5,6 @@ import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.RootOtelContext;
 
 class TestTrafficStreamsLifecycleContext
         extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
@@ -16,11 +15,13 @@ class TestTrafficStreamsLifecycleContext
     public TestTrafficStreamsLifecycleContext(IInstrumentationAttributes rootContext, ITrafficStreamKey tsk) {
         super(new ReplayContexts.ChannelKeyContext(rootContext, tsk));
         this.trafficStreamKey = tsk;
-        setCurrentSpan("testTrafficSpan");
+        setCurrentSpan();
     }
 
     @Override
     public String getScopeName() { return "testScope"; }
+    @Override
+    public String getActivityName() { return "testTrafficSpan"; }
 
     @Override
     public IReplayContexts.IChannelKeyContext getChannelKeyContext() {

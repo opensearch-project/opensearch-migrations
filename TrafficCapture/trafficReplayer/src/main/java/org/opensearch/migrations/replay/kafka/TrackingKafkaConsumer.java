@@ -11,8 +11,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.slf4j.event.Level;
@@ -66,52 +65,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         @Override
         public int hashCode() {
             return Long.valueOf(offset).hashCode();
-        }
-    }
-
-    public static class TouchScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
-        public TouchScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
-            super(enclosingScope);
-            setCurrentSpan("touch");
-        }
-
-        @Override
-        public String getScopeName() {
-            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
-        }
-    }
-
-    public static class PollScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
-        public PollScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
-            super(enclosingScope);
-            setCurrentSpan("kafkaPoll");
-        }
-        @Override
-        public String getScopeName() {
-            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
-        }
-
-    }
-
-    public static class CommitScopeContext extends DirectNestedSpanContext<IInstrumentationAttributes> {
-        public CommitScopeContext(@NonNull IInstrumentationAttributes enclosingScope) {
-            super(enclosingScope);
-            setCurrentSpan("commit");
-        }
-        @Override
-        public String getScopeName() {
-            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
-        }
-    }
-
-    public static class KafkaCommitScopeContext extends DirectNestedSpanContext<CommitScopeContext> {
-        public KafkaCommitScopeContext(@NonNull CommitScopeContext enclosingScope) {
-            super(enclosingScope);
-            setCurrentSpan("kafkaCommit");
-        }
-        @Override
-        public String getScopeName() {
-            return IReplayContexts.KAFKA_CONSUMER_SCOPE;
         }
     }
 
@@ -212,10 +165,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public void touch(IInstrumentationAttributes context) {
-        try (var touchCtx = new TouchScopeContext(context)) {
+        try (var touchCtx = new KafkaConsumerContexts.TouchScopeContext(context)) {
             log.trace("touch() called.");
             pause();
-            try (var pollCtx = new PollScopeContext(touchCtx)) {
+            try (var pollCtx = new KafkaConsumerContexts.PollScopeContext(touchCtx)) {
                 var records = kafkaConsumer.poll(Duration.ZERO);
                 if (!records.isEmpty()) {
                     throw new IllegalStateException("Expected no entries once the consumer was paused.  " +
@@ -301,7 +254,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         try {
             lastTouchTimeRef.set(clock.instant());
             ConsumerRecords<String, byte[]> records;
-            try (var pollContext = new PollScopeContext(context)) {
+            try (var pollContext = new KafkaConsumerContexts.PollScopeContext(context)) {
                 records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             }
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
@@ -363,12 +316,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     private void safeCommit(IInstrumentationAttributes incomingContext) {
         HashMap<TopicPartition, OffsetAndMetadata> nextCommitsMapCopy;
-        CommitScopeContext context = null;
+        KafkaConsumerContexts.CommitScopeContext context = null;
         synchronized (commitDataLock) {
             if (nextSetOfCommitsMap.isEmpty()) {
                 return;
             }
-            context = new CommitScopeContext(incomingContext);
+            context = new KafkaConsumerContexts.CommitScopeContext(incomingContext);
             nextCommitsMapCopy = new HashMap<>();
             nextCommitsMapCopy.putAll(nextSetOfCommitsMap);
         }
@@ -408,11 +361,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
-    private static void safeCommitStatic(CommitScopeContext context, Consumer<String, byte[]> kafkaConsumer,
+    private static void safeCommitStatic(KafkaConsumerContexts.CommitScopeContext context,
+                                         Consumer<String, byte[]> kafkaConsumer,
                                          HashMap<TopicPartition, OffsetAndMetadata> nextCommitsMap) {
         assert !nextCommitsMap.isEmpty();
         log.atDebug().setMessage(() -> "Committing " + nextCommitsMap).log();
-        try (var kafkaContext = new KafkaCommitScopeContext(context)) {
+        try (var kafkaContext = new KafkaConsumerContexts.KafkaCommitScopeContext(context)) {
             kafkaConsumer.commitSync(nextCommitsMap);
         }
     }

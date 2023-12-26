@@ -26,8 +26,8 @@ public abstract class AbstractNestedSpanContext<T extends IInstrumentationAttrib
 
     public T getImmediateEnclosingScope() { return enclosingScope; }
 
-    protected void setCurrentSpan(String spanName) {
-        setCurrentSpan(rootInstrumentationScope.buildSpan(enclosingScope, getScopeName(), spanName));
+    protected void setCurrentSpan() {
+        setCurrentSpan(rootInstrumentationScope.buildSpan(enclosingScope, getScopeName(), getActivityName()));
     }
 
     protected void setCurrentSpanWithNoParent(@NonNull ISpanWithParentGenerator spanGenerator) {

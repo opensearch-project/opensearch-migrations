@@ -6,13 +6,15 @@ import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 
 public class TrafficSourceContexts {
 
+    private TrafficSourceContexts() {}
+
     public static class ReadChunkContext<T extends IInstrumentationAttributes>
             extends DirectNestedSpanContext<T>
             implements ITrafficSourceContexts.IReadChunkContext
     {
         public ReadChunkContext(T enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("readNextTrafficStreamChunk");
+            setCurrentSpan();
         }
     }
 
@@ -22,16 +24,16 @@ public class TrafficSourceContexts {
     {
         public BackPressureBlockContext(@NonNull ITrafficSourceContexts.IReadChunkContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("backPressureBlock");
+            setCurrentSpan();
         }
     }
 
     public static class WaitForNextSignal
             extends DirectNestedSpanContext<ITrafficSourceContexts.IBackPressureBlockContext>
-            implements ITrafficSourceContexts.IReadChunkContext {
+            implements ITrafficSourceContexts.IWaitForNextSignal {
         public WaitForNextSignal(@NonNull ITrafficSourceContexts.IBackPressureBlockContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan("waitForNextBackPressureCheck");
+            setCurrentSpan();
         }
     }
 

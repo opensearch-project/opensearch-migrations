@@ -3,13 +3,9 @@ package org.opensearch.migrations.trafficcapture.netty.tracing;
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
-import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.time.Instant;
 
@@ -56,7 +52,12 @@ public class HttpMessageContext extends DirectNestedSpanContext<IConnectionConte
         this.sourceRequestIndex = sourceRequestIndex;
         this.startTime = Instant.now();
         this.state = state;
-        setCurrentSpan(getSpanLabelForState(state));
+        setCurrentSpan();
+    }
+
+    @Override
+    public String getActivityName() {
+        return getSpanLabelForState(state);
     }
 
     @Override public String getScopeName() { return "CapturingHttpHandler"; }

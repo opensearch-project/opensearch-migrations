@@ -17,11 +17,9 @@ import lombok.Getter;
 import java.time.Duration;
 import java.util.Optional;
 
-public class TestContext implements IScopedInstrumentationAttributes {
+public class TestContext implements IInstrumentationAttributes {
     @Getter
     public IInstrumentConstructor rootInstrumentationScope;
-    @Getter
-    public Span currentSpan;
     @Getter
     public final InMemorySpanExporter testSpanExporter;
     @Getter
@@ -53,7 +51,6 @@ public class TestContext implements IScopedInstrumentationAttributes {
         }
         var openTel = otelBuilder.build();
         rootInstrumentationScope = new RootOtelContext(openTel);
-        currentSpan = null;
     }
     @Override
     public String getScopeName() {

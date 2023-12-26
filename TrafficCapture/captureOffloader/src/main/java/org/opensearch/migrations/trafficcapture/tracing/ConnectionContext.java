@@ -22,6 +22,9 @@ public class ConnectionContext implements IConnectionContext, IWithStartTime {
     @Getter
     final IInstrumentConstructor rootInstrumentationScope;
 
+    @Override
+    public String getActivityName() { return "captureConnection"; }
+
     public ConnectionContext(IInstrumentConstructor rootInstrumentationScope,
                              String connectionId, String nodeId) {
         this.rootInstrumentationScope = rootInstrumentationScope;

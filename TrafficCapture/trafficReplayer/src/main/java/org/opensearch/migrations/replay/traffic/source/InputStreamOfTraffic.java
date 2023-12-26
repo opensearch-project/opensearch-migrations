@@ -40,8 +40,11 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
         public IOSTrafficStreamContext(@NonNull IReplayContexts.IChannelKeyContext ctx, ITrafficStreamKey tsk) {
             super(ctx);
             this.trafficStreamKey = tsk;
-            setCurrentSpan("trafficStreamLifecycle");
+            setCurrentSpan();
         }
+
+        @Override
+        public String getActivityName() { return "trafficStreamLifecycle"; }
 
         @Override
         public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
