@@ -83,6 +83,7 @@ services:
     image: 'opensearchproject/opensearch:latest'
     environment:
       - discovery.type=single-node
+      - OPENSESARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
     networks:
       - migrations
     ports:
@@ -92,6 +93,7 @@ services:
     image: 'opensearchproject/opensearch:latest'
     environment:
       - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
     networks:
       - migrations
     ports:
