@@ -18,20 +18,19 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
     private final int partition;
     private final long offset;
 
-    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> contextFactory,
-                                      TrafficStream trafficStream, String recordId, KafkaCommitOffsetData ok) {
-        this(contextFactory, trafficStream, recordId, ok.getGeneration(), ok.getPartition(), ok.getOffset());
+    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
+                                      TrafficStream trafficStream, KafkaCommitOffsetData ok) {
+        this(contextFactory, trafficStream, ok.getGeneration(), ok.getPartition(), ok.getOffset());
     }
 
-    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> contextFactory,
-                                      TrafficStream trafficStream, String recordId,
+    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
+                                      TrafficStream trafficStream,
                                       int generation, int partition, long offset) {
         super(trafficStream);
         this.generation = generation;
         this.partition = partition;
         this.offset = offset;
-        var channelKeyContext = contextFactory.apply(this);
-        var kafkaContext = new ReplayContexts.KafkaRecordContext(channelKeyContext, recordId);
+        var kafkaContext = contextFactory.apply(this);
         this.setTrafficStreamsContext(new ReplayContexts.TrafficStreamsLifecycleContext(kafkaContext, this));
     }
 

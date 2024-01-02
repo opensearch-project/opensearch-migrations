@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+import java.time.Instant;
+
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.SimpleMeteringClosure;
@@ -24,6 +26,7 @@ public class TestRequestKey {
                 PojoTrafficStreamKeyAndContext.build(TEST_NODE_ID, connectionId, 0,
                         tsk -> new TestTrafficStreamsLifecycleContext(ctx, tsk)),
                 0, replayerIdx);
-        return new ReplayContexts.HttpTransactionContext(rk.trafficStreamKey.getTrafficStreamsContext(), rk);
+        return new ReplayContexts.HttpTransactionContext(rk.trafficStreamKey.getTrafficStreamsContext(), rk,
+                Instant.EPOCH);
     }
 }

@@ -9,7 +9,6 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.Utils;
@@ -76,7 +75,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
         channel = new EmbeddedChannel();
         pipelineOrchestrator = new RequestPipelineOrchestrator<>(chunkSizes, transformedPacketReceiver,
-                authTransformerFactory, httpTransactionContext);
+                authTransformerFactory, transformationContext);
         pipelineOrchestrator.addInitialHandlers(channel.pipeline(), transformer);
     }
 
@@ -137,11 +136,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return offloadingHandler.getPacketReceiverCompletionFuture()
                 .getDeferredFutureThroughHandle(
                         (v, t) -> {
-                            transformationContext.endSpan();
-                            transformationContext.meterIncrementEvent(t != null ? "transformRequestFailed" :
-                                    "transformRequestSuccess");
-                            transformationContext.meterHistogramMicros("transformationDuration");
+                            transformationContext.close();
                             if (t != null) {
+                                transformationContext.onTransformFailure();
                                 t = unwindPossibleCompletionException(t);
                                 if (t instanceof NoContentException) {
                                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
@@ -153,6 +150,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                     throw new CompletionException(t);
                                 }
                             } else {
+                                transformationContext.onTransformSuccess();
                                 metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
                                         .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
                                         .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())

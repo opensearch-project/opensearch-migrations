@@ -14,7 +14,20 @@ public interface IScopedInstrumentationAttributes extends IInstrumentationAttrib
         getCurrentSpan().end();
     }
 
+    default String getEndOfScopeMetricName() {
+        return getActivityName() + "Count";
+    }
+    default String getEndOfScopeDurationMetricName() {
+        return getActivityName() + "Duration";
+    }
+
+    default void sendMeterEventsForEnd() {
+        meterIncrementEvent(getEndOfScopeMetricName());
+        meterHistogramMicros(getEndOfScopeDurationMetricName());
+    }
+
     default void close() {
         endSpan();
+        sendMeterEventsForEnd();
     }
 }

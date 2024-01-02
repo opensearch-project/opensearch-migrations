@@ -22,15 +22,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringingHandler;
+import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.net.URI;
 import java.time.Instant;
@@ -56,8 +58,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
-    IReplayContexts.ITargetRequestContext parentContext;
-    IScopedInstrumentationAttributes currentRequestContext;
+    IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
                                      ReplayContexts.HttpTransactionContext httpTransactionContext) {
@@ -66,8 +67,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     public NettyPacketToHttpConsumer(ChannelFuture clientConnection, IReplayContexts.IReplayerHttpTransactionContext ctx) {
-        this.parentContext = new ReplayContexts.TargetRequestContext(ctx);
-        this.currentRequestContext = new ReplayContexts.RequestSendingContext(this.parentContext);
+        var parentContext = new ReplayContexts.TargetRequestContext(ctx);
+        this.setCurrentRequestContext(new ReplayContexts.RequestSendingContext(parentContext));
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
@@ -90,8 +91,24 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         });
     }
 
-    public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup, SslContext sslContext,
-                                                       URI serverUri, IReplayContexts.IChannelKeyContext channelKeyContext) {
+    private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> & 
+            IScopedInstrumentationAttributes>
+    void setCurrentRequestContext(T requestSendingContext) {
+        currentRequestContextUnion = requestSendingContext;
+    }
+
+    private IScopedInstrumentationAttributes getCurrentRequestSpan() {
+        return (IScopedInstrumentationAttributes) currentRequestContextUnion;
+    }
+
+    public IReplayContexts.ITargetRequestContext getParentContext() {
+        return currentRequestContextUnion.getLogicalEnclosingScope();
+    }
+    
+    public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup,
+                                                       SslContext sslContext,
+                                                       URI serverUri,
+                                                       IReplayContexts.IChannelKeyContext channelKeyContext) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
@@ -107,6 +124,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var rval = new DefaultChannelPromise(outboundChannelFuture.channel());
         outboundChannelFuture.addListener((ChannelFutureListener) connectFuture -> {
             if (connectFuture.isSuccess()) {
+                channelKeyContext.onTargetConnectionCreated();
                 var pipeline = connectFuture.channel().pipeline();
                 pipeline.removeFirst();
                 log.atTrace().setMessage(()-> channelKeyContext.getChannelKey() +
@@ -155,12 +173,17 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             throw new IllegalStateException("Channel " + channel + "is being used elsewhere already!");
         }
         var pipeline = channel.pipeline();
-        addLoggingHandler(pipeline, "B");
-        pipeline.addLast(new BacksideSnifferHandler(responseBuilder, ()->{
-            this.currentRequestContext.close();
-            this.currentRequestContext = new ReplayContexts.ReceivingHttpResponseContext(this.parentContext);
-
+        // add this size counter BEFORE TLS?
+        pipeline.addFirst(new ReadMeteringingHandler(size->{
+            if (!(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
+                this.getCurrentRequestSpan().close();
+                this.setCurrentRequestContext(new ReplayContexts.ReceivingHttpResponseContext(getParentContext()));
+            }
+            getParentContext().onBytesReceived(size);
         }));
+        pipeline.addFirst(new WriteMeteringHandler(size->getParentContext().onBytesSent(size)));
+        addLoggingHandler(pipeline, "B");
+        pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         addLoggingHandler(pipeline, "C");
         pipeline.addLast(new HttpResponseDecoder());
         addLoggingHandler(pipeline, "D");
@@ -190,8 +213,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             channel.config().setAutoRead(false);
             log.atDebug().setMessage(() -> "Reset the pipeline back to: " + pipeline).log();
         } finally {
-            currentRequestContext.close();
-            parentContext.close();
+            getCurrentRequestSpan().close();
+            getParentContext().close();
         }
     }
 
@@ -216,7 +239,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     private IReplayContexts.IReplayerHttpTransactionContext httpContext() {
-        return parentContext.getLogicalEnclosingScope();
+        return getParentContext().getLogicalEnclosingScope();
     }
 
     private DiagnosticTrackableCompletableFuture<String, Void>
@@ -224,7 +247,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
         final int readableBytes = packetData.readableBytes();
-        this.currentRequestContext.meterIncrementEvent("readBytes", packetData.readableBytes());
         channel.writeAndFlush(packetData)
                 .addListener((ChannelFutureListener) future -> {
                     Throwable cause = null;
@@ -272,8 +294,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
-                    this.currentRequestContext.close();
-                    this.currentRequestContext = new ReplayContexts.WaitingForHttpResponseContext(parentContext);
+                    this.getCurrentRequestSpan().close();
+                    this.setCurrentRequestContext(new ReplayContexts.WaitingForHttpResponseContext(getParentContext()));
 
                     var future = new CompletableFuture<AggregatedRawResponse>();
                     var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,
@@ -281,9 +303,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     if (t == null) {
                         var responseWatchHandler =
                                 (BacksideHttpWatcherHandler) channel.pipeline().get(BACKSIDE_HTTP_WATCHER_HANDLER_NAME);
-                        responseWatchHandler.addCallback(value -> {
-                            future.complete(value);
-                        });
+                        responseWatchHandler.addCallback(future::complete);
                     } else {
                         future.complete(responseBuilder.addErrorCause(t).build());
                     }

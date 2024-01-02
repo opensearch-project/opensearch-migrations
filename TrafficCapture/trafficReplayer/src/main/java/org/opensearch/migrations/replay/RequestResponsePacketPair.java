@@ -35,14 +35,14 @@ public class RequestResponsePacketPair {
     // or just leave this null, in which case, the context from the trafficStreamKey should be used
     private IScopedInstrumentationAttributes requestOrResponseAccumulationContext;
 
-    public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey,
+    public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey, Instant sourceTimestamp,
                                      int startingSourceRequestIndex, int indexOfCurrentRequest) {
         this.firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
         var requestKey = new UniqueReplayerRequestKey(startingAtTrafficStreamKey,
                 startingSourceRequestIndex, indexOfCurrentRequest);
         var httpTransactionContext = new ReplayContexts.HttpTransactionContext(
                 startingAtTrafficStreamKey.getTrafficStreamsContext(),
-                requestKey);
+                requestKey, sourceTimestamp);
         requestOrResponseAccumulationContext = new ReplayContexts.RequestAccumulationContext(httpTransactionContext);
     }
 

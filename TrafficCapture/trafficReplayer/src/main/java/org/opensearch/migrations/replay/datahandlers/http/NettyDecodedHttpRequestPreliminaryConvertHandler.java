@@ -4,6 +4,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
@@ -27,13 +28,13 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    private IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext;
+    private IReplayContexts.IRequestTransformationContext httpTransactionContext;
     static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
-                                                            IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
+                                                            IReplayContexts.IRequestTransformationContext httpTransactionContext) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;
@@ -42,20 +43,16 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+    public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
+            httpTransactionContext.onHeaderParse();
             var request = (HttpRequest) msg;
-            log.info(new StringBuilder(diagnosticLabel)
-                    .append(" parsed request: ")
-                    .append(request.method())
-                    .append(" ")
-                    .append(request.uri())
-                    .append(" ")
-                    .append(request.protocolVersion().text())
-                    .toString());
+            log.atInfo().setMessage(()-> diagnosticLabel + " parsed request: " +
+                    request.method() + " " + request.uri() + " " + request.protocolVersion().text()).log();
             metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
                     .setAttribute(MetricsAttributeKey.REQUEST_ID, httpTransactionContext)
-                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, httpTransactionContext.getConnectionId())
+                    .setAttribute(MetricsAttributeKey.CONNECTION_ID,
+                            httpTransactionContext.getLogicalEnclosingScope().getConnectionId())
                     .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
                     .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 

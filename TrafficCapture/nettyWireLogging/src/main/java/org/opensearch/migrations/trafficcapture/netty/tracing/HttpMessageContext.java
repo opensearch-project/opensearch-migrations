@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.netty.tracing;
 
-import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
@@ -52,7 +51,7 @@ public class HttpMessageContext extends DirectNestedSpanContext<IConnectionConte
         this.sourceRequestIndex = sourceRequestIndex;
         this.startTime = Instant.now();
         this.state = state;
-        setCurrentSpan();
+        initializeSpan();
     }
 
     @Override

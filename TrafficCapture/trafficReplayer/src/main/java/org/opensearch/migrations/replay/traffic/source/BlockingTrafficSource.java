@@ -99,7 +99,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     log.info("BlockingTrafficSource::composing");
                     return underlyingSource.readNextTrafficStreamChunk(readContext);
                 })
-                .whenComplete((v,t)->readContext.endSpan());
+                .whenComplete((v,t)->readContext.close());
         return trafficStreamListFuture.whenComplete((v, t) -> {
             if (t != null) {
                 return;
@@ -161,7 +161,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             }
         }
         if (blockContext != null) {
-            blockContext.endSpan();
+            blockContext.close();
         }
         return null;
     }

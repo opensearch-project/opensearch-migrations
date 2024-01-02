@@ -15,7 +15,7 @@ class TestTrafficStreamsLifecycleContext
     public TestTrafficStreamsLifecycleContext(IInstrumentationAttributes rootContext, ITrafficStreamKey tsk) {
         super(new ReplayContexts.ChannelKeyContext(rootContext, tsk));
         this.trafficStreamKey = tsk;
-        setCurrentSpan();
+        initializeSpan();
     }
 
     @Override
@@ -34,8 +34,8 @@ class TestTrafficStreamsLifecycleContext
     }
 
     @Override
-    public void endSpan() {
-        super.endSpan();
+    public void close() {
+        super.close();
         getLogicalEnclosingScope().close();
     }
 }

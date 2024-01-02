@@ -106,7 +106,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     " instead of " + looseParentScope + " (of type=" + looseParentScope.getClass() + ")");
         }
         var kafkaCtx = (ReplayContexts.KafkaRecordContext) looseParentScope;
-        kafkaCtx.endSpan();
+        kafkaCtx.close();
         channelContextManager.releaseContextFor((ReplayContexts.ChannelKeyContext) kafkaCtx.getImmediateEnclosingScope());
     }
 
@@ -211,7 +211,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             log.atTrace().setMessage(()->"Parsed traffic stream #" + trafficStreamsSoFar +
                                             ": " + offsetData + " " + ts).log();
                             var key = new TrafficStreamKeyWithKafkaRecordId(
-                                    channelContextManager::retainOrCreateContext, ts, kafkaRecord.key(), offsetData);
+                                    tsk -> {
+                                        var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);
+                                        return new ReplayContexts.KafkaRecordContext(channelKeyCtx, kafkaRecord.key(),
+                                                kafkaRecord.serializedKeySize() + kafkaRecord.serializedValueSize());
+                                    },
+                                    ts, offsetData);
                             return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key);
                         } catch (InvalidProtocolBufferException e) {
                             RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);

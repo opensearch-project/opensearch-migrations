@@ -10,6 +10,9 @@ import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithStartTime;
 import org.opensearch.migrations.tracing.IndirectNestedSpanContext;
 
+import java.time.Duration;
+import java.time.Instant;
+
 public class ReplayContexts {
 
     private ReplayContexts() {}
@@ -22,7 +25,7 @@ public class ReplayContexts {
         public ChannelKeyContext(IInstrumentationAttributes enclosingScope, ISourceTrafficChannelKey channelKey) {
             super(enclosingScope);
             this.channelKey = channelKey;
-            setCurrentSpan();
+            initializeSpan();
         }
 
         @Override
@@ -31,16 +34,29 @@ public class ReplayContexts {
         }
 
         @Override public String getScopeName() { return "Connection"; }
+
+        @Override
+        public void onTargetConnectionCreated() {
+            meterDeltaEvent(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS, 1);
+        }
+        @Override
+        public void onTargetConnectionClosed() {
+            meterDeltaEvent(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS, -1);
+        }
     }
 
     public static class KafkaRecordContext extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
             implements IReplayContexts.IKafkaRecordContext {
+
         final String recordId;
 
-        public KafkaRecordContext(IReplayContexts.IChannelKeyContext enclosingScope, String recordId) {
+        public KafkaRecordContext(IReplayContexts.IChannelKeyContext enclosingScope, String recordId,
+                                  int recordSize) {
             super(enclosingScope);
             this.recordId = recordId;
-            setCurrentSpan();
+            initializeSpan();
+            this.meterIncrementEvent(IReplayContexts.MetricNames.KAFKA_RECORD_READ);
+            this.meterIncrementEvent(IReplayContexts.MetricNames.KAFKA_BYTES_READ, recordSize);
         }
 
         @Override
@@ -58,7 +74,8 @@ public class ReplayContexts {
                                               ITrafficStreamKey trafficStreamKey) {
             super(enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
-            setCurrentSpan();
+            initializeSpan();
+            this.meterIncrementEvent(IReplayContexts.MetricNames.TRAFFIC_STREAMS_READ);
         }
 
         @Override
@@ -81,12 +98,15 @@ public class ReplayContexts {
             extends IndirectNestedSpanContext<IReplayContexts.ITrafficStreamsLifecycleContext, IReplayContexts.IChannelKeyContext>
             implements IReplayContexts.IReplayerHttpTransactionContext {
         final UniqueReplayerRequestKey replayerRequestKey;
+        @Getter final Instant timeOfOriginalRequest;
 
         public HttpTransactionContext(IReplayContexts.ITrafficStreamsLifecycleContext enclosingScope,
-                                      UniqueReplayerRequestKey replayerRequestKey) {
+                                      UniqueReplayerRequestKey replayerRequestKey,
+                                      Instant timeOfOriginalRequest) {
             super(enclosingScope);
             this.replayerRequestKey = replayerRequestKey;
-            setCurrentSpan();
+            this.timeOfOriginalRequest = timeOfOriginalRequest;
+            initializeSpan();
         }
 
         public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
@@ -114,7 +134,7 @@ public class ReplayContexts {
             implements IReplayContexts.IRequestAccumulationContext {
         public RequestAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 
@@ -123,7 +143,7 @@ public class ReplayContexts {
             implements IReplayContexts.IResponseAccumulationContext {
         public ResponseAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 
@@ -132,16 +152,87 @@ public class ReplayContexts {
             implements IReplayContexts.IRequestTransformationContext {
         public RequestTransformationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
+        }
+
+        @Override
+        public void onHeaderParse() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_HEADER_PARSE);
+        }
+        @Override
+        public void onPayloadParse() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_PARSE_REQUIRED);
+        }
+        @Override
+        public void onPayloadParseSuccess() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_PARSE_SUCCESS);
+        }
+        @Override
+        public void onJsonPayloadParseRequired() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_JSON_REQUIRED);
+        }
+        @Override
+        public void onJsonPayloadParseSucceeded() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_JSON_SUCCEEDED);
+        }
+        @Override
+        public void onPayloadBytesIn(int inputSize) {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_BYTES_IN, inputSize);
+        }
+        @Override
+        public void onUncompressedBytesIn(int inputSize) {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_IN, inputSize);
+        }
+        @Override
+        public void onUncompressedBytesOut(int inputSize) {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_OUT, inputSize);
+        }
+        @Override
+        public void onFinalBytesOut(int inputSize) {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_FINAL_PAYLOAD_BYTES_OUT, inputSize);
+        }
+        @Override
+        public void onTransformSuccess() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_SUCCESS);
+        }
+        @Override
+        public void onTransformSkip() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_SKIPPED);
+        }
+        @Override
+        public void onTransformFailure() {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_ERROR);
+        }
+        @Override
+        public void aggregateInputChunk(int sizeInBytes) {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_BYTES_IN, sizeInBytes);
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_CHUNKS_IN);
+        }
+        @Override
+        public void aggregateOutputChunk(int sizeInBytes) {
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_BYTES_OUT, sizeInBytes);
+            meterIncrementEvent(IReplayContexts.MetricNames.TRANSFORM_CHUNKS_OUT);
         }
     }
 
     public static class ScheduledContext
             extends DirectNestedSpanContext<IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IScheduledContext {
-        public ScheduledContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
+        private final Instant scheduledFor;
+
+        public ScheduledContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope,
+                                Instant scheduledFor) {
             super(enclosingScope);
-            setCurrentSpan();
+            this.scheduledFor = scheduledFor;
+            initializeSpan();
+        }
+
+        @Override
+        public void sendMeterEventsForEnd() {
+            super.sendMeterEventsForEnd();
+            meterHistogramMillis(IReplayContexts.MetricNames.NETTY_SCHEDULE_LAG,
+                    Duration.between(scheduledFor, Instant.now()));
+
         }
     }
 
@@ -150,7 +241,18 @@ public class ReplayContexts {
             implements IReplayContexts.ITargetRequestContext {
         public TargetRequestContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
+            meterHistogramMillis(IReplayContexts.MetricNames.SOURCE_TO_TARGET_REQUEST_LAG,
+                    Duration.between(enclosingScope.getTimeOfOriginalRequest(), Instant.now()));
+        }
+        @Override
+        public void onBytesSent(int size) {
+            meterIncrementEvent(IReplayContexts.MetricNames.BYTES_WRITTEN_TO_TARGET, size);
+        }
+
+        @Override
+        public void onBytesReceived(int size) {
+            meterIncrementEvent(IReplayContexts.MetricNames.BYTES_READ_FROM_TARGET, size);
         }
     }
 
@@ -159,7 +261,7 @@ public class ReplayContexts {
             implements IReplayContexts.IRequestSendingContext {
         public RequestSendingContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 
@@ -168,7 +270,7 @@ public class ReplayContexts {
             implements IReplayContexts.IWaitingForHttpResponseContext {
         public WaitingForHttpResponseContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 
@@ -177,7 +279,7 @@ public class ReplayContexts {
             implements IReplayContexts.IReceivingHttpResponseContext {
         public ReceivingHttpResponseContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 
@@ -186,7 +288,7 @@ public class ReplayContexts {
             implements IReplayContexts.ITupleHandlingContext {
         public TupleHandlingContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 }

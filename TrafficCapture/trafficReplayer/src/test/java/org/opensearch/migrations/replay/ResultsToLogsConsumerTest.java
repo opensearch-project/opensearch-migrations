@@ -238,7 +238,8 @@ class ResultsToLogsConsumerTest {
                 k->new TestTrafficStreamsLifecycleContext(context, k));
         var requestCtx = TestRequestKey.getTestConnectionRequestContext(context, 0);
         trafficStreamKey.setTrafficStreamsContext(requestCtx.getImmediateEnclosingScope());
-        var sourcePair = new RequestResponsePacketPair(trafficStreamKey, 0, 0);
+        var sourcePair = new RequestResponsePacketPair(trafficStreamKey, Instant.EPOCH,
+                0, 0);
         var rawRequestData = loadResourceAsBytes("/requests/raw/" + requestResourceName);
         sourcePair.addRequestData(Instant.EPOCH, rawRequestData);
         var rawResponseData = NettyPacketToHttpConsumerTest.EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);

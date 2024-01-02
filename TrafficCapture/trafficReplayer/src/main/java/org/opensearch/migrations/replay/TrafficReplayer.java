@@ -679,7 +679,7 @@ public class TrafficReplayer {
                         .log();
                 throw e;
             } finally {
-                httpContext.endSpan();
+                httpContext.close();
                 requestToFinalWorkFuturesMap.remove(requestKey);
                 log.trace("removed rrPair.requestData to " +
                         "targetTransactionInProgressMap for " +
@@ -707,7 +707,7 @@ public class TrafficReplayer {
                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
             if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
-                    tsk.getTrafficStreamsContext().endSpan();
+                    tsk.getTrafficStreamsContext().close();
                     trafficCaptureSource.commitTrafficStream(context, tsk);
                 }
             }

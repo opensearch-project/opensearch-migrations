@@ -14,7 +14,7 @@ public class TrafficSourceContexts {
     {
         public ReadChunkContext(T enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 
@@ -24,7 +24,7 @@ public class TrafficSourceContexts {
     {
         public BackPressureBlockContext(@NonNull ITrafficSourceContexts.IReadChunkContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 
@@ -33,7 +33,7 @@ public class TrafficSourceContexts {
             implements ITrafficSourceContexts.IWaitForNextSignal {
         public WaitForNextSignal(@NonNull ITrafficSourceContexts.IBackPressureBlockContext enclosingScope) {
             super(enclosingScope);
-            setCurrentSpan();
+            initializeSpan();
         }
     }
 

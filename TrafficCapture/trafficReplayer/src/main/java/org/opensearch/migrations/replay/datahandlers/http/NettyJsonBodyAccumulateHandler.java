@@ -6,6 +6,7 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.SneakyThrows;
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 /**
@@ -18,13 +19,16 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
  */
 public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter {
 
+    private final IReplayContexts.IRequestTransformationContext context;
+
     public static class IncompleteJsonBodyException extends NoContentException {}
 
     JsonAccumulator jsonAccumulator;
     HttpJsonMessageWithFaultingPayload capturedHttpJsonMessage;
 
     @SneakyThrows
-    public NettyJsonBodyAccumulateHandler() {
+    public NettyJsonBodyAccumulateHandler(IReplayContexts.IRequestTransformationContext context) {
+        this.context = context;
         this.jsonAccumulator = new JsonAccumulator();
     }
 
@@ -36,6 +40,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
             var jsonObject = jsonAccumulator.consumeByteBuffer(((HttpContent)msg).content().nioBuffer());
             if (jsonObject != null) {
                 capturedHttpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, jsonObject);
+                context.onJsonPayloadParseSucceeded();
                 ctx.fireChannelRead(capturedHttpJsonMessage);
             } else if (msg instanceof LastHttpContent) {
                 throw new IncompleteJsonBodyException();

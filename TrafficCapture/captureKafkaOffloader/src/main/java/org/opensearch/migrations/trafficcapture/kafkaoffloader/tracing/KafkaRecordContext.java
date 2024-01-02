@@ -2,12 +2,8 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.trace.Span;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
-import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithStartTime;
@@ -30,7 +26,7 @@ public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionConte
         this.topic = topic;
         this.recordId = recordId;
         this.recordSize = recordSize;
-        setCurrentSpan();
+        initializeSpan();
     }
 
     @Override public String getScopeName() { return "KafkaCapture"; }

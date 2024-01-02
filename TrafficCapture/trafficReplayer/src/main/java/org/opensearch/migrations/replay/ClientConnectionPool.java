@@ -15,7 +15,6 @@ import io.opentelemetry.context.ContextKey;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -178,6 +177,7 @@ public class ClientConnectionPool {
                         .thenAccept(cf-> {
                             cf.channel().close()
                                     .addListener(closeFuture -> {
+                                        channelAndFutureWork.getChannelContext().onTargetConnectionClosed();
                                         if (closeFuture.isSuccess()) {
                                             channelClosedFuture.future.complete(channelAndFutureWork.getInnerChannelFuture().channel());
                                         } else {

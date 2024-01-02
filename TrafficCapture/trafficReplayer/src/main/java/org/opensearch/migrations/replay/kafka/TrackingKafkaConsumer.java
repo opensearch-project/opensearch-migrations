@@ -123,6 +123,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+        new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
         synchronized (commitDataLock) {
             safeCommit(globalContext);
             partitions.forEach(p -> {
@@ -140,6 +141,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     @Override public void onPartitionsAssigned(Collection<TopicPartition> newPartitions) {
+        new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsAssigned(newPartitions);
         synchronized (commitDataLock) {
             consumerConnectionGeneration.incrementAndGet();
             newPartitions.forEach(p -> partitionToOffsetLifecycleTrackerMap.computeIfAbsent(p.partition(),

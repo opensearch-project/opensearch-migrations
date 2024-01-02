@@ -10,6 +10,8 @@ import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
+import java.time.Instant;
+
 public class IReplayContexts {
 
     public static class ScopeNames {
@@ -36,9 +38,36 @@ public class IReplayContexts {
         public static final String SCHEDULED = "scheduled";
         public static final String TARGET_TRANSACTION = "targetTransaction";
         public static final String REQUEST_SENDING = "requestSending";
-        public static final String RECEIVING_REQUEST = "receivingRequest";
         public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
+        public static final String RECEIVING_RESPONSE = "receivingResponse";
         public static final String TUPLE_HANDLING = "tupleHandling";
+    }
+
+    public static class MetricNames {
+        public static final String KAFKA_RECORD_READ = "kafkaRecordsRead";
+        public static final String KAFKA_BYTES_READ = "kafkaBytesRead";
+        public static final String TRAFFIC_STREAMS_READ = "trafficStreamsRead";
+        public static final String TRANSFORM_HEADER_PARSE = "parsedHeader";
+        public static final String TRANSFORM_PAYLOAD_PARSE_REQUIRED = "parsedPayload";
+        public static final String TRANSFORM_PAYLOAD_PARSE_SUCCESS = "parsedPayloadSuccess";
+        public static final String TRANSFORM_JSON_REQUIRED = "transformedJsonRequired";
+        public static final String TRANSFORM_JSON_SUCCEEDED = "transformedJsonSucceeded";
+        public static final String TRANSFORM_PAYLOAD_BYTES_IN = "originalPayloadBytesIn";
+        public static final String TRANSFORM_UNCOMPRESSED_BYTES_IN = "uncompressedBytesIn";
+        public static final String TRANSFORM_UNCOMPRESSED_BYTES_OUT = "uncompressedBytesOut";
+        public static final String TRANSFORM_FINAL_PAYLOAD_BYTES_OUT = "finalPayloadBytesOut";
+        public static final String TRANSFORM_SUCCESS = "transformSuccess";
+        public static final String TRANSFORM_SKIPPED = "transformSkipped";
+        public static final String TRANSFORM_ERROR = "transformError";
+        public static final String TRANSFORM_BYTES_IN = "transformBytesIn";
+        public static final String TRANSFORM_BYTES_OUT = "transformBytesOut";
+        public static final String TRANSFORM_CHUNKS_IN = "transformChunksIn";
+        public static final String TRANSFORM_CHUNKS_OUT = "transformChunksOut";
+        public static final String NETTY_SCHEDULE_LAG = "scheduleLag";
+        public static final String SOURCE_TO_TARGET_REQUEST_LAG = "lagBetweenSourceAndTargetRequests";
+        public static final String ACTIVE_TARGET_CONNECTIONS = "activeTargetConnections";
+        public static final String BYTES_WRITTEN_TO_TARGET = "bytesWrittenToTarget";
+        public static final String BYTES_READ_FROM_TARGET = "bytesReadFromTarget";
     }
 
     public interface IChannelKeyContext extends IConnectionContext {
@@ -56,6 +85,10 @@ public class IReplayContexts {
         default String getNodeId() {
             return getChannelKey().getNodeId();
         }
+
+        void onTargetConnectionCreated();
+
+        void onTargetConnectionClosed();
     }
 
     public interface IKafkaRecordContext
@@ -73,10 +106,13 @@ public class IReplayContexts {
     }
 
     public interface ITrafficStreamsLifecycleContext
-            extends IChannelKeyContext, IWithTypedEnclosingScope<IChannelKeyContext> {
+            extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IChannelKeyContext> {
         default String getActivityName() { return ActivityNames.TRAFFIC_STREAM_LIFETIME; }
         ITrafficStreamKey getTrafficStreamKey();
         IChannelKeyContext getChannelKeyContext();
+        default String getConnectionId() {
+            return getChannelKey().getConnectionId();
+        }
         default String getScopeName() { return ScopeNames.TRAFFIC_STREAM_LIFETIME_SCOPE; }
         default ISourceTrafficChannelKey getChannelKey() {
             return getChannelKeyContext().getChannelKey();
@@ -84,15 +120,19 @@ public class IReplayContexts {
     }
 
     public interface IReplayerHttpTransactionContext
-            extends IHttpTransactionContext, IChannelKeyContext, IWithTypedEnclosingScope<IChannelKeyContext> {
+            extends IHttpTransactionContext, IWithTypedEnclosingScope<IChannelKeyContext> {
         static final AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
 
         default String getActivityName() { return ActivityNames.HTTP_TRANSACTION; }
 
         UniqueReplayerRequestKey getReplayerRequestKey();
         IChannelKeyContext getChannelKeyContext();
+        Instant getTimeOfOriginalRequest();
 
         @Override default String getScopeName() { return ScopeNames.ACCUMULATOR_SCOPE; }
+        default String getConnectionId() {
+            return getChannelKey().getConnectionId();
+        }
         default ISourceTrafficChannelKey getChannelKey() {
             return getChannelKeyContext().getChannelKey();
         }
@@ -129,6 +169,26 @@ public class IReplayContexts {
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         default String getActivityName() { return ActivityNames.TRANSFORMATION; }
         default String getScopeName() { return ScopeNames.HTTP_TRANSFORMER_SCOPE; }
+
+
+        void onHeaderParse();
+        void onPayloadParse();
+
+        void onPayloadParseSuccess();
+
+        void onJsonPayloadParseRequired();
+
+        void onJsonPayloadParseSucceeded();
+
+        void onPayloadBytesIn(int inputSize);
+        void onUncompressedBytesIn(int inputSize);
+        void onUncompressedBytesOut(int inputSize);
+        void onFinalBytesOut(int outputSize);
+        void onTransformSuccess();
+        void onTransformSkip();
+        void onTransformFailure();
+        void aggregateInputChunk(int sizeInBytes);
+        void aggregateOutputChunk(int sizeInBytes);
     }
 
     public interface IScheduledContext
@@ -141,6 +201,9 @@ public class IReplayContexts {
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         default String getActivityName() { return ActivityNames.TARGET_TRANSACTION; }
         default String getScopeName() { return ScopeNames.REQUEST_SENDER_SCOPE; }
+
+        void onBytesSent(int size);
+        void onBytesReceived(int size);
     }
 
     public interface IRequestSendingContext
@@ -157,7 +220,7 @@ public class IReplayContexts {
 
     public interface IReceivingHttpResponseContext
             extends IScopedInstrumentationAttributes, IWithTypedEnclosingScope<ITargetRequestContext> {
-        default String getActivityName() { return ActivityNames.RECEIVING_REQUEST; }
+        default String getActivityName() { return ActivityNames.RECEIVING_RESPONSE; }
         default String getScopeName() { return ScopeNames.REQUEST_SENDER_SCOPE; }
     }
 

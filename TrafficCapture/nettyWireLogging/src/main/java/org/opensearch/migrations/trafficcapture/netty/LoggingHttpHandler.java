@@ -219,7 +219,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (messageContext.getState() == HttpMessageContext.HttpTransactionState.RESPONSE) {
-            messageContext.endSpan();
+            messageContext.endSpan(); // TODO - make this meter on create/close
             rotateNextMessageContext(HttpMessageContext.HttpTransactionState.REQUEST);
         }
         var timestamp = Instant.now();
@@ -247,7 +247,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
 
         if (requestParsingHandler.haveParsedFullRequest) {
-            messageContext.endSpan();
+            messageContext.endSpan(); // TODO - make this meter on create/close
             var httpRequest = requestParsingHandler.resetCurrentRequest();
             captureState.liveReadObservationsInOffloader = false;
             captureState.advanceStateModelIntoResponseGather();
@@ -270,7 +270,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         if (messageContext.getState() != HttpMessageContext.HttpTransactionState.RESPONSE) {
-            messageContext.endSpan();
+            messageContext.endSpan(); // TODO - make this meter on create/close
             rotateNextMessageContext(HttpMessageContext.HttpTransactionState.RESPONSE);
         }
         var bb = (ByteBuf) msg;

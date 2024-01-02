@@ -47,11 +47,12 @@ public class Accumulation {
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
     }
 
-    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
+    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey,
+                                                                Instant originTimestamp) {
         if (rrPair != null) {
             return rrPair;
         }
-        this.rrPair = new RequestResponsePacketPair(forTrafficStreamKey,
+        this.rrPair = new RequestResponsePacketPair(forTrafficStreamKey, originTimestamp,
                 startingSourceRequestIndex, getIndexOfCurrentRequest());
         //this.rrPair.getRequestContext()
         return rrPair;

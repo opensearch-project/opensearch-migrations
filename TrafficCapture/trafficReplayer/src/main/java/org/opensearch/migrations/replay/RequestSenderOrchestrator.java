@@ -44,7 +44,7 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm processing work has finished");
         log.atDebug().setMessage(()->"Scheduling work for "+ctx.getConnectionId()+" at time "+timestamp).log();
-        var scheduledContext = new ReplayContexts.ScheduledContext(ctx);
+        var scheduledContext = new ReplayContexts.ScheduledContext(ctx, timestamp);
         // this method doesn't use the scheduling that scheduleRequest and scheduleClose use because
         // doing work associated with a connection is considered to be preprocessing work independent
         // of the underlying network connection itself, so it's fair to be able to do this without
@@ -72,8 +72,8 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for final aggregated response");
         log.atDebug().setMessage(()->"Scheduling request for "+requestKey+" at start time "+start).log();
-        return asynchronouslyInvokeRunnableToSetupFuture(
-                ctx, requestKey.getReplayerRequestIndex(), false, finalTunneledResponse,
+        return asynchronouslyInvokeRunnableToSetupFuture(ctx.getLogicalEnclosingScope(),
+                requestKey.getReplayerRequestIndex(), false, finalTunneledResponse,
                 channelFutureAndRequestSchedule-> scheduleSendOnConnectionReplaySession(ctx,
                         channelFutureAndRequestSchedule, finalTunneledResponse, start, interval, packets));
     }
@@ -218,7 +218,7 @@ public class RequestSenderOrchestrator {
                                     packetReceiverRef),
                     eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
         };
-        var scheduledContext = new ReplayContexts.ScheduledContext(ctx);
+        var scheduledContext = new ReplayContexts.ScheduledContext(ctx, start);
         scheduleOnConnectionReplaySession(ctx.getLogicalEnclosingScope(),
                 ctx.getReplayerRequestKey().getSourceRequestIndex(),
                 channelFutureAndRequestSchedule, responseFuture, start,
