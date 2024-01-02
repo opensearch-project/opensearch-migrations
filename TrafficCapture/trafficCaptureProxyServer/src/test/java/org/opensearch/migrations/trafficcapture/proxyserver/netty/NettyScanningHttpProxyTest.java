@@ -12,6 +12,7 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayOutputStream;
@@ -197,7 +198,8 @@ class NettyScanningHttpProxyTest {
             try {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null,
                         10, Duration.ofSeconds(10));
-                nshp.get().start(connectionPool, 1, null, connectionCaptureFactory);
+                nshp.get().start(connectionPool, 1, null, connectionCaptureFactory,
+                        new RequestCapturePredicate());
                 System.out.println("proxy port = " + port);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

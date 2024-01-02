@@ -8,15 +8,16 @@ import java.util.StringJoiner;
 import java.util.TreeMap;
 
 public class TimeToResponseFulfillmentFutureMap {
-    TreeMap<Instant, ArrayDeque<Runnable>> timeToRunnableMap = new TreeMap<>();
 
-    public void appendTask(Instant start, Runnable packetSender) {
+    TreeMap<Instant, ArrayDeque<ChannelTask>> timeToRunnableMap = new TreeMap<>();
+
+    public void appendTask(Instant start, ChannelTask task) {
         assert timeToRunnableMap.keySet().stream().allMatch(t->!t.isAfter(start));
         var existing = timeToRunnableMap.computeIfAbsent(start, k->new ArrayDeque<>());
-        existing.offer(packetSender);
+        existing.offer(task);
     }
 
-    public Map.Entry<Instant, Runnable> peekFirstItem() {
+    public Map.Entry<Instant, ChannelTask> peekFirstItem() {
         var e = timeToRunnableMap.firstEntry();
         return e == null ? null : new AbstractMap.SimpleEntry<>(e.getKey(), e.getValue().peek());
     }
@@ -37,6 +38,17 @@ public class TimeToResponseFulfillmentFutureMap {
 
     public boolean isEmpty() {
         return timeToRunnableMap.isEmpty();
+    }
+
+    public boolean hasPendingTransmissions() {
+        if (timeToRunnableMap.isEmpty()) {
+            return false;
+        } else {
+            return timeToRunnableMap.values().stream()
+                    .flatMap(d->d.stream())
+                    .filter(ct->ct.kind==ChannelTaskType.TRANSMIT)
+                    .findAny().isPresent();
+        }
     }
 
     public long calculateSizeSlowly() {
@@ -60,4 +72,5 @@ public class TimeToResponseFulfillmentFutureMap {
                     .toString();
         }
     }
+
 }
