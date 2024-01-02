@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.SortedSet;
+import java.util.StringJoiner;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -55,6 +56,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     enum OffloaderCommandType {
         Read,
         EndOfMessage,
+        DropRequest,
         Write,
         Flush
     }
@@ -70,11 +72,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         public static ObservationDirective eom() {
             return new ObservationDirective(OffloaderCommandType.EndOfMessage, 0);
         }
+        public static ObservationDirective cancelOffload() {
+            return new ObservationDirective(OffloaderCommandType.DropRequest, 0);
+        }
         public static ObservationDirective write(int i) {
             return new ObservationDirective(OffloaderCommandType.Write, i);
         }
         public static ObservationDirective flush() {
             return new ObservationDirective(OffloaderCommandType.Flush, 0);
+        }
+
+        @Override
+        public String toString() {
+            return "(" + offloaderCommandType + ":" + size + ")";
         }
     }
 
@@ -82,11 +92,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         return new InMemoryConnectionCaptureFactory("TEST_NODE_ID", bufferSize, onClosedCallback);
     }
 
+    private static byte nextPrintable(int i) {
+        final char firstChar = ' ';
+        final byte lastChar = '~';
+        var r = (byte) (i%(lastChar-firstChar));
+        return (byte) ((r < 0) ? (lastChar + r) : (byte) (r + firstChar));
+    }
+
     static ByteBuf makeSequentialByteBuf(int offset, int size) {
         var bb = Unpooled.buffer(size);
+        final var b = nextPrintable(offset);
         for (int i=0; i<size; ++i) {
             //bb.writeByte((i+offset)%255);
-            bb.writeByte('A'+offset);
+            bb.writeByte(b);
         }
         return bb;
     }
@@ -118,6 +136,9 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                 return;
             case Flush:
                 offloader.flushCommitAndResetStream(false);
+                return;
+            case DropRequest:
+                 offloader.cancelCaptureForCurrentRequest(Instant.EPOCH);
                 return;
             default:
                 throw new IllegalStateException("Unknown directive type: " + directive.offloaderCommandType);
@@ -224,7 +245,9 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
-                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {}
+                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
+                                tsIndicesReceived.add(tsk.getTrafficStreamIndex());
+                            }
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();

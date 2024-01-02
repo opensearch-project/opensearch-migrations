@@ -6,12 +6,18 @@ import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import {createOpenSearchIAMAccessPolicy, createOpenSearchServerlessIAMAccessPolicy} from "../common-utilities";
+import {
+    createMSKConsumerIAMPolicies,
+    createOpenSearchIAMAccessPolicy,
+    createOpenSearchServerlessIAMAccessPolicy
+} from "../common-utilities";
+import {StreamingSourceType} from "../streaming-source-type";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly enableClusterFGACAuth: boolean,
+    readonly streamingSourceType: StreamingSourceType,
     readonly addOnMigrationId?: string,
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
@@ -25,7 +31,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         super(scope, id, props)
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "mskAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
         ]
@@ -53,34 +59,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "elasticfilesystem:ClientWrite"
             ]
         })
-
-        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`);
-        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`);
-        const mskClusterConnectPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterARN],
-            actions: [
-                "kafka-cluster:Connect"
-            ]
-        })
-        const mskClusterAllTopicArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:topic/${mskClusterName}/*`
-        const mskTopicConsumerPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterAllTopicArn],
-            actions: [
-                "kafka-cluster:DescribeTopic",
-                "kafka-cluster:ReadData"
-            ]
-        })
-        const mskClusterAllGroupArn = `arn:aws:kafka:${props.env?.region}:${props.env?.account}:group/${mskClusterName}/*`
-        const mskConsumerGroupPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [mskClusterAllGroupArn],
-            actions: [
-                "kafka-cluster:AlterGroup",
-                "kafka-cluster:DescribeGroup"
-            ]
-        })
+        
         const secretAccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: ["*"],
@@ -89,19 +68,25 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "secretsmanager:DescribeSecret"
             ]
         })
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(<string>props.env?.region, <string>props.env?.account)
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
+        let servicePolicies = [replayerOutputMountPolicy, secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
+            const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.region, this.account, props.stage, props.defaultDeployId)
+            servicePolicies = servicePolicies.concat(mskConsumerPolicies)
+        }
 
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`);
+        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
 
-        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId} --kafka-traffic-enable-msk-auth`
+        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId}`
         if (props.enableClusterFGACAuth) {
             const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
         }
+        replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand
         replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
         replayerCommand = props.analyticsServiceEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
@@ -113,7 +98,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
-            taskRolePolicies: [mskClusterConnectPolicy, mskTopicConsumerPolicy, mskConsumerGroupPolicy, replayerOutputMountPolicy, secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy],
+            taskRolePolicies: servicePolicies,
             environment: {
                 "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
             },

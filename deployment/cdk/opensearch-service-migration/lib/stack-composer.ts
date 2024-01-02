@@ -16,6 +16,8 @@ import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
 import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
+import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
+import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -56,7 +58,14 @@ export class StackComposer {
                 return parseInt(option)
             }
             if (expectedType === 'boolean' || expectedType === 'object') {
-                return JSON.parse(option)
+                try {
+                    return JSON.parse(option)
+                } catch (e) {
+                    if (e instanceof SyntaxError) {
+                        console.error(`Unable to parse option: ${optionName} with expected type: ${expectedType}`)
+                    }
+                    throw e
+                }
             }
         }
         // Values provided by the cdk.context.json should be of the desired type
@@ -65,7 +74,6 @@ export class StackComposer {
         }
         return option
     }
-
 
     private getEngineVersion(engineVersionString: string) : EngineVersion {
         let version: EngineVersion
@@ -80,6 +88,14 @@ export class StackComposer {
         return version
     }
 
+    private addDependentStacks(primaryStack: Stack, dependantStacks: any[]) {
+        for (let stack of dependantStacks) {
+            if (stack) {
+                primaryStack.addDependency(stack)
+            }
+        }
+    }
+
     constructor(scope: Construct, props: StackComposerProps) {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
@@ -90,9 +106,17 @@ export class StackComposer {
         if (!contextId) {
             throw new Error("Required context field 'contextId' not provided")
         }
-        const contextJSON = scope.node.tryGetContext(contextId)
+        let contextJSON = scope.node.tryGetContext(contextId)
         if (!contextJSON) {
             throw new Error(`No CDK context block found for contextId '${contextId}'`)
+        }
+        console.log('Received following context block for deployment: ')
+        console.log(contextJSON)
+        console.log('End of context block.')
+        // For a context block to be provided as a string (as in the case of providing via command line) it will need to be properly escaped
+        // to be captured. This requires JSON to parse twice, 1. Returns a normal JSON string with no escaping 2. Returns a JSON object for use
+        if (typeof contextJSON === 'string') {
+            contextJSON = JSON.parse(JSON.parse(contextJSON))
         }
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
@@ -150,6 +174,7 @@ export class StackComposer {
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
+        const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
 
         const migrationAnalyticsServiceEnabled = this.getContextForType('migrationAnalyticsServiceEnabled', 'boolean', defaultValues, contextJSON)
         const migrationAnalyticsBastionHostEnabled = this.getContextForType('migrationAnalyticsBastionEnabled', 'boolean', defaultValues, contextJSON)
@@ -177,6 +202,13 @@ export class StackComposer {
         if (!domainName) {
             throw new Error("Domain name is not present and is a required field")
         }
+        let targetEndpoint
+        if (targetClusterEndpoint && osContainerServiceEnabled) {
+            throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetClusterEndpoint, osContainerServiceEnabled]")
+        } else if (targetClusterEndpoint || osContainerServiceEnabled) {
+            targetEndpoint = targetClusterEndpoint ? targetClusterEndpoint : "https://opensearch:9200"
+        }
+        const streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         version = this.getEngineVersion(engineVersion)
@@ -209,7 +241,7 @@ export class StackComposer {
             networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
                 availabilityZoneCount: availabilityZoneCount,
-                targetClusterEndpoint: targetClusterEndpoint,
+                targetClusterEndpoint: targetEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 stage: stage,
@@ -222,9 +254,9 @@ export class StackComposer {
         }
 
         // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
-        // created cluster like below or an imported one
+        // created Domain like below or an imported one
         let openSearchStack
-        if (!targetClusterEndpoint) {
+        if (!targetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: version,
                 domainName: domainName,
@@ -264,10 +296,7 @@ export class StackComposer {
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 ...props,
             });
-
-            if (networkStack) {
-                openSearchStack.addDependency(networkStack)
-            }
+            this.addDependentStacks(openSearchStack, [networkStack])
             this.stacks.push(openSearchStack)
         }
 
@@ -277,6 +306,7 @@ export class StackComposer {
         if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
                 vpc: networkStack.vpc,
+                streamingSourceType: streamingSourceType,
                 mskImportARN: mskARN,
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 mskRestrictPublicAccessTo: mskRestrictPublicAccessTo,
@@ -288,20 +318,22 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            migrationStack.addDependency(networkStack)
+            this.addDependentStacks(migrationStack, [networkStack])
             this.stacks.push(migrationStack)
 
-            mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
-                vpc: networkStack.vpc,
-                mskEnablePublicEndpoints: mskEnablePublicEndpoints,
-                stackName: `OSMigrations-${stage}-${region}-MSKUtility`,
-                description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            mskUtilityStack.addDependency(migrationStack)
-            this.stacks.push(mskUtilityStack)
+            if (streamingSourceType === StreamingSourceType.AWS_MSK) {
+                mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
+                    vpc: networkStack.vpc,
+                    mskEnablePublicEndpoints: mskEnablePublicEndpoints,
+                    stackName: `OSMigrations-${stage}-${region}-MSKUtility`,
+                    description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
+                    stage: stage,
+                    defaultDeployId: defaultDeployId,
+                    ...props,
+                })
+                this.addDependentStacks(mskUtilityStack, [migrationStack])
+                this.stacks.push(mskUtilityStack)
+            }
         }
 
         let migrationAnalyticsStack;
@@ -342,7 +374,7 @@ export class StackComposer {
                 openAccessPolicyEnabled: true,
                 ...props
             })
-            analyticsDomainStack.addDependency(networkStack)
+            this.addDependentStacks(analyticsDomainStack, [networkStack])
             this.stacks.push(analyticsDomainStack)
 
             migrationAnalyticsStack = new MigrationAnalyticsStack(scope, "migration-analytics", {
@@ -354,14 +386,54 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            migrationAnalyticsStack.addDependency(networkStack)
             // The general analytics stack (otel collector) is dependent on the analytics cluster being deployed first
-            migrationAnalyticsStack.addDependency(analyticsDomainStack)
+            this.addDependentStacks(migrationAnalyticsStack, [networkStack, analyticsDomainStack])
             this.stacks.push(migrationAnalyticsStack)
         }
 
+        let osContainerStack
+        if (osContainerServiceEnabled && networkStack && migrationStack) {
+            osContainerStack = new OpenSearchContainerStack(scope, "opensearch-container", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-OpenSearchContainer`,
+                description: "This stack contains resources for the OpenSearch Container ECS service",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            this.addDependentStacks(osContainerStack, [migrationStack])
+            this.stacks.push(osContainerStack)
+        }
+
+        let kafkaZookeeperStack
+        if (kafkaZookeeperServiceEnabled && networkStack && migrationStack) {
+            kafkaZookeeperStack = new KafkaZookeeperStack(scope, "kafka-zookeeper", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-KafkaZookeeper`,
+                description: "This stack contains resources for the Kafka Zookeeper ECS service",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            this.addDependentStacks(kafkaZookeeperStack, [migrationStack])
+            this.stacks.push(kafkaZookeeperStack)
+        }
+
+        let kafkaBrokerStack
+        if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
+            kafkaBrokerStack = new KafkaBrokerStack(scope, "kafka-broker", {
+                vpc: networkStack.vpc,
+                stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
+                description: "This stack contains resources for the Kafka Broker ECS service",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                ...props,
+            })
+            this.addDependentStacks(kafkaBrokerStack, [migrationStack, kafkaZookeeperStack])
+            this.stacks.push(kafkaBrokerStack)
+        }
+
         // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
-        // TODO: Future work to provide orchestration between fetch migration and migration assistance
         let fetchMigrationStack
         if (fetchMigrationEnabled && networkStack && migrationStack) {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
@@ -374,34 +446,29 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            if (openSearchStack) {
-                fetchMigrationStack.addDependency(openSearchStack)
-            }
-            fetchMigrationStack.addDependency(migrationStack)
+            this.addDependentStacks(fetchMigrationStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(fetchMigrationStack)
         }
 
         let captureProxyESStack
-        if (captureProxyESServiceEnabled && networkStack && mskUtilityStack) {
+        if (captureProxyESServiceEnabled && networkStack && migrationStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
                 vpc: networkStack.vpc,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
+                streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            // This is necessary to ensure the otel collector is available (and can be found via service connect)
-            if (migrationAnalyticsStack) {
-                captureProxyESStack.addDependency(migrationAnalyticsStack)
-            }
-            captureProxyESStack.addDependency(mskUtilityStack)
+            // The analytics stack dependency is necessary to ensure the otel collector is available (and can be found via service connect)
+            this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack, migrationAnalyticsStack])
             this.stacks.push(captureProxyESStack)
         }
 
         let trafficReplayerStack
-        if ((trafficReplayerServiceEnabled && networkStack && migrationStack && mskUtilityStack) || (addOnMigrationDeployId && networkStack)) {
+        if ((trafficReplayerServiceEnabled && networkStack && migrationStack) || (addOnMigrationDeployId && networkStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpc: networkStack.vpc,
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
@@ -410,26 +477,16 @@ export class StackComposer {
                 userAgentSuffix: trafficReplayerCustomUserAgent,
                 extraArgs: trafficReplayerExtraArgs,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
+                streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            if (mskUtilityStack) {
-                trafficReplayerStack.addDependency(mskUtilityStack)
-            }
-            if (migrationStack) {
-                trafficReplayerStack.addDependency(migrationStack)
-            }
-            // This is necessary to ensure the otel collector is available (and can be found via service connect)
-            if (migrationAnalyticsStack) {
-                trafficReplayerStack.addDependency(migrationAnalyticsStack)
-            }
-            if (openSearchStack) {
-                trafficReplayerStack.addDependency(openSearchStack)
-            }
-            trafficReplayerStack.addDependency(networkStack)
+            // The analytics stack dependency is necessary to ensure the otel collector is available (and can be found via service connect)
+            this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,
+                kafkaBrokerStack, migrationAnalyticsStack, openSearchStack, osContainerStack])
             this.stacks.push(trafficReplayerStack)
         }
 
@@ -443,65 +500,34 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            elasticsearchStack.addDependency(migrationStack)
+            this.addDependentStacks(elasticsearchStack, [migrationStack])
             this.stacks.push(elasticsearchStack)
         }
 
         let captureProxyStack
-        if (captureProxyServiceEnabled && networkStack && mskUtilityStack) {
+        if (captureProxyServiceEnabled && networkStack && migrationStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
                 customSourceClusterEndpoint: captureProxySourceEndpoint,
                 analyticsServiceEnabled: migrationAnalyticsServiceEnabled,
+                streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            if (elasticsearchStack) {
-                captureProxyStack.addDependency(elasticsearchStack)
-            }
-            // This is necessary to ensure the otel collector is available (and can be found via service connect)
-            if (migrationAnalyticsStack) {
-                captureProxyStack.addDependency(migrationAnalyticsStack)
-            }
-            captureProxyStack.addDependency(mskUtilityStack)
+            // The analytics stack dependency is necessary to ensure the otel collector is available (and can be found via service connect)
+            this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationAnalyticsStack, migrationStack,
+                kafkaBrokerStack, mskUtilityStack])
             this.stacks.push(captureProxyStack)
         }
 
-        let kafkaBrokerStack
-        if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
-            kafkaBrokerStack = new KafkaBrokerStack(scope, "kafka-broker", {
-                vpc: networkStack.vpc,
-                stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
-                description: "This stack contains resources for the Kafka Broker ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            kafkaBrokerStack.addDependency(migrationStack)
-            this.stacks.push(kafkaBrokerStack)
-        }
-
-        let kafkaZookeeperStack
-        if (kafkaZookeeperServiceEnabled && networkStack && migrationStack) {
-            kafkaZookeeperStack = new KafkaZookeeperStack(scope, "kafka-zookeeper", {
-                vpc: networkStack.vpc,
-                stackName: `OSMigrations-${stage}-${region}-KafkaZookeeper`,
-                description: "This stack contains resources for the Kafka Zookeeper ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                ...props,
-            })
-            kafkaZookeeperStack.addDependency(migrationStack)
-            this.stacks.push(kafkaZookeeperStack)
-        }
-
         let migrationConsoleStack
-        if (migrationConsoleServiceEnabled && networkStack && mskUtilityStack) {
+        if (migrationConsoleServiceEnabled && networkStack && migrationStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 vpc: networkStack.vpc,
+                streamingSourceType: streamingSourceType,
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationAnalyticsEnabled: migrationAnalyticsServiceEnabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
@@ -511,26 +537,9 @@ export class StackComposer {
                 ...props,
             })
             // To enable the Migration Console to make requests to other service endpoints with Service Connect,
-            // it must be deployed after these services
-            if (captureProxyESStack) {
-                migrationConsoleStack.addDependency(captureProxyESStack)
-            }
-            if (captureProxyStack) {
-                migrationConsoleStack.addDependency(captureProxyStack)
-            }
-            if (elasticsearchStack) {
-                migrationConsoleStack.addDependency(elasticsearchStack)
-            }
-            if (fetchMigrationStack) {
-                migrationConsoleStack.addDependency(fetchMigrationStack)
-            }
-            if (migrationAnalyticsStack) {
-                migrationConsoleStack.addDependency(migrationAnalyticsStack)
-            }
-            if (openSearchStack) {
-                migrationConsoleStack.addDependency(openSearchStack)
-            }
-            migrationConsoleStack.addDependency(mskUtilityStack)
+            // it must be deployed after any Service Connect services
+            this.addDependentStacks(migrationConsoleStack, [captureProxyESStack, captureProxyStack, elasticsearchStack,
+                fetchMigrationStack, migrationAnalyticsStack, openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack, mskUtilityStack])
             this.stacks.push(migrationConsoleStack)
         }
 

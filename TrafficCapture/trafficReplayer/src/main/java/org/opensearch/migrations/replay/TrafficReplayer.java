@@ -519,7 +519,7 @@ public class TrafficReplayer {
         } catch (InterruptedException ex) {
             throw ex;
         } catch (Exception e) {
-            log.warn("Terminating runReplay due to", e);
+            log.atWarn().setCause(e).setMessage("Terminating runReplay due to exception").log();
             throw e;
         } finally {
             trafficToHttpTransactionAccumulator.close();
@@ -645,7 +645,8 @@ public class TrafficReplayer {
                     commitTrafficStreams(rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
                     return null;
                 } else {
-                    log.atError().setCause(t).setMessage(()->"Throwable passed to handle().  Rethrowing.").log();
+                    log.atError().setCause(t).setMessage(()->"Throwable passed to handle() for " + requestKey +
+                            ".  Rethrowing.").log();
                     throw Lombok.sneakyThrow(t);
                 }
             } catch (Error error) {
@@ -687,7 +688,7 @@ public class TrafficReplayer {
 
         @SneakyThrows
         private void commitTrafficStreams(List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
-            if (shouldCommit) {
+            if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     trafficCaptureSource.commitTrafficStream(tsk);
                 }
@@ -922,7 +923,7 @@ public class TrafficReplayer {
     }
 
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
-        log.warn("Shutting down "+this+" because of "+error);
+        log.atWarn().setCause(error).setMessage(()->"Shutting down " + this + " because of error").log();
         shutdownReasonRef.compareAndSet(null, error);
         if (!shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
             log.atError().setMessage(()->"Shutdown was already signaled by {}.  " +

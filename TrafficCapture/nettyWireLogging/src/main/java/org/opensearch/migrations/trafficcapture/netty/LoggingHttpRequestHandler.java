@@ -15,6 +15,7 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
 import lombok.Lombok;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
@@ -28,6 +29,12 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
 
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
+        private final PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve;
+
+        public SimpleHttpRequestDecoder(@NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve) {
+            this.headersToPreserve = headersToPreserve;
+        }
+
         /**
          * Override this so that the HttpHeaders object can be a cheaper one.  PassThruHeaders
          * only stores a handful of headers that are required for parsing the payload portion
@@ -37,7 +44,7 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         public HttpMessage createMessage(String[] initialLine) throws Exception {
             return new DefaultHttpRequest(HttpVersion.valueOf(initialLine[2]),
                     HttpMethod.valueOf(initialLine[0]), initialLine[1]
-                    , new PassThruHttpHeaders()
+                    , new PassThruHttpHeaders(headersToPreserve)
             );
         }
     }
@@ -45,11 +52,25 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     static class SimpleDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter {
         @Getter
         private HttpRequest currentRequest;
+        final RequestCapturePredicate requestCapturePredicate;
         boolean isDone;
+        boolean shouldCapture;
+        boolean liveReadObservationsInOffloader;
+
+        SimpleDecodedHttpRequestHandler(RequestCapturePredicate requestCapturePredicate) {
+            this.requestCapturePredicate = requestCapturePredicate;
+            this.currentRequest = null;
+            this.isDone = false;
+            this.shouldCapture = true;
+            liveReadObservationsInOffloader = false;
+        }
+
         @Override
-        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
             if (msg instanceof HttpRequest) {
                 currentRequest = (HttpRequest) msg;
+                shouldCapture = RequestCapturePredicate.CaptureDirective.CAPTURE ==
+                        requestCapturePredicate.apply((HttpRequest) msg);
             } else if (msg instanceof HttpContent) {
                 ((HttpContent)msg).release();
                 if (msg instanceof LastHttpContent) {
@@ -61,9 +82,11 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         }
 
         public HttpRequest resetCurrentRequest() {
-            isDone = false;
+            this.shouldCapture = true;
+            this.isDone = false;
             var old = currentRequest;
-            currentRequest = null;
+            this.currentRequest = null;
+            this.liveReadObservationsInOffloader = false;
             return old;
         }
     }
@@ -71,23 +94,14 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     protected final IChannelConnectionCaptureSerializer<T> trafficOffloader;
 
     protected final EmbeddedChannel httpDecoderChannel;
-    protected final SimpleHttpRequestDecoder requestDecoder;
 
-
-    public LoggingHttpRequestHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader) {
+    public LoggingHttpRequestHandler(IChannelConnectionCaptureSerializer<T> trafficOffloader,
+                                     @NonNull RequestCapturePredicate httpHeadersCapturePredicate) {
         this.trafficOffloader = trafficOffloader;
-        requestDecoder = new SimpleHttpRequestDecoder(); // as a field for easier debugging
         httpDecoderChannel = new EmbeddedChannel(
-                requestDecoder,
-                new SimpleDecodedHttpRequestHandler()
+                new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher()),
+                new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate)
         );
-    }
-
-    private HttpProcessedState parseHttpMessageParts(ByteBuf msg)  {
-        httpDecoderChannel.writeInbound(msg); // Consume this outright, up to the caller to know what else to do
-        return getHandlerThatHoldsParsedHttpRequest().isDone ?
-                HttpProcessedState.FULL_MESSAGE :
-                HttpProcessedState.ONGOING;
     }
 
     private SimpleDecodedHttpRequestHandler getHandlerThatHoldsParsedHttpRequest() {
@@ -126,7 +140,8 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
         super.handlerRemoved(ctx);
     }
 
-    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, HttpRequest httpRequest) throws Exception {
+    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, boolean shouldCapture,
+                                                       HttpRequest httpRequest) throws Exception {
         super.channelRead(ctx, msg);
         metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_REQUEST)
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
@@ -137,25 +152,32 @@ public class LoggingHttpRequestHandler<T> extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         var timestamp = Instant.now();
-        HttpProcessedState httpProcessedState;
-        {
-            var bb = ((ByteBuf) msg).retainedDuplicate();
+        var requestParsingHandler = getHandlerThatHoldsParsedHttpRequest();
+        var bb = ((ByteBuf) msg);
+        httpDecoderChannel.writeInbound(bb.retainedDuplicate()); // the ByteBuf is consumed/release by this method
+        var shouldCapture = requestParsingHandler.shouldCapture;
+        if (shouldCapture) {
+            requestParsingHandler.liveReadObservationsInOffloader = true;
             trafficOffloader.addReadEvent(timestamp, bb);
-            metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
-                    .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
-
-            httpProcessedState = parseHttpMessageParts(bb); // bb is consumed/release by this method
+        } else if (requestParsingHandler.liveReadObservationsInOffloader) {
+            trafficOffloader.cancelCaptureForCurrentRequest(timestamp);
+            requestParsingHandler.liveReadObservationsInOffloader = false;
         }
-        if (httpProcessedState == HttpProcessedState.FULL_MESSAGE) {
-            var httpRequest = getHandlerThatHoldsParsedHttpRequest().resetCurrentRequest();
-            var decoderResultLoose = httpRequest.decoderResult();
-            if (decoderResultLoose instanceof HttpMessageDecoderResult) {
-                var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
-                trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
-                trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+        metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
+                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
+
+        if (requestParsingHandler.isDone) {
+            var httpRequest = requestParsingHandler.resetCurrentRequest();
+            if (shouldCapture) {
+                var decoderResultLoose = httpRequest.decoderResult();
+                if (decoderResultLoose instanceof HttpMessageDecoderResult) {
+                    var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
+                    trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
+                    trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+                }
+                trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
             }
-            trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
-            channelFinishedReadingAnHttpMessage(ctx, msg, httpRequest);
+            channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
         } else {
             super.channelRead(ctx, msg);
         }
