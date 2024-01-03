@@ -18,14 +18,13 @@ public interface IInstrumentationAttributes {
         return builder;
     }
 
-    default Attributes getPopulatedAttributes() {
-        return getPopulatedAttributesBuilder().build();
+    default Attributes getPopulatedAttributes(AttributesBuilder builder) {
+        return getPopulatedAttributesBuilder(builder).build();
     }
 
-    default AttributesBuilder getPopulatedAttributesBuilder() {
+    default AttributesBuilder getPopulatedAttributesBuilder(AttributesBuilder builder) {
         var currentObj = this;
         var stack = new ArrayList<IInstrumentationAttributes>();
-        var builder = Attributes.builder();
         while (currentObj != null) {
             stack.add(currentObj);
             currentObj = currentObj.getEnclosingScope();
@@ -38,28 +37,22 @@ public interface IInstrumentationAttributes {
     }
 
     default void meterIncrementEvent(String eventName) {
-        getRootInstrumentationScope().buildMeter(this).meterIncrementEvent(eventName);
+        meterIncrementEvent(eventName, Attributes.builder());
+    }
+    default void meterIncrementEvent(String eventName, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildSimpleMeter(this).meterIncrementEvent(eventName, attributesBuilder);
     }
     default void meterIncrementEvent(String eventName, long increment) {
-        getRootInstrumentationScope().buildMeter(this).meterIncrementEvent(eventName, increment);
+        meterIncrementEvent (eventName, increment, Attributes.builder());
+    }
+    default void meterIncrementEvent(String eventName, long increment, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildSimpleMeter(this)
+                .meterIncrementEvent(eventName, increment, attributesBuilder);
     }
     default void meterDeltaEvent(String eventName, long delta) {
-        getRootInstrumentationScope().buildMeter(this).meterDeltaEvent(eventName, delta);
+        meterDeltaEvent(eventName, delta, Attributes.builder());
     }
-    default void meterHistogramMicros(String eventName, Duration value) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMicros(eventName, value);
+    default void meterDeltaEvent(String eventName, long delta, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildSimpleMeter(this).meterDeltaEvent(eventName, delta, attributesBuilder);
     }
-    default void meterHistogramMillis(String eventName, Duration value) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMillis(eventName, value);
-    }
-    default void meterHistogram(String eventName, String units, long value) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogram(eventName, units, value);
-    }
-    default void meterHistogramMicros(String eventName) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMicros(eventName);
-    }
-    default void meterHistogramMillis(String eventName) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMillis(eventName);
-    }
-
 }

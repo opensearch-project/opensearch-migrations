@@ -22,8 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -139,11 +138,11 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected HttpMessageContext messageContext;
 
-    public LoggingHttpHandler(@NonNull IInstrumentConstructor contextConstructor, String nodeId, String channelKey,
+    public LoggingHttpHandler(@NonNull RootOtelContext rootContext, String nodeId, String channelKey,
                               @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
                               @NonNull RequestCapturePredicate httpHeadersCapturePredicate)
     throws IOException {
-        var parentContext = new ConnectionContext(contextConstructor, channelKey, nodeId);
+        var parentContext = new ConnectionContext(rootContext, channelKey, nodeId);
 
         this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.HttpTransactionState.REQUEST);
         messageContext.meterIncrementEvent("requestStarted");

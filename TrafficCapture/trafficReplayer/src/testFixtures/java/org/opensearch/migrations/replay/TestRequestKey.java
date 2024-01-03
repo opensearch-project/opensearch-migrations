@@ -4,7 +4,6 @@ import java.time.Instant;
 
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.SimpleMeteringClosure;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 

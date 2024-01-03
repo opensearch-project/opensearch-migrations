@@ -7,6 +7,7 @@ import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
@@ -18,16 +19,16 @@ import java.util.function.Supplier;
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
     private final IConnectionCaptureFactory<T> connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
-    private final IInstrumentConstructor instrumentationConstructor;
+    private final RootOtelContext rootContext;
     private final BacksideConnectionPool backsideConnectionPool;
     private final RequestCapturePredicate requestCapturePredicate;
 
-    public ProxyChannelInitializer(IInstrumentConstructor instrumentationConstructor,
+    public ProxyChannelInitializer(RootOtelContext rootContext,
                                    BacksideConnectionPool backsideConnectionPool,
                                    Supplier<SSLEngine> sslEngineSupplier,
                                    IConnectionCaptureFactory<T> connectionCaptureFactory,
                                    @NonNull RequestCapturePredicate requestCapturePredicate) {
-        this.instrumentationConstructor = instrumentationConstructor;
+        this.rootContext = rootContext;
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
@@ -50,7 +51,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         }
 
         var connectionId = ch.id().asLongText();
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<T>(instrumentationConstructor,
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<T>(rootContext,
                 "", connectionId, connectionCaptureFactory, requestCapturePredicate,
                 this::shouldGuaranteeMessageOffloading));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));

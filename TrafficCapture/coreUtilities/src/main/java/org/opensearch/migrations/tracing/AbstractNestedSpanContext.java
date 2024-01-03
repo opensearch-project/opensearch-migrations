@@ -1,5 +1,7 @@
 package org.opensearch.migrations.tracing;
 
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import lombok.NonNull;
@@ -7,7 +9,7 @@ import lombok.NonNull;
 import java.time.Instant;
 
 public abstract class AbstractNestedSpanContext<T extends IInstrumentationAttributes>
-        implements IScopedInstrumentationAttributes, IWithStartTime, AutoCloseable {
+        implements IScopedInstrumentationAttributes, IWithStartTimeAndAttributes, AutoCloseable {
     final T enclosingScope;
     @Getter final Instant startTime;
     @Getter private Span currentSpan;
@@ -27,7 +29,12 @@ public abstract class AbstractNestedSpanContext<T extends IInstrumentationAttrib
     public T getImmediateEnclosingScope() { return enclosingScope; }
 
     protected void initializeSpan() {
-        initializeSpan(rootInstrumentationScope.buildSpan(enclosingScope, getScopeName(), getActivityName()));
+        initializeSpan(Attributes.builder());
+    }
+
+    protected void initializeSpan(AttributesBuilder attributesBuilder) {
+        initializeSpan(rootInstrumentationScope.buildSpan(enclosingScope, getScopeName(), getActivityName(),
+                attributesBuilder));
     }
 
     public void initializeSpan(@NonNull Span s) {

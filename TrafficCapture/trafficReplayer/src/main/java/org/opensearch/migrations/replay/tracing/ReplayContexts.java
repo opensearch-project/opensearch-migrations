@@ -7,7 +7,6 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.tracing.AbstractNestedSpanContext;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IWithStartTime;
 import org.opensearch.migrations.tracing.IndirectNestedSpanContext;
 
 import java.time.Duration;
@@ -18,7 +17,7 @@ public class ReplayContexts {
     private ReplayContexts() {}
 
     public static class ChannelKeyContext extends AbstractNestedSpanContext<IInstrumentationAttributes>
-            implements IReplayContexts.IChannelKeyContext, IWithStartTime {
+            implements IReplayContexts.IChannelKeyContext {
         @Getter
         final ISourceTrafficChannelKey channelKey;
 

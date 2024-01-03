@@ -9,6 +9,7 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 
@@ -29,7 +30,7 @@ public class NettyScanningHttpProxy {
         return proxyPort;
     }
 
-    public void start(IInstrumentConstructor rootContext,
+    public void start(RootOtelContext rootContext,
                       BacksideConnectionPool backsideConnectionPool,
                       int numThreads,
                       Supplier<SSLEngine> sslEngineSupplier,

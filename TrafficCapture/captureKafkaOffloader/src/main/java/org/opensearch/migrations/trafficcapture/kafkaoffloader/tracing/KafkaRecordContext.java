@@ -6,10 +6,9 @@ import lombok.Getter;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IWithStartTime;
 
 public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionContext>
-        implements IScopedInstrumentationAttributes, IWithStartTime {
+        implements IScopedInstrumentationAttributes {
     static final AttributeKey<String> TOPIC_ATTR = AttributeKey.stringKey("topic");
     static final AttributeKey<String> RECORD_ID_ATTR = AttributeKey.stringKey("recordId");
     static final AttributeKey<Long> RECORD_SIZE_ATTR = AttributeKey.longKey("recordSize");

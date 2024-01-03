@@ -3,7 +3,7 @@ package org.opensearch.migrations.tracing;
 import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
 
-public interface IScopedInstrumentationAttributes extends IInstrumentationAttributes, AutoCloseable {
+public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttributes, AutoCloseable {
 
     String getActivityName();
 

@@ -3,7 +3,6 @@ package org.opensearch.migrations.tracing;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.context.Context;
@@ -22,7 +21,6 @@ import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
 import lombok.NonNull;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -100,10 +98,22 @@ public class RootOtelContext implements IInstrumentationAttributes, IInstrumentC
         return null;
     }
 
+    OpenTelemetry getOpenTelemetry() {
+        return openTelemetryImpl;
+    }
+
     @Override
     @NonNull
     public IInstrumentConstructor getRootInstrumentationScope() {
         return this;
+    }
+
+    public MeteringClosure buildSimpleMeter(IInstrumentationAttributes ctx) {
+        return new MeteringClosure(ctx, getOpenTelemetry().getMeter(ctx.getScopeName()));
+    }
+
+    public MeteringClosureForStartTimes buildMeter(IWithStartTimeAndAttributes ctx) {
+        return new MeteringClosureForStartTimes(ctx, getOpenTelemetry().getMeter(ctx.getScopeName()));
     }
 
     @Override
@@ -111,82 +121,17 @@ public class RootOtelContext implements IInstrumentationAttributes, IInstrumentC
         return builder; // nothing more to do
     }
 
-    public static Span buildSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan) {
+    private static Span buildSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan) {
         return Optional.ofNullable(parentSpan).map(p -> builder.setParent(Context.current().with(p)))
                 .orElseGet(builder::setNoParent)
                 .startSpan().setAllAttributes(attrs);
     }
 
     @Override
-    public Span buildSpan(IInstrumentationAttributes enclosingScope, String scopeName, String spanName) {
+    public Span buildSpan(IInstrumentationAttributes enclosingScope, String scopeName, String spanName,
+                          AttributesBuilder attributesBuilder) {
         var parentSpan = enclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
-        return buildSpanWithParent(spanBuilder, getPopulatedAttributes(), parentSpan);
-    }
-
-    public Span buildSpanWithoutParent(String scopeName, String spanName) {
-        var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
-        return buildSpanWithParent(spanBuilder, getPopulatedAttributes(), null);
-    }
-
-    public SimpleMeteringClosure buildMeter(IInstrumentationAttributes ctx) {
-        return new SimpleMeteringClosure(ctx, getOpenTelemetry().getMeter(ctx.getScopeName()));
-    }
-
-    OpenTelemetry getOpenTelemetry() {
-        return openTelemetryImpl;
-    }
-
-    public void meterIncrementEvent(Meter meter, IInstrumentationAttributes ctx, String eventName) {
-        meterIncrementEvent(meter, ctx, eventName, 1);
-    }
-
-    public void meterIncrementEvent(Meter meter, IInstrumentationAttributes ctx, String eventName, long increment) {
-        meter.counterBuilder(eventName)
-                .build().add(increment, ctx.getPopulatedAttributesBuilder()
-                        .put("labelName", eventName)
-                        .build());
-    }
-
-    public void meterDeltaEvent(Meter meter, IInstrumentationAttributes ctx, String eventName, long delta) {
-        if (ctx == null) {
-            return;
-        }
-        meter.upDownCounterBuilder(eventName)
-                .build().add(delta, ctx.getPopulatedAttributesBuilder()
-                        .put("labelName", eventName)
-                        .build());
-    }
-
-    public <T extends IInstrumentationAttributes & IWithStartTime>
-    void meterHistogramMillis(Meter meter, T ctx, String eventName) {
-        meterHistogram(meter, ctx, eventName, "ms",
-                Duration.between(ctx.getStartTime(), Instant.now()).toMillis());
-    }
-
-    public <T extends IInstrumentationAttributes & IWithStartTime>
-    void meterHistogramMicros(Meter meter, T ctx, String eventName) {
-        meterHistogram(meter, ctx, eventName, "us",
-                Duration.between(ctx.getStartTime(), Instant.now()).toNanos()*1000);
-    }
-
-    public void meterHistogramMillis(Meter meter, IInstrumentationAttributes ctx, String eventName, Duration between) {
-        meterHistogram(meter, ctx, eventName, "ms", between.toMillis());
-    }
-
-    public void meterHistogramMicros(Meter meter, IInstrumentationAttributes ctx, String eventName, Duration between) {
-        meterHistogram(meter, ctx, eventName, "us", between.toNanos()*1000);
-    }
-
-    public void meterHistogram(Meter meter, IInstrumentationAttributes ctx, String eventName, String units, long value) {
-        if (ctx == null) {
-            return;
-        }
-        meter.histogramBuilder(eventName)
-                .ofLongs()
-                .setUnit(units)
-                .build().record(value, ctx.getPopulatedAttributesBuilder()
-                        .put("labelName", eventName)
-                        .build());
+        return buildSpanWithParent(spanBuilder, getPopulatedAttributes(attributesBuilder), parentSpan);
     }
 }

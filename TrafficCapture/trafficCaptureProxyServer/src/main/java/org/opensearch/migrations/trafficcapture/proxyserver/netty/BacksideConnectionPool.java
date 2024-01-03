@@ -1,8 +1,6 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.logging.LogLevel;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.slf4j.event.Level;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelDuplexHandler;

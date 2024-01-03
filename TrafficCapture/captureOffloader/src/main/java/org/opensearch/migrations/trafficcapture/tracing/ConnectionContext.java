@@ -1,36 +1,40 @@
 package org.opensearch.migrations.trafficcapture.tracing;
 
-import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.common.Attributes;
 import lombok.Getter;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
-import org.opensearch.migrations.tracing.ISpanGenerator;
-import org.opensearch.migrations.tracing.ISpanWithParentGenerator;
+import org.opensearch.migrations.tracing.AbstractNestedSpanContext;
+import org.opensearch.migrations.tracing.FilteringAttributeBuilder;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-import org.opensearch.migrations.tracing.IWithStartTime;
 
-import java.time.Instant;
+import java.util.Set;
 
-public class ConnectionContext implements IConnectionContext, IWithStartTime {
+public class ConnectionContext extends AbstractNestedSpanContext<RootOtelContext> implements IConnectionContext {
+    private static final Set KEYS_TO_ALLOW_FOR_ACTIVE_CONNECTION_COUNT = Set.of(CONNECTION_ID_ATTR.getKey());
+    public static final String ACTIVE_CONNECTION = "activeConnection";
+
     @Getter
     public final String connectionId;
     @Getter
     public final String nodeId;
-    @Getter
-    public final Span currentSpan;
-    @Getter
-    private final Instant startTime;
-    @Getter
-    final IInstrumentConstructor rootInstrumentationScope;
 
     @Override
     public String getActivityName() { return "captureConnection"; }
 
-    public ConnectionContext(IInstrumentConstructor rootInstrumentationScope,
+    public ConnectionContext(RootOtelContext rootInstrumentationScope,
                              String connectionId, String nodeId) {
-        this.rootInstrumentationScope = rootInstrumentationScope;
+        super(rootInstrumentationScope);
         this.connectionId = connectionId;
         this.nodeId = nodeId;
-        this.currentSpan = rootInstrumentationScope.buildSpanWithoutParent("","connectionLifetime");
-        this.startTime = Instant.now();
+        initializeSpan();
+        meterDeltaEvent(ACTIVE_CONNECTION, 1,
+                new FilteringAttributeBuilder(Attributes.builder(), false, KEYS_TO_ALLOW_FOR_ACTIVE_CONNECTION_COUNT));
+    }
+
+    @Override
+    public void sendMeterEventsForEnd() {
+        super.sendMeterEventsForEnd();
+        meterDeltaEvent(ACTIVE_CONNECTION, -1,
+                new FilteringAttributeBuilder(Attributes.builder(), false, KEYS_TO_ALLOW_FOR_ACTIVE_CONNECTION_COUNT));
     }
 }
