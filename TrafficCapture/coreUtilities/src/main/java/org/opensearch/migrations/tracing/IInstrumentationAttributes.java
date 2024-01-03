@@ -44,7 +44,7 @@ public interface IInstrumentationAttributes {
         getRootInstrumentationScope().buildMeter(this).meterIncrementEvent(eventName, increment);
     }
     default void meterDeltaEvent(String eventName, long delta) {
-        getRootInstrumentationScope().buildMeter(this).meterIncrementEvent(eventName, delta);
+        getRootInstrumentationScope().buildMeter(this).meterDeltaEvent(eventName, delta);
     }
     default void meterHistogramMicros(String eventName, Duration value) {
         getRootInstrumentationScope().buildMeter(this).meterHistogramMicros(eventName, value);

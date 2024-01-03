@@ -192,7 +192,7 @@ public class FullTrafficReplayerTest {
         // ideally, we'd be getting these back too, but our requests are malformed, so the server closes, which
         // may occur before we've started to accumulate the response.  So - just ignore these, but make sure that
         // there isn't anything else that we've missed.
-        byName.remove("receivingRequest");
+        byName.remove("receivingResponse");
 
         Assertions.assertEquals("", byName.entrySet().stream()
                 .map(kvp->kvp.getKey()+":"+kvp.getValue()).collect(Collectors.joining()));
