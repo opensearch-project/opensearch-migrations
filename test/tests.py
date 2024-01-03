@@ -13,6 +13,8 @@ import uuid
 import string
 import secrets
 import pytest
+import boto3
+from requests_aws4auth import AWS4Auth
 
 from requests.exceptions import ConnectionError, SSLError
 
@@ -92,6 +94,12 @@ class E2ETests(unittest.TestCase):
     def setup_authentication(self, auth_type, username, password):
         if auth_type == "basic":
             return (username, password)
+        elif auth_type == "sigv4":
+            session = boto3.Session()
+            credentials = session.get_credentials()
+            aws_auth = AWS4Auth(credentials.access_key, credentials.secret_key, session.region_name, 'es',
+                                session_token=credentials.token)
+            return aws_auth
         return None
 
     def set_common_values(self):

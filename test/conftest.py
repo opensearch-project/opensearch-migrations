@@ -1,6 +1,18 @@
 # conftest.py
 import pytest
 
+import logging
+
+
+def pytest_configure(config):
+    # Configure logging
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S')
+
+    # This line ensures that log messages are displayed on the console during test runs
+    logging.getLogger().setLevel(logging.DEBUG)
+
 
 def pytest_addoption(parser):
     parser.addoption("--proxy_endpoint", action="store", default="https://localhost:9200")
