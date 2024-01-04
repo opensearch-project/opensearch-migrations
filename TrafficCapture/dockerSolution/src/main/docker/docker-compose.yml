@@ -24,14 +24,6 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 
-  # Zipkin
-  zipkin:
-    image: openzipkin/zipkin:latest
-    networks:
-      - migrations
-    ports:
-      - "9411:9411"
-
   # Collector
   otel-collector:
     image: otel/opentelemetry-collector:latest
@@ -50,7 +42,6 @@ services:
       - "4317:4317"   # otlp receiver
     depends_on:
       - jaeger
-      - zipkin
 
   zookeeper:
     image: docker.io/bitnami/zookeeper:3.8
