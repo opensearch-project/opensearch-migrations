@@ -164,7 +164,7 @@ vpc_id=$(aws cloudformation describe-stacks --stack-name opensearch-network-stac
 echo $vpc_id
 
 cdk_context=$(echo "${cdk_context/<VPC_ID>/$vpc_id}")
-cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}}")
+cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:19200}")
 cdk_context=$(echo $cdk_context | jq '@json')
 
 cd ../../deployment/cdk/opensearch-service-migration
