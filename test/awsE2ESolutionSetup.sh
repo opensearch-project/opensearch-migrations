@@ -102,12 +102,12 @@ while [[ $# -gt 0 ]]; do
       ENABLE_CAPTURE_PROXY=true
       shift # past argument
       ;;
-    --git-url)
+    --migrations-git-url)
       MIGRATIONS_GIT_URL="$2"
       shift # past argument
       shift # past value
       ;;
-    --git-branch)
+    --migrations-git-branch)
       MIGRATIONS_GIT_BRANCH="$2"
       shift # past argument
       shift # past value
