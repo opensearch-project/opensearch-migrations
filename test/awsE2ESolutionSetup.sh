@@ -72,7 +72,7 @@ usage() {
   echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy]"
   echo ""
   echo "Options:"
-  echo "  --migrations-git-url                             The Github http url used for pulling the integration tests onto the migration console and building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
+  echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
   echo "  --bootstrap-region                               If included, will attempt to CDK bootstrap the region to allow CDK deployments"
@@ -174,8 +174,3 @@ cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-s
 if [ "$ENABLE_CAPTURE_PROXY" = true ] ; then
   prepare_source_nodes_for_capture $stage
 fi
-
-# Kickoff integration tests
-#task_arn=$(aws ecs list-tasks --cluster migration-${stage}-ecs-cluster --family "migration-${stage}-migration-console" | jq --raw-output '.taskArns[0]')
-#echo "aws ecs execute-command --cluster 'migration-${stage}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
-#aws ecs execute-command --cluster "migration-${stage}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh $MIGRATIONS_GIT_URL $MIGRATIONS_GIT_BRANCH"
