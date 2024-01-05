@@ -52,4 +52,4 @@ done
 # Kickoff integration tests
 task_arn=$(aws ecs list-tasks --cluster migration-${STAGE}-ecs-cluster --family "migration-${STAGE}-migration-console" | jq --raw-output '.taskArns[0]')
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
-aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh $MIGRATIONS_GIT_URL $MIGRATIONS_GIT_BRANCH"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh $MIGRATIONS_GIT_URL $MIGRATIONS_GIT_BRANCH"
