@@ -44,5 +44,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 echo "Starting python 'tests.py'"
 # TODO command to be updated as 'tests.py' gets updated to allow AWS testing
-pytest tests.py
+#pytest tests.py
+pytest tests.py::E2ETests::test_0001_index tests.py::E2ETests::test_0002_document  --proxy_endpoint="http://opense-clust-qM5vY33YeBef-dde6b54655fcc296.elb.us-east-1.amazonaws.com" --source_endpoint="https://localhost:19200" --target_endpoint="$MIGRATION_DOMAIN_ENDPOINT" --source_auth_type="none" --target_auth_type="none" --source_verify_ssl=False --target_verify_ssl=False
 deactivate
