@@ -32,9 +32,18 @@ prepare_source_nodes_for_capture () {
       printf -v group_ids_string '%s ' "${group_ids[@]}"
       aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
     fi
-    echo "Executing ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers on node: $id. Attempting to append output of command: "
-    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers" --output text --query 'Command.CommandId')
-    sleep 5
+    echo "Executing ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH on node: $id"
+    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH" --output text --query 'Command.CommandId')
+    sleep 10
+    command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'Status')
+    # TODO for multi-node setups, we should collect all command ids and allow to run in parallel
+    while [ "$command_status" != "Success" ] && [ "$command_status" != "Failed" ]
+    do
+      echo "Waiting for command to complete, current status is $command_status"
+      sleep 60
+      command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'Status')
+    done
+    echo "Command has completed with status: $command_status, appending output"
     echo "Standard Output:"
     aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'StandardOutputContent'
     echo "Standard Error:"
@@ -60,9 +69,11 @@ usage() {
   echo "an OpenSearch Service Domain as the target cluster, and the Migration infrastructure for simulating a migration from source to target."
   echo ""
   echo "Usage: "
-  echo "  ./awsE2ESolutionSetup.sh [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy]"
+  echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy]"
   echo ""
   echo "Options:"
+  echo "  --migrations-git-url                             The Github http url used for pulling the integration tests onto the migration console and building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
+  echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
   echo "  --bootstrap-region                               If included, will attempt to CDK bootstrap the region to allow CDK deployments"
   echo "  --enable-capture-proxy                           If included, will attempt to enable the capture proxy on all source nodes"
@@ -74,6 +85,9 @@ stage='aws-integ'
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
 ENABLE_CAPTURE_PROXY=false
+MIGRATIONS_GIT_URL='https://github.com/opensearch-project/opensearch-migrations.git'
+MIGRATIONS_GIT_BRANCH='main'
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --create-service-linked-roles)
@@ -87,6 +101,16 @@ while [[ $# -gt 0 ]]; do
     --enable-capture-proxy)
       ENABLE_CAPTURE_PROXY=true
       shift # past argument
+      ;;
+    --git-url)
+      MIGRATIONS_GIT_URL="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --git-branch)
+      MIGRATIONS_GIT_BRANCH="$2"
+      shift # past argument
+      shift # past value
       ;;
     -h|--help)
       usage
@@ -133,7 +157,7 @@ if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
 fi
 # Deploy source cluster on EC2 instances
-cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c captureProxyTarUrl="https://github.com/opensearch-project/opensearch-migrations/releases/download/1.0.0/trafficCaptureProxyServer.x86_64.tar" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
 source_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
 echo $source_endpoint
 vpc_id=$(aws cloudformation describe-stacks --stack-name opensearch-network-stack --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" --output text)
@@ -154,4 +178,4 @@ fi
 # Kickoff integration tests
 #task_arn=$(aws ecs list-tasks --cluster migration-${stage}-ecs-cluster --family "migration-${stage}-migration-console" | jq --raw-output '.taskArns[0]')
 #echo "aws ecs execute-command --cluster 'migration-${stage}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
-#aws ecs execute-command --cluster "migration-${stage}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh https://github.com/opensearch-project/opensearch-migrations.git main"
+#aws ecs execute-command --cluster "migration-${stage}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh $MIGRATIONS_GIT_URL $MIGRATIONS_GIT_BRANCH"
