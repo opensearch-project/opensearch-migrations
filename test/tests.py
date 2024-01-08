@@ -9,7 +9,6 @@ import unittest
 import logging
 import time
 import requests
-import uuid
 import string
 import secrets
 import pytest
@@ -76,7 +75,7 @@ class E2ETests(unittest.TestCase):
     @pytest.fixture(autouse=True)
     def init_fixtures(self, proxy_endpoint, source_endpoint, target_endpoint, source_auth_type, source_username,
                       source_password, target_auth_type, target_username, target_password, target_verify_ssl,
-                      source_verify_ssl):
+                      source_verify_ssl, deployment_type, unique_id):
         self.proxy_endpoint = proxy_endpoint
         self.source_endpoint = source_endpoint
         self.target_endpoint = target_endpoint
@@ -90,6 +89,8 @@ class E2ETests(unittest.TestCase):
         self.target_password = target_password
         self.source_verify_ssl = source_verify_ssl.lower() == 'true'
         self.target_verify_ssl = target_verify_ssl.lower() == 'true'
+        self.deployment_type = deployment_type
+        self.unique_id = unique_id
 
     def setup_authentication(self, auth_type, username, password):
         if auth_type == "basic":
@@ -103,7 +104,7 @@ class E2ETests(unittest.TestCase):
         return None
 
     def set_common_values(self):
-        self.index = f"my_index_{uuid.uuid4()}"
+        self.index = self.unique_id
         self.doc_id = '7'
         self.ignore_list = []
 
@@ -264,16 +265,22 @@ class E2ETests(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
 
     def test_0006_OSB(self):
-        cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name=migration']
-        container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
-
-        if container_id:
-            cmd_exec = f"docker exec {container_id} ./runTestBenchmarks.sh"
-            logger.warning(f"Running command: {cmd_exec}")
+        if self.deployment_type == "cloud":
+            cmd_exec = f"./runTestBenchmarks --unique-id {self.index}"
+            logger.warning(f"Running local command: {cmd_exec}")
             subprocess.run(cmd_exec, shell=True)
         else:
-            logger.error("Migration-console container was not found, please double check that deployment was a success")
-            self.assert_(False)
+            cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name=migration']
+            container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
+
+            if container_id:
+                cmd_exec = f"docker exec {container_id} ./runTestBenchmarks.sh"
+                logger.warning(f"Running command: {cmd_exec}")
+                subprocess.run(cmd_exec, shell=True)
+            else:
+                logger.error("Migration-console container was not found,"
+                             " please double check that deployment was a success")
+                self.assert_(False)
 
         source_indices = get_indices(self.source_endpoint, self.source_auth, self.source_verify_ssl)
         target_indices = get_indices(self.target_endpoint, self.target_auth, self.target_verify_ssl)

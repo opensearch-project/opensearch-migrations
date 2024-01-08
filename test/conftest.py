@@ -22,10 +22,12 @@ def pytest_addoption(parser):
     parser.addoption("--source_verify_ssl", action="store", default="False", choices=["True", "False"])
     parser.addoption("--target_auth_type", action="store", default="basic", choices=["none", "basic", "sigv4"])
     parser.addoption("--target_verify_ssl", action="store", default="False", choices=["True", "False"])
+    parser.addoption("--deployment_type", action="store", default="local", choices=["local", "cloud"])
     parser.addoption("--source_username", action="store", default="admin")
     parser.addoption("--source_password", action="store", default="admin")
     parser.addoption("--target_username", action="store", default="admin")
     parser.addoption("--target_password", action="store", default="admin")
+    parser.addoption("--unique_id", action="store", default="")
 
 
 @pytest.fixture
@@ -81,3 +83,13 @@ def target_verify_ssl(pytestconfig):
 @pytest.fixture
 def source_verify_ssl(pytestconfig):
     return pytestconfig.getoption("source_verify_ssl")
+
+
+@pytest.fixture
+def deployment_type(pytestconfig):
+    return pytestconfig.getoption("deployment_type")
+
+
+@pytest.fixture
+def unique_id(pytestconfig):
+    return pytestconfig.getoption("unique_id")

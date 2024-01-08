@@ -44,4 +44,4 @@ jobs:
         run: |
           cd test
           chmod +x ./tests.py
-          pytest tests.py
+          pytest tests.py --unique_id="testindex"
