@@ -129,7 +129,6 @@ if [ "$CREATE_SLR" = true ] ; then
   create_service_linked_roles
 fi
 
-# TODO allow spaces in CDK context block when passing as CLI param
 # Store CDK context for migration solution deployment in variable
 read -r -d '' cdk_context << EOM
 {
@@ -142,6 +141,7 @@ read -r -d '' cdk_context << EOM
     "mskBrokerNodeCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
+    "trafficReplayerExtraArgs": "--speedup-factor 5",
     "migrationAnalyticsServiceEnabled": false,
     "fetchMigrationEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
@@ -166,6 +166,9 @@ echo $vpc_id
 cdk_context=$(echo "${cdk_context/<VPC_ID>/$vpc_id}")
 cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:19200}")
 cdk_context=$(echo $cdk_context | jq '@json')
+# TODO Further verify space escaping for JSON
+# Escape spaces for CDK JSON parsing to handle
+cdk_context=$(echo "${cdk_context/ /\u0020}")
 
 cd ../../deployment/cdk/opensearch-service-migration
 ./buildDockerImages.sh

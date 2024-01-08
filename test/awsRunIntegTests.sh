@@ -52,12 +52,12 @@ done
 task_arn=$(aws ecs list-tasks --cluster migration-${STAGE}-ecs-cluster --family "migration-${STAGE}-migration-console" | jq --raw-output '.taskArns[0]')
 # Delete and re-create topic
 kafka_brokers=$(aws ssm get-parameter --name "/migration/${STAGE}/default/kafkaBrokers" --query 'Parameter.Value' --output text)
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-topics.sh --bootstrap-server ${kafka_brokers} --delete --topic logging-traffic-topic --command-config kafka-tools/aws/msk-iam-auth.properties"
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-topics.sh --bootstrap-server ${kafka_brokers} --create --topic logging-traffic-topic --command-config kafka-tools/aws/msk-iam-auth.properties"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-topics.sh --bootstrap-server ${kafka_brokers} --delete --topic logging-traffic-topic --command-config kafka-tools/aws/msk-iam-auth.properties && echo 'Done deleting 'logging-traffic-topic'"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-topics.sh --bootstrap-server ${kafka_brokers} --create --topic logging-traffic-topic --command-config kafka-tools/aws/msk-iam-auth.properties && echo 'Done creating 'logging-traffic-topic'"
 
 # Spin up Replayer container and wait set time for service to get started
 aws ecs update-service --cluster migration-aws-integ-ecs-cluster --service migration-aws-integ-traffic-replayer-default --desired-count 1
-sleep 180
+sleep 60
 
 # Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
