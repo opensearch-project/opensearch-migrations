@@ -2,6 +2,8 @@ package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -28,12 +30,14 @@ public class MeteringClosureForStartTimes extends MeteringClosure {
         if (ctx == null) {
             return;
         }
-        meter.histogramBuilder(eventName)
-                .ofLongs()
-                .setUnit(units)
-                .build().record(value, ctx.getPopulatedAttributesBuilder(attributesBuilder)
-                        .put("labelName", eventName)
-                        .build());
+        try (var scope = new NullableExemplarScope(ctx.getCurrentSpan())) {
+            meter.histogramBuilder(eventName)
+                    .ofLongs()
+                    .setUnit(units)
+                    .build().record(value, ctx.getPopulatedAttributesBuilder(attributesBuilder)
+                            .put("labelName", eventName)
+                            .build());
+        }
     }
 
     public void meterHistogramMillis(String eventName, AttributesBuilder attributesBuilder) {
