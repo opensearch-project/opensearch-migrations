@@ -13,6 +13,7 @@ import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.logs.SdkLoggerProvider;
 import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.export.AggregationTemporalitySelector;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
@@ -32,42 +33,31 @@ public class RootOtelContext implements IInstrumentationAttributes, IInstrumentC
                 .put(ResourceAttributes.SERVICE_NAME, serviceName)
                 .build();
 
-        var openTelemetrySdk =
-                OpenTelemetrySdk.builder()
-                        .setLoggerProvider(
-                                SdkLoggerProvider.builder()
-                                        .setResource(serviceResource)
-                                        .addLogRecordProcessor(
-                                                BatchLogRecordProcessor.builder(
-                                                                OtlpGrpcLogRecordExporter.builder()
-                                                                        .setEndpoint(collectorEndpoint)
-                                                                        .build())
-                                                        .build())
-                                        .build())
-                        .setTracerProvider(
-                                SdkTracerProvider.builder()
-                                        .setResource(serviceResource)
-                                        .addSpanProcessor(
-                                                BatchSpanProcessor.builder(
-                                                                OtlpGrpcSpanExporter.builder()
-                                                                        .setEndpoint(collectorEndpoint)
-                                                                        .setTimeout(2, TimeUnit.SECONDS)
-                                                                        .build())
-                                                        .setScheduleDelay(100, TimeUnit.MILLISECONDS)
-                                                        .build())
-                                        .build())
-                        .setMeterProvider(
-                                SdkMeterProvider.builder()
-                                        .setResource(serviceResource)
-                                        .registerMetricReader(
-                                                PeriodicMetricReader.builder(
-                                                                OtlpGrpcMetricExporter.builder()
-                                                                        .setEndpoint(collectorEndpoint)
-                                                                        .build())
-                                                        .setInterval(Duration.ofMillis(1000))
-                                                        .build())
-                                        .build())
-                        .build();
+        final var spanProcessor = BatchSpanProcessor.builder(OtlpGrpcSpanExporter.builder()
+                        .setEndpoint(collectorEndpoint)
+                        .setTimeout(2, TimeUnit.SECONDS)
+                        .build())
+                .setScheduleDelay(100, TimeUnit.MILLISECONDS)
+                .build();
+        final var metricReader = PeriodicMetricReader.builder(OtlpGrpcMetricExporter.builder()
+                        .setEndpoint(collectorEndpoint)
+                        .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
+                        .build())
+                .setInterval(Duration.ofMillis(1000))
+                .build();
+        final var logProcessor = BatchLogRecordProcessor.builder(OtlpGrpcLogRecordExporter.builder()
+                        .setEndpoint(collectorEndpoint)
+                        .build())
+                .build();
+
+        var openTelemetrySdk = OpenTelemetrySdk.builder()
+                .setTracerProvider(SdkTracerProvider.builder().setResource(serviceResource)
+                        .addSpanProcessor(spanProcessor).build())
+                .setMeterProvider(SdkMeterProvider.builder().setResource(serviceResource)
+                        .registerMetricReader(metricReader).build())
+                .setLoggerProvider(SdkLoggerProvider.builder().setResource(serviceResource)
+                        .addLogRecordProcessor(logProcessor).build())
+                .build();
 
         // Add hook to close SDK, which flushes logs
         Runtime.getRuntime().addShutdownHook(new Thread(openTelemetrySdk::close));
