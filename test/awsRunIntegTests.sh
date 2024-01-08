@@ -49,7 +49,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Kickoff integration tests
 task_arn=$(aws ecs list-tasks --cluster migration-${STAGE}-ecs-cluster --family "migration-${STAGE}-migration-console" | jq --raw-output '.taskArns[0]')
+# Delete and re-create topic
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-topics.sh --bootstrap-server $MIGRATION_KAFKA_BROKER_ENDPOINTS --delete --topic logging-traffic-topic --command-config kafka-tools/aws/msk-iam-auth.properties"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-topics.sh  --bootstrap-server $MIGRATION_KAFKA_BROKER_ENDPOINTS --create --topic logging-traffic-topic --command-config kafka-tools/aws/msk-iam-auth.properties"
+
+# Spin up Replayer container and wait set time for service to get started
+aws ecs update-service --cluster migration-aws-integ-ecs-cluster --service migration-aws-integ-traffic-replayer-default --desired-count 1
+sleep 180
+
+# Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh $MIGRATIONS_GIT_URL $MIGRATIONS_GIT_BRANCH"
