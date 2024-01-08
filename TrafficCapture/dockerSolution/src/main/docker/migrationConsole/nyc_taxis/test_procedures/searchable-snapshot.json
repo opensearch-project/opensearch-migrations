@@ -1,0 +1,148 @@
+    {
+      "name": "searchable-snapshot",
+      "description": "Measuring performance for Searchable Snapshot feature. Based on the default test procedure 'append-no-conflicts'.",
+      "schedule": [
+        {
+          "operation": "delete-index"
+        },
+        {
+          "operation": {
+            "operation-type": "create-index",
+            "settings": {%- if index_settings is defined %} {{ index_settings | tojson }} {%- else %} {
+              "index.codec": "best_compression",
+              "index.refresh_interval": "30s",
+              "index.translog.flush_threshold_size": "4g"
+            }{%- endif %}
+          }
+        },
+        {
+          "name": "check-cluster-health",
+          "operation": {
+            "operation-type": "cluster-health",
+            "index": "nyc_taxis",
+            "request-params": {
+              "wait_for_status": "{{ cluster_health | default('green') }}",
+              "wait_for_no_relocating_shards": "true"
+            },
+            "retry-until-success": true
+          }
+        },
+        {
+          "operation": "index",
+          "warmup-time-period": 240,
+          "clients": {{ bulk_indexing_clients | default(8) }},
+          "ignore-response-error-level": "{{ error_level | default('non-fatal') }}"
+        },
+        {
+          "name": "refresh-after-index",
+          "operation": "refresh"
+        },
+        {
+          "operation": {
+            "operation-type": "force-merge",
+            "request-timeout": 7200
+            {%- if force_merge_max_num_segments is defined %},
+            "max-num-segments": {{ force_merge_max_num_segments | tojson }}
+            {%- endif %}
+          }
+        },
+        {
+          "name": "refresh-after-force-merge",
+          "operation": "refresh"
+        },
+        {
+          "operation": "wait-until-merges-finish"
+        },
+        {
+          "operation": "create-snapshot-repository"
+        },
+        {
+          "operation": "delete-snapshot"
+        },
+        {
+          "operation": "create-snapshot"
+        },
+        {
+          "operation": "wait-for-snapshot-creation"
+        },
+        {
+          "operation": {
+            "name": "delete-local-index",
+            "operation-type": "delete-index"
+          }
+        },
+        {
+          "operation": "restore-snapshot"
+        },
+        {
+          "operation": "default",
+          "warmup-iterations": 50,
+          "iterations": 100
+          {%- if not target_throughput %}
+          ,"target-throughput": 3
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%-if search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "range",
+          "warmup-iterations": 50,
+          "iterations": 100
+          {%- if not target_throughput %}
+          ,"target-throughput": 0.7
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%-if search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "distance_amount_agg",
+          "warmup-iterations": 50,
+          "iterations": 50
+          {%- if not target_throughput %}
+          ,"target-throughput": 2
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%-if search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "autohisto_agg",
+          "warmup-iterations": 50,
+          "iterations": 100
+          {%- if not target_throughput %}
+          ,"target-throughput": 1.5
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%-if search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "date_histogram_agg",
+          "warmup-iterations": 50,
+          "iterations": 100
+          {%- if not target_throughput %}
+          ,"target-throughput": 1.5
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%-if search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        }
+      ]
+    }

@@ -10,6 +10,11 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 COPY runTestBenchmarks.sh /root/
+COPY geonames /root/geonames/
+COPY http_logs /root/http_logs/
+COPY nested /root/nested/
+COPY nyc_taxis /root/nyc_taxis/
+COPY UniqueIDBenchmarkRunner.sh /root/
 COPY humanReadableLogs.py /root/
 COPY catIndices.sh /root/
 COPY showFetchMigrationCommand.sh /root/
@@ -20,6 +25,7 @@ RUN chmod ug+x /root/runTestBenchmarks.sh
 RUN chmod ug+x /root/humanReadableLogs.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
+RUN chmod ug+x /root/UniqueIDBenchmarkRunner.sh
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
 RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz

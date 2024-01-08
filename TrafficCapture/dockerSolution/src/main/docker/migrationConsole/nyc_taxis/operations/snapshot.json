@@ -1,0 +1,48 @@
+    {
+      "name": "create-snapshot-repository",
+      "operation-type": "create-snapshot-repository",
+      "repository": "{{ snapshot_repository_name | default('test-repository') }}",
+      "body": {
+        "type": "s3",
+        "settings": {
+          "bucket": "{{ s3_bucket_name }}",
+          "region": "{{ s3_bucket_region }}"
+        }
+      }
+    },
+    {
+      "name": "delete-snapshot",
+      "operation-type": "delete-snapshot",
+      "repository": "{{ snapshot_repository_name | default('test-repository') }}",
+      "snapshot": "{{ snapshot_name | default('test-snapshot') }}",
+      "include-in-reporting": false
+    },
+    {
+      "name": "create-snapshot",
+      "operation-type": "create-snapshot",
+      "repository": "{{ snapshot_repository_name | default('test-repository') }}",
+      "snapshot": "{{ snapshot_name | default('test-snapshot') }}",
+      "body": {
+        "indices": ["nyc_taxis"]
+      }
+    },
+    {
+      "name": "wait-for-snapshot-creation",
+      "operation-type": "wait-for-snapshot-create",
+      "repository": "{{ snapshot_repository_name | default('test-repository') }}",
+      "snapshot": "{{ snapshot_name | default('test-snapshot') }}"
+    },
+    {
+      "name": "restore-snapshot",
+      "operation-type": "restore-snapshot",
+      "repository": "test-repository",
+      "snapshot": "{{ snapshot_name | default('test-snapshot') }}",
+      "body": {
+        "indices": ["nyc_taxis"],
+        "storage_type": "remote_snapshot"
+      },
+      "wait-for-completion": true,
+      "request-params": {
+        "request_timeout": 3600
+      }
+    }

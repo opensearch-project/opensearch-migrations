@@ -1,0 +1,33 @@
+{% import "benchmark.helpers" as benchmark with context %}
+
+{
+  "version": 2,
+  "description": "Taxi rides in New York in 2015",
+  "indices": [
+    {
+      "name": "testIDnyc_taxis",
+      "body": "index.json"
+    }
+  ],
+  "corpora": [
+    {
+      "name": "nyc_taxis",
+      "base-url": "https://dbyiw3u3rf9yr.cloudfront.net/corpora/nyc_taxis",
+      "documents": [
+        {
+          "source-file": "documents.json.bz2",
+          "#COMMENT": "ML benchmark rely on the fact that the document count stays constant.",
+          "document-count": 165346692,
+          "compressed-bytes": 4820107188,
+          "uncompressed-bytes": 79802445255
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {{ benchmark.collect(parts="operations/*.json") }}
+  ],
+  "test_procedures": [
+    {{ benchmark.collect(parts="test_procedures/*.json") }}
+  ]
+}

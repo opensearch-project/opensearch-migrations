@@ -58,10 +58,10 @@ client_options="${base_options_string}${auth_string}"
 
 echo "Running opensearch-benchmark workloads against ${endpoint}"
 echo "Running opensearch-benchmark w/ 'geonames' workload..." &&
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload=geonames --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options=$client_options &&
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload-path=geonames/workload.json --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options=$client_options &&
 echo "Running opensearch-benchmark w/ 'http_logs' workload..." &&
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload=http_logs --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1" --client-options=$client_options &&
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload-path=http_logs/workload.json --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1" --client-options=$client_options &&
 echo "Running opensearch-benchmark w/ 'nested' workload..." &&
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload=nested --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options=$client_options &&
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload-path=nested/workload.json --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options=$client_options &&
 echo "Running opensearch-benchmark w/ 'nyc_taxis' workload..." &&
-opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options=$client_options
+opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload-path=nyc_taxis/workload.json --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"  --client-options=$client_options

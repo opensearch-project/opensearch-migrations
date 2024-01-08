@@ -1,0 +1,235 @@
+    {
+      "name": "nested-search-test-procedure",
+      "description": "Indexes the document corpus for an hour using OpenSearch default settings. After that randomized nested queries are run.",
+      "default": true,
+      "schedule": [
+        {
+          "operation": "delete-index"
+        },
+        {
+          "operation": {
+            "operation-type": "create-index",
+            "settings": {{index_settings | default({}) | tojson}}
+          }
+        },
+        {
+          "name": "check-cluster-health",
+          "operation": {
+            "operation-type": "cluster-health",
+            "index": "testIDsonested",
+            "request-params": {
+              "wait_for_status": "{{cluster_health | default('green')}}",
+              "wait_for_no_relocating_shards": "true"
+            },
+            "retry-until-success": true
+          }
+        },
+       {
+          "operation": "index-append",
+          "warmup-time-period": 120,
+          "time-period": 3600,
+          "clients": {{bulk_indexing_clients | default(4)}},
+          "ignore-response-error-level": "{{error_level | default('non-fatal')}}"
+        },
+        {
+          "name": "refresh-after-index",
+          "operation": "refresh"
+        },
+        {
+          "operation": {
+            "operation-type": "force-merge",
+            "request-timeout": 7200
+          }
+        },
+        {
+          "name": "refresh-after-force-merge",
+          "operation": "refresh"
+        },
+        {
+          "name": "wait-until-merges-finish",
+          "operation": {
+            "operation-type": "index-stats",
+            "index": "_all",
+            "condition": {
+              "path": "_all.total.merges.current",
+              "expected-value": 0
+            },
+            "retry-until-success": true,
+            "include-in-reporting": false
+          }
+        },
+        {
+          "operation": "randomized-nested-queries",
+          "warmup-iterations": 500,
+          "iterations": 1000
+          {%- if not target_throughput %}
+          ,"target-throughput": 20
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%- if not search_clients %}
+          ,"clients": 2
+          {%- elif search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "randomized-term-queries",
+          "warmup-iterations": 500,
+          "iterations": 200
+          {%- if not target_throughput %}
+          ,"target-throughput": 25
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%- if not search_clients %}
+          ,"clients": 2
+          {%- elif search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "randomized-sorted-term-queries",
+          "warmup-iterations": 500,
+          "iterations": 200
+          {%- if not target_throughput %}
+          ,"target-throughput": 16
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%- if not search_clients %}
+          ,"clients": 2
+          {%- elif search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "match-all",
+          "warmup-iterations": 500,
+          "iterations": 200
+          {%- if not target_throughput %}
+          ,"target-throughput": 5
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%- if not search_clients %}
+          ,"clients": 2
+          {%- elif search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "nested-date-histo",
+          "warmup-iterations": 100,
+          "iterations": 200
+          {%- if not target_throughput %}
+          ,"target-throughput": 1
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%- if not search_clients %}
+          ,"clients": 2
+          {%- elif search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "randomized-nested-queries-with-inner-hits_default",
+          "warmup-iterations": 500,
+          "iterations": 1000
+          {%- if not target_throughput %}
+          ,"target-throughput": 18
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%- if not search_clients %}
+          ,"clients": 2
+          {%- elif search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        },
+        {
+          "operation": "randomized-nested-queries-with-inner-hits_default_big_size",
+          "warmup-iterations": 500,
+          "iterations": 1000
+          {%- if not target_throughput %}
+          ,"target-throughput": 16
+          {%- elif target_throughput is string and target_throughput.lower() == 'none' %}
+          {%- else %}
+          ,"target-throughput": {{ target_throughput | tojson }}
+          {%- endif %}
+          {%- if not search_clients %}
+          ,"clients": 2
+          {%- elif search_clients is defined and search_clients %}
+          ,"clients": {{ search_clients | tojson}}
+          {%- endif %}
+        }
+      ]
+    },
+    {
+      "name": "index-only",
+      "description": "Indexes the document corpus for an hour using OpenSearch default settings.",
+      "schedule": [
+        {
+          "operation": "delete-index"
+        },
+        {
+          "operation": {
+            "operation-type": "create-index",
+            "settings": {{index_settings | default({}) | tojson}}
+          }
+        },
+        {
+          "name": "check-cluster-health",
+          "operation": {
+            "operation-type": "cluster-health",
+            "index": "testIDsonested",
+            "request-params": {
+              "wait_for_status": "{{cluster_health | default('green')}}",
+              "wait_for_no_relocating_shards": "true"
+            },
+            "retry-until-success": true
+          }
+        },
+        {
+          "operation": "index-append",
+          "warmup-time-period": 120,
+          "time-period": 3600,
+          "clients": {{bulk_indexing_clients | default(4)}},
+          "ignore-response-error-level": "{{error_level | default('non-fatal')}}"
+        },
+        {
+        "name": "refresh-after-index",
+        "operation": "refresh"
+        },
+        {
+          "operation": {
+            "operation-type": "force-merge",
+            "request-timeout": 7200
+          }
+        },
+        {
+          "name": "refresh-after-force-merge",
+          "operation": "refresh"
+        },
+        {
+          "name": "wait-until-merges-finish",
+          "operation": {
+            "operation-type": "index-stats",
+            "index": "_all",
+            "condition": {
+              "path": "_all.total.merges.current",
+              "expected-value": 0
+            },
+            "retry-until-success": true,
+            "include-in-reporting": false
+          }
+        }
+      ]
+    }

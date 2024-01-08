@@ -1,0 +1,176 @@
+{% import "benchmark.helpers" as benchmark with context %}
+
+{% set index_body = 'index.json' %}
+
+
+{
+  "version": 2,
+  "description": "HTTP server log data",
+  "#TODO": "Replace index definitions with a template after setting the workload version to 2. Explicit index definitions are not necessary anymore.",
+  "indices": [
+    {%- if generated_corpus is defined %}
+      {{ benchmark.collect(parts="gen-idx-*.json") }}
+    {%- else %}
+      {
+	"name": "testIDlogs-181998",
+	"body": "{{ index_body }}"
+      },
+      {
+	"name": "testIDlogs-191998",
+	"body": "{{ index_body }}"
+      },
+      {
+	"name": "testIDlogs-201998",
+	"body": "{{ index_body }}"
+      },
+      {
+	"name": "testIDlogs-211998",
+	"body": "{{ index_body }}"
+      },
+      {
+	"name": "testIDlogs-221998",
+	"body": "{{ index_body }}"
+      },
+      {
+	"name": "testIDlogs-231998",
+	"body": "{{ index_body }}"
+      },
+      {
+	"name": "testIDlogs-241998",
+	"body": "{{ index_body }}"
+      },
+      {
+	"name": "testIDreindexed-logs",
+	"body": "{{ index_body }}"
+      }
+    {%- endif %}
+  ],
+  "corpora": [
+      {%- if generated_corpus is defined %}
+        {
+          "name": "http_logs",
+          "documents": [
+            {{ benchmark.collect(parts="gen-docs-*.json") }}
+          ]
+        }
+      {%- elif ingest_pipeline is defined and ingest_pipeline == "grok" %}
+        {
+          "name": "http_logs_unparsed",
+          "base-url": "https://dbyiw3u3rf9yr.cloudfront.net/corpora/http_logs",
+          "documents": [
+          {
+            "target-index": "testIDlogs-181998",
+            "source-file": "documents-181998.unparsed.json.bz2",
+            "document-count": 2708746,
+            "compressed-bytes": 13088137,
+            "uncompressed-bytes": 303920342
+          },
+          {
+            "target-index": "testIDlogs-191998",
+            "source-file": "documents-191998.unparsed.json.bz2",
+            "document-count": 9697882,
+            "compressed-bytes": 47290776,
+            "uncompressed-bytes": 1088378738
+          },
+          {
+            "target-index": "testIDlogs-201998",
+            "source-file": "documents-201998.unparsed.json.bz2",
+            "document-count": 13053463,
+            "compressed-bytes": 63278452,
+            "uncompressed-bytes": 1456836090
+          },
+          {
+            "target-index": "testIDlogs-211998",
+            "source-file": "documents-211998.unparsed.json.bz2",
+            "document-count": 17647279,
+            "compressed-bytes": 85739523,
+            "uncompressed-bytes": 1975990671
+          },
+          {
+            "target-index": "testIDlogs-221998",
+            "source-file": "documents-221998.unparsed.json.bz2",
+            "document-count": 10716760,
+            "compressed-bytes": 53264421,
+            "uncompressed-bytes": 1202551382
+          },
+          {
+            "target-index": "testIDlogs-231998",
+            "source-file": "documents-231998.unparsed.json.bz2",
+            "document-count": 11961342,
+            "compressed-bytes": 60795929,
+            "uncompressed-bytes": 1334381144
+          },
+          {
+            "target-index": "testIDlogs-241998",
+            "source-file": "documents-241998.unparsed.json.bz2",
+            "document-count": 181463624,
+            "compressed-bytes": 899190175,
+            "uncompressed-bytes": 20563705716
+          }
+        ]
+      }
+    {%- else %}
+      {
+        "name": "http_logs",
+        "base-url": "https://dbyiw3u3rf9yr.cloudfront.net/corpora/http_logs",
+        "documents": [
+          {
+            "target-index": "testIDlogs-181998",
+            "source-file": "documents-181998.json.bz2",
+            "document-count": 2708746,
+            "compressed-bytes": 13843641,
+            "uncompressed-bytes": 363512754
+          },
+          {
+            "target-index": "testIDlogs-191998",
+            "source-file": "documents-191998.json.bz2",
+            "document-count": 9697882,
+            "compressed-bytes": 49546887,
+            "uncompressed-bytes": 1301732149
+          },
+          {
+            "target-index": "testIDlogs-201998",
+            "source-file": "documents-201998.json.bz2",
+            "document-count": 13053463,
+            "compressed-bytes": 65759419,
+            "uncompressed-bytes": 1744012279
+          },
+          {
+            "target-index": "testIDlogs-211998",
+            "source-file": "documents-211998.json.bz2",
+            "document-count": 17647279,
+            "compressed-bytes": 88445049,
+            "uncompressed-bytes": 2364230815
+          },
+          {
+            "target-index": "testIDlogs-221998",
+            "source-file": "documents-221998.json.bz2",
+            "document-count": 10716760,
+            "compressed-bytes": 54274027,
+            "uncompressed-bytes": 1438320123
+          },
+          {
+            "target-index": "testIDlogs-231998",
+            "source-file": "documents-231998.json.bz2",
+            "document-count": 11961342,
+            "compressed-bytes": 61043842,
+            "uncompressed-bytes": 1597530673
+          },
+          {
+            "target-index": "testIDlogs-241998",
+            "source-file": "documents-241998.json.bz2",
+            "document-count": 181463624,
+            "compressed-bytes": 907295259,
+            "uncompressed-bytes": 24555905444
+          }
+        ]
+      }
+    {%- endif %}
+  ],
+  "operations": [
+    {{ benchmark.collect(parts="operations/*.json") }}
+  ],
+  "test_procedures": [
+    {{ benchmark.collect(parts="test_procedures/*.json") }}
+  ]
+}

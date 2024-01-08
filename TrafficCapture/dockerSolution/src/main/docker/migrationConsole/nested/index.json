@@ -1,0 +1,46 @@
+{
+  "settings": {
+    "index.number_of_shards": {{number_of_shards | default(1)}},
+    "index.number_of_replicas": {{number_of_replicas | default(0)}},
+    "index.store.type": "{{store_type | default('fs')}}",
+    "index.queries.cache.enabled": {{query_cache_enabled | default(false) | tojson}},
+    "index.requests.cache.enable": {{requests_cache_enabled | default(false | tojson)}}
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "_source": {
+      "enabled": {{ source_enabled | default(true) | tojson }}
+    },
+    "properties": {
+      "user": {
+        "type": "keyword"
+      },
+      "creationDate": {
+        "type": "date"
+      },
+      "title": {
+        "type": "text"
+      },
+      "qid": {
+        "type": "keyword"
+      },
+      "tag": {
+        "type": "keyword"
+      },
+      "answer_count": {
+        "type": "integer"
+      },
+      "answers": {
+        "type": "nested",
+        "properties": {
+          "user": {
+            "type": "keyword"
+          },
+          "date": {
+            "type": "date"
+          }
+        }
+      }
+    }
+  }
+}
