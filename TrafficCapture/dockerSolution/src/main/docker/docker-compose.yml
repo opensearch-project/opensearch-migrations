@@ -27,12 +27,12 @@ services:
   # Collector
   otel-collector:
     image: otel/opentelemetry-collector:latest
-#    command: ["--config=/etc/otel-collector-config-demo.yaml", "${OTELCOL_ARGS}"]
+#    command: ["--config=/etc/otel-collector-config.yaml", "${OTELCOL_ARGS}"]
     networks:
       - migrations
     volumes:
-#      - ./otel-collector-config-demo.yaml:/etc/otel-collector-config-demo.yaml
-      - ./otel-collector-config-demo.yaml:/etc/otelcol/config.yaml
+#      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml
     ports:
       - "1888:1888"   # pprof extension
       - "8888:8888"   # Prometheus metrics exposed by the collector

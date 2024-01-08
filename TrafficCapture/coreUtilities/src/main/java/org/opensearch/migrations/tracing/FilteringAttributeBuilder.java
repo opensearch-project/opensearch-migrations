@@ -9,6 +9,9 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.function.Predicate;
 
+/**
+ * The use-case of filtering attributes in instruments might be better to implement via views.
+ */
 @Getter
 public class FilteringAttributeBuilder implements AttributesBuilder {
     private AttributesBuilder underlyingBuilder;

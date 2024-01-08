@@ -78,6 +78,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         Instant startTime;
 
         public StreamManager(IConnectionContext ctx, String connectionId) {
+            // TODO - add https://opentelemetry.io/blog/2022/instrument-kafka-clients/
             this.telemetryContext = ctx;
             ctx.meterIncrementEvent("offloader_created");
             telemetryContext.meterDeltaEvent("offloaders_active", 1);

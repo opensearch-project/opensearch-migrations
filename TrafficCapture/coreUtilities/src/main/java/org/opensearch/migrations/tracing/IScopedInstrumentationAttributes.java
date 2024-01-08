@@ -30,4 +30,8 @@ public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttri
         endSpan();
         sendMeterEventsForEnd();
     }
+
+    default void addException(Exception e) {
+        getCurrentSpan().recordException(e);
+    }
 }
