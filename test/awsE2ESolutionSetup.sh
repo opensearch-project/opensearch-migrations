@@ -169,6 +169,7 @@ cdk_context=$(echo $cdk_context | jq '@json')
 # TODO Further verify space escaping for JSON
 # Escape spaces for CDK JSON parsing to handle
 cdk_context=$(echo "${cdk_context/ /\u0020}")
+echo $cdk_context
 
 cd ../../deployment/cdk/opensearch-service-migration
 ./buildDockerImages.sh
