@@ -69,11 +69,12 @@ usage() {
   echo "an OpenSearch Service Domain as the target cluster, and the Migration infrastructure for simulating a migration from source to target."
   echo ""
   echo "Usage: "
-  echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy]"
+  echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--stage] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy]"
   echo ""
   echo "Options:"
   echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
+  echo "  --stage                                          The stage name to use for naming/grouping of AWS deployment resources, default is 'aws-integ'."
   echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
   echo "  --bootstrap-region                               If included, will attempt to CDK bootstrap the region to allow CDK deployments"
   echo "  --enable-capture-proxy                           If included, will attempt to enable the capture proxy on all source nodes"
@@ -81,7 +82,7 @@ usage() {
   exit 1
 }
 
-stage='aws-integ'
+STAGE='aws-integ'
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
 ENABLE_CAPTURE_PROXY=false
@@ -112,6 +113,11 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --stage)
+      STAGE="$2"
+      shift # past argument
+      shift # past value
+      ;;
     -h|--help)
       usage
       ;;
@@ -132,7 +138,7 @@ fi
 # Store CDK context for migration solution deployment in variable
 read -r -d '' cdk_context << EOM
 {
-    "stage": "$stage",
+    "stage": "$STAGE",
     "vpcId": "<VPC_ID>",
     "engineVersion": "OS_2.9",
     "domainName": "opensearch-cluster-aws-integ",
@@ -176,5 +182,5 @@ cd ../../deployment/cdk/opensearch-service-migration
 npm install
 cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
 if [ "$ENABLE_CAPTURE_PROXY" = true ] ; then
-  prepare_source_nodes_for_capture $stage
+  prepare_source_nodes_for_capture "$STAGE"
 fi

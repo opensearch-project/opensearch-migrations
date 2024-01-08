@@ -58,7 +58,8 @@ unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --ta
 echo "Done creating 'logging-traffic-topic'"
 
 # Spin up Replayer container and wait set time for service to get started
-aws ecs update-service --cluster migration-aws-integ-ecs-cluster --service migration-aws-integ-traffic-replayer-default --desired-count 1
+aws ecs update-service --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default" --desired-count 1
+# TODO: Poll with AWS CLI call till service is running
 sleep 60
 
 # Kickoff integration tests
