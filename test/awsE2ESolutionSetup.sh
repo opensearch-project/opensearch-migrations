@@ -159,7 +159,7 @@ done
 
 if [ "$RUN_POST_ACTIONS" = true ] ; then
   restore_and_record "$STAGE"
-  exit 1
+  exit 0
 fi
 
 if [ "$CREATE_SLR" = true ] ; then
