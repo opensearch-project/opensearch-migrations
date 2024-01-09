@@ -173,7 +173,7 @@ read -r -d '' cdk_context << EOM
     "mskBrokerNodeCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
-    "trafficReplayerExtraArgs": "--speedup-factor 5",
+    "trafficReplayerExtraArgs": "--speedup-factor 100.0",
     "migrationAnalyticsServiceEnabled": false,
     "fetchMigrationEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
