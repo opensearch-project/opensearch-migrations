@@ -51,6 +51,26 @@ prepare_source_nodes_for_capture () {
   done
 }
 
+restore_and_record () {
+  deploy_stage=$1
+  source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
+  source_endpoint="http://${source_lb_endpoint}:19200"
+  target_endpoint=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/osClusterEndpoint" --query 'Parameter.Value' --output text)
+  kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/kafkaBrokers" --query 'Parameter.Value' --output text)
+  console_task_arn=$(aws ecs list-tasks --cluster migration-${deploy_stage}-ecs-cluster --family "migration-${deploy_stage}-migration-console" | jq --raw-output '.taskArns[0]')
+
+  # Print final doc counts and Kafka topic status
+  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source_endpoint $source_endpoint --source_no_auth --target_no_auth"
+  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${kafka_brokers} --timeout 100000 --describe --group logging-group-default --command-config kafka-tools/aws/msk-iam-auth.properties"
+
+  # Remove all non-system indices
+  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${source_endpoint}/*,-.*,-searchguard*,-sg7*"
+  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${target_endpoint}/*,-.*"
+
+  # Turn off Replayer
+  aws ecs update-service --cluster "migration-${deploy_stage}-ecs-cluster" --service "migration-${deploy_stage}-traffic-replayer-default" --desired-count 0
+}
+
 # One-time required service-linked-role creation for AWS accounts which do not have these roles
 create_service_linked_roles () {
   aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com
@@ -69,12 +89,13 @@ usage() {
   echo "an OpenSearch Service Domain as the target cluster, and the Migration infrastructure for simulating a migration from source to target."
   echo ""
   echo "Usage: "
-  echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--stage] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy]"
+  echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--stage] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy] [--run-post-actions]"
   echo ""
   echo "Options:"
   echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --stage                                          The stage name to use for naming/grouping of AWS deployment resources, default is 'aws-integ'."
+  echo "  --run-post-actions                               Flag to enable only running post test actions for cleaning up and recording a test run."
   echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
   echo "  --bootstrap-region                               If included, will attempt to CDK bootstrap the region to allow CDK deployments"
   echo "  --enable-capture-proxy                           If included, will attempt to enable the capture proxy on all source nodes"
@@ -83,6 +104,7 @@ usage() {
 }
 
 STAGE='aws-integ'
+RUN_POST_ACTIONS=false
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
 ENABLE_CAPTURE_PROXY=false
@@ -97,6 +119,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bootstrap-region)
       BOOTSTRAP_REGION=true
+      shift # past argument
+      ;;
+    --run-post-actions)
+      RUN_POST_ACTIONS=true
       shift # past argument
       ;;
     --enable-capture-proxy)
@@ -130,6 +156,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [ "$RUN_POST_ACTIONS" = true ] ; then
+  restore_and_record "$STAGE"
+  exit 1
+fi
 
 if [ "$CREATE_SLR" = true ] ; then
   create_service_linked_roles
