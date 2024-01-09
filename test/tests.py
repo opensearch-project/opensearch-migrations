@@ -110,15 +110,23 @@ class E2ETests(unittest.TestCase):
 
     def setUp(self):
         self.set_common_values()
-        retry_request(delete_index, args=(self.proxy_endpoint, self.index, self.source_auth, self.source_verify_ssl),
+        retry_request(delete_index, args=(self.source_endpoint, self.index, self.source_auth, self.source_verify_ssl),
                       expected_status_code=HTTPStatus.NOT_FOUND)
-        retry_request(delete_document, args=(self.proxy_endpoint, self.index, self.doc_id, self.source_auth,
+        retry_request(delete_document, args=(self.source_endpoint, self.index, self.doc_id, self.source_auth,
                                              self.source_verify_ssl),
+                      expected_status_code=HTTPStatus.NOT_FOUND)
+        retry_request(delete_index, args=(self.target_endpoint, self.index, self.target_auth, self.target_verify_ssl),
+                      expected_status_code=HTTPStatus.NOT_FOUND)
+        retry_request(delete_document, args=(self.target_endpoint, self.index, self.doc_id, self.target_auth,
+                                         self.target_verify_ssl),
                       expected_status_code=HTTPStatus.NOT_FOUND)
 
     def tearDown(self):
-        delete_index(self.proxy_endpoint, self.index, self.source_auth, self.source_verify_ssl)
-        delete_document(self.proxy_endpoint, self.index, self.doc_id, self.source_auth, self.source_verify_ssl)
+        # TODO can't I just delete the index?
+        delete_index(self.source_endpoint, self.index, self.source_auth, self.source_verify_ssl)
+        delete_document(self.source_endpoint, self.index, self.doc_id, self.source_auth, self.source_verify_ssl)
+        delete_index(self.target_endpoint, self.index, self.target_auth, self.target_verify_ssl)
+        delete_document(self.target_endpoint, self.index, self.doc_id, self.target_auth, self.target_verify_ssl)
 
     def test_0001_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
