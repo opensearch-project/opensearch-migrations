@@ -57,6 +57,13 @@ echo "Done deleting 'logging-traffic-topic'"
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-topics.sh --bootstrap-server ${kafka_brokers} --create --topic logging-traffic-topic --command-config kafka-tools/aws/msk-iam-auth.properties"
 echo "Done creating 'logging-traffic-topic'"
 
+# Remove all non-system indices
+source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
+source_endpoint="http://${source_lb_endpoint}:19200"
+target_endpoint=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/osClusterEndpoint" --query 'Parameter.Value' --output text)
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${source_endpoint}/*,-.*,-searchguard*,-sg7*"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${target_endpoint}/*,-.*"
+
 # Spin up Replayer container and wait set time for service to get started
 aws ecs update-service --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default" --desired-count 1
 # TODO: Poll with AWS CLI call till service is running
