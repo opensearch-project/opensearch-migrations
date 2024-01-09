@@ -104,7 +104,7 @@ class E2ETests(unittest.TestCase):
         return None
 
     def set_common_values(self):
-        self.index = self.unique_id
+        self.index = f"test_index_{self.unique_id}"
         self.doc_id = '7'
         self.ignore_list = []
 
@@ -266,7 +266,7 @@ class E2ETests(unittest.TestCase):
 
     def test_0006_OSB(self):
         if self.deployment_type == "cloud":
-            cmd_exec = f"./runTestBenchmarks --unique-id {self.index}"
+            cmd_exec = f"/root/runTestBenchmarks.sh --unique-id {self.unique_id}"
             logger.warning(f"Running local command: {cmd_exec}")
             subprocess.run(cmd_exec, shell=True)
         else:

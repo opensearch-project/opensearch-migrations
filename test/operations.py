@@ -2,13 +2,13 @@ import requests
 import json
 
 
-def create_index(endpoint: str, index_name: str, auth, verify_ssl: bool = False, protocol: str = 'https'):
+def create_index(endpoint: str, index_name: str, auth, verify_ssl: bool = False):
     response = requests.put(f'{endpoint}/{index_name}', auth=auth, verify=verify_ssl)
 
     return response
 
 
-def check_index(endpoint: str, index_name: str, auth, verify_ssl: bool = False, protocol: str = 'https'):
+def check_index(endpoint: str, index_name: str, auth, verify_ssl: bool = False):
     response = requests.get(f'{endpoint}/{index_name}', auth=auth, verify=verify_ssl)
 
     return response
