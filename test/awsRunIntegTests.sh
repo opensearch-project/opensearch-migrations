@@ -67,10 +67,10 @@ unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --ta
 echo "Clearing non-system target indices"
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${target_endpoint}/*,-.*"
 
-# Spin up Replayer container and wait set time for service to get started
+# Spin up Replayer container and wait for service to be stable
 aws ecs update-service --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default" --desired-count 1
-# TODO: Poll with AWS CLI call till service is running
-sleep 60
+echo "Waiting for Replayer to be stable..."
+aws ecs wait services-stable --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default"
 
 # Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
