@@ -25,6 +25,7 @@ import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSe
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
@@ -303,7 +304,8 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
-        var rootContext = new RootOtelContext(params.otelCollectorEndpoint, "capture");
+        var rootContext = new RootWireLoggingContext(
+                RootOtelContext.initializeOpenTelemetry(params.otelCollectorEndpoint, "capture"));
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),

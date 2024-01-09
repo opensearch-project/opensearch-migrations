@@ -1,6 +1,7 @@
 package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
@@ -22,9 +23,13 @@ public class MeteringClosure {
         if (ctx == null) {
             return;
         }
+        meterIncrementEvent(eventName, increment, meter.counterBuilder(eventName).build(), attributesBuilder);
+    }
+
+    public void meterIncrementEvent(String eventName, long increment, LongCounter c,
+                                    AttributesBuilder attributesBuilder) {
         try (var scope = new NullableExemplarScope(ctx.getCurrentSpan())) {
-            meter.counterBuilder(eventName)
-                    .build().add(increment, ctx.getPopulatedAttributesBuilder(attributesBuilder)
+            c.add(increment, ctx.getPopulatedAttributesBuilder(attributesBuilder)
                             .put("labelName", eventName)
                             .build());
         }

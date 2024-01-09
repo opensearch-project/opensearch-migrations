@@ -22,6 +22,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
+import org.opensearch.migrations.trafficcapture.tracing.IRootOffloaderContext;
+import org.opensearch.migrations.trafficcapture.tracing.RootOffloaderContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,7 +46,6 @@ public class KafkaCaptureFactoryTest {
     private Producer<String, byte[]> mockProducer;
     private String connectionId = "0242c0fffea82008-0000000a-00000003-62993a3207f92af6-9093ce33";
     private String topic = "test_topic";
-
 
     @Test
     public void testLargeRequestIsWithinKafkaMessageSizeLimit() throws IOException, ExecutionException, InterruptedException {
@@ -77,7 +78,7 @@ public class KafkaCaptureFactoryTest {
     }
 
     private static ConnectionContext createCtx() {
-        return new ConnectionContext(new RootOtelContext(), "test", "test");
+        return new ConnectionContext(new RootOffloaderContext(null), "test", "test");
     }
 
     /**

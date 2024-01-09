@@ -4,8 +4,6 @@ import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.opentelemetry.api.metrics.Meter;
-import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.sdk.testing.junit5.OpenTelemetryExtension;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -17,11 +15,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWrapper;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -46,6 +44,12 @@ import java.util.stream.Stream;
 public class ConditionallyReliableLoggingHttpHandlerTest {
     @RegisterExtension
     static final OpenTelemetryExtension otelTesting = OpenTelemetryExtension.create();
+
+    private static class TestRootContext extends RootWireLoggingContext {
+        public TestRootContext() {
+            super(otelTesting.getOpenTelemetry());
+        }
+    }
 
     static class TestStreamManager extends OrderedStreamLifecyleManager implements AutoCloseable {
         AtomicReference<ByteBuffer> byteBufferAtomicReference = new AtomicReference<>();
@@ -78,10 +82,9 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         }
     }
 
-
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter)
             throws IOException {
-        var rootInstrumenter = new RootOtelContext(otelTesting.getOpenTelemetry());
+        var rootInstrumenter = new TestRootContext();
         var streamManager = new TestStreamManager();
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "c", streamManager);
 
@@ -155,7 +158,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     @Test
     @ValueSource(booleans = {false, true})
     public void testThatSuppressedCaptureWorks() throws Exception {
-        var rootInstrumenter = new RootOtelContext();
+        var rootInstrumenter = new TestRootContext();
         var streamMgr = new TestStreamManager();
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
 
@@ -180,7 +183,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testThatHealthCheckCaptureCanBeSuppressed(boolean singleBytes) throws Exception {
-        var rootInstrumenter = new RootOtelContext();
+        var rootInstrumenter = new TestRootContext();
         var streamMgr = new TestStreamManager();
         var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
 

@@ -12,6 +12,7 @@ import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 
 import javax.net.ssl.SSLEngine;
 import java.util.function.Supplier;
@@ -30,7 +31,7 @@ public class NettyScanningHttpProxy {
         return proxyPort;
     }
 
-    public void start(RootOtelContext rootContext,
+    public void start(IRootWireLoggingContext rootContext,
                       BacksideConnectionPool backsideConnectionPool,
                       int numThreads,
                       Supplier<SSLEngine> sslEngineSupplier,

@@ -24,6 +24,7 @@ import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSeriali
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
+import org.opensearch.migrations.trafficcapture.tracing.RootOffloaderContext;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -93,6 +94,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         }
     }
 
+    static class TestRootContext extends RootOffloaderContext {
+        public TestRootContext() {
+            super(null);
+        }
+    }
+
     public static InMemoryConnectionCaptureFactory buildSerializerFactory(int bufferSize, Runnable onClosedCallback) {
         return new InMemoryConnectionCaptureFactory("TEST_NODE_ID", bufferSize, onClosedCallback);
     }
@@ -117,7 +124,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
                                              List<ObservationDirective> directives) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
-        var offloader = connectionFactory.createOffloader(new ConnectionContext(new RootOtelContext(),
+        var offloader = connectionFactory.createOffloader(new ConnectionContext(new TestRootContext(),
                         "n", "test"),
                 "TEST_"+uniqueIdCounter.incrementAndGet());
         for (var directive : directives) {

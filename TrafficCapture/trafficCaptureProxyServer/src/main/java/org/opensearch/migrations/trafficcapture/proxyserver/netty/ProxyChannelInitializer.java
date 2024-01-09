@@ -11,6 +11,8 @@ import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
 
 import javax.net.ssl.SSLEngine;
 import java.io.IOException;
@@ -19,11 +21,11 @@ import java.util.function.Supplier;
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
     private final IConnectionCaptureFactory<T> connectionCaptureFactory;
     private final Supplier<SSLEngine> sslEngineProvider;
-    private final RootOtelContext rootContext;
+    private final IRootWireLoggingContext rootContext;
     private final BacksideConnectionPool backsideConnectionPool;
     private final RequestCapturePredicate requestCapturePredicate;
 
-    public ProxyChannelInitializer(RootOtelContext rootContext,
+    public ProxyChannelInitializer(IRootWireLoggingContext rootContext,
                                    BacksideConnectionPool backsideConnectionPool,
                                    Supplier<SSLEngine> sslEngineSupplier,
                                    IConnectionCaptureFactory<T> connectionCaptureFactory,

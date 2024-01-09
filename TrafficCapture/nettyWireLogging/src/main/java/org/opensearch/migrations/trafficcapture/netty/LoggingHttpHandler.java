@@ -27,6 +27,7 @@ import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSeriali
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.IOException;
@@ -138,7 +139,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected HttpMessageContext messageContext;
 
-    public LoggingHttpHandler(@NonNull RootOtelContext rootContext, String nodeId, String channelKey,
+    public LoggingHttpHandler(@NonNull IRootWireLoggingContext rootContext, String nodeId, String channelKey,
                               @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
                               @NonNull RequestCapturePredicate httpHeadersCapturePredicate)
     throws IOException {

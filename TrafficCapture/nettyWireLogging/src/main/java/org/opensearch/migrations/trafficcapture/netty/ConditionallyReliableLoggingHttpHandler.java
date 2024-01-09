@@ -10,6 +10,7 @@ import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 
 import java.io.IOException;
 import java.util.function.Predicate;
@@ -18,7 +19,7 @@ import java.util.function.Predicate;
 public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
 
-    public ConditionallyReliableLoggingHttpHandler(@NonNull RootOtelContext rootContext,
+    public ConditionallyReliableLoggingHttpHandler(@NonNull IRootWireLoggingContext rootContext,
                                                    @NonNull String nodeId, String connectionId,
                                                    @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
                                                    @NonNull RequestCapturePredicate requestCapturePredicate,

@@ -3,6 +3,7 @@ package org.opensearch.migrations.tracing;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.context.Context;
@@ -25,10 +26,11 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-public class RootOtelContext implements IInstrumentationAttributes, IInstrumentConstructor {
+public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
 
-    public static OpenTelemetry initializeOpenTelemetry(String serviceName, String collectorEndpoint) {
+    public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
+                                                                    @NonNull String serviceName) {
         var serviceResource = Resource.getDefault().toBuilder()
                 .put(ResourceAttributes.SERVICE_NAME, serviceName)
                 .build();
@@ -64,18 +66,23 @@ public class RootOtelContext implements IInstrumentationAttributes, IInstrumentC
         return openTelemetrySdk;
     }
 
+    public static OpenTelemetry initializeOpenTelemetry(String collectorEndpoint, String serviceName) {
+        return Optional.ofNullable(collectorEndpoint)
+                .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName))
+                .orElse(OpenTelemetrySdk.builder().build());
+    }
+
+
     public RootOtelContext() {
-        this(null, null);
+        this(null);
     }
 
     public RootOtelContext(String collectorEndpoint, String serviceName) {
-        this(Optional.ofNullable(collectorEndpoint)
-                .map(endpoint-> initializeOpenTelemetry(serviceName, endpoint))
-                .orElse(OpenTelemetrySdk.builder().build()));
+        this(initializeOpenTelemetry(collectorEndpoint, serviceName));
     }
 
     public RootOtelContext(OpenTelemetry sdk) {
-        openTelemetryImpl = sdk;
+        openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetry(null, null);
     }
 
     @Override
@@ -98,8 +105,13 @@ public class RootOtelContext implements IInstrumentationAttributes, IInstrumentC
         return this;
     }
 
+    @Override
+    public Meter getMeterForScope(String scopeName) {
+        return getOpenTelemetry().getMeter(scopeName);
+    }
+
     public MeteringClosure buildSimpleMeter(IInstrumentationAttributes ctx) {
-        return new MeteringClosure(ctx, getOpenTelemetry().getMeter(ctx.getScopeName()));
+        return new MeteringClosure(ctx, getMeterForScope(ctx.getScopeName()));
     }
 
     public MeteringClosureForStartTimes buildMeter(IWithStartTimeAndAttributes ctx) {

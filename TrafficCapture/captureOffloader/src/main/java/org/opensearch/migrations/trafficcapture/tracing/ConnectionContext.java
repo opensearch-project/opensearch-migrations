@@ -5,10 +5,11 @@ import lombok.Getter;
 import org.opensearch.migrations.tracing.AbstractNestedSpanContext;
 import org.opensearch.migrations.tracing.AttributeNameMatchingPredicate;
 import org.opensearch.migrations.tracing.FilteringAttributeBuilder;
+import org.opensearch.migrations.tracing.IRootOtelContext;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
-public class ConnectionContext extends AbstractNestedSpanContext<RootOtelContext> implements IConnectionContext {
+public class ConnectionContext extends AbstractNestedSpanContext<IRootOffloaderContext> implements IConnectionContext {
     private static final AttributeNameMatchingPredicate KEYS_TO_EXCLUDE_FOR_ACTIVE_CONNECTION_COUNT =
             AttributeNameMatchingPredicate.builder(true).add(CONNECTION_ID_ATTR.getKey()).build();
     public static final String ACTIVE_CONNECTION = "activeConnection";
@@ -21,12 +22,12 @@ public class ConnectionContext extends AbstractNestedSpanContext<RootOtelContext
     @Override
     public String getActivityName() { return "captureConnection"; }
 
-    public ConnectionContext(RootOtelContext rootInstrumentationScope,
-                             String connectionId, String nodeId) {
+    public ConnectionContext(IRootOffloaderContext rootInstrumentationScope, String connectionId, String nodeId) {
         super(rootInstrumentationScope);
         this.connectionId = connectionId;
         this.nodeId = nodeId;
         initializeSpan();
+        //rootInstrumentationScope.getActiveConnectionsCounter().
         meterDeltaEvent(ACTIVE_CONNECTION, 1,
                 new FilteringAttributeBuilder(Attributes.builder(), KEYS_TO_EXCLUDE_FOR_ACTIVE_CONNECTION_COUNT));
     }
