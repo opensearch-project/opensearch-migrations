@@ -60,6 +60,7 @@ echo "Done creating 'logging-traffic-topic'"
 # Remove all non-system indices
 source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
 source_endpoint="http://${source_lb_endpoint}:19200"
+proxy_endpoint="http://${source_lb_endpoint}:9200"
 target_endpoint=$(aws ssm get-parameter --name "/migration/${STAGE}/default/osClusterEndpoint" --query 'Parameter.Value' --output text)
 echo "Clearing non-system source indices"
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${source_endpoint}/*,-.*,-searchguard*,-sg7*"
@@ -73,4 +74,4 @@ sleep 60
 
 # Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh $MIGRATIONS_GIT_URL $MIGRATIONS_GIT_BRANCH"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}"
