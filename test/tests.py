@@ -278,6 +278,7 @@ class E2ETests(unittest.TestCase):
             cmd_exec = f"/root/runTestBenchmarks.sh --unique-id {self.unique_id} --endpoint {self.proxy_endpoint} --no-auth --no-ssl"
             logger.warning(f"Running local command: {cmd_exec}")
             subprocess.run(cmd_exec, shell=True)
+            time.sleep(60)
         else:
             cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name=migration']
             container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
