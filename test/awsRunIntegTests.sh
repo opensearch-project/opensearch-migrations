@@ -77,7 +77,7 @@ aws ecs wait services-stable --cluster "migration-${STAGE}-ecs-cluster" --servic
 
 # Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
-test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}" 2>&1 | tee /dev/tty)
+test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}" 2>&1 | tee /dev/stderr)
 failure_output=$(echo "$test_output" | grep "FAILED")
 if [ -n "$failure_output" ]; then
   echo "Failed test detected in output, failing step"
