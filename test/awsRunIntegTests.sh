@@ -67,6 +67,9 @@ unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --ta
 echo "Clearing non-system target indices"
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${target_endpoint}/*,-.*"
 
+echo "Print initial source and target indices after clearing indices: "
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source_endpoint ${source_endpoint} --source_no_auth --target_no_auth"
+
 # Spin up Replayer container and wait for service to be stable
 aws ecs update-service --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default" --desired-count 1
 echo "Waiting for Replayer to be stable..."
@@ -74,4 +77,11 @@ aws ecs wait services-stable --cluster "migration-${STAGE}-ecs-cluster" --servic
 
 # Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}"
+test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}" 2>&1 | tee /dev/tty)
+failure_output=$(echo "$test_output" | grep "FAILED")
+if [ -n "$failure_output" ]; then
+  echo "Failed test detected in output, failing step"
+  exit 1
+else
+  exit 0
+fi
