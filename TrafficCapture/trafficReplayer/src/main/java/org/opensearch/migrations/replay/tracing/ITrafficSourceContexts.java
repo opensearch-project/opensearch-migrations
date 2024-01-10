@@ -16,8 +16,7 @@ public interface ITrafficSourceContexts {
     }
 
     interface ITrafficSourceContext extends IScopedInstrumentationAttributes {
-        @Override
-        default String getScopeName() { return ScopeNames.TRAFFIC_SCOPE; }
+        String SCOPE_NAME = ScopeNames.TRAFFIC_SCOPE;
     }
     interface IReadChunkContext extends ITrafficSourceContext {
         @Override

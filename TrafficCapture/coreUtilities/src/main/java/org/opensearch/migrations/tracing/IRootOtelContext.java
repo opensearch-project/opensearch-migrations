@@ -1,7 +1,11 @@
 package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.api.metrics.MeterProvider;
 
-public interface IRootOtelContext extends IInstrumentationAttributes<IRootOtelContext>, IInstrumentConstructor {
-    Meter getMeterForScope(String scopeName);
+public interface IRootOtelContext<S extends IInstrumentConstructor> extends IInstrumentationAttributes<S>, IInstrumentConstructor<S> {
+    MeterProvider getMeterProvider();
+    default Meter getMeterForScope(String scopeName) {
+        return getMeterProvider().get(scopeName);
+    }
 }

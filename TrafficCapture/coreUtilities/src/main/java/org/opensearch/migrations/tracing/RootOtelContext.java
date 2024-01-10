@@ -4,6 +4,7 @@ import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.api.metrics.MeterProvider;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.context.Context;
@@ -25,7 +26,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-public class RootOtelContext implements IRootOtelContext {
+public class RootOtelContext<S extends IInstrumentConstructor> implements IRootOtelContext<S> {
     private final OpenTelemetry openTelemetryImpl;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
@@ -92,7 +93,7 @@ public class RootOtelContext implements IRootOtelContext {
     }
 
     @Override
-    public IRootOtelContext getEnclosingScope() {
+    public RootOtelContext<S> getEnclosingScope() {
         return null;
     }
 
@@ -101,22 +102,25 @@ public class RootOtelContext implements IRootOtelContext {
     }
 
     @Override
-    @NonNull
-    public IRootOtelContext getRootInstrumentationScope() {
-        return this;
+    public MeterProvider getMeterProvider() {
+        return getOpenTelemetry().getMeterProvider();
     }
 
     @Override
-    public Meter getMeterForScope(String scopeName) {
-        return getOpenTelemetry().getMeter(scopeName);
+    @NonNull
+    public S getRootInstrumentationScope() {
+        return (S) this;
+    } // CRTP so that callers can get more specific
+
+    @Override
+    public MeteringClosure<S> buildSimpleMeterClosure(IInstrumentationAttributes<S> ctx) {
+        return new MeteringClosure<>(ctx);
     }
 
-    public MeteringClosure buildMeterClosure(IInstrumentationAttributes ctx) {
-        return new MeteringClosure(ctx, getMeterForScope(ctx.getScopeName()));
-    }
-
-    public MeteringClosureForStartTimes buildMeterClosure(IWithStartTimeAndAttributes ctx) {
-        return new MeteringClosureForStartTimes(ctx, getOpenTelemetry().getMeter(ctx.getScopeName()));
+    @Override
+    public MeteringClosureForStartTimes<S>
+    buildMeterClosure(IWithStartTimeAndAttributes<S> ctx) {
+        return new MeteringClosureForStartTimes<>(ctx);
     }
 
     @Override
@@ -131,8 +135,8 @@ public class RootOtelContext implements IRootOtelContext {
     }
 
     @Override
-    public Span buildSpan(IInstrumentationAttributes enclosingScope, String scopeName, String spanName,
-                          AttributesBuilder attributesBuilder) {
+    public Span buildSpan(IInstrumentationAttributes<S> enclosingScope,
+                          String scopeName, String spanName, AttributesBuilder attributesBuilder) {
         var parentSpan = enclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
         return buildSpanWithParent(spanBuilder, getPopulatedAttributes(attributesBuilder), parentSpan);

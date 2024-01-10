@@ -18,8 +18,7 @@ class TestTrafficStreamsLifecycleContext
         initializeSpan();
     }
 
-    @Override
-    public String getScopeName() { return "testScope"; }
+    public static final String SCOPE_NAME = "testScope";
     @Override
     public String getActivityName() { return "testTrafficSpan"; }
 

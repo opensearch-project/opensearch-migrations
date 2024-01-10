@@ -1,7 +1,7 @@
 package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.LongHistogram;
+import io.opentelemetry.api.metrics.DoubleHistogram;
 import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -21,11 +21,12 @@ public class ReplayContexts {
     public static class ChannelKeyContext
             extends AbstractNestedSpanContext<IRootReplayerContext, IInstrumentationAttributes<IRootReplayerContext>>
             implements IReplayContexts.IChannelKeyContext {
+
         @Getter
         final ISourceTrafficChannelKey channelKey;
         
         @Override
-        public LongHistogram getEndOfScopeDurationMetric() {
+        public DoubleHistogram getEndOfScopeDurationMetric() {
             return getRootInstrumentationScope().getChannelDuration();
         }
 
@@ -44,8 +45,6 @@ public class ReplayContexts {
         public String toString() {
             return channelKey.toString();
         }
-
-        @Override public String getScopeName() { return "Connection"; }
 
         @Override
         public void onTargetConnectionCreated() {
@@ -78,7 +77,7 @@ public class ReplayContexts {
         }
 
         @Override
-        public LongHistogram getEndOfScopeDurationMetric() {
+        public DoubleHistogram getEndOfScopeDurationMetric() {
             return getRootInstrumentationScope().getKafkaRecordDuration();
         }
 
@@ -117,7 +116,7 @@ public class ReplayContexts {
         }
 
         @Override
-        public LongHistogram getEndOfScopeDurationMetric() {
+        public DoubleHistogram getEndOfScopeDurationMetric() {
             return getRootInstrumentationScope().getTrafficStreamLifecycleDuration();
         }
 

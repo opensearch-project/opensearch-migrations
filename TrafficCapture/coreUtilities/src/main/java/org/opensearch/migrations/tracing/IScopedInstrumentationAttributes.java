@@ -1,20 +1,24 @@
 package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.LongHistogram;
+import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
 
-public interface IScopedInstrumentationAttributes<S extends IInstrumentConstructor>
+public interface IScopedInstrumentationAttributes<S extends IInstrumentConstructor<S>>
         extends IWithStartTimeAndAttributes<S>, AutoCloseable {
 
     String getActivityName();
 
     @Override
     @NonNull Span getCurrentSpan();
-    LongHistogram getEndOfScopeDurationMetric();
-    LongCounter getEndOfScopeCountMetric();
-
+    CommonScopedMetricInstruments getMetrics();
+    default LongCounter getEndOfScopeCountMetric() {
+        return getMetrics().contextCounter;
+    }
+    default DoubleHistogram getEndOfScopeDurationMetric() {
+        return getMetrics().contextDuration;
+    }
     default void endSpan() {
         getCurrentSpan().end();
     }

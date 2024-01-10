@@ -9,6 +9,8 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionContext>
         implements IScopedInstrumentationAttributes {
+    public static final String SCOPE_NAME = "KafkaCapture";
+
     static final AttributeKey<String> TOPIC_ATTR = AttributeKey.stringKey("topic");
     static final AttributeKey<String> RECORD_ID_ATTR = AttributeKey.stringKey("recordId");
     static final AttributeKey<Long> RECORD_SIZE_ATTR = AttributeKey.longKey("recordSize");
@@ -28,7 +30,7 @@ public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionConte
         initializeSpan();
     }
 
-    @Override public String getScopeName() { return "KafkaCapture"; }
+    @Override public String getScopeName() { return SCOPE_NAME; }
 
     @Override
     public String getActivityName() { return "stream_flush_called"; }

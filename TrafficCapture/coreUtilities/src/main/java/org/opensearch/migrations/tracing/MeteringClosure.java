@@ -12,9 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @AllArgsConstructor
-public class MeteringClosure {
-    public final IInstrumentationAttributes ctx;
-    public final Meter meter;
+public class MeteringClosure<S extends IInstrumentConstructor> {
+    public final IInstrumentationAttributes<S> ctx;
 
     public void meterIncrementEvent(LongCounter c, AttributesBuilder attributesBuilder) {
         meterIncrementEvent(c, 1, attributesBuilder);
@@ -26,9 +25,6 @@ public class MeteringClosure {
         }
         try (var scope = new NullableExemplarScope(ctx.getCurrentSpan())) {
             c.add(increment);
-            //            c.add(increment, ctx.getPopulatedAttributesBuilder(attributesBuilder)
-            //                            .put("labelName", eventName)
-            //                            .build());
         }
     }
 
@@ -36,9 +32,6 @@ public class MeteringClosure {
                                 AttributesBuilder attributesBuilder) {
         try (var scope = new NullableExemplarScope(ctx.getCurrentSpan())) {
             c.add(delta);
-//            c.add(delta, ctx.getPopulatedAttributesBuilder(attributesBuilder)
-//                            .put("labelName", eventName)
-//                            .build());
         }
     }
 }

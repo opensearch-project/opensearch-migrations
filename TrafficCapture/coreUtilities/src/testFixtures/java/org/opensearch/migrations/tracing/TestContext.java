@@ -52,10 +52,6 @@ public class TestContext implements IInstrumentationAttributes {
         var openTel = otelBuilder.build();
         rootInstrumentationScope = new RootOtelContext(openTel);
     }
-    @Override
-    public String getScopeName() {
-        return "TestContext";
-    }
 
     @Override
     public IInstrumentationAttributes getEnclosingScope() {

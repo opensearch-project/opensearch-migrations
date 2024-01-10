@@ -2,7 +2,7 @@ package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.metrics.LongHistogram;
+import io.opentelemetry.api.metrics.DoubleHistogram;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -11,37 +11,37 @@ public interface IWithStartTimeAndAttributes<S extends IInstrumentConstructor> e
     Instant getStartTime();
 
 
-    default void meterHistogramMillis(LongHistogram histogram) {
+    default void meterHistogramMillis(DoubleHistogram histogram) {
         meterHistogramMillis(histogram, Attributes.builder());
     }
-    default void meterHistogramMillis(LongHistogram histogram, AttributesBuilder attributesBuilder) {
+    default void meterHistogramMillis(DoubleHistogram histogram, AttributesBuilder attributesBuilder) {
         getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMillis(histogram, attributesBuilder);
     }
-    default void meterHistogramMillis(LongHistogram histogram, Duration value) {
+    default void meterHistogramMillis(DoubleHistogram histogram, Duration value) {
         meterHistogramMillis(histogram, value, Attributes.builder());
     }
-    default void meterHistogramMillis(LongHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
+    default void meterHistogramMillis(DoubleHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
         getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMillis(histogram, value, attributesBuilder);
     }
 
-    default void meterHistogramMicros(LongHistogram histogram, Duration value) {
+    default void meterHistogramMicros(DoubleHistogram histogram, Duration value) {
         meterHistogramMicros(histogram, value, Attributes.builder());
     }
-    default void meterHistogramMicros(LongHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
+    default void meterHistogramMicros(DoubleHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
         getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMicros(histogram, value, attributesBuilder);
     }
-    default void meterHistogramMicros(LongHistogram histogram) {
+    default void meterHistogramMicros(DoubleHistogram histogram) {
         meterHistogramMicros(histogram, Attributes.builder());
     }
-    default void meterHistogramMicros(LongHistogram histogram, AttributesBuilder attributesBuilder) {
+    default void meterHistogramMicros(DoubleHistogram histogram, AttributesBuilder attributesBuilder) {
         getRootInstrumentationScope().buildMeterClosure(this)
                 .meterHistogramMicros(histogram, attributesBuilder);
     }
 
-    default void meterHistogram(LongHistogram histogram, long value) {
+    default void meterHistogram(DoubleHistogram histogram, long value) {
         meterHistogram(histogram, value, Attributes.builder());
     }
-    default void meterHistogram(LongHistogram histogram, long value, AttributesBuilder attributesBuilder) {
+    default void meterHistogram(DoubleHistogram histogram, long value, AttributesBuilder attributesBuilder) {
         getRootInstrumentationScope().buildMeterClosure(this).meterHistogram(histogram, value, attributesBuilder);
     }
 

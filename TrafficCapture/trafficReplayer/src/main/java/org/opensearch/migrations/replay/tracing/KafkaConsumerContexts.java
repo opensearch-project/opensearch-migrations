@@ -1,11 +1,15 @@
 package org.opensearch.migrations.replay.tracing;
 
+import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.LongHistogram;
+import io.opentelemetry.api.metrics.DoubleHistogram;
+import io.opentelemetry.api.metrics.LongUpDownCounter;
+import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
+import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 
@@ -16,68 +20,88 @@ public class KafkaConsumerContexts {
     private KafkaConsumerContexts() {}
 
     @AllArgsConstructor
-    public static class AsyncListeningContext implements IKafkaConsumerContexts.IAsyncListeningContext {
+    public static class AsyncListeningContext
+            implements IKafkaConsumerContexts.IAsyncListeningContext<RootReplayerContext> {
+        public static class MetricInstruments {
+            public final LongCounter kafkaPartitionsRevokedCounter;
+            public final LongCounter kafkaPartitionsAssignedCounter;
+            public final LongUpDownCounter kafkaActivePartitionsCounter;
+            public MetricInstruments(MeterProvider meterProvider) {
+                var meter = meterProvider.get(SCOPE_NAME);
+                kafkaPartitionsRevokedCounter = meter
+                        .counterBuilder(IKafkaConsumerContexts.MetricNames.PARTITIONS_REVOKED_EVENT_COUNT).build();
+                kafkaPartitionsAssignedCounter = meter
+                        .counterBuilder(IKafkaConsumerContexts.MetricNames.PARTITIONS_ASSIGNED_EVENT_COUNT).build();
+                kafkaActivePartitionsCounter = meter
+                        .upDownCounterBuilder(IKafkaConsumerContexts.MetricNames.ACTIVE_PARTITIONS_ASSIGNED_COUNT).build();
+            }
+        }
+
         @Getter
         @NonNull
-        private final IInstrumentationAttributes<IRootReplayerContext> enclosingScope;
+        private final IInstrumentationAttributes<RootReplayerContext> enclosingScope;
 
         @Override
-        public @NonNull IRootReplayerContext getRootInstrumentationScope() {
+        public @NonNull RootReplayerContext getRootInstrumentationScope() {
             return enclosingScope.getRootInstrumentationScope();
         }
 
+        private @NonNull MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().asyncListeningInstruments;
+        }
+
         public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-            meterIncrementEvent(getRootInstrumentationScope().getKafkaPartitionsRevokedCounter());
+            meterIncrementEvent(getMetrics().kafkaPartitionsRevokedCounter);
             onParitionsAssignedChanged(partitions.size());
         }
 
         public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-            meterIncrementEvent(getRootInstrumentationScope().getKafkaPartitionsAssignedCounter());
+            meterIncrementEvent(getMetrics().kafkaPartitionsAssignedCounter);
             onParitionsAssignedChanged(partitions.size());
         }
 
         private void onParitionsAssignedChanged(int delta) {
-            meterDeltaEvent(getRootInstrumentationScope().getKafkaActivePartitionsCounter(), delta);
+            meterDeltaEvent(getMetrics().kafkaActivePartitionsCounter, delta);
         }
     }
 
     public static class TouchScopeContext
-            extends DirectNestedSpanContext<IRootReplayerContext, IInstrumentationAttributes<IRootReplayerContext>>
+            extends DirectNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
             implements IKafkaConsumerContexts.ITouchScopeContext
     {
-        public TouchScopeContext(@NonNull IInstrumentationAttributes<IRootReplayerContext> enclosingScope) {
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            }
+        }
+        public TouchScopeContext(@NonNull IInstrumentationAttributes<RootReplayerContext> enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
 
-        @Override
-        public LongHistogram getEndOfScopeDurationMetric() {
-            return getRootInstrumentationScope().getKafkaTouchDuration();
-        }
-
-        @Override
-        public LongCounter getEndOfScopeCountMetric() {
-            return getRootInstrumentationScope().getKafkaTouchCounter();
+        public @NonNull MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().touchInstruments;
         }
     }
 
     public static class PollScopeContext
             extends DirectNestedSpanContext<IRootReplayerContext, IInstrumentationAttributes<IRootReplayerContext>>
         implements IKafkaConsumerContexts.IPollScopeContext {
+        @Override
+        public CommonScopedMetricInstruments getMetrics() {
+            return getRootInstrumentationScope().poll;
+        }
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            }
+        }
         public PollScopeContext(@NonNull IInstrumentationAttributes<IRootReplayerContext> enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
 
-        @Override
-        public LongHistogram getEndOfScopeDurationMetric() {
-            return getRootInstrumentationScope().getKafkaPollDuration();
-        }
-
-        @Override
-        public LongCounter getEndOfScopeCountMetric() {
-            return getRootInstrumentationScope().getKafkaPollCounter();
-        }
     }
 
     public static class CommitScopeContext
@@ -89,7 +113,7 @@ public class KafkaConsumerContexts {
         }
 
         @Override
-        public LongHistogram getEndOfScopeDurationMetric() {
+        public DoubleHistogram getEndOfScopeDurationMetric() {
             return getRootInstrumentationScope().getCommitDuration();
         }
 
@@ -109,7 +133,7 @@ public class KafkaConsumerContexts {
         }
 
         @Override
-        public LongHistogram getEndOfScopeDurationMetric() {
+        public DoubleHistogram getEndOfScopeDurationMetric() {
             return getRootInstrumentationScope().getKafkaCommitDuration();
         }
 

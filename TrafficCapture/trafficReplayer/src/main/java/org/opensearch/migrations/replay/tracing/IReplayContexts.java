@@ -71,6 +71,8 @@ public class IReplayContexts {
     }
 
     public interface IChannelKeyContext extends IConnectionContext<IRootReplayerContext> {
+        String SCOPE_NAME = "Connection";
+
         @Override
         default String getActivityName() { return ActivityNames.CHANNEL; }
 
@@ -94,14 +96,16 @@ public class IReplayContexts {
     public interface IKafkaRecordContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IChannelKeyContext>
-    {        @Override
+    {
+        String SCOPE_NAME = ScopeNames.KAFKA_RECORD_SCOPE;
+
+        @Override
         default String getActivityName() { return ActivityNames.RECORD_LIFETIME; }
 
         static final AttributeKey<String> RECORD_ID_KEY = AttributeKey.stringKey("recordId");
 
         String getRecordId();
 
-        default String getScopeName() { return ScopeNames.KAFKA_RECORD_SCOPE; }
         default AttributesBuilder fillAttributes(AttributesBuilder builder) {
             return IScopedInstrumentationAttributes.super.fillAttributes(builder.put(RECORD_ID_KEY, getRecordId()));
         }
@@ -110,13 +114,13 @@ public class IReplayContexts {
     public interface ITrafficStreamsLifecycleContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IChannelKeyContext> {
+        String SCOPE_NAME = ScopeNames.TRAFFIC_STREAM_LIFETIME_SCOPE;
         default String getActivityName() { return ActivityNames.TRAFFIC_STREAM_LIFETIME; }
         ITrafficStreamKey getTrafficStreamKey();
         IChannelKeyContext getChannelKeyContext();
         default String getConnectionId() {
             return getChannelKey().getConnectionId();
         }
-        default String getScopeName() { return ScopeNames.TRAFFIC_STREAM_LIFETIME_SCOPE; }
         default ISourceTrafficChannelKey getChannelKey() {
             return getChannelKeyContext().getChannelKey();
         }
@@ -125,7 +129,8 @@ public class IReplayContexts {
     public interface IReplayerHttpTransactionContext
             extends IHttpTransactionContext<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IChannelKeyContext> {
-        static final AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
+        String SCOPE_NAME = ScopeNames.ACCUMULATOR_SCOPE;
+        AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
 
         default String getActivityName() { return ActivityNames.HTTP_TRANSACTION; }
 
@@ -133,7 +138,6 @@ public class IReplayContexts {
         IChannelKeyContext getChannelKeyContext();
         Instant getTimeOfOriginalRequest();
 
-        @Override default String getScopeName() { return ScopeNames.ACCUMULATOR_SCOPE; }
         default String getConnectionId() {
             return getChannelKey().getConnectionId();
         }
@@ -159,24 +163,23 @@ public class IReplayContexts {
     public interface IRequestAccumulationContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
+        String SCOPE_NAME = ScopeNames.ACCUMULATOR_SCOPE;
         default String getActivityName() { return ActivityNames.ACCUMULATING_REQUEST; }
-
-        default String getScopeName() { return ScopeNames.ACCUMULATOR_SCOPE; }
     }
 
     public interface IResponseAccumulationContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
+        String SCOPE_NAME = ScopeNames.ACCUMULATOR_SCOPE;
         default String getActivityName() { return ActivityNames.ACCUMULATING_RESPONSE; }
-        default String getScopeName() { return ScopeNames.ACCUMULATOR_SCOPE; }
     }
 
     public interface IRequestTransformationContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
-        default String getActivityName() { return ActivityNames.TRANSFORMATION; }
-        default String getScopeName() { return ScopeNames.HTTP_TRANSFORMER_SCOPE; }
+        String SCOPE_NAME = ScopeNames.HTTP_TRANSFORMER_SCOPE;
 
+        default String getActivityName() { return ActivityNames.TRANSFORMATION; }
 
         void onHeaderParse();
         void onPayloadParse();
@@ -201,15 +204,15 @@ public class IReplayContexts {
     public interface IScheduledContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
+        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
         default String getActivityName() { return ActivityNames.SCHEDULED; }
-        default String getScopeName() { return ScopeNames.REQUEST_SENDER_SCOPE; }
     }
 
     public interface ITargetRequestContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
+        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
         default String getActivityName() { return ActivityNames.TARGET_TRANSACTION; }
-        default String getScopeName() { return ScopeNames.REQUEST_SENDER_SCOPE; }
 
         void onBytesSent(int size);
         void onBytesReceived(int size);
@@ -218,28 +221,28 @@ public class IReplayContexts {
     public interface IRequestSendingContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, ITargetRequestContext> {
+        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
         default String getActivityName() { return ActivityNames.REQUEST_SENDING; }
-        default String getScopeName() { return ScopeNames.REQUEST_SENDER_SCOPE; }
     }
 
     public interface IWaitingForHttpResponseContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, ITargetRequestContext> {
+        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
         default String getActivityName() { return ActivityNames.WAITING_FOR_RESPONSE; }
-        default String getScopeName() { return ScopeNames.REQUEST_SENDER_SCOPE; }
     }
 
     public interface IReceivingHttpResponseContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, ITargetRequestContext> {
+        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
         default String getActivityName() { return ActivityNames.RECEIVING_RESPONSE; }
-        default String getScopeName() { return ScopeNames.REQUEST_SENDER_SCOPE; }
     }
 
     public interface ITupleHandlingContext
             extends IScopedInstrumentationAttributes<IRootReplayerContext>,
                     IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
+        String SCOPE_NAME = ScopeNames.TRAFFIC_REPLAYER_SCOPE;
         default String getActivityName() { return ActivityNames.TUPLE_HANDLING; }
-        default String getScopeName() { return ScopeNames.TRAFFIC_REPLAYER_SCOPE; }
     }
 }

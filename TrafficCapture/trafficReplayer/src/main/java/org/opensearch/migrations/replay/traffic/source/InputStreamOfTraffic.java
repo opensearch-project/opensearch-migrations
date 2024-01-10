@@ -35,6 +35,8 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     private static class IOSTrafficStreamContext
             extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
             implements IReplayContexts.ITrafficStreamsLifecycleContext {
+        public static final String SCOPE_NAME = TELEMETRY_SCOPE_NAME;
+
         @Getter private final ITrafficStreamKey trafficStreamKey;
 
         public IOSTrafficStreamContext(@NonNull IReplayContexts.IChannelKeyContext ctx, ITrafficStreamKey tsk) {
@@ -50,7 +52,6 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
         public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
             return getImmediateEnclosingScope();
         }
-        @Override public String getScopeName() { return TELEMETRY_SCOPE_NAME; }
     }
 
     /**
