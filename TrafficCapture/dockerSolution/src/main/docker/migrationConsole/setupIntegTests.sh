@@ -6,6 +6,7 @@ git_http_url=$1
 branch=$2
 source_endpoint=$3
 proxy_endpoint=$4
+unique_id=$5
 
 mkdir -p /root/integ-tests
 cd /root/integ-tests || exit
@@ -45,6 +46,7 @@ fi
 source .venv/bin/activate
 pip install -r requirements.txt
 echo "Starting python 'tests.py'"
-# TODO Dynamically skip certain tests depending on setup, forcing negative auth tests not to run here as the source/target cluster has no auth
-pytest tests.py::E2ETests::test_0001_index tests.py::E2ETests::test_0002_document tests.py::E2ETests::test_0005_invalidIncorrectUri tests.py::E2ETests::test_0006_OSB --proxy_endpoint="${proxy_endpoint}" --source_endpoint="${source_endpoint}" --target_endpoint="${MIGRATION_DOMAIN_ENDPOINT}" --source_auth_type="none" --target_auth_type="none" --source_verify_ssl=False --target_verify_ssl=False --deployment_type="cloud" --verbose
+# TODO Add support to dynamically skip certain tests depending on setup. Currently, forcing negative auth tests not to run here as the source/target cluster has no auth
+# /root/integ-tests/test/reports/.xml
+pytest tests.py::E2ETests::test_0001_index tests.py::E2ETests::test_0002_document tests.py::E2ETests::test_0005_invalidIncorrectUri tests.py::E2ETests::test_0006_OSB --proxy_endpoint="${proxy_endpoint}" --source_endpoint="${source_endpoint}" --target_endpoint="${MIGRATION_DOMAIN_ENDPOINT}" --source_auth_type="none" --target_auth_type="none" --source_verify_ssl=False --target_verify_ssl=False --deployment_type="cloud" --verbose --junitxml="./reports/${unique_id}.xml"
 deactivate

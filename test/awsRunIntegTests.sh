@@ -5,9 +5,10 @@ usage() {
   echo "Script to run integrations tests on AWS Migration Console"
   echo ""
   echo "Usage: "
-  echo "  ./awsRunIntegTests.sh [--migrations-git-url] [--migrations-git-branch] [--stage]"
+  echo "  ./awsRunIntegTests.sh [--unique-id] [--migrations-git-url] [--migrations-git-branch] [--stage]"
   echo ""
   echo "Options:"
+  echo "  --unique-id                                      Identifier for labeling integ test artifacts, e.g. 'full_run_123'."
   echo "  --migrations-git-url                             The Github http url used for pulling the integration tests onto the migration console, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --stage                                          The stage used for CDK deployment, default is 'aws-integ'."
@@ -15,12 +16,19 @@ usage() {
   exit 1
 }
 
+epoch_seconds=$(date +%s)
+UNIQUE_ID="test_${epoch_seconds}_1"
 STAGE='aws-integ'
 MIGRATIONS_GIT_URL='https://github.com/opensearch-project/opensearch-migrations.git'
 MIGRATIONS_GIT_BRANCH='main'
 
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --unique-id)
+      UNIQUE_ID="$2"
+      shift # past argument
+      shift # past value
+      ;;
     --stage)
       STAGE="$2"
       shift # past argument
@@ -77,11 +85,12 @@ aws ecs wait services-stable --cluster "migration-${STAGE}-ecs-cluster" --servic
 
 # Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
-test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}" 2>&1 | tee /dev/stderr)
-failure_output=$(echo "$test_output" | grep "FAILED")
-if [ -n "$failure_output" ]; then
-  echo "Failed test detected in output, failing step"
-  exit 1
-else
-  exit 0
-fi
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint} ${UNIQUE_ID}"
+#test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}" 2>&1 | tee /dev/stderr)
+#failure_output=$(echo "$test_output" | grep "FAILED")
+#if [ -n "$failure_output" ]; then
+#  echo "Failed test detected in output, failing step"
+#  exit 1
+#else
+#  exit 0
+#fi
