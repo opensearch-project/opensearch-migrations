@@ -86,11 +86,17 @@ aws ecs wait services-stable --cluster "migration-${STAGE}-ecs-cluster" --servic
 # Kickoff integration tests
 echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint} ${UNIQUE_ID}"
-#test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint}" 2>&1 | tee /dev/stderr)
-#failure_output=$(echo "$test_output" | grep "FAILED")
-#if [ -n "$failure_output" ]; then
-#  echo "Failed test detected in output, failing step"
-#  exit 1
-#else
-#  exit 0
-#fi
+test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "awk '/failures/ && /errors/' /root/integ-tests/test/reports/${UNIQUE_ID}.xml")
+echo "Fetch integ test summary: "
+echo "$test_output"
+failure_output=$(echo "$test_output" | grep -o "failures=\"0\"")
+if [ -z "$failure_output" ]; then
+  echo "Failed test detected in output, failing step"
+  exit 1
+fi
+errors_output=$(echo "$test_output" | grep -o "errors=\"0\"")
+if [ -z "$errors_output" ]; then
+  echo "Errored test detected in output, failing step"
+  exit 1
+fi
+exit 0
