@@ -24,14 +24,14 @@ public interface IKafkaConsumerContexts {
         public static final String ACTIVE_PARTITIONS_ASSIGNED_COUNT = "numPartitionsAssigned";
     }
 
-    interface IAsyncListeningContext extends IInstrumentationAttributes {
+    interface IAsyncListeningContext extends IInstrumentationAttributes<IRootReplayerContext> {
         default String getScopeName() { return ScopeNames.KAFKA_CONSUMER_SCOPE; }
     }
-    interface IKafkaConsumerScope extends IScopedInstrumentationAttributes {
+    interface IKafkaConsumerScope extends IScopedInstrumentationAttributes<IRootReplayerContext> {
         @Override
         default String getScopeName() { return ScopeNames.KAFKA_CONSUMER_SCOPE; }
     }
-    interface ITouchScopeContext extends IKafkaCommitScopeContext {
+    interface ITouchScopeContext extends IKafkaConsumerScope {
         @Override
         default String getActivityName() { return ActivityNames.TOUCH; }
     }

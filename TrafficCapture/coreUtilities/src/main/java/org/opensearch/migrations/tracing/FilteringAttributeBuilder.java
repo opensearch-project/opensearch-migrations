@@ -14,12 +14,21 @@ import java.util.function.Predicate;
  */
 @Getter
 public class FilteringAttributeBuilder implements AttributesBuilder {
+
     private AttributesBuilder underlyingBuilder;
     private final Predicate<AttributeKey> excludePredicate;
+
+    public FilteringAttributeBuilder(Predicate<AttributeKey> excludePredicate) {
+        this(Attributes.builder(), excludePredicate);
+    }
 
     public FilteringAttributeBuilder(AttributesBuilder underlyingBuilder, Predicate<AttributeKey> excludePredicate) {
         this.underlyingBuilder = underlyingBuilder;
         this.excludePredicate = excludePredicate;
+    }
+
+    public static FilteringAttributeBuilder getBuilderThatIncludesNone() {
+        return new FilteringAttributeBuilder(x->true);
     }
 
     @Override

@@ -14,7 +14,6 @@ import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.logs.SdkLoggerProvider;
 import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
-import io.opentelemetry.sdk.metrics.export.AggregationTemporalitySelector;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
@@ -43,7 +42,9 @@ public class RootOtelContext implements IRootOtelContext {
                 .build();
         final var metricReader = PeriodicMetricReader.builder(OtlpGrpcMetricExporter.builder()
                         .setEndpoint(collectorEndpoint)
-                        .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
+                        // see https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/prometheus/
+                        // "A Prometheus Exporter MUST only support Cumulative Temporality."
+                        //.setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
                         .build())
                 .setInterval(Duration.ofMillis(1000))
                 .build();
@@ -91,7 +92,7 @@ public class RootOtelContext implements IRootOtelContext {
     }
 
     @Override
-    public IInstrumentationAttributes getEnclosingScope() {
+    public IRootOtelContext getEnclosingScope() {
         return null;
     }
 
@@ -101,7 +102,7 @@ public class RootOtelContext implements IRootOtelContext {
 
     @Override
     @NonNull
-    public IInstrumentConstructor getRootInstrumentationScope() {
+    public IRootOtelContext getRootInstrumentationScope() {
         return this;
     }
 
@@ -110,11 +111,11 @@ public class RootOtelContext implements IRootOtelContext {
         return getOpenTelemetry().getMeter(scopeName);
     }
 
-    public MeteringClosure buildSimpleMeter(IInstrumentationAttributes ctx) {
+    public MeteringClosure buildMeterClosure(IInstrumentationAttributes ctx) {
         return new MeteringClosure(ctx, getMeterForScope(ctx.getScopeName()));
     }
 
-    public MeteringClosureForStartTimes buildMeter(IWithStartTimeAndAttributes ctx) {
+    public MeteringClosureForStartTimes buildMeterClosure(IWithStartTimeAndAttributes ctx) {
         return new MeteringClosureForStartTimes(ctx, getOpenTelemetry().getMeter(ctx.getScopeName()));
     }
 

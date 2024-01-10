@@ -2,10 +2,11 @@ package org.opensearch.migrations.tracing.commoncontexts;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
-public interface IConnectionContext extends IScopedInstrumentationAttributes {
+public interface IConnectionContext<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
     static final AttributeKey<String> CONNECTION_ID_ATTR = AttributeKey.stringKey("connectionId");
     static final AttributeKey<String> NODE_ID_ATTR = AttributeKey.stringKey("nodeId");
     String CHANNEL_SCOPE = "Channel";
@@ -14,7 +15,7 @@ public interface IConnectionContext extends IScopedInstrumentationAttributes {
     String getNodeId();
 
     @Override
-    default IInstrumentationAttributes getEnclosingScope() { return null; }
+    default IInstrumentationAttributes<S> getEnclosingScope() { return null; }
 
     @Override
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {

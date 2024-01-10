@@ -27,15 +27,17 @@ public class ConnectionContext extends AbstractNestedSpanContext<IRootOffloaderC
         this.connectionId = connectionId;
         this.nodeId = nodeId;
         initializeSpan();
-        //rootInstrumentationScope.getActiveConnectionsCounter().
-        meterDeltaEvent(ACTIVE_CONNECTION, 1,
+        meterDeltaEvent(rootInstrumentationScope.getActiveConnectionsCounter(), 1,
                 new FilteringAttributeBuilder(Attributes.builder(), KEYS_TO_EXCLUDE_FOR_ACTIVE_CONNECTION_COUNT));
     }
 
     @Override
     public void sendMeterEventsForEnd() {
-        super.sendMeterEventsForEnd();
-        meterDeltaEvent(ACTIVE_CONNECTION, -1,
+        //super.sendMeterEventsForEnd();
+//        meterIncrementEvent(getEndOfScopeMetricName());
+//        meterHistogramMicros(getEndOfScopeDurationMetricName());
+
+        meterDeltaEvent(getRootInstrumentationScope().getActiveConnectionsCounter(), 1,
                 new FilteringAttributeBuilder(Attributes.builder(), KEYS_TO_EXCLUDE_FOR_ACTIVE_CONNECTION_COUNT));
     }
 }

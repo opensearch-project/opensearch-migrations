@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.tracing;
 
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.LongHistogram;
 import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -16,12 +18,23 @@ public class ReplayContexts {
 
     private ReplayContexts() {}
 
-    public static class ChannelKeyContext extends AbstractNestedSpanContext<IInstrumentationAttributes>
+    public static class ChannelKeyContext
+            extends AbstractNestedSpanContext<IRootReplayerContext, IInstrumentationAttributes<IRootReplayerContext>>
             implements IReplayContexts.IChannelKeyContext {
         @Getter
         final ISourceTrafficChannelKey channelKey;
+        
+        @Override
+        public LongHistogram getEndOfScopeDurationMetric() {
+            return getRootInstrumentationScope().getChannelDuration();
+        }
 
-        public ChannelKeyContext(IInstrumentationAttributes enclosingScope, ISourceTrafficChannelKey channelKey) {
+        @Override
+        public LongCounter getEndOfScopeCountMetric() {
+            return getRootInstrumentationScope().getChannelCounter();
+        }
+
+        public ChannelKeyContext(IInstrumentationAttributes<IRootReplayerContext> enclosingScope, ISourceTrafficChannelKey channelKey) {
             super(enclosingScope);
             this.channelKey = channelKey;
             initializeSpan();
@@ -36,15 +49,16 @@ public class ReplayContexts {
 
         @Override
         public void onTargetConnectionCreated() {
-            meterDeltaEvent(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS, 1);
+            meterDeltaEvent(getRootInstrumentationScope().getActiveChannelsCounter(), 1);
         }
         @Override
         public void onTargetConnectionClosed() {
-            meterDeltaEvent(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS, -1);
+            meterDeltaEvent(getRootInstrumentationScope().getActiveChannelsCounter(), -1);
         }
     }
 
-    public static class KafkaRecordContext extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
+    public static class KafkaRecordContext
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IChannelKeyContext>
             implements IReplayContexts.IKafkaRecordContext {
 
         final String recordId;
@@ -54,18 +68,28 @@ public class ReplayContexts {
             super(enclosingScope);
             this.recordId = recordId;
             initializeSpan();
-            this.meterIncrementEvent(IReplayContexts.MetricNames.KAFKA_RECORD_READ);
-            this.meterIncrementEvent(IReplayContexts.MetricNames.KAFKA_BYTES_READ, recordSize);
+            this.meterIncrementEvent(getRootInstrumentationScope().getKafkaRecordCounter());
+            this.meterIncrementEvent(getRootInstrumentationScope().getKafkaRecordBytesCounter(), recordSize);
         }
 
         @Override
         public String getRecordId() {
             return recordId;
         }
+
+        @Override
+        public LongHistogram getEndOfScopeDurationMetric() {
+            return getRootInstrumentationScope().getKafkaRecordDuration();
+        }
+
+        @Override
+        public LongCounter getEndOfScopeCountMetric() {
+            return getRootInstrumentationScope().getKafkaRecordCounter();
+        }
     }
 
     public static class TrafficStreamsLifecycleContext
-            extends IndirectNestedSpanContext<IReplayContexts.IKafkaRecordContext, IReplayContexts.IChannelKeyContext>
+            extends IndirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IKafkaRecordContext, IReplayContexts.IChannelKeyContext>
             implements IReplayContexts.ITrafficStreamsLifecycleContext {
         private final ITrafficStreamKey trafficStreamKey;
 
@@ -91,10 +115,20 @@ public class ReplayContexts {
         public IReplayContexts.IChannelKeyContext getLogicalEnclosingScope() {
             return getImmediateEnclosingScope().getLogicalEnclosingScope();
         }
+
+        @Override
+        public LongHistogram getEndOfScopeDurationMetric() {
+            return getRootInstrumentationScope().getTrafficStreamLifecycleDuration();
+        }
+
+        @Override
+        public LongCounter getEndOfScopeCountMetric() {
+            return getRootInstrumentationScope().getTrafficStreamLifecycleCounter();
+        }
     }
 
     public static class HttpTransactionContext
-            extends IndirectNestedSpanContext<IReplayContexts.ITrafficStreamsLifecycleContext, IReplayContexts.IChannelKeyContext>
+            extends IndirectNestedSpanContext<IRootReplayerContext, IReplayContexts.ITrafficStreamsLifecycleContext, IReplayContexts.IChannelKeyContext>
             implements IReplayContexts.IReplayerHttpTransactionContext {
         final UniqueReplayerRequestKey replayerRequestKey;
         @Getter final Instant timeOfOriginalRequest;
@@ -129,7 +163,7 @@ public class ReplayContexts {
     }
 
     public static class RequestAccumulationContext
-            extends DirectNestedSpanContext<IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IRequestAccumulationContext {
         public RequestAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -138,7 +172,7 @@ public class ReplayContexts {
     }
 
     public static class ResponseAccumulationContext
-            extends DirectNestedSpanContext<IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IResponseAccumulationContext {
         public ResponseAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -147,7 +181,7 @@ public class ReplayContexts {
     }
 
     public static class RequestTransformationContext
-            extends DirectNestedSpanContext<IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IRequestTransformationContext {
         public RequestTransformationContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -215,7 +249,7 @@ public class ReplayContexts {
     }
 
     public static class ScheduledContext
-            extends DirectNestedSpanContext<IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IScheduledContext {
         private final Instant scheduledFor;
 
@@ -236,7 +270,7 @@ public class ReplayContexts {
     }
 
     public static class TargetRequestContext
-            extends DirectNestedSpanContext<IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.ITargetRequestContext {
         public TargetRequestContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -256,7 +290,7 @@ public class ReplayContexts {
     }
 
     public static class RequestSendingContext
-            extends DirectNestedSpanContext<IReplayContexts.ITargetRequestContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.ITargetRequestContext>
             implements IReplayContexts.IRequestSendingContext {
         public RequestSendingContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
@@ -265,7 +299,7 @@ public class ReplayContexts {
     }
 
     public static class WaitingForHttpResponseContext
-            extends DirectNestedSpanContext<IReplayContexts.ITargetRequestContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.ITargetRequestContext>
             implements IReplayContexts.IWaitingForHttpResponseContext {
         public WaitingForHttpResponseContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
@@ -274,7 +308,7 @@ public class ReplayContexts {
     }
 
     public static class ReceivingHttpResponseContext
-            extends DirectNestedSpanContext<IReplayContexts.ITargetRequestContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.ITargetRequestContext>
             implements IReplayContexts.IReceivingHttpResponseContext {
         public ReceivingHttpResponseContext(IReplayContexts.ITargetRequestContext enclosingScope) {
             super(enclosingScope);
@@ -283,7 +317,7 @@ public class ReplayContexts {
     }
 
     public static class TupleHandlingContext
-            extends DirectNestedSpanContext<IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<IRootReplayerContext, IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.ITupleHandlingContext {
         public TupleHandlingContext(IReplayContexts.IReplayerHttpTransactionContext enclosingScope) {
             super(enclosingScope);

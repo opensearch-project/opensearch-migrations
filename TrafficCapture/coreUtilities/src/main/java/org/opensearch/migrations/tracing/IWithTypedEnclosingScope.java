@@ -1,5 +1,5 @@
 package org.opensearch.migrations.tracing;
 
-public interface IWithTypedEnclosingScope<T> extends IInstrumentationAttributes {
+public interface IWithTypedEnclosingScope<S extends IInstrumentConstructor,T> extends IInstrumentationAttributes<S> {
     T getLogicalEnclosingScope();
 }

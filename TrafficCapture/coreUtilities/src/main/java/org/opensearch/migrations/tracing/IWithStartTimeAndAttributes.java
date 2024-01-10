@@ -2,42 +2,47 @@ package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.metrics.LongHistogram;
 
 import java.time.Duration;
 import java.time.Instant;
 
-public interface IWithStartTimeAndAttributes extends IInstrumentationAttributes {
+public interface IWithStartTimeAndAttributes<S extends IInstrumentConstructor> extends IInstrumentationAttributes<S> {
     Instant getStartTime();
 
 
-    default void meterHistogramMicros(String eventName, Duration value) {
-        meterHistogramMicros(eventName, value, Attributes.builder());
+    default void meterHistogramMillis(LongHistogram histogram) {
+        meterHistogramMillis(histogram, Attributes.builder());
     }
-    default void meterHistogramMicros(String eventName, Duration value, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMicros(eventName, value, attributesBuilder);
+    default void meterHistogramMillis(LongHistogram histogram, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMillis(histogram, attributesBuilder);
     }
-    default void meterHistogramMillis(String eventName, Duration value) {
-        meterHistogramMillis(eventName, value, Attributes.builder());
+    default void meterHistogramMillis(LongHistogram histogram, Duration value) {
+        meterHistogramMillis(histogram, value, Attributes.builder());
     }
-    default void meterHistogramMillis(String eventName, Duration value, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMillis(eventName, value, attributesBuilder);
+    default void meterHistogramMillis(LongHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMillis(histogram, value, attributesBuilder);
     }
-    default void meterHistogram(String eventName, String units, long value) {
-        meterHistogram(eventName, units, value, Attributes.builder());
+
+    default void meterHistogramMicros(LongHistogram histogram, Duration value) {
+        meterHistogramMicros(histogram, value, Attributes.builder());
     }
-    default void meterHistogram(String eventName, String units, long value, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogram(eventName, units, value, attributesBuilder);
+    default void meterHistogramMicros(LongHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMicros(histogram, value, attributesBuilder);
     }
-    default void meterHistogramMicros(String eventName) {
-        meterHistogramMicros(eventName, Attributes.builder());
+    default void meterHistogramMicros(LongHistogram histogram) {
+        meterHistogramMicros(histogram, Attributes.builder());
     }
-    default void meterHistogramMicros(String eventName, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMicros(eventName, attributesBuilder);
+    default void meterHistogramMicros(LongHistogram histogram, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this)
+                .meterHistogramMicros(histogram, attributesBuilder);
     }
-    default void meterHistogramMillis(String eventName) {
-        meterHistogramMillis(eventName, Attributes.builder());
+
+    default void meterHistogram(LongHistogram histogram, long value) {
+        meterHistogram(histogram, value, Attributes.builder());
     }
-    default void meterHistogramMillis(String eventName, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeter(this).meterHistogramMillis(eventName, attributesBuilder);
+    default void meterHistogram(LongHistogram histogram, long value, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this).meterHistogram(histogram, value, attributesBuilder);
     }
+
 }

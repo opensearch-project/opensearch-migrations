@@ -2,16 +2,17 @@ package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
 
-import java.time.Duration;
 import java.util.ArrayList;
 
-public interface IInstrumentationAttributes {
+public interface IInstrumentationAttributes<S extends IInstrumentConstructor> {
     String getScopeName();
-    IInstrumentationAttributes getEnclosingScope();
-    @NonNull IInstrumentConstructor getRootInstrumentationScope();
+    IInstrumentationAttributes<S> getEnclosingScope();
+    @NonNull S getRootInstrumentationScope();
     default Span getCurrentSpan() { return null; }
 
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {
@@ -24,7 +25,7 @@ public interface IInstrumentationAttributes {
 
     default AttributesBuilder getPopulatedAttributesBuilder(AttributesBuilder builder) {
         var currentObj = this;
-        var stack = new ArrayList<IInstrumentationAttributes>();
+        var stack = new ArrayList<IInstrumentationAttributes<S>>();
         while (currentObj != null) {
             stack.add(currentObj);
             currentObj = currentObj.getEnclosingScope();
@@ -36,23 +37,24 @@ public interface IInstrumentationAttributes {
         return builder;
     }
 
-    default void meterIncrementEvent(String eventName) {
-        meterIncrementEvent(eventName, Attributes.builder());
+    default void meterIncrementEvent(LongCounter c) {
+        meterIncrementEvent(c, Attributes.builder());
     }
-    default void meterIncrementEvent(String eventName, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildSimpleMeter(this).meterIncrementEvent(eventName, attributesBuilder);
+    default void meterIncrementEvent(LongCounter c, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this).meterIncrementEvent(c, attributesBuilder);
     }
-    default void meterIncrementEvent(String eventName, long increment) {
-        meterIncrementEvent (eventName, increment, Attributes.builder());
+    default void meterIncrementEvent(LongCounter c, long increment) {
+        meterIncrementEvent (c, increment, Attributes.builder());
     }
-    default void meterIncrementEvent(String eventName, long increment, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildSimpleMeter(this)
-                .meterIncrementEvent(eventName, increment, attributesBuilder);
+    default void meterIncrementEvent(LongCounter c, long increment, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this)
+                .meterIncrementEvent(c, increment, attributesBuilder);
     }
-    default void meterDeltaEvent(String eventName, long delta) {
-        meterDeltaEvent(eventName, delta, Attributes.builder());
+    default void meterDeltaEvent(LongUpDownCounter c, long delta) {
+        meterDeltaEvent(c, delta, Attributes.builder());
     }
-    default void meterDeltaEvent(String eventName, long delta, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildSimpleMeter(this).meterDeltaEvent(eventName, delta, attributesBuilder);
+    default void meterDeltaEvent(LongUpDownCounter c, long delta, AttributesBuilder attributesBuilder) {
+        getRootInstrumentationScope().buildMeterClosure(this).meterDeltaEvent(c, delta, attributesBuilder);
     }
+
 }
