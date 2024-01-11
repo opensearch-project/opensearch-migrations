@@ -79,7 +79,7 @@ echo "Print initial source and target indices after clearing indices: "
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source_endpoint ${source_endpoint} --source_no_auth --target_no_auth"
 
 # Spin up Replayer container and wait for service to be stable
-aws ecs update-service --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default" --desired-count 1
+aws ecs update-service --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default" --desired-count 1 > /dev/null 2>&1
 echo "Waiting for Replayer to be stable..."
 aws ecs wait services-stable --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default"
 

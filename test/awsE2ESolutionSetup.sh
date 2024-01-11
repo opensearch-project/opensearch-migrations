@@ -63,7 +63,7 @@ restore_and_record () {
   unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${kafka_brokers} --timeout 100000 --describe --group logging-group-default --command-config kafka-tools/aws/msk-iam-auth.properties"
 
   # Turn off Replayer
-  aws ecs update-service --cluster "migration-${deploy_stage}-ecs-cluster" --service "migration-${deploy_stage}-traffic-replayer-default" --desired-count 0
+  aws ecs update-service --cluster "migration-${deploy_stage}-ecs-cluster" --service "migration-${deploy_stage}-traffic-replayer-default" --desired-count 0 > /dev/null 2>&1
 }
 
 # One-time required service-linked-role creation for AWS accounts which do not have these roles
