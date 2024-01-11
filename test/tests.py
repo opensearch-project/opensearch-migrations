@@ -290,9 +290,11 @@ class E2ETests(unittest.TestCase):
                 self.assert_(False)
 
         source_indices = get_indices(self.source_endpoint, self.source_auth, self.source_verify_ssl)
-        valid_source_indices = set([index for index in source_indices if not self.does_index_match_ignored_index(index)])
+        valid_source_indices = set([index for index in source_indices
+                                    if not self.does_index_match_ignored_index(index)])
         target_indices = get_indices(self.target_endpoint, self.target_auth, self.target_verify_ssl)
-        valid_target_indices = set([index for index in target_indices if not self.does_index_match_ignored_index(index)])
+        valid_target_indices = set([index for index in target_indices
+                                    if not self.does_index_match_ignored_index(index)])
 
         self.assertTrue(valid_source_indices, "No valid indices found on source after running OpenSearch Benchmark")
         self.assertEqual(valid_source_indices, valid_target_indices,
@@ -303,4 +305,5 @@ class E2ETests(unittest.TestCase):
             source_count = get_doc_count(self.source_endpoint, index, self.source_auth, self.source_verify_ssl)
             target_count = get_doc_count(self.target_endpoint, index, self.target_auth, self.target_verify_ssl)
             if source_count != target_count:
-                self.assertEqual(source_count, target_count, f'{index}: doc counts do not match - Source = {source_count}, Target = {target_count}')
+                self.assertEqual(source_count, target_count, f'{index}: doc counts do not match - '
+                                                             f'Source = {source_count}, Target = {target_count}')
