@@ -8,5 +8,5 @@ import org.opensearch.migrations.tracing.IInstrumentConstructor;
 public interface ISourceTrafficChannelKey {
     String getNodeId();
     String getConnectionId();
-    @NonNull IReplayContexts.ITrafficStreamsLifecycleContext<IInstrumentConstructor> getTrafficStreamsContext();
+    @NonNull IReplayContexts.ITrafficStreamsLifecycleContext getTrafficStreamsContext();
 }

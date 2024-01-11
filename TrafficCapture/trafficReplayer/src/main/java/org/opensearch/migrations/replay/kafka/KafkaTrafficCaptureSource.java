@@ -14,6 +14,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -35,6 +36,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -106,7 +108,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
         var kafkaCtx = (ReplayContexts.KafkaRecordContext) looseParentScope;
         kafkaCtx.close();
-        channelContextManager.releaseContextFor((ReplayContexts.ChannelKeyContext) kafkaCtx.getImmediateEnclosingScope());
+        channelContextManager.releaseContextFor(kafkaCtx.getImmediateEnclosingScope());
     }
 
     public static KafkaTrafficCaptureSource buildKafkaSource(@NonNull IInstrumentationAttributes globalContext,
@@ -169,7 +171,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     @SneakyThrows
-    public void touch(IInstrumentationAttributes context) {
+    public void touch(ITrafficSourceContexts.IReadChunkContext context) {
         CompletableFuture.runAsync(()->trackingKafkaConsumer.touch(context), kafkaExecutor).get();
     }
 
@@ -186,15 +188,16 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     @SuppressWarnings("unchecked")
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(IInstrumentationAttributes context) {
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
         log.atTrace().setMessage("readNextTrafficStreamChunk()").log();
         return CompletableFuture.supplyAsync(() -> {
             log.atTrace().setMessage("async...readNextTrafficStreamChunk()").log();
-            return readNextTrafficStreamSynchronously(context);
+            return readNextTrafficStreamSynchronously(contextSupplier);
         }, kafkaExecutor);
     }
 
-    public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously(IInstrumentationAttributes context) {
+    public List<ITrafficStreamWithKey>
+    readNextTrafficStreamSynchronously(ITrafficSourceContexts.IReadChunkContext context) {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
         try {
             return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData,kafkaRecord) -> {

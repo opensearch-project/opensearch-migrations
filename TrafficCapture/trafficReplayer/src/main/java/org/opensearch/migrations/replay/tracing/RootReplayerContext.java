@@ -5,6 +5,7 @@ import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.MeterProvider;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.tracing.RootOtelContext;
@@ -12,7 +13,7 @@ import org.opensearch.migrations.tracing.RootOtelContext;
 import lombok.Getter;
 
 @Getter
-public class RootReplayerContext extends RootOtelContext<RootReplayerContext> implements IRootReplayerContext<RootReplayerContext> {
+public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
     public final KafkaConsumerContexts.AsyncListeningContext.MetricInstruments asyncListeningInstruments;
     public final KafkaConsumerContexts.TouchScopeContext.MetricInstruments touchInstruments;
     public final KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments;
@@ -73,6 +74,14 @@ public class RootReplayerContext extends RootOtelContext<RootReplayerContext> im
 
     @Override
     public TrafficSourceContexts.ReadChunkContext createReadChunkContext() {
-        return new TrafficSourceContexts.ReadChunkContext(this);
+        return new TrafficSourceContexts.ReadChunkContext(this, this);
+    }
+
+    public ReplayContexts.ChannelKeyContext createChannelContext(ITrafficStreamKey tsk) {
+        return new ReplayContexts.ChannelKeyContext(this, this, tsk);
+    }
+
+    public IKafkaConsumerContexts.ICommitScopeContext createCommitContext() {
+        return new KafkaConsumerContexts.CommitScopeContext(this, this);
     }
 }

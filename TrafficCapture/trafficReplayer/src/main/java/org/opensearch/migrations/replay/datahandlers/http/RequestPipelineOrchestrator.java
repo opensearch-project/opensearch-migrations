@@ -45,14 +45,14 @@ public class RequestPipelineOrchestrator<R> {
     public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
     private final List<List<Integer>> chunkSizes;
     final IPacketFinalizingConsumer<R> packetReceiver;
-    private final IReplayContexts.IRequestTransformationContext<RootReplayerContext> httpTransactionContext;
+    private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
 
     public RequestPipelineOrchestrator(List<List<Integer>> chunkSizes,
                                        IPacketFinalizingConsumer<R> packetReceiver,
                                        IAuthTransformerFactory incomingAuthTransformerFactory,
-                                       IReplayContexts.IRequestTransformationContext<RootReplayerContext> httpTransactionContext) {
+                                       IReplayContexts.IRequestTransformationContext httpTransactionContext) {
         this.chunkSizes = chunkSizes;
         this.packetReceiver = packetReceiver;
         this.authTransfomerFactory = incomingAuthTransformerFactory != null ? incomingAuthTransformerFactory :

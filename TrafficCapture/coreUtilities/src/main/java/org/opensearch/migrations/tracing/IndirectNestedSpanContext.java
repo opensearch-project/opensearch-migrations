@@ -2,11 +2,14 @@ package org.opensearch.migrations.tracing;
 
 import lombok.NonNull;
 
-public abstract class IndirectNestedSpanContext
-        <S extends IInstrumentConstructor, D extends IInstrumentationAttributes<S>, L extends IInstrumentationAttributes<S>>
-        extends AbstractNestedSpanContext<S, D> {
-    public IndirectNestedSpanContext(@NonNull D enclosingScope) {
-        super(enclosingScope);
+public abstract class IndirectNestedSpanContext<S extends IInstrumentConstructor,
+                                                D extends IInstrumentationAttributes & IHasRootInstrumentationScope<S>,
+                                                L>
+        extends BaseNestedSpanContext<S, D>
+        implements IWithTypedEnclosingScope<L>
+{
+    protected IndirectNestedSpanContext(@NonNull D enclosingScope) {
+        super(enclosingScope.getRootInstrumentationScope(), enclosingScope);
     }
 
     public abstract L getLogicalEnclosingScope();

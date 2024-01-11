@@ -34,16 +34,15 @@ public class RequestResponsePacketPair {
     ReconstructionStatus completionStatus;
     // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,
     // or just leave this null, in which case, the context from the trafficStreamKey should be used
-    private IScopedInstrumentationAttributes<IRootReplayerContext> requestOrResponseAccumulationContext;
+    private IScopedInstrumentationAttributes requestOrResponseAccumulationContext;
 
     public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey, Instant sourceTimestamp,
                                      int startingSourceRequestIndex, int indexOfCurrentRequest) {
         this.firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
         var requestKey = new UniqueReplayerRequestKey(startingAtTrafficStreamKey,
                 startingSourceRequestIndex, indexOfCurrentRequest);
-        var httpTransactionContext = new ReplayContexts.HttpTransactionContext(
-                startingAtTrafficStreamKey.getTrafficStreamsContext(),
-                requestKey, sourceTimestamp);
+        var httpTransactionContext = startingAtTrafficStreamKey.getTrafficStreamsContext()
+                .createHttpTransactionContext(requestKey, sourceTimestamp);
         requestOrResponseAccumulationContext = new ReplayContexts.RequestAccumulationContext(httpTransactionContext);
     }
 
@@ -51,7 +50,7 @@ public class RequestResponsePacketPair {
         return firstTrafficStreamKeyForRequest;
     }
 
-    public IReplayContexts.IReplayerHttpTransactionContext<IRootReplayerContext> getHttpTransactionContext() {
+    public IReplayContexts.IReplayerHttpTransactionContext getHttpTransactionContext() {
         var looseCtx = requestOrResponseAccumulationContext;
         // the req/response ctx types in the assert below will always implement this with the
         // IReplayerHttpTransactionContext parameter, but this seems clearer
@@ -59,24 +58,24 @@ public class RequestResponsePacketPair {
         assert looseCtx instanceof IWithTypedEnclosingScope;
         assert looseCtx instanceof IReplayContexts.IRequestAccumulationContext
                 || looseCtx instanceof IReplayContexts.IResponseAccumulationContext;
-        return ((IWithTypedEnclosingScope<IRootReplayerContext, IReplayContexts.IReplayerHttpTransactionContext<IRootReplayerContext>>) looseCtx)
+        return ((IWithTypedEnclosingScope<IReplayContexts.IReplayerHttpTransactionContext>) looseCtx)
                 .getLogicalEnclosingScope();
 
     }
 
-    public @NonNull IReplayContexts.IRequestAccumulationContext<IRootReplayerContext> getRequestContext() {
-        return (IReplayContexts.IRequestAccumulationContext<IRootReplayerContext>) requestOrResponseAccumulationContext;
+    public @NonNull IReplayContexts.IRequestAccumulationContext getRequestContext() {
+        return (IReplayContexts.IRequestAccumulationContext) requestOrResponseAccumulationContext;
     }
 
-    public @NonNull IReplayContexts.IResponseAccumulationContext<IRootReplayerContext> getResponseContext() {
-        return (IReplayContexts.IResponseAccumulationContext<IRootReplayerContext>) requestOrResponseAccumulationContext;
+    public @NonNull IReplayContexts.IResponseAccumulationContext getResponseContext() {
+        return (IReplayContexts.IResponseAccumulationContext) requestOrResponseAccumulationContext;
     }
 
     public void rotateRequestGatheringToResponse() {
         var looseCtx = requestOrResponseAccumulationContext;
         assert looseCtx instanceof IReplayContexts.IRequestAccumulationContext;
-        requestOrResponseAccumulationContext = new ReplayContexts.ResponseAccumulationContext(
-                getRequestContext().getLogicalEnclosingScope());
+        requestOrResponseAccumulationContext =
+                getRequestContext().getLogicalEnclosingScope().createAccumulatorContext();
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {

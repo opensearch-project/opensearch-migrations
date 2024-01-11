@@ -69,7 +69,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                         IAuthTransformerFactory authTransformerFactory,
                                         IPacketFinalizingConsumer<R> transformedPacketReceiver,
                                         IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
-        transformationContext = new ReplayContexts.RequestTransformationContext(httpTransactionContext);
+        transformationContext = httpTransactionContext.createTransformationContext();
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
@@ -163,7 +163,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
 
     private static Throwable unwindPossibleCompletionException(Throwable t) {
         while (t instanceof CompletionException) {
-            t = ((CompletionException) t).getCause();
+            t = t.getCause();
         }
         return t;
     }
@@ -183,10 +183,14 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
                 .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
                 .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
-        return finalizedFuture.map(f->f.thenApply(r->reason == null ?
-                        new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.SKIPPED, null) :
-                        new TransformedOutputAndResult<R>(r, HttpRequestTransformationStatus.ERROR, reason))
-                        .whenComplete((v,t)->transformationContext.close()),
+        return finalizedFuture.map(f->f.thenApply(r -> reason == null ?
+                new TransformedOutputAndResult<>(r, HttpRequestTransformationStatus.SKIPPED, null) :
+                new TransformedOutputAndResult<>(r, HttpRequestTransformationStatus.ERROR, reason)
+        )
+                        .whenComplete((v,t)->{
+                            transformationContext.onTransformSkip();
+                            transformationContext.close();
+                        }),
                 ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }
 }

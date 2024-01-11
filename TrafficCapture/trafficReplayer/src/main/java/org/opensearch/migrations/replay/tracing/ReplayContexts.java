@@ -9,10 +9,11 @@ import lombok.NonNull;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.tracing.AbstractNestedSpanContext;
+import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IndirectNestedSpanContext;
 
 import java.time.Duration;
@@ -26,13 +27,15 @@ public class ReplayContexts {
     private ReplayContexts() {}
 
     public static class ChannelKeyContext
-            extends AbstractNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
-            implements IReplayContexts.IChannelKeyContext<RootReplayerContext> {
+            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+            implements IReplayContexts.IChannelKeyContext {
         @Getter
         final ISourceTrafficChannelKey channelKey;
 
-        public ChannelKeyContext(IInstrumentationAttributes<RootReplayerContext> enclosingScope, ISourceTrafficChannelKey channelKey) {
-            super(enclosingScope);
+        public ChannelKeyContext(RootReplayerContext rootScope,
+                                 IInstrumentationAttributes enclosingScope,
+                                 ISourceTrafficChannelKey channelKey) {
+            super(rootScope, enclosingScope);
             this.channelKey = channelKey;
             initializeSpan();
         }
@@ -67,13 +70,12 @@ public class ReplayContexts {
     }
 
     public static class KafkaRecordContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.IChannelKeyContext<RootReplayerContext>>
-            implements IReplayContexts.IKafkaRecordContext<RootReplayerContext> {
+            extends DirectNestedSpanContext<RootReplayerContext,ChannelKeyContext,IReplayContexts.IChannelKeyContext>
+            implements IReplayContexts.IKafkaRecordContext {
 
         final String recordId;
 
-        public KafkaRecordContext(IReplayContexts.IChannelKeyContext<RootReplayerContext> enclosingScope,
-                                  String recordId, int recordSize) {
+        public KafkaRecordContext(ChannelKeyContext enclosingScope, String recordId, int recordSize) {
             super(enclosingScope);
             this.recordId = recordId;
             initializeSpan();
@@ -102,14 +104,20 @@ public class ReplayContexts {
         public String getRecordId() {
             return recordId;
         }
+
+        @Override
+        public IReplayContexts.ITrafficStreamsLifecycleContext
+        createTrafficLifecyleContext(ITrafficStreamKey tsk) {
+            return new ReplayContexts.TrafficStreamsLifecycleContext(this, tsk);
+        }
     }
 
     public static class TrafficStreamsLifecycleContext
-            extends IndirectNestedSpanContext<RootReplayerContext,IReplayContexts.IKafkaRecordContext<RootReplayerContext>, IReplayContexts.IChannelKeyContext<RootReplayerContext>>
-            implements IReplayContexts.ITrafficStreamsLifecycleContext<RootReplayerContext> {
+            extends IndirectNestedSpanContext<RootReplayerContext,KafkaRecordContext,IReplayContexts.IChannelKeyContext>
+            implements IReplayContexts.ITrafficStreamsLifecycleContext {
         private final ITrafficStreamKey trafficStreamKey;
 
-        public TrafficStreamsLifecycleContext(IReplayContexts.IKafkaRecordContext<RootReplayerContext> enclosingScope,
+        public TrafficStreamsLifecycleContext(KafkaRecordContext enclosingScope,
                                               ITrafficStreamKey trafficStreamKey) {
             super(enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
@@ -133,8 +141,15 @@ public class ReplayContexts {
         }
 
         @Override
-        public IReplayContexts.IChannelKeyContext<RootReplayerContext> getChannelKeyContext() {
+        public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
             return getLogicalEnclosingScope();
+        }
+
+        @Override
+        public HttpTransactionContext createHttpTransactionContext(UniqueReplayerRequestKey requestKey,
+                                                                   Instant sourceTimestamp) {
+            return new ReplayContexts.HttpTransactionContext(getRootInstrumentationScope(),
+                    this, requestKey, sourceTimestamp);
         }
 
         @Override
@@ -143,21 +158,22 @@ public class ReplayContexts {
         }
 
         @Override
-        public IReplayContexts.IChannelKeyContext<RootReplayerContext> getLogicalEnclosingScope() {
+        public IReplayContexts.IChannelKeyContext getLogicalEnclosingScope() {
             return getImmediateEnclosingScope().getLogicalEnclosingScope();
         }
     }
 
     public static class HttpTransactionContext
-            extends IndirectNestedSpanContext<RootReplayerContext,IReplayContexts.ITrafficStreamsLifecycleContext<RootReplayerContext>, IReplayContexts.IChannelKeyContext<RootReplayerContext>>
-            implements IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> {
+            extends BaseNestedSpanContext<RootReplayerContext,IReplayContexts.ITrafficStreamsLifecycleContext>
+            implements IReplayContexts.IReplayerHttpTransactionContext {
         final UniqueReplayerRequestKey replayerRequestKey;
         @Getter final Instant timeOfOriginalRequest;
 
-        public HttpTransactionContext(IReplayContexts.ITrafficStreamsLifecycleContext<RootReplayerContext> enclosingScope,
+        public HttpTransactionContext(RootReplayerContext rootScope,
+                                      IReplayContexts.ITrafficStreamsLifecycleContext enclosingScope,
                                       UniqueReplayerRequestKey replayerRequestKey,
                                       Instant timeOfOriginalRequest) {
-            super(enclosingScope);
+            super(rootScope, enclosingScope);
             this.replayerRequestKey = replayerRequestKey;
             this.timeOfOriginalRequest = timeOfOriginalRequest;
             initializeSpan();
@@ -178,8 +194,28 @@ public class ReplayContexts {
             return getRootInstrumentationScope().httpTransactionContext;
         }
 
-        public IReplayContexts.IChannelKeyContext<RootReplayerContext> getChannelKeyContext() {
+        public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
             return getLogicalEnclosingScope();
+        }
+
+        @Override
+        public RequestTransformationContext createTransformationContext() {
+            return new ReplayContexts.RequestTransformationContext(this);
+        }
+
+        @Override
+        public IScopedInstrumentationAttributes createAccumulatorContext() {
+            return new ReplayContexts.ResponseAccumulationContext(this);
+        }
+
+        @Override
+        public TargetRequestContext createTargetRequestContext() {
+            return new ReplayContexts.TargetRequestContext(this);
+        }
+
+        @Override
+        public IReplayContexts.IScheduledContext createScheduledContext(Instant timestamp) {
+            return new ReplayContexts.ScheduledContext(this, timestamp);
         }
 
         @Override
@@ -193,15 +229,15 @@ public class ReplayContexts {
         }
 
         @Override
-        public IReplayContexts.IChannelKeyContext<RootReplayerContext> getLogicalEnclosingScope() {
+        public IReplayContexts.IChannelKeyContext getLogicalEnclosingScope() {
             return getImmediateEnclosingScope().getLogicalEnclosingScope();
         }
     }
 
     public static class RequestAccumulationContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext>>
-            implements IReplayContexts.IRequestAccumulationContext<RootReplayerContext> {
-        public RequestAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,HttpTransactionContext,IReplayContexts.IReplayerHttpTransactionContext>
+            implements IReplayContexts.IRequestAccumulationContext {
+        public RequestAccumulationContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -218,9 +254,9 @@ public class ReplayContexts {
     }
 
     public static class ResponseAccumulationContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext>>
-            implements IReplayContexts.IResponseAccumulationContext<RootReplayerContext> {
-        public ResponseAccumulationContext(IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,HttpTransactionContext,IReplayContexts.IReplayerHttpTransactionContext>
+            implements IReplayContexts.IResponseAccumulationContext {
+        public ResponseAccumulationContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -237,9 +273,9 @@ public class ReplayContexts {
     }
 
     public static class RequestTransformationContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext>>
-            implements IReplayContexts.IRequestTransformationContext<RootReplayerContext> {
-        public RequestTransformationContext(IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,HttpTransactionContext,IReplayContexts.IReplayerHttpTransactionContext>
+            implements IReplayContexts.IRequestTransformationContext {
+        public RequestTransformationContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -352,12 +388,11 @@ public class ReplayContexts {
     }
 
     public static class ScheduledContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext>>
-            implements IReplayContexts.IScheduledContext<RootReplayerContext> {
+            extends DirectNestedSpanContext<RootReplayerContext,HttpTransactionContext,IReplayContexts.IReplayerHttpTransactionContext>
+            implements IReplayContexts.IScheduledContext {
         private final Instant scheduledFor;
 
-        public ScheduledContext(IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> enclosingScope,
-                                Instant scheduledFor) {
+        public ScheduledContext(HttpTransactionContext enclosingScope, Instant scheduledFor) {
             super(enclosingScope);
             this.scheduledFor = scheduledFor;
             initializeSpan();
@@ -384,9 +419,9 @@ public class ReplayContexts {
     }
 
     public static class TargetRequestContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext>>
-            implements IReplayContexts.ITargetRequestContext<RootReplayerContext> {
-        public TargetRequestContext(IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,HttpTransactionContext,IReplayContexts.IReplayerHttpTransactionContext>
+            implements IReplayContexts.ITargetRequestContext {
+        public TargetRequestContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
             meterHistogramMillis(getMetrics().sourceTargetGap,
@@ -424,12 +459,22 @@ public class ReplayContexts {
         public void onBytesReceived(int size) {
             meterIncrementEvent(getMetrics().bytesRead, size);
         }
+
+        @Override
+        public IReplayContexts.IReceivingHttpResponseContext createHttpReceivingContext() {
+            return new ReplayContexts.ReceivingHttpResponseContext(this);
+        }
+
+        @Override
+        public IReplayContexts.IWaitingForHttpResponseContext createWaitingForResponseContext() {
+            return new ReplayContexts.WaitingForHttpResponseContext(this);
+        }
     }
 
     public static class RequestSendingContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.ITargetRequestContext<RootReplayerContext>>
-            implements IReplayContexts.IRequestSendingContext<RootReplayerContext> {
-        public RequestSendingContext(IReplayContexts.ITargetRequestContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,TargetRequestContext,IReplayContexts.ITargetRequestContext>
+            implements IReplayContexts.IRequestSendingContext {
+        public RequestSendingContext(TargetRequestContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -446,9 +491,9 @@ public class ReplayContexts {
     }
 
     public static class WaitingForHttpResponseContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.ITargetRequestContext<RootReplayerContext>>
-            implements IReplayContexts.IWaitingForHttpResponseContext<RootReplayerContext> {
-        public WaitingForHttpResponseContext(IReplayContexts.ITargetRequestContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,TargetRequestContext,IReplayContexts.ITargetRequestContext>
+            implements IReplayContexts.IWaitingForHttpResponseContext {
+        public WaitingForHttpResponseContext(TargetRequestContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -466,9 +511,9 @@ public class ReplayContexts {
     }
 
     public static class ReceivingHttpResponseContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.ITargetRequestContext<RootReplayerContext>>
-            implements IReplayContexts.IReceivingHttpResponseContext<RootReplayerContext> {
-        public ReceivingHttpResponseContext(IReplayContexts.ITargetRequestContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,TargetRequestContext,IReplayContexts.ITargetRequestContext>
+            implements IReplayContexts.IReceivingHttpResponseContext {
+        public ReceivingHttpResponseContext(TargetRequestContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -486,9 +531,9 @@ public class ReplayContexts {
     }
 
     public static class TupleHandlingContext
-            extends DirectNestedSpanContext<RootReplayerContext,IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext>>
-            implements IReplayContexts.ITupleHandlingContext<RootReplayerContext> {
-        public TupleHandlingContext(IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext,HttpTransactionContext,IReplayContexts.IReplayerHttpTransactionContext>
+            implements IReplayContexts.ITupleHandlingContext {
+        public TupleHandlingContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }

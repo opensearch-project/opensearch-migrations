@@ -29,13 +29,13 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    private final IReplayContexts.IRequestTransformationContext<RootReplayerContext> httpTransactionContext;
+    private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
     static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
-                                                            IReplayContexts.IRequestTransformationContext<RootReplayerContext> httpTransactionContext) {
+                                                            IReplayContexts.IRequestTransformationContext httpTransactionContext) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;

@@ -6,7 +6,7 @@ import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IRootOtelContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
-public interface IHttpTransactionContext<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
+public interface IHttpTransactionContext extends IScopedInstrumentationAttributes {
     static final AttributeKey<Long> SOURCE_REQUEST_INDEX_KEY = AttributeKey.longKey("sourceRequestIndex");
 
     long getSourceRequestIndex();

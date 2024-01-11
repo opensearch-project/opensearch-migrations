@@ -11,9 +11,11 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.slf4j.event.Level;
 
 import java.time.Clock;
@@ -29,6 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -79,7 +82,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      */
     public static final int POLL_TIMEOUT_KEEP_ALIVE_DIVISOR = 4;
 
-    @NonNull private final IInstrumentationAttributes globalContext;
+    @NonNull private final RootReplayerContext globalContext;
     private final Consumer<String, byte[]> kafkaConsumer;
 
     final String topic;
@@ -102,7 +105,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private final AtomicInteger kafkaRecordsLeftToCommitEventually;
     private final AtomicBoolean kafkaRecordsReadyToCommit;
 
-    public TrackingKafkaConsumer(@NonNull IInstrumentationAttributes globalContext,
+    public TrackingKafkaConsumer(@NonNull RootReplayerContext globalContext,
                                  Consumer<String, byte[]> kafkaConsumer, String topic,
                                  Duration keepAliveInterval, Clock c,
                                  java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback) {
@@ -125,7 +128,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
         synchronized (commitDataLock) {
-            safeCommit(globalContext);
+            safeCommit(globalContext::createCommitContext);
             partitions.forEach(p -> {
                 var tp = new TopicPartition(topic, p.partition());
                 nextSetOfCommitsMap.remove(tp);
@@ -166,11 +169,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return r;
     }
 
-    public void touch(IInstrumentationAttributes context) {
-        try (var touchCtx = new KafkaConsumerContexts.TouchScopeContext(context)) {
+    public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
+        try (var touchCtx = context.createNewTouchContext()) {
             log.trace("touch() called.");
             pause();
-            try (var pollCtx = new KafkaConsumerContexts.PollScopeContext(touchCtx)) {
+            try (var pollCtx = touchCtx.createNewPollContext()) {
                 var records = kafkaConsumer.poll(Duration.ZERO);
                 if (!records.isEmpty()) {
                     throw new IllegalStateException("Expected no entries once the consumer was paused.  " +
@@ -184,7 +187,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             } finally {
                 resume();
             }
-            safeCommit(context);
+            safeCommit(()->context.createCommitContext());
             lastTouchTimeRef.set(clock.instant());
         }
     }
@@ -229,11 +232,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     public <T> Stream<T>
-    getNextBatchOfRecords(IInstrumentationAttributes context,
+    getNextBatchOfRecords(ITrafficSourceContexts.IReadChunkContext context,
                           BiFunction<KafkaCommitOffsetData, ConsumerRecord<String,byte[]>, T> builder) {
-        safeCommit(context);
+        safeCommit(()->context.createCommitContext());
         var records = safePollWithSwallowedRuntimeExceptions(context);
-        safeCommit(context);
+        safeCommit(()->context.createCommitContext());
         return applyBuilder(builder, records);
     }
 
@@ -252,11 +255,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     private ConsumerRecords<String, byte[]>
-    safePollWithSwallowedRuntimeExceptions(IInstrumentationAttributes context) {
+    safePollWithSwallowedRuntimeExceptions(ITrafficSourceContexts.IReadChunkContext context) {
         try {
             lastTouchTimeRef.set(clock.instant());
             ConsumerRecords<String, byte[]> records;
-            try (var pollContext = new KafkaConsumerContexts.PollScopeContext(context)) {
+            try (var pollContext = context.createPollContext()) {
                 records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             }
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
@@ -316,16 +319,15 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .add(new OrderedKeyHolder(kafkaTsk.getOffset(), streamKey));
     }
 
-    private void safeCommit(IInstrumentationAttributes incomingContext) {
+    private void safeCommit(Supplier<IKafkaConsumerContexts.ICommitScopeContext> commitContextSupplier) {
         HashMap<TopicPartition, OffsetAndMetadata> nextCommitsMapCopy;
-        KafkaConsumerContexts.CommitScopeContext context = null;
+        IKafkaConsumerContexts.ICommitScopeContext context = null;
         synchronized (commitDataLock) {
             if (nextSetOfCommitsMap.isEmpty()) {
                 return;
             }
-            context = new KafkaConsumerContexts.CommitScopeContext(incomingContext);
-            nextCommitsMapCopy = new HashMap<>();
-            nextCommitsMapCopy.putAll(nextSetOfCommitsMap);
+            context = commitContextSupplier.get();
+            nextCommitsMapCopy = new HashMap<>(nextSetOfCommitsMap);
         }
         try {
             safeCommitStatic(context, kafkaConsumer, nextCommitsMapCopy);
@@ -363,12 +365,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
-    private static void safeCommitStatic(KafkaConsumerContexts.CommitScopeContext context,
+    private static void safeCommitStatic(IKafkaConsumerContexts.ICommitScopeContext context,
                                          Consumer<String, byte[]> kafkaConsumer,
                                          HashMap<TopicPartition, OffsetAndMetadata> nextCommitsMap) {
         assert !nextCommitsMap.isEmpty();
         log.atDebug().setMessage(() -> "Committing " + nextCommitsMap).log();
-        try (var kafkaContext = new KafkaConsumerContexts.KafkaCommitScopeContext(context)) {
+        try (var kafkaContext = context.createNewKafkaCommitContext()) {
             kafkaConsumer.commitSync(nextCommitsMap);
         }
     }

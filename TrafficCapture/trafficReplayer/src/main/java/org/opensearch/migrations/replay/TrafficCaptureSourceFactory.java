@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.kafka.KafkaBehavioralPolicy;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
@@ -21,13 +22,13 @@ public class TrafficCaptureSourceFactory {
     private TrafficCaptureSourceFactory() {}
 
     public static BlockingTrafficSource
-    createTrafficCaptureSource(IInstrumentationAttributes ctx,
+    createTrafficCaptureSource(RootReplayerContext ctx,
                                TrafficReplayer.Parameters appParams, Duration bufferTimeWindow) throws IOException {
         return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(ctx, appParams), bufferTimeWindow);
     }
 
     public static ISimpleTrafficCaptureSource
-    createUnbufferedTrafficCaptureSource(IInstrumentationAttributes ctx,
+    createUnbufferedTrafficCaptureSource(RootReplayerContext ctx,
                                          TrafficReplayer.Parameters appParams) throws IOException {
         boolean isKafkaActive = TrafficReplayer.validateRequiredKafkaParams(appParams.kafkaTrafficBrokers, appParams.kafkaTrafficTopic, appParams.kafkaTrafficGroupId);
         boolean isInputFileActive = appParams.inputFilename != null;

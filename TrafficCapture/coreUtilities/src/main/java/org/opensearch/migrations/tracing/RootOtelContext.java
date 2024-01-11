@@ -3,7 +3,6 @@ package org.opensearch.migrations.tracing;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
@@ -26,7 +25,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-public class RootOtelContext<S extends IInstrumentConstructor> implements IRootOtelContext<S> {
+public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
@@ -93,7 +92,7 @@ public class RootOtelContext<S extends IInstrumentConstructor> implements IRootO
     }
 
     @Override
-    public RootOtelContext<S> getEnclosingScope() {
+    public RootOtelContext getEnclosingScope() {
         return null;
     }
 
@@ -107,28 +106,28 @@ public class RootOtelContext<S extends IInstrumentConstructor> implements IRootO
     }
 
     @Override
-    @NonNull
-    public S getRootInstrumentationScope() {
-        return (S) this;
-    } // CRTP so that callers can get more specific
-
-    @Override
     public AttributesBuilder fillAttributes(AttributesBuilder builder) {
         return builder; // nothing more to do
     }
 
-    private static Span buildSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan) {
-        return Optional.ofNullable(parentSpan).map(p -> builder.setParent(Context.current().with(p)))
-                .orElseGet(builder::setNoParent)
+    private static SpanBuilder addLinkedToBuilder(Span linkedSpanContext, SpanBuilder spanBuilder) {
+        return Optional.ofNullable(linkedSpanContext)
+                .map(Span::getSpanContext).map(spanBuilder::addLink).orElse(spanBuilder);
+    }
+
+    private static Span buildSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan,
+                                            Span linkedSpanContext) {
+        return addLinkedToBuilder(linkedSpanContext, Optional.ofNullable(parentSpan)
+                .map(p -> builder.setParent(Context.current().with(p)))
+                .orElseGet(builder::setNoParent))
                 .startSpan().setAllAttributes(attrs);
     }
 
     @Override
-    public <S extends IInstrumentConstructor>
-    Span buildSpan(IInstrumentationAttributes<S> enclosingScope,
-                   String scopeName, String spanName, AttributesBuilder attributesBuilder) {
+    public Span buildSpan(IInstrumentationAttributes enclosingScope,
+                   String scopeName, String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
         var parentSpan = enclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
-        return buildSpanWithParent(spanBuilder, getPopulatedAttributes(attributesBuilder), parentSpan);
+        return buildSpanWithParent(spanBuilder, getPopulatedAttributes(attributesBuilder), parentSpan, linkedSpan);
     }
 }

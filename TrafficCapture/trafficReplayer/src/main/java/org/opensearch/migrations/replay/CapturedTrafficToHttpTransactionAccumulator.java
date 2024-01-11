@@ -105,7 +105,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     @AllArgsConstructor
     private static class SpanWrappingAccumulationCallbacks {
         private final AccumulationCallbacks underlying;
-        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext<IRootReplayerContext> requestCtx,
+        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
                                       @NonNull HttpMessageAndTimestamp request) {
             requestCtx.close();
             underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope().getReplayerRequestKey(),
@@ -129,7 +129,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            IReplayContexts.ITrafficStreamsLifecycleContext<IInstrumentConstructor> tsCtx,
+                                            IReplayContexts.ITrafficStreamsLifecycleContext tsCtx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             underlying.onTrafficStreamsExpired(status, tsCtx.getLogicalEnclosingScope(), trafficStreamKeysBeingHeld);
         }

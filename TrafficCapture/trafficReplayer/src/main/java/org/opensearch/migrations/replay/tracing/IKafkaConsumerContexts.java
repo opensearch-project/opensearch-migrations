@@ -26,20 +26,22 @@ public interface IKafkaConsumerContexts {
         public static final String ACTIVE_PARTITIONS_ASSIGNED_COUNT = "numPartitionsAssigned";
     }
 
-    interface IAsyncListeningContext<S extends IRootReplayerContext> extends IInstrumentationAttributes<S> {
+    interface IAsyncListeningContext extends IInstrumentationAttributes {
         String SCOPE_NAME = ScopeNames.KAFKA_CONSUMER_SCOPE;
         @Override default String getScopeName() { return SCOPE_NAME; }
     }
-    interface IKafkaConsumerScope<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
+    interface IKafkaConsumerScope extends IScopedInstrumentationAttributes {
         String SCOPE_NAME = ScopeNames.KAFKA_CONSUMER_SCOPE;
         @Override default String getScopeName() { return SCOPE_NAME; }
     }
-    interface ITouchScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S> {
+    interface ITouchScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.TOUCH;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
+
+        IPollScopeContext createNewPollContext();
     }
-    interface IPollScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S> {
+    interface IPollScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.KAFKA_POLL;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
@@ -48,16 +50,18 @@ public interface IKafkaConsumerContexts {
     /**
      * Context for the KafkaConsumer's bookkeeping around and including the commit service call
      */
-    interface ICommitScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S> {
+    interface ICommitScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.COMMIT;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
+
+        IKafkaCommitScopeContext createNewKafkaCommitContext();
     }
 
     /**
      * Context for ONLY the service call to Kafka to perform the commit.
      */
-    interface IKafkaCommitScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S>{
+    interface IKafkaCommitScopeContext extends IKafkaConsumerScope{
         String ACTIVITY_NAME = ActivityNames.KAFKA_COMMIT;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }

@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.tracing;
 
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public interface ITrafficSourceContexts {
@@ -16,22 +15,34 @@ public interface ITrafficSourceContexts {
         public static final String WAIT_FOR_NEXT_BACK_PRESSURE_CHECK = "waitForNextBackPressureCheck";
     }
 
-    interface ITrafficSourceContext<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
+    interface ITrafficSourceContext extends IScopedInstrumentationAttributes {
         String SCOPE_NAME = ScopeNames.TRAFFIC_SCOPE;
         @Override default String getScopeName() { return SCOPE_NAME; }
 
     }
-    interface IReadChunkContext<S extends IInstrumentConstructor> extends ITrafficSourceContext<S> {
+    interface IReadChunkContext extends ITrafficSourceContext {
         String ACTIVITY_NAME = ActivityNames.READ_NEXT_TRAFFIC_CHUNK;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
+
+        IBackPressureBlockContext createBackPressureContext();
+
+        IKafkaConsumerContexts.IPollScopeContext createPollContext();
+
+        IKafkaConsumerContexts.ICommitScopeContext createCommitContext();
     }
-    interface IBackPressureBlockContext<S extends IInstrumentConstructor> extends ITrafficSourceContext<S> {
+    interface IBackPressureBlockContext extends ITrafficSourceContext {
         String ACTIVITY_NAME = ActivityNames.BACK_PRESSURE_BLOCK;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
+
+        IWaitForNextSignal createWaitForSignalContext();
+
+        IKafkaConsumerContexts.ITouchScopeContext createNewTouchContext();
+
+        IKafkaConsumerContexts.ICommitScopeContext createCommitContext();
     }
-    interface IWaitForNextSignal<S extends IInstrumentConstructor> extends ITrafficSourceContext<S> {
+    interface IWaitForNextSignal extends ITrafficSourceContext {
         String ACTIVITY_NAME = ActivityNames.WAIT_FOR_NEXT_BACK_PRESSURE_CHECK;
         default String getActivityName() { return ACTIVITY_NAME; }
     }

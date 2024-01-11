@@ -9,7 +9,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
@@ -21,9 +24,12 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 @Slf4j
 public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
@@ -31,17 +37,17 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     private final AtomicInteger trafficStreamsRead = new AtomicInteger();
     private final ChannelContextManager channelContextManager;
 
-    public InputStreamOfTraffic(IInstrumentationAttributes<RootReplayerContext> context, InputStream inputStream) {
+    public InputStreamOfTraffic(RootReplayerContext context, InputStream inputStream) {
         this.channelContextManager = new ChannelContextManager(context);
         this.inputStream = inputStream;
     }
 
     public static class IOSTrafficStreamContext
-            extends DirectNestedSpanContext<RootReplayerContext, IReplayContexts.IChannelKeyContext<RootReplayerContext>>
-            implements IReplayContexts.ITrafficStreamsLifecycleContext<RootReplayerContext> {
+            extends DirectNestedSpanContext<RootReplayerContext, ReplayContexts.ChannelKeyContext, IReplayContexts.IChannelKeyContext>
+            implements IReplayContexts.ITrafficStreamsLifecycleContext {
         @Getter private final ITrafficStreamKey trafficStreamKey;
 
-        public IOSTrafficStreamContext(@NonNull IReplayContexts.IChannelKeyContext<RootReplayerContext> ctx,
+        public IOSTrafficStreamContext(@NonNull ReplayContexts.ChannelKeyContext ctx,
                                        ITrafficStreamKey tsk) {
             super(ctx);
             this.trafficStreamKey = tsk;
@@ -49,12 +55,9 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            final LongUpDownCounter activeChannelCounter;
             public MetricInstruments(MeterProvider meterProvider) {
                 super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
                 var meter = meterProvider.get(SCOPE_NAME2);
-                activeChannelCounter = meter
-                        .upDownCounterBuilder(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
             }
         }
 
@@ -63,10 +66,17 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
         }
 
         @Override
+        public ReplayContexts.HttpTransactionContext createHttpTransactionContext(UniqueReplayerRequestKey requestKey,
+                                                                                  Instant sourceTimestamp) {
+            return new ReplayContexts.HttpTransactionContext(getRootInstrumentationScope(),
+                    this, requestKey, sourceTimestamp);
+        }
+
+        @Override
         public String getActivityName() { return "trafficStreamLifecycle"; }
 
         @Override
-        public IReplayContexts.IChannelKeyContext<RootReplayerContext> getChannelKeyContext() {
+        public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
             return getImmediateEnclosingScope();
         }
     }
@@ -74,11 +84,10 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     /**
      * Returns a CompletableFuture to a TrafficStream object or sets the cause exception to an
      * EOFException if the input has been exhausted.
-     *
-     * @return
      */
+    @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(IInstrumentationAttributes<RootReplayerContext> context) {
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
         return CompletableFuture.supplyAsync(() -> {
             var builder = TrafficStream.newBuilder();
             try {
@@ -104,7 +113,9 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CommitResult commitTrafficStream(IInstrumentationAttributes ctx, ITrafficStreamKey trafficStreamKey) {
+    public CommitResult commitTrafficStream(Function<ITrafficStreamKey,
+                                                     IKafkaConsumerContexts.ICommitScopeContext> ctx,
+                                            ITrafficStreamKey trafficStreamKey) {
         // do nothing - this datasource isn't transactional
         return CommitResult.Immediate;
     }

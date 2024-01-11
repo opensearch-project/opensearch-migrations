@@ -2,14 +2,9 @@ package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.LongUpDownCounter;
-import io.opentelemetry.api.metrics.MeterProvider;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
@@ -76,7 +71,7 @@ public class IReplayContexts {
         public static final String BYTES_READ_FROM_TARGET = "bytesReadFromTarget";
     }
 
-    public interface IAccumulationScope<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
+    public interface IAccumulationScope extends IScopedInstrumentationAttributes {
         String SCOPE_NAME2 = "Replay";
 
         @Override
@@ -85,20 +80,10 @@ public class IReplayContexts {
         }
     }
 
-    public interface IChannelKeyContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IConnectionContext<S> {
+    public interface IChannelKeyContext
+            extends IAccumulationScope,
+                    IConnectionContext {
         String ACTIVITY_NAME = ActivityNames.CHANNEL;
-
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            final LongUpDownCounter activeChannelCounter;
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-                var meter = meterProvider.get(SCOPE_NAME2);
-                activeChannelCounter = meter
-                        .upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
-            }
-        }
 
         @Override default String getActivityName() { return ACTIVITY_NAME;}
 
@@ -119,17 +104,11 @@ public class IReplayContexts {
         void onTargetConnectionClosed();
     }
 
-    public interface IKafkaRecordContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IChannelKeyContext<S>>
+    public interface IKafkaRecordContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IChannelKeyContext>
     {
         String ACTIVITY_NAME = ActivityNames.RECORD_LIFETIME;
-
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-            }
-        }
 
         @Override default String getActivityName() { return ACTIVITY_NAME;}
 
@@ -137,25 +116,25 @@ public class IReplayContexts {
 
         String getRecordId();
 
+        @Override
         default AttributesBuilder fillAttributes(AttributesBuilder builder) {
             return IAccumulationScope.super.fillAttributes(builder.put(RECORD_ID_KEY, getRecordId()));
         }
+
+        ITrafficStreamsLifecycleContext createTrafficLifecyleContext(ITrafficStreamKey tsk);
     }
 
-    public interface ITrafficStreamsLifecycleContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IChannelKeyContext<S>> {
+    public interface ITrafficStreamsLifecycleContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IChannelKeyContext> {
         String ACTIVITY_NAME = ActivityNames.TRAFFIC_STREAM_LIFETIME;
 
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-            }
-        }
+        ReplayContexts.HttpTransactionContext createHttpTransactionContext(UniqueReplayerRequestKey requestKey,
+                                                                           Instant sourceTimestamp);
 
         @Override default String getActivityName() { return ACTIVITY_NAME;}
         ITrafficStreamKey getTrafficStreamKey();
-        IChannelKeyContext<S> getChannelKeyContext();
+        IChannelKeyContext getChannelKeyContext();
         default String getConnectionId() {
             return getChannelKey().getConnectionId();
         }
@@ -164,25 +143,19 @@ public class IReplayContexts {
         }
     }
 
-    public interface IReplayerHttpTransactionContext<S extends IInstrumentConstructor>
-            extends IHttpTransactionContext<S>,
-                    IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IChannelKeyContext<S>> {
+    public interface IReplayerHttpTransactionContext
+            extends IHttpTransactionContext,
+                    IAccumulationScope,
+                    IWithTypedEnclosingScope<IChannelKeyContext> {
         AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
 
         ITupleHandlingContext createTupleContext();
-
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-            }
-        }
 
         String ACTIVITY_NAME = ActivityNames.HTTP_TRANSACTION;
         @Override default String getActivityName() { return ACTIVITY_NAME;}
 
         UniqueReplayerRequestKey getReplayerRequestKey();
-        IChannelKeyContext<S> getChannelKeyContext();
+        IChannelKeyContext getChannelKeyContext();
         Instant getTimeOfOriginalRequest();
 
         default String getConnectionId() {
@@ -205,48 +178,38 @@ public class IReplayContexts {
             return IHttpTransactionContext.super.fillAttributes(
                     builder.put(REPLAYER_REQUEST_INDEX_KEY, replayerRequestIndex()));
         }
+
+        ReplayContexts.RequestTransformationContext createTransformationContext();
+
+        IScopedInstrumentationAttributes createAccumulatorContext();
+
+        ReplayContexts.TargetRequestContext createTargetRequestContext();
+
+        IScheduledContext createScheduledContext(Instant timestamp);
     }
 
-    public interface IRequestAccumulationContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+    public interface IRequestAccumulationContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_REQUEST;
 
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-            }
-        }
-
         @Override
         default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IResponseAccumulationContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+    public interface IResponseAccumulationContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_RESPONSE;
 
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-            }
-        }
-
         @Override
         default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IRequestTransformationContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+    public interface IRequestTransformationContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TRANSFORMATION;
-
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-            }
-        }
 
         @Override default String getActivityName() { return ACTIVITY_NAME;}
 
@@ -270,56 +233,54 @@ public class IReplayContexts {
         void aggregateOutputChunk(int sizeInBytes);
     }
 
-    public interface IScheduledContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+    public interface IScheduledContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.SCHEDULED;
-
-        class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-            }
-        }
 
         @Override
         default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface ITargetRequestContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+    public interface ITargetRequestContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TARGET_TRANSACTION;
 
         @Override default String getActivityName() { return ACTIVITY_NAME;}
 
         void onBytesSent(int size);
         void onBytesReceived(int size);
+
+        IReceivingHttpResponseContext createHttpReceivingContext();
+
+        IWaitingForHttpResponseContext createWaitingForResponseContext();
     }
 
-    public interface IRequestSendingContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, ITargetRequestContext<S>> {
+    public interface IRequestSendingContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.REQUEST_SENDING;
         @Override default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IWaitingForHttpResponseContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, ITargetRequestContext<S>> {
+    public interface IWaitingForHttpResponseContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.WAITING_FOR_RESPONSE;
         @Override default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IReceivingHttpResponseContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, ITargetRequestContext<S>> {
+    public interface IReceivingHttpResponseContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.RECEIVING_RESPONSE;
         @Override default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface ITupleHandlingContext<S extends IInstrumentConstructor>
-            extends IAccumulationScope<S>,
-                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+    public interface ITupleHandlingContext
+            extends IAccumulationScope,
+                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TUPLE_HANDLING;
         @Override default String getActivityName() { return ACTIVITY_NAME; }
     }

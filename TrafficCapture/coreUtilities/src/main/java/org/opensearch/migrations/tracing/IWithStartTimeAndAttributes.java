@@ -1,13 +1,12 @@
 package org.opensearch.migrations.tracing;
 
-import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 
 import java.time.Duration;
 import java.time.Instant;
 
-public interface IWithStartTimeAndAttributes<S extends IInstrumentConstructor> extends IInstrumentationAttributes<S> {
+public interface IWithStartTimeAndAttributes extends IInstrumentationAttributes {
     Instant getStartTime();
 
     default void meterHistogramMillis(DoubleHistogram histogram) {

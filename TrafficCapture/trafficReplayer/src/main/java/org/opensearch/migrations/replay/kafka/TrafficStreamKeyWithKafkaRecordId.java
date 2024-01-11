@@ -5,7 +5,6 @@ import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.util.StringJoiner;
@@ -31,7 +30,7 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
         this.partition = partition;
         this.offset = offset;
         var kafkaContext = contextFactory.apply(this);
-        this.setTrafficStreamsContext(new ReplayContexts.TrafficStreamsLifecycleContext(kafkaContext, this));
+        this.setTrafficStreamsContext(kafkaContext.createTrafficLifecyleContext(this));
     }
 
     @Override

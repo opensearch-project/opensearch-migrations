@@ -9,8 +9,10 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
+import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
+import org.opensearch.migrations.tracing.IHasRootInstrumentationScope;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 
 import java.util.Collection;
@@ -21,7 +23,7 @@ public class KafkaConsumerContexts {
 
     @AllArgsConstructor
     public static class AsyncListeningContext
-            implements IKafkaConsumerContexts.IAsyncListeningContext<RootReplayerContext> {
+            implements IKafkaConsumerContexts.IAsyncListeningContext {
         public static class MetricInstruments {
             public final LongCounter kafkaPartitionsRevokedCounter;
             public final LongCounter kafkaPartitionsAssignedCounter;
@@ -39,15 +41,10 @@ public class KafkaConsumerContexts {
 
         @Getter
         @NonNull
-        private final IInstrumentationAttributes<RootReplayerContext> enclosingScope;
-
-        @Override
-        public @NonNull RootReplayerContext getRootInstrumentationScope() {
-            return enclosingScope.getRootInstrumentationScope();
-        }
+        public final RootReplayerContext enclosingScope;
 
         private @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().asyncListeningInstruments;
+            return enclosingScope.asyncListeningInstruments;
         }
 
         public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
@@ -66,15 +63,20 @@ public class KafkaConsumerContexts {
     }
 
     public static class TouchScopeContext
-            extends DirectNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
-            implements IKafkaConsumerContexts.ITouchScopeContext<RootReplayerContext>
+            extends DirectNestedSpanContext<RootReplayerContext, TrafficSourceContexts.BackPressureBlockContext, ITrafficSourceContexts.IBackPressureBlockContext>
+            implements IKafkaConsumerContexts.ITouchScopeContext
     {
+        @Override
+        public IKafkaConsumerContexts.IPollScopeContext createNewPollContext() {
+            return new KafkaConsumerContexts.PollScopeContext(getRootInstrumentationScope(), this);
+        }
+
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public MetricInstruments(MeterProvider meterProvider) {
                 super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
             }
         }
-        public TouchScopeContext(@NonNull IInstrumentationAttributes<RootReplayerContext> enclosingScope) {
+        public TouchScopeContext(@NonNull TrafficSourceContexts.BackPressureBlockContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -85,8 +87,8 @@ public class KafkaConsumerContexts {
     }
 
     public static class PollScopeContext
-            extends DirectNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
-        implements IKafkaConsumerContexts.IPollScopeContext<RootReplayerContext> {
+            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+            implements IKafkaConsumerContexts.IPollScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public MetricInstruments(MeterProvider meterProvider) {
                 super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
@@ -98,16 +100,21 @@ public class KafkaConsumerContexts {
             return getRootInstrumentationScope().pollInstruments;
         }
 
-        public PollScopeContext(@NonNull IInstrumentationAttributes<RootReplayerContext> enclosingScope) {
-            super(enclosingScope);
+        public PollScopeContext(@NonNull RootReplayerContext rootScope,
+                                @NonNull IInstrumentationAttributes enclosingScope) {
+            super(rootScope, enclosingScope);
             initializeSpan();
         }
-
     }
 
     public static class CommitScopeContext
-            extends DirectNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
-        implements IKafkaConsumerContexts.ICommitScopeContext<RootReplayerContext> {
+            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+        implements IKafkaConsumerContexts.ICommitScopeContext {
+
+        @Override
+        public IKafkaConsumerContexts.IKafkaCommitScopeContext createNewKafkaCommitContext() {
+            return new KafkaConsumerContexts.KafkaCommitScopeContext(this);
+        }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public MetricInstruments(MeterProvider meterProvider) {
@@ -120,16 +127,16 @@ public class KafkaConsumerContexts {
             return getRootInstrumentationScope().commitInstruments;
         }
 
-        public CommitScopeContext(@NonNull IInstrumentationAttributes<RootReplayerContext> enclosingScope) {
-            super(enclosingScope);
+        public CommitScopeContext(@NonNull RootReplayerContext rootScope,
+                                  @NonNull IInstrumentationAttributes enclosingScope) {
+            super(rootScope, enclosingScope);
             initializeSpan();
         }
-
     }
 
     public static class KafkaCommitScopeContext
-            extends DirectNestedSpanContext<RootReplayerContext, KafkaConsumerContexts.CommitScopeContext>
-            implements IKafkaConsumerContexts.IKafkaCommitScopeContext<RootReplayerContext> {
+            extends DirectNestedSpanContext<RootReplayerContext, KafkaConsumerContexts.CommitScopeContext, IKafkaConsumerContexts.ICommitScopeContext>
+            implements IKafkaConsumerContexts.IKafkaCommitScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public MetricInstruments(MeterProvider meterProvider) {
                 super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);

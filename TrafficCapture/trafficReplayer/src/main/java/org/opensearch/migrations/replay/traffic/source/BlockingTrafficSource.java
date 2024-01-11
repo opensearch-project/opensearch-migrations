@@ -5,12 +5,11 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.replay.tracing.TrafficSourceContexts;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.slf4j.event.Level;
 
@@ -24,6 +23,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The BlockingTrafficSource class implements ITrafficCaptureSource and wraps another instance.
@@ -86,19 +87,16 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     /**
      * Reads the next chunk that is available before the current stopReading barrier.  However,
      * that barrier isn't meant to be a tight barrier with immediate effect.
-     *
-     * @return
      */
-    @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(IRootReplayerContext context) {
-        var readContext = context.createReadChunkContext();
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> commitContextSupplier) {
+        var readContext = commitContextSupplier.get();
         log.info("BlockingTrafficSource::readNext");
         var trafficStreamListFuture = CompletableFuture
                 .supplyAsync(() -> blockIfNeeded(readContext), task -> new Thread(task).start())
                 .thenCompose(v -> {
                     log.info("BlockingTrafficSource::composing");
-                    return underlyingSource.readNextTrafficStreamChunk(readContext);
+                    return underlyingSource.readNextTrafficStreamChunk(()->readContext);
                 })
                 .whenComplete((v,t)->readContext.close());
         return trafficStreamListFuture.whenComplete((v, t) -> {
@@ -107,7 +105,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             }
             var maxLocallyObservedTimestamp = v.stream()
                     .flatMap(tswk -> tswk.getStream().getSubStreamList().stream())
-                    .map(tso -> tso.getTs())
+                    .map(TrafficObservation::getTs)
                     .max(Comparator.comparingLong(Timestamp::getSeconds)
                             .thenComparingInt(Timestamp::getNanos))
                     .map(TrafficStreamUtils::instantFromProtoTimestamp)
@@ -118,14 +116,14 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         });
     }
 
-    private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext<RootReplayerContext> readContext) {
+    private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext readContext) {
         if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
         log.atInfo().setMessage(() -> "stopReadingAtRef=" + stopReadingAtRef +
                 " lastTimestampSecondsRef=" + lastTimestampSecondsRef).log();
-        ITrafficSourceContexts.IBackPressureBlockContext<RootReplayerContext> blockContext = null;
+        ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
             if (blockContext == null) {
-                blockContext = new TrafficSourceContexts.BackPressureBlockContext(readContext);
+                blockContext = readContext.createBackPressureContext();
             }
             try {
                 log.atInfo().setMessage("blocking until signaled to read the next chunk last={} stop={}")
@@ -135,7 +133,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
                     log.trace("acquiring readGate semaphore (w/out timeout)");
-                    try (var waitContext = new TrafficSourceContexts.WaitForNextSignal(blockContext)) {
+                    try (var waitContext = blockContext.createWaitForSignalContext()) {
                         readGate.acquire();
                     }
                 } else {
@@ -150,7 +148,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
                         log.atTrace().setMessage(() -> "acquring readGate semaphore with timeout=" + waitIntervalMs).log();
-                        try (var waitContext = new TrafficSourceContexts.WaitForNextSignal(blockContext)) {
+                        try (var waitContext = blockContext.createWaitForSignalContext()) {
                             readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
                         }
                     }
@@ -168,9 +166,10 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public CommitResult commitTrafficStream(IInstrumentationAttributes<IRootReplayerContext> context,
+    public CommitResult commitTrafficStream(Function<ITrafficStreamKey,
+                                                     IKafkaConsumerContexts.ICommitScopeContext> contextFactory,
                                             ITrafficStreamKey trafficStreamKey) throws IOException {
-        var commitResult = underlyingSource.commitTrafficStream(context, trafficStreamKey);
+        var commitResult = underlyingSource.commitTrafficStream(contextFactory, trafficStreamKey);
         if (commitResult == CommitResult.AfterNextRead) {
             readGate.drainPermits();
             readGate.release();

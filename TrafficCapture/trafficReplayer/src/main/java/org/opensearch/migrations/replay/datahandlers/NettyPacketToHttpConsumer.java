@@ -59,7 +59,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
-    IWithTypedEnclosingScope<RootReplayerContext, IReplayContexts.ITargetRequestContext<RootReplayerContext>> currentRequestContextUnion;
+    IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
                                      ReplayContexts.HttpTransactionContext httpTransactionContext) {
@@ -68,8 +68,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     public NettyPacketToHttpConsumer(ChannelFuture clientConnection,
-                                     IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> ctx) {
-        var parentContext = new ReplayContexts.TargetRequestContext(ctx);
+                                     IReplayContexts.IReplayerHttpTransactionContext ctx) {
+        var parentContext = ctx.createTargetRequestContext();
         this.setCurrentRequestContext(new ReplayContexts.RequestSendingContext(parentContext));
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
@@ -93,24 +93,24 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         });
     }
 
-    private <T extends IWithTypedEnclosingScope<RootReplayerContext, IReplayContexts.ITargetRequestContext<RootReplayerContext>> &
-            IScopedInstrumentationAttributes<RootReplayerContext>>
+    private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> &
+            IScopedInstrumentationAttributes>
     void setCurrentRequestContext(T requestSendingContext) {
         currentRequestContextUnion = requestSendingContext;
     }
 
-    private IScopedInstrumentationAttributes<RootReplayerContext> getCurrentRequestSpan() {
-        return (IScopedInstrumentationAttributes<RootReplayerContext>) currentRequestContextUnion;
+    private IScopedInstrumentationAttributes getCurrentRequestSpan() {
+        return (IScopedInstrumentationAttributes) currentRequestContextUnion;
     }
 
-    public IReplayContexts.ITargetRequestContext<RootReplayerContext> getParentContext() {
+    public IReplayContexts.ITargetRequestContext getParentContext() {
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
     
     public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup,
                                                        SslContext sslContext,
                                                        URI serverUri,
-                                                       IReplayContexts.IChannelKeyContext<RootReplayerContext> channelKeyContext) {
+                                                       IReplayContexts.IChannelKeyContext channelKeyContext) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
@@ -179,7 +179,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         pipeline.addFirst(new ReadMeteringingHandler(size->{
             if (!(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
                 this.getCurrentRequestSpan().close();
-                this.setCurrentRequestContext(new ReplayContexts.ReceivingHttpResponseContext(getParentContext()));
+                this.setCurrentRequestContext(getParentContext().createHttpReceivingContext());
             }
             getParentContext().onBytesReceived(size);
         }));
@@ -240,7 +240,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return activeChannelFuture;
     }
 
-    private IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> httpContext() {
+    private IReplayContexts.IReplayerHttpTransactionContext httpContext() {
         return getParentContext().getLogicalEnclosingScope();
     }
 
@@ -297,7 +297,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
                     this.getCurrentRequestSpan().close();
-                    this.setCurrentRequestContext(new ReplayContexts.WaitingForHttpResponseContext(getParentContext()));
+                    this.setCurrentRequestContext(getParentContext().createWaitingForResponseContext());
 
                     var future = new CompletableFuture<AggregatedRawResponse>();
                     var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,

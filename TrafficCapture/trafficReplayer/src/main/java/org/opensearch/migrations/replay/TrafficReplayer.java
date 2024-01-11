@@ -206,7 +206,7 @@ public class TrafficReplayer {
         return true;
     }
 
-    static class Parameters {
+    public static class Parameters {
         @Parameter(required = true,
                 arity = 1,
                 description = "URI of the target cluster/domain")
@@ -604,7 +604,7 @@ public class TrafficReplayer {
 
         @Override
         public void onRequestReceived(@NonNull UniqueReplayerRequestKey requestKey,
-                                      IReplayContexts.IReplayerHttpTransactionContext<IRootReplayerContext> ctx,
+                                      IReplayContexts.IReplayerHttpTransactionContext ctx,
                                       @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
@@ -623,7 +623,7 @@ public class TrafficReplayer {
 
         @Override
         public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
-                                       IReplayContexts.IReplayerHttpTransactionContext<IRootReplayerContext> ctx,
+                                       IReplayContexts.IReplayerHttpTransactionContext ctx,
                                        @NonNull RequestResponsePacketPair rrPair) {
             log.atInfo().setMessage(()->"Done receiving captured stream for " + requestKey +
                     ":" + rrPair.requestData).log();
@@ -639,7 +639,7 @@ public class TrafficReplayer {
             }
         }
 
-        Void handleCompletedTransaction(IInstrumentationAttributes<IRootReplayerContext> context,
+        Void handleCompletedTransaction(IInstrumentationAttributes context,
                                         @NonNull UniqueReplayerRequestKey requestKey,
                                         RequestResponsePacketPair rrPair,
                                         TransformedTargetRequestAndResponse summary, Throwable t) {
@@ -652,7 +652,7 @@ public class TrafficReplayer {
                     try (var tupleHandlingContext = httpContext.createTupleContext()) {
                         packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
                     }
-                    commitTrafficStreams(context, rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
+                    commitTrafficStreams(rrPair.completionStatus, context, rrPair.trafficStreamKeysBeingHeld);
                     return null;
                 } else {
                     log.atError().setCause(t).setMessage(()->"Throwable passed to handle() for " + requestKey +
@@ -686,26 +686,27 @@ public class TrafficReplayer {
 
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            IReplayContexts.IChannelKeyContext<IRootReplayerContext> ctx,
+                                            IReplayContexts.IChannelKeyContext ctx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            commitTrafficStreams(ctx, trafficStreamKeysBeingHeld, status);
+            commitTrafficStreams(status, ctx, trafficStreamKeysBeingHeld);
         }
 
         @SneakyThrows
-        private void commitTrafficStreams(IInstrumentationAttributes<IRootReplayerContext> context,
-                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld,
-                                          RequestResponsePacketPair.ReconstructionStatus status) {
-            commitTrafficStreams(context, trafficStreamKeysBeingHeld,
-                    status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY);
+        private void commitTrafficStreams(RequestResponsePacketPair.ReconstructionStatus status,
+                                          IReplayContexts.IChannelKeyContext context,
+                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+            commitTrafficStreams(status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY,
+                    context, trafficStreamKeysBeingHeld);
         }
 
         @SneakyThrows
-        private void commitTrafficStreams(IInstrumentationAttributes<IRootReplayerContext> context,
-                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
+        private void commitTrafficStreams(boolean shouldCommit,
+                                          IReplayContexts.IChannelKeyContext context,
+                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     tsk.getTrafficStreamsContext().close();
-                    trafficCaptureSource.commitTrafficStream(context, tsk);
+                    trafficCaptureSource.commitTrafficStream(()->context, tsk);
                 }
             }
         }
@@ -713,19 +714,19 @@ public class TrafficReplayer {
         @Override
         public void onConnectionClose(@NonNull ISourceTrafficChannelKey channelKey,
                                       int channelInteractionNum,
-                                      IReplayContexts.IChannelKeyContext<IRootReplayerContext> ctx,
+                                      IReplayContexts.IChannelKeyContext ctx,
                                       RequestResponsePacketPair.ReconstructionStatus status,
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
             cf.map(f->f.whenComplete((v,t)->{
-                commitTrafficStreams(ctx, trafficStreamKeysBeingHeld, status);
+                commitTrafficStreams(status, ctx, trafficStreamKeysBeingHeld);
             }), ()->"closing the channel in the ReplayEngine");
         }
 
         @Override
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, IReplayContexts.IChannelKeyContext ctx) {
-            commitTrafficStreams(ctx, List.of(tsk), true);
+            commitTrafficStreams(true, ctx, List.of(tsk));
         }
 
         private TransformedTargetRequestAndResponse
@@ -987,7 +988,8 @@ public class TrafficReplayer {
             if (stopReadingRef.get()) {
                 break;
             }
-            this.nextChunkFutureRef.set(trafficChunkStream.readNextTrafficStreamChunk(topLevelContext));
+            this.nextChunkFutureRef.set(trafficChunkStream
+                    .readNextTrafficStreamChunk(topLevelContext::createReadChunkContext));
             List<ITrafficStreamWithKey> trafficStreams = null;
             try {
                 trafficStreams = this.nextChunkFutureRef.get().get();

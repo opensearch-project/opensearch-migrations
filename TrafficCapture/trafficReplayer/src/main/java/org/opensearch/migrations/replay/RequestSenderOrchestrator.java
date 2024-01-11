@@ -44,7 +44,7 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm processing work has finished");
         log.atDebug().setMessage(()->"Scheduling work for "+ctx.getConnectionId()+" at time "+timestamp).log();
-        var scheduledContext = new ReplayContexts.ScheduledContext(ctx, timestamp);
+        var scheduledContext = ctx.createScheduledContext(timestamp);
         // this method doesn't use the scheduling that scheduleRequest and scheduleClose use because
         // doing work associated with a connection is considered to be preprocessing work independent
         // of the underlying network connection itself, so it's fair to be able to do this without
@@ -136,7 +136,7 @@ public class RequestSenderOrchestrator {
                                                                 replaySession.scheduleSequencer).log();
                                                         replaySession.scheduleSequencer.add(channelInteractionNumber,
                                                                 () -> successFn.accept(channelFutureAndRequestSchedule),
-                                                                x -> x.run());
+                                                                Runnable::run);
                                                         if (replaySession.scheduleSequencer.hasPending()) {
                                                             log.atDebug().setMessage(()->"Sequencer for "+ctx+
                                                                     " = "+replaySession.scheduleSequencer).log();
@@ -218,7 +218,7 @@ public class RequestSenderOrchestrator {
                                     packetReceiverRef),
                     eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
         };
-        var scheduledContext = new ReplayContexts.ScheduledContext(ctx, start);
+        var scheduledContext = ctx.createScheduledContext(start);
         scheduleOnConnectionReplaySession(ctx.getLogicalEnclosingScope(),
                 ctx.getReplayerRequestKey().getSourceRequestIndex(),
                 channelFutureAndRequestSchedule, responseFuture, start,

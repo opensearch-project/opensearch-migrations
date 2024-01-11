@@ -6,16 +6,13 @@ import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
-public class RootOffloaderContext extends RootOtelContext implements IRootOffloaderContext {
-    public static final String SCOPE_NAME = "Offloader";
-    @Getter
-    public LongUpDownCounter activeConnectionsCounter;
-    @Getter
-    Meter offloaderMeter;
+public class RootOffloaderContext extends RootOtelContext {
+    public static final String OFFLOADER_SCOPE_NAME = "Offloader";
+    public final ConnectionContext.MetricInstruments connectionInstruments;
 
     public RootOffloaderContext(OpenTelemetry openTelemetry) {
         super(openTelemetry);
-        offloaderMeter = super.getMeterForScope(SCOPE_NAME);
-        activeConnectionsCounter = offloaderMeter.upDownCounterBuilder(ConnectionContext.ACTIVE_CONNECTION).build();
+        var meterProvider = openTelemetry.getMeterProvider();
+        connectionInstruments = new ConnectionContext.MetricInstruments(meterProvider, OFFLOADER_SCOPE_NAME);
     }
 }

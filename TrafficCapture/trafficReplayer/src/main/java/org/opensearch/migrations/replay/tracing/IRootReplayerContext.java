@@ -1,9 +1,11 @@
 package org.opensearch.migrations.replay.tracing;
 
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IRootOtelContext;
 
-public interface IRootReplayerContext<S extends IRootOtelContext> extends IRootOtelContext<S>, IInstrumentConstructor {
+public interface IRootReplayerContext extends IRootOtelContext, IInstrumentConstructor {
 
-    TrafficSourceContexts.ReadChunkContext createReadChunkContext();
+    ITrafficSourceContexts.IReadChunkContext createReadChunkContext();
+    IReplayContexts.IChannelKeyContext createChannelContext(ITrafficStreamKey tsk);
 }

@@ -8,22 +8,22 @@ import lombok.NonNull;
 
 import java.time.Instant;
 
-public abstract class AbstractNestedSpanContext
-        <S extends IInstrumentConstructor, T extends IInstrumentationAttributes<S>>
-        implements IScopedInstrumentationAttributes<S>, IWithStartTimeAndAttributes<S>, AutoCloseable {
+public abstract class BaseNestedSpanContext
+        <S extends IInstrumentConstructor, T extends IInstrumentationAttributes>
+        implements IScopedInstrumentationAttributes, IWithStartTimeAndAttributes, IHasRootInstrumentationScope<S>, AutoCloseable {
     final T enclosingScope;
     @Getter final Instant startTime;
     @Getter private Span currentSpan;
     @Getter private final S rootInstrumentationScope;
 
-    protected AbstractNestedSpanContext(T enclosingScope) {
+    protected BaseNestedSpanContext(S rootScope, T enclosingScope) {
         this.enclosingScope = enclosingScope;
         this.startTime = Instant.now();
-        this.rootInstrumentationScope = (S) enclosingScope.getRootInstrumentationScope();
+        this.rootInstrumentationScope = rootScope;
     }
 
     @Override
-    public IInstrumentationAttributes<S> getEnclosingScope() {
+    public IInstrumentationAttributes getEnclosingScope() {
         return enclosingScope;
     }
 
@@ -34,8 +34,12 @@ public abstract class AbstractNestedSpanContext
     }
 
     protected void initializeSpan(AttributesBuilder attributesBuilder) {
+        initializeSpan(null, attributesBuilder);
+    }
+
+    protected void initializeSpan(Span linkedSpan, AttributesBuilder attributesBuilder) {
         initializeSpan(rootInstrumentationScope.buildSpan(enclosingScope, getScopeName(), getActivityName(),
-                attributesBuilder));
+                linkedSpan, attributesBuilder));
     }
 
     public void initializeSpan(@NonNull Span s) {

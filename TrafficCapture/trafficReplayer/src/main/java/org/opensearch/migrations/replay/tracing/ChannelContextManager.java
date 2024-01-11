@@ -8,9 +8,9 @@ import java.util.HashMap;
 import java.util.function.Function;
 
 public class ChannelContextManager implements Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> {
-    private final IInstrumentationAttributes globalContext;
+    private final RootReplayerContext globalContext;
 
-    public ChannelContextManager(IInstrumentationAttributes globalContext) {
+    public ChannelContextManager(RootReplayerContext globalContext) {
         this.globalContext = globalContext;
     }
 
@@ -47,7 +47,7 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
 
     public ReplayContexts.ChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
         return connectionToChannelContextMap.computeIfAbsent(tsk.getConnectionId(),
-                k-> new RefCountedContext(new ReplayContexts.ChannelKeyContext(globalContext, tsk))).retain();
+                k-> new RefCountedContext(globalContext.createChannelContext(tsk))).retain();
     }
 
     public ReplayContexts.ChannelKeyContext releaseContextFor(ReplayContexts.ChannelKeyContext ctx) {

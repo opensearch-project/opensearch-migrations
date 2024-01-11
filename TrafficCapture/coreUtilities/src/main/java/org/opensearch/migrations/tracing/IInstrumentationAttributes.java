@@ -9,10 +9,9 @@ import lombok.NonNull;
 
 import java.util.ArrayList;
 
-public interface IInstrumentationAttributes<S extends IInstrumentConstructor> {
+public interface IInstrumentationAttributes {
     String getScopeName();
-    IInstrumentationAttributes<S> getEnclosingScope();
-    @NonNull S getRootInstrumentationScope();
+    IInstrumentationAttributes getEnclosingScope();
     default Span getCurrentSpan() { return null; }
 
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {
@@ -25,7 +24,7 @@ public interface IInstrumentationAttributes<S extends IInstrumentConstructor> {
 
     default AttributesBuilder getPopulatedAttributesBuilder(AttributesBuilder builder) {
         var currentObj = this;
-        var stack = new ArrayList<IInstrumentationAttributes<S>>();
+        var stack = new ArrayList<IInstrumentationAttributes>();
         while (currentObj != null) {
             stack.add(currentObj);
             currentObj = currentObj.getEnclosingScope();
@@ -59,5 +58,4 @@ public interface IInstrumentationAttributes<S extends IInstrumentConstructor> {
             c.add(delta);
         }
     }
-
 }
