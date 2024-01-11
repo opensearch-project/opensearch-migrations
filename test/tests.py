@@ -266,11 +266,11 @@ class E2ETests(unittest.TestCase):
         if self.deployment_type == "cloud":
             cmd_exec = f"/root/runTestBenchmarks.sh --unique-id {self.unique_id} --endpoint {self.proxy_endpoint}"
             if self.source_auth_type is None:
-                cmd_exec = cmd_exec.join(" --no-auth")
+                cmd_exec = cmd_exec + " --no-auth"
             elif self.source_auth_type == "basic":
-                cmd_exec = cmd_exec.join(f" --auth_user {self.source_username} --auth_pass {self.source_password}")
-            if not self.source_verify_ssl :
-                cmd_exec = cmd_exec.join(" --no-ssl")
+                cmd_exec = cmd_exec + f" --auth_user {self.source_username} --auth_pass {self.source_password}"
+            if not self.source_verify_ssl:
+                cmd_exec = cmd_exec + " --no-ssl"
             logger.warning(f"Running local command: {cmd_exec}")
             subprocess.run(cmd_exec, shell=True)
             # TODO: Enhance our waiting logic for determining when all OSB records have been processed by Replayer
