@@ -226,16 +226,16 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueReplayerRequestKey key,
+                            public void onRequestReceived(@NonNull UniqueReplayerRequestKey key,
                                                           IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                          HttpMessageAndTimestamp request) {
+                                                          @NonNull HttpMessageAndTimestamp request) {
                                 requestsReceived.incrementAndGet();
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueReplayerRequestKey requestKey,
+                            public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
                                                            IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                           RequestResponsePacketPair fullPair) {
+                                                           @NonNull RequestResponsePacketPair fullPair) {
                                 var sourceIdx = requestKey.getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
                                         RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {

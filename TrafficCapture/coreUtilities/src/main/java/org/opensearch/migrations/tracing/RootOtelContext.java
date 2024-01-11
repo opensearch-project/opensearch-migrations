@@ -113,17 +113,6 @@ public class RootOtelContext<S extends IInstrumentConstructor> implements IRootO
     } // CRTP so that callers can get more specific
 
     @Override
-    public MeteringClosure<S> buildSimpleMeterClosure(IInstrumentationAttributes<S> ctx) {
-        return new MeteringClosure<>(ctx);
-    }
-
-    @Override
-    public MeteringClosureForStartTimes<S>
-    buildMeterClosure(IWithStartTimeAndAttributes<S> ctx) {
-        return new MeteringClosureForStartTimes<>(ctx);
-    }
-
-    @Override
     public AttributesBuilder fillAttributes(AttributesBuilder builder) {
         return builder; // nothing more to do
     }
@@ -135,8 +124,9 @@ public class RootOtelContext<S extends IInstrumentConstructor> implements IRootO
     }
 
     @Override
-    public Span buildSpan(IInstrumentationAttributes<S> enclosingScope,
-                          String scopeName, String spanName, AttributesBuilder attributesBuilder) {
+    public <S extends IInstrumentConstructor>
+    Span buildSpan(IInstrumentationAttributes<S> enclosingScope,
+                   String scopeName, String spanName, AttributesBuilder attributesBuilder) {
         var parentSpan = enclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
         return buildSpanWithParent(spanBuilder, getPopulatedAttributes(attributesBuilder), parentSpan);

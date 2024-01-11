@@ -26,6 +26,7 @@ import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringin
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
@@ -58,7 +59,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
-    IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
+    IWithTypedEnclosingScope<RootReplayerContext, IReplayContexts.ITargetRequestContext<RootReplayerContext>> currentRequestContextUnion;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
                                      ReplayContexts.HttpTransactionContext httpTransactionContext) {
@@ -66,7 +67,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         httpTransactionContext.getLogicalEnclosingScope()), httpTransactionContext);
     }
 
-    public NettyPacketToHttpConsumer(ChannelFuture clientConnection, IReplayContexts.IReplayerHttpTransactionContext ctx) {
+    public NettyPacketToHttpConsumer(ChannelFuture clientConnection,
+                                     IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> ctx) {
         var parentContext = new ReplayContexts.TargetRequestContext(ctx);
         this.setCurrentRequestContext(new ReplayContexts.RequestSendingContext(parentContext));
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
@@ -91,24 +93,24 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         });
     }
 
-    private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> & 
-            IScopedInstrumentationAttributes>
+    private <T extends IWithTypedEnclosingScope<RootReplayerContext, IReplayContexts.ITargetRequestContext<RootReplayerContext>> &
+            IScopedInstrumentationAttributes<RootReplayerContext>>
     void setCurrentRequestContext(T requestSendingContext) {
         currentRequestContextUnion = requestSendingContext;
     }
 
-    private IScopedInstrumentationAttributes getCurrentRequestSpan() {
-        return (IScopedInstrumentationAttributes) currentRequestContextUnion;
+    private IScopedInstrumentationAttributes<RootReplayerContext> getCurrentRequestSpan() {
+        return (IScopedInstrumentationAttributes<RootReplayerContext>) currentRequestContextUnion;
     }
 
-    public IReplayContexts.ITargetRequestContext getParentContext() {
+    public IReplayContexts.ITargetRequestContext<RootReplayerContext> getParentContext() {
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
     
     public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup,
                                                        SslContext sslContext,
                                                        URI serverUri,
-                                                       IReplayContexts.IChannelKeyContext channelKeyContext) {
+                                                       IReplayContexts.IChannelKeyContext<RootReplayerContext> channelKeyContext) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
@@ -238,7 +240,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return activeChannelFuture;
     }
 
-    private IReplayContexts.IReplayerHttpTransactionContext httpContext() {
+    private IReplayContexts.IReplayerHttpTransactionContext<RootReplayerContext> httpContext() {
         return getParentContext().getLogicalEnclosingScope();
     }
 

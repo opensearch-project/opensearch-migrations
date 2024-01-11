@@ -5,7 +5,7 @@ import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
 
-public interface IScopedInstrumentationAttributes<S extends IInstrumentConstructor<S>>
+public interface IScopedInstrumentationAttributes<S extends IInstrumentConstructor>
         extends IWithStartTimeAndAttributes<S>, AutoCloseable {
 
     String getActivityName();
@@ -25,7 +25,7 @@ public interface IScopedInstrumentationAttributes<S extends IInstrumentConstruct
 
     default void sendMeterEventsForEnd() {
         meterIncrementEvent(getEndOfScopeCountMetric());
-        meterHistogramMicros(getEndOfScopeDurationMetric());
+        meterHistogramMillis(getEndOfScopeDurationMetric());
     }
 
     default void close() {

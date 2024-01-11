@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
@@ -17,12 +18,12 @@ public interface ITrafficCaptureSource extends Closeable {
         Immediate, AfterNextRead, BlockedByOtherCommits, Ignored
     }
 
-    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IInstrumentationAttributes context);
+    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IRootReplayerContext context);
 
     /**
      * Returns true if the committed results are immediate
      */
-    CommitResult commitTrafficStream(IInstrumentationAttributes context,
+    CommitResult commitTrafficStream(IInstrumentationAttributes<IRootReplayerContext> context,
                                      ITrafficStreamKey trafficStreamKey) throws IOException;
 
     default void close() throws IOException {}
@@ -31,7 +32,7 @@ public interface ITrafficCaptureSource extends Closeable {
      * Keep-alive call to be used by the BlockingTrafficSource to keep this connection alive if
      * this is required.
      */
-    default void touch(IInstrumentationAttributes context) {}
+    default <S extends IRootReplayerContext> void touch(IInstrumentationAttributes<S> context) {}
 
     /**
      * @return The time that the next call to touch() must be completed for this source to stay

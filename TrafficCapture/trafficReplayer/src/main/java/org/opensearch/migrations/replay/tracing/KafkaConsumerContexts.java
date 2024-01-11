@@ -67,7 +67,7 @@ public class KafkaConsumerContexts {
 
     public static class TouchScopeContext
             extends DirectNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
-            implements IKafkaConsumerContexts.ITouchScopeContext
+            implements IKafkaConsumerContexts.ITouchScopeContext<RootReplayerContext>
     {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public MetricInstruments(MeterProvider meterProvider) {
@@ -85,19 +85,20 @@ public class KafkaConsumerContexts {
     }
 
     public static class PollScopeContext
-            extends DirectNestedSpanContext<IRootReplayerContext, IInstrumentationAttributes<IRootReplayerContext>>
-        implements IKafkaConsumerContexts.IPollScopeContext {
-        @Override
-        public CommonScopedMetricInstruments getMetrics() {
-            return getRootInstrumentationScope().poll;
-        }
-
+            extends DirectNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
+        implements IKafkaConsumerContexts.IPollScopeContext<RootReplayerContext> {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public MetricInstruments(MeterProvider meterProvider) {
                 super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
             }
         }
-        public PollScopeContext(@NonNull IInstrumentationAttributes<IRootReplayerContext> enclosingScope) {
+
+        @Override
+        public CommonScopedMetricInstruments getMetrics() {
+            return getRootInstrumentationScope().pollInstruments;
+        }
+
+        public PollScopeContext(@NonNull IInstrumentationAttributes<RootReplayerContext> enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
@@ -105,41 +106,46 @@ public class KafkaConsumerContexts {
     }
 
     public static class CommitScopeContext
-            extends DirectNestedSpanContext<IRootReplayerContext, IInstrumentationAttributes<IRootReplayerContext>>
-        implements IKafkaConsumerContexts.ICommitScopeContext {
-        public CommitScopeContext(@NonNull IInstrumentationAttributes<IRootReplayerContext> enclosingScope) {
+            extends DirectNestedSpanContext<RootReplayerContext, IInstrumentationAttributes<RootReplayerContext>>
+        implements IKafkaConsumerContexts.ICommitScopeContext<RootReplayerContext> {
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            }
+        }
+
+        @Override
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().commitInstruments;
+        }
+
+        public CommitScopeContext(@NonNull IInstrumentationAttributes<RootReplayerContext> enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
 
-        @Override
-        public DoubleHistogram getEndOfScopeDurationMetric() {
-            return getRootInstrumentationScope().getCommitDuration();
-        }
-
-        @Override
-        public LongCounter getEndOfScopeCountMetric() {
-            return getRootInstrumentationScope().getCommitCounter();
-        }
     }
 
     public static class KafkaCommitScopeContext
-            extends DirectNestedSpanContext<IRootReplayerContext, KafkaConsumerContexts.CommitScopeContext>
-            implements IKafkaConsumerContexts.IKafkaCommitScopeContext {
+            extends DirectNestedSpanContext<RootReplayerContext, KafkaConsumerContexts.CommitScopeContext>
+            implements IKafkaConsumerContexts.IKafkaCommitScopeContext<RootReplayerContext> {
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            }
+        }
+
+        @Override
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().kafkaCommitInstruments;
+        }
+
 
         public KafkaCommitScopeContext(@NonNull KafkaConsumerContexts.CommitScopeContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
 
-        @Override
-        public DoubleHistogram getEndOfScopeDurationMetric() {
-            return getRootInstrumentationScope().getKafkaCommitDuration();
-        }
-
-        @Override
-        public LongCounter getEndOfScopeCountMetric() {
-            return getRootInstrumentationScope().getKafkaCommitCounter();
-        }
     }
 }

@@ -11,8 +11,8 @@ import java.util.stream.IntStream;
 
 @Slf4j
 public class CommonScopedMetricInstruments {
-    public final LongCounter contextCounter;
-    public final DoubleHistogram contextDuration;
+    final LongCounter contextCounter;
+    final DoubleHistogram contextDuration;
     public CommonScopedMetricInstruments(MeterProvider meterProvider, String scopeName, String activityName) {
         var meter = meterProvider.get(scopeName);
         contextCounter = meter

@@ -2,9 +2,14 @@ package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.LongUpDownCounter;
+import io.opentelemetry.api.metrics.MeterProvider;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
@@ -13,17 +18,17 @@ import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 import java.time.Instant;
 
 public class IReplayContexts {
-
-    public static class ScopeNames {
-        private ScopeNames() {}
-
-        public static final String KAFKA_RECORD_SCOPE = "KafkaRecord";
-        public static final String TRAFFIC_STREAM_LIFETIME_SCOPE = "TrafficStreamLifetime";
-        public static final String ACCUMULATOR_SCOPE = "Accumulator";
-        public static final String HTTP_TRANSFORMER_SCOPE = "HttpTransformer";
-        public static final String REQUEST_SENDER_SCOPE = "RequestSender";
-        public static final String TRAFFIC_REPLAYER_SCOPE = "TrafficReplayer";
-    }
+//
+//    public static class ScopeNames {
+//        private ScopeNames() {}
+//
+//        public static final String KAFKA_RECORD_SCOPE = "KafkaRecord";
+//        public static final String TRAFFIC_STREAM_LIFETIME_SCOPE = "TrafficStreamLifetime";
+//        public static final String ACCUMULATOR_SCOPE = "Accumulator";
+//        public static final String HTTP_TRANSFORMER_SCOPE = "HttpTransformer";
+//        public static final String REQUEST_SENDER_SCOPE = "RequestSender";
+//        public static final String TRAFFIC_REPLAYER_SCOPE = "TrafficReplayer";
+//    }
 
     public static class ActivityNames {
         private ActivityNames() {}
@@ -44,6 +49,7 @@ public class IReplayContexts {
     }
 
     public static class MetricNames {
+        private MetricNames() {}
         public static final String KAFKA_RECORD_READ = "kafkaRecordsRead";
         public static final String KAFKA_BYTES_READ = "kafkaBytesRead";
         public static final String TRAFFIC_STREAMS_READ = "trafficStreamsRead";
@@ -70,11 +76,31 @@ public class IReplayContexts {
         public static final String BYTES_READ_FROM_TARGET = "bytesReadFromTarget";
     }
 
-    public interface IChannelKeyContext extends IConnectionContext<IRootReplayerContext> {
-        String SCOPE_NAME = "Connection";
+    public interface IAccumulationScope<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
+        String SCOPE_NAME2 = "Replay";
 
         @Override
-        default String getActivityName() { return ActivityNames.CHANNEL; }
+        default String getScopeName() {
+            return SCOPE_NAME2;
+        }
+    }
+
+    public interface IChannelKeyContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IConnectionContext<S> {
+        String ACTIVITY_NAME = ActivityNames.CHANNEL;
+
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            final LongUpDownCounter activeChannelCounter;
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+                var meter = meterProvider.get(SCOPE_NAME2);
+                activeChannelCounter = meter
+                        .upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
+            }
+        }
+
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
 
         // do not add this as a property
         // because its components are already being added in the IConnectionContext implementation
@@ -93,31 +119,43 @@ public class IReplayContexts {
         void onTargetConnectionClosed();
     }
 
-    public interface IKafkaRecordContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IChannelKeyContext>
+    public interface IKafkaRecordContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IChannelKeyContext<S>>
     {
-        String SCOPE_NAME = ScopeNames.KAFKA_RECORD_SCOPE;
+        String ACTIVITY_NAME = ActivityNames.RECORD_LIFETIME;
 
-        @Override
-        default String getActivityName() { return ActivityNames.RECORD_LIFETIME; }
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            }
+        }
+
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
 
         static final AttributeKey<String> RECORD_ID_KEY = AttributeKey.stringKey("recordId");
 
         String getRecordId();
 
         default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-            return IScopedInstrumentationAttributes.super.fillAttributes(builder.put(RECORD_ID_KEY, getRecordId()));
+            return IAccumulationScope.super.fillAttributes(builder.put(RECORD_ID_KEY, getRecordId()));
         }
     }
 
-    public interface ITrafficStreamsLifecycleContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IChannelKeyContext> {
-        String SCOPE_NAME = ScopeNames.TRAFFIC_STREAM_LIFETIME_SCOPE;
-        default String getActivityName() { return ActivityNames.TRAFFIC_STREAM_LIFETIME; }
+    public interface ITrafficStreamsLifecycleContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IChannelKeyContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.TRAFFIC_STREAM_LIFETIME;
+
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            }
+        }
+
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
         ITrafficStreamKey getTrafficStreamKey();
-        IChannelKeyContext getChannelKeyContext();
+        IChannelKeyContext<S> getChannelKeyContext();
         default String getConnectionId() {
             return getChannelKey().getConnectionId();
         }
@@ -126,16 +164,25 @@ public class IReplayContexts {
         }
     }
 
-    public interface IReplayerHttpTransactionContext
-            extends IHttpTransactionContext<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IChannelKeyContext> {
-        String SCOPE_NAME = ScopeNames.ACCUMULATOR_SCOPE;
+    public interface IReplayerHttpTransactionContext<S extends IInstrumentConstructor>
+            extends IHttpTransactionContext<S>,
+                    IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IChannelKeyContext<S>> {
         AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
 
-        default String getActivityName() { return ActivityNames.HTTP_TRANSACTION; }
+        ITupleHandlingContext createTupleContext();
+
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            }
+        }
+
+        String ACTIVITY_NAME = ActivityNames.HTTP_TRANSACTION;
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
 
         UniqueReplayerRequestKey getReplayerRequestKey();
-        IChannelKeyContext getChannelKeyContext();
+        IChannelKeyContext<S> getChannelKeyContext();
         Instant getTimeOfOriginalRequest();
 
         default String getConnectionId() {
@@ -160,26 +207,48 @@ public class IReplayContexts {
         }
     }
 
-    public interface IRequestAccumulationContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
-        String SCOPE_NAME = ScopeNames.ACCUMULATOR_SCOPE;
-        default String getActivityName() { return ActivityNames.ACCUMULATING_REQUEST; }
+    public interface IRequestAccumulationContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.ACCUMULATING_REQUEST;
+
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            }
+        }
+
+        @Override
+        default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IResponseAccumulationContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
-        String SCOPE_NAME = ScopeNames.ACCUMULATOR_SCOPE;
-        default String getActivityName() { return ActivityNames.ACCUMULATING_RESPONSE; }
+    public interface IResponseAccumulationContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.ACCUMULATING_RESPONSE;
+
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            }
+        }
+
+        @Override
+        default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IRequestTransformationContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
-        String SCOPE_NAME = ScopeNames.HTTP_TRANSFORMER_SCOPE;
+    public interface IRequestTransformationContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.TRANSFORMATION;
 
-        default String getActivityName() { return ActivityNames.TRANSFORMATION; }
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            }
+        }
+
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
 
         void onHeaderParse();
         void onPayloadParse();
@@ -201,48 +270,57 @@ public class IReplayContexts {
         void aggregateOutputChunk(int sizeInBytes);
     }
 
-    public interface IScheduledContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
-        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
-        default String getActivityName() { return ActivityNames.SCHEDULED; }
+    public interface IScheduledContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.SCHEDULED;
+
+        class MetricInstruments extends CommonScopedMetricInstruments {
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            }
+        }
+
+        @Override
+        default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface ITargetRequestContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
-        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
-        default String getActivityName() { return ActivityNames.TARGET_TRANSACTION; }
+    public interface ITargetRequestContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.TARGET_TRANSACTION;
+
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
 
         void onBytesSent(int size);
         void onBytesReceived(int size);
     }
 
-    public interface IRequestSendingContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, ITargetRequestContext> {
-        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
-        default String getActivityName() { return ActivityNames.REQUEST_SENDING; }
+    public interface IRequestSendingContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, ITargetRequestContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.REQUEST_SENDING;
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IWaitingForHttpResponseContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, ITargetRequestContext> {
-        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
-        default String getActivityName() { return ActivityNames.WAITING_FOR_RESPONSE; }
+    public interface IWaitingForHttpResponseContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, ITargetRequestContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.WAITING_FOR_RESPONSE;
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface IReceivingHttpResponseContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, ITargetRequestContext> {
-        String SCOPE_NAME = ScopeNames.REQUEST_SENDER_SCOPE;
-        default String getActivityName() { return ActivityNames.RECEIVING_RESPONSE; }
+    public interface IReceivingHttpResponseContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, ITargetRequestContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.RECEIVING_RESPONSE;
+        @Override default String getActivityName() { return ACTIVITY_NAME;}
     }
 
-    public interface ITupleHandlingContext
-            extends IScopedInstrumentationAttributes<IRootReplayerContext>,
-                    IWithTypedEnclosingScope<IRootReplayerContext, IReplayerHttpTransactionContext> {
-        String SCOPE_NAME = ScopeNames.TRAFFIC_REPLAYER_SCOPE;
-        default String getActivityName() { return ActivityNames.TUPLE_HANDLING; }
+    public interface ITupleHandlingContext<S extends IInstrumentConstructor>
+            extends IAccumulationScope<S>,
+                    IWithTypedEnclosingScope<S, IReplayerHttpTransactionContext<S>> {
+        String ACTIVITY_NAME = ActivityNames.TUPLE_HANDLING;
+        @Override default String getActivityName() { return ACTIVITY_NAME; }
     }
 }

@@ -10,39 +10,27 @@ import java.time.Instant;
 public interface IWithStartTimeAndAttributes<S extends IInstrumentConstructor> extends IInstrumentationAttributes<S> {
     Instant getStartTime();
 
-
     default void meterHistogramMillis(DoubleHistogram histogram) {
-        meterHistogramMillis(histogram, Attributes.builder());
-    }
-    default void meterHistogramMillis(DoubleHistogram histogram, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMillis(histogram, attributesBuilder);
+        meterHistogramMillis(histogram, Duration.between(getStartTime(), Instant.now()));
     }
     default void meterHistogramMillis(DoubleHistogram histogram, Duration value) {
-        meterHistogramMillis(histogram, value, Attributes.builder());
+        meterHistogramMillis(histogram, value, null);
+    }
+    default void meterHistogramMillis(DoubleHistogram histogram, AttributesBuilder attributesBuilder) {
+        meterHistogramMillis(histogram, Duration.between(getStartTime(), Instant.now()),
+                attributesBuilder);
     }
     default void meterHistogramMillis(DoubleHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMillis(histogram, value, attributesBuilder);
+        meterHistogram(histogram, value.toNanos()/1_000_000.0, attributesBuilder);
     }
-
-    default void meterHistogramMicros(DoubleHistogram histogram, Duration value) {
-        meterHistogramMicros(histogram, value, Attributes.builder());
+    default void meterHistogram(DoubleHistogram histogram, double value) {
+        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
+            histogram.record(value);
+        }
     }
-    default void meterHistogramMicros(DoubleHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeterClosure(this).meterHistogramMicros(histogram, value, attributesBuilder);
+    default void meterHistogram(DoubleHistogram histogram, double value, AttributesBuilder attributesBuilder) {
+        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
+            histogram.record(value);
+        }
     }
-    default void meterHistogramMicros(DoubleHistogram histogram) {
-        meterHistogramMicros(histogram, Attributes.builder());
-    }
-    default void meterHistogramMicros(DoubleHistogram histogram, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeterClosure(this)
-                .meterHistogramMicros(histogram, attributesBuilder);
-    }
-
-    default void meterHistogram(DoubleHistogram histogram, long value) {
-        meterHistogram(histogram, value, Attributes.builder());
-    }
-    default void meterHistogram(DoubleHistogram histogram, long value, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildMeterClosure(this).meterHistogram(histogram, value, attributesBuilder);
-    }
-
 }

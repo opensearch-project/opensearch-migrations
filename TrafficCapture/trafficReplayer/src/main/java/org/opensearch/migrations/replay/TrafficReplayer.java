@@ -14,8 +14,9 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
@@ -88,21 +89,21 @@ public class TrafficReplayer {
     private final TrafficStreamLimiter liveTrafficStreamLimiter;
     private final AtomicInteger successfulRequestCount;
     private final AtomicInteger exceptionRequestCount;
-    private final IInstrumentationAttributes topLevelContext;
-    private ConcurrentHashMap<UniqueReplayerRequestKey,
+    private final IRootReplayerContext topLevelContext;
+    private final ConcurrentHashMap<UniqueReplayerRequestKey,
             DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap;
-    private ConcurrentHashMap<UniqueReplayerRequestKey,
+    private final ConcurrentHashMap<UniqueReplayerRequestKey,
             DiagnosticTrackableCompletableFuture<String, Void>> requestToFinalWorkFuturesMap;
 
-    private AtomicBoolean stopReadingRef;
-    private AtomicReference<StringTrackableCompletableFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
-    private AtomicReference<Error> shutdownReasonRef;
-    private AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
-    private AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
-    private ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
+    private final AtomicBoolean stopReadingRef;
+    private final AtomicReference<StringTrackableCompletableFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
+    private final AtomicReference<Error> shutdownReasonRef;
+    private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
+    private final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
+    private final ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
     private Future nettyShutdownFuture;
 
-    public class DualException extends Exception {
+    public static class DualException extends Exception {
         public final Throwable originalCause;
         public final Throwable immediateCause;
         public DualException(Throwable originalCause, Throwable immediateCause) {
@@ -117,13 +118,13 @@ public class TrafficReplayer {
         }
     }
 
-    public class TerminationException extends DualException {
+    public static class TerminationException extends DualException {
         public TerminationException(Throwable originalCause, Throwable immediateCause) {
             super(originalCause, immediateCause);
         }
     }
 
-    public TrafficReplayer(IInstrumentationAttributes context,
+    public TrafficReplayer(IRootReplayerContext context,
                            URI serverUri,
                            String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
@@ -134,7 +135,7 @@ public class TrafficReplayer {
     }
 
 
-    public TrafficReplayer(IInstrumentationAttributes context,
+    public TrafficReplayer(IRootReplayerContext context,
                            URI serverUri,
                            String fullTransformerConfig,
                            IAuthTransformerFactory authTransformerFactory,
@@ -149,7 +150,7 @@ public class TrafficReplayer {
         );
     }
     
-    public TrafficReplayer(IInstrumentationAttributes context,
+    public TrafficReplayer(IRootReplayerContext context,
                            URI serverUri,
                            IAuthTransformerFactory authTransformer,
                            boolean allowInsecureConnections,
@@ -390,15 +391,15 @@ public class TrafficReplayer {
             System.exit(3);
             return;
         }
-        var topContext = new RootOtelContext(params.otelCollectorEndpoint, "replay");
+        var topContext = new RootReplayerContext(RootOtelContext.initializeOpenTelemetry(params.otelCollectorEndpoint,
+                "replay"));
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
                      Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
             String transformerConfig = getTransformerConfig(params);
-            if (transformerConfig != null)
-            {
-                log.info("Transformations config string: ", transformerConfig);
+            if (transformerConfig != null) {
+                log.atInfo().setMessage(()->"Transformations config string: " + transformerConfig).log();
             }
             var tr = new TrafficReplayer(topContext, uri, transformerConfig, authTransformer, params.userAgent,
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
@@ -441,11 +442,11 @@ public class TrafficReplayer {
      * aspect out from the core logic below.
      */
     private static String formatAuthArgFlagsAsString() {
-        return List.of(REMOVE_AUTH_HEADER_VALUE_ARG,
-                        AUTH_HEADER_VALUE_ARG,
-                        AWS_AUTH_HEADER_USER_AND_SECRET_ARG,
-                        SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG).stream()
-                .collect(Collectors.joining(", "));
+        return String.join(", ",
+                REMOVE_AUTH_HEADER_VALUE_ARG,
+                AUTH_HEADER_VALUE_ARG,
+                AWS_AUTH_HEADER_USER_AND_SECRET_ARG,
+                SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG);
     }
 
     private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
@@ -488,7 +489,7 @@ public class TrafficReplayer {
             String region = serviceAndRegion[1];
 
             return new IAuthTransformerFactory() {
-                DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
+                final DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
                 @Override
                 public IAuthTransformer getAuthTransformer(IHttpMessage httpMessage) {
                     return new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
@@ -528,10 +529,8 @@ public class TrafficReplayer {
         } finally {
             trafficToHttpTransactionAccumulator.close();
             wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
-            if (shutdownFutureRef.get() == null) {
-                assert requestToFinalWorkFuturesMap.isEmpty() :
-                        "expected to wait for all the in flight requests to fully flush and self destruct themselves";
-            }
+            assert shutdownFutureRef.get() != null || requestToFinalWorkFuturesMap.isEmpty() :
+                    "expected to wait for all the in flight requests to fully flush and self destruct themselves";
         }
     }
 
@@ -553,8 +552,7 @@ public class TrafficReplayer {
                 logLevel = secondaryLogLevel;
             }
         }
-        if (requestToFinalWorkFuturesMap.size() > 0 ||
-                exceptionRequestCount.get() > 0) {
+        if (!requestToFinalWorkFuturesMap.isEmpty() || exceptionRequestCount.get() > 0) {
             log.atWarn().setMessage("{} in-flight requests being dropped due to pending shutdown; " +
                             "{} requests to the target threw an exception; " +
                             "{} requests were successfully processed.")
@@ -606,7 +604,7 @@ public class TrafficReplayer {
 
         @Override
         public void onRequestReceived(@NonNull UniqueReplayerRequestKey requestKey,
-                                      IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                      IReplayContexts.IReplayerHttpTransactionContext<IRootReplayerContext> ctx,
                                       @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
@@ -625,7 +623,7 @@ public class TrafficReplayer {
 
         @Override
         public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
-                                       IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                       IReplayContexts.IReplayerHttpTransactionContext<IRootReplayerContext> ctx,
                                        @NonNull RequestResponsePacketPair rrPair) {
             log.atInfo().setMessage(()->"Done receiving captured stream for " + requestKey +
                     ":" + rrPair.requestData).log();
@@ -641,7 +639,7 @@ public class TrafficReplayer {
             }
         }
 
-        Void handleCompletedTransaction(IInstrumentationAttributes context,
+        Void handleCompletedTransaction(IInstrumentationAttributes<IRootReplayerContext> context,
                                         @NonNull UniqueReplayerRequestKey requestKey,
                                         RequestResponsePacketPair rrPair,
                                         TransformedTargetRequestAndResponse summary, Throwable t) {
@@ -651,7 +649,7 @@ public class TrafficReplayer {
                 // packaging it up and calling the callback.
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
-                    try (var tupleHandlingContext = new ReplayContexts.TupleHandlingContext(httpContext)) {
+                    try (var tupleHandlingContext = httpContext.createTupleContext()) {
                         packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
                     }
                     commitTrafficStreams(context, rrPair.trafficStreamKeysBeingHeld, rrPair.completionStatus);
@@ -688,13 +686,13 @@ public class TrafficReplayer {
 
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            IReplayContexts.IChannelKeyContext ctx,
+                                            IReplayContexts.IChannelKeyContext<IRootReplayerContext> ctx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             commitTrafficStreams(ctx, trafficStreamKeysBeingHeld, status);
         }
 
         @SneakyThrows
-        private void commitTrafficStreams(IInstrumentationAttributes context,
+        private void commitTrafficStreams(IInstrumentationAttributes<IRootReplayerContext> context,
                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld,
                                           RequestResponsePacketPair.ReconstructionStatus status) {
             commitTrafficStreams(context, trafficStreamKeysBeingHeld,
@@ -702,7 +700,7 @@ public class TrafficReplayer {
         }
 
         @SneakyThrows
-        private void commitTrafficStreams(IInstrumentationAttributes context,
+        private void commitTrafficStreams(IInstrumentationAttributes<IRootReplayerContext> context,
                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld, boolean shouldCommit) {
             if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
@@ -713,8 +711,10 @@ public class TrafficReplayer {
         }
 
         @Override
-        public void onConnectionClose(@NonNull ISourceTrafficChannelKey channelKey, int channelInteractionNum,
-                                      IReplayContexts.IChannelKeyContext ctx, RequestResponsePacketPair.ReconstructionStatus status,
+        public void onConnectionClose(@NonNull ISourceTrafficChannelKey channelKey,
+                                      int channelInteractionNum,
+                                      IReplayContexts.IChannelKeyContext<IRootReplayerContext> ctx,
+                                      RequestResponsePacketPair.ReconstructionStatus status,
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);

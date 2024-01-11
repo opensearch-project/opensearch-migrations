@@ -1,11 +1,15 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import com.google.protobuf.Timestamp;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.tracing.TrafficSourceContexts;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.slf4j.event.Level;
@@ -44,6 +48,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * Limit the number of readers to one at a time and only if we haven't yet maxed out our time buffer
      */
     private final Semaphore readGate;
+    @Getter
     private final Duration bufferTimeWindow;
 
     public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying, Duration bufferTimeWindow) {
@@ -78,10 +83,6 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         }
     }
 
-    public Duration getBufferTimeWindow() {
-        return bufferTimeWindow;
-    }
-
     /**
      * Reads the next chunk that is available before the current stopReading barrier.  However,
      * that barrier isn't meant to be a tight barrier with immediate effect.
@@ -90,8 +91,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      */
     @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(IInstrumentationAttributes context) {
-        var readContext = new TrafficSourceContexts.ReadChunkContext(context);
+    readNextTrafficStreamChunk(IRootReplayerContext context) {
+        var readContext = context.createReadChunkContext();
         log.info("BlockingTrafficSource::readNext");
         var trafficStreamListFuture = CompletableFuture
                 .supplyAsync(() -> blockIfNeeded(readContext), task -> new Thread(task).start())
@@ -117,11 +118,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         });
     }
 
-    private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext readContext) {
+    private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext<RootReplayerContext> readContext) {
         if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
         log.atInfo().setMessage(() -> "stopReadingAtRef=" + stopReadingAtRef +
                 " lastTimestampSecondsRef=" + lastTimestampSecondsRef).log();
-        ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
+        ITrafficSourceContexts.IBackPressureBlockContext<RootReplayerContext> blockContext = null;
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
             if (blockContext == null) {
                 blockContext = new TrafficSourceContexts.BackPressureBlockContext(readContext);
@@ -167,7 +168,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public CommitResult commitTrafficStream(IInstrumentationAttributes context,
+    public CommitResult commitTrafficStream(IInstrumentationAttributes<IRootReplayerContext> context,
                                             ITrafficStreamKey trafficStreamKey) throws IOException {
         var commitResult = underlyingSource.commitTrafficStream(context, trafficStreamKey);
         if (commitResult == CommitResult.AfterNextRead) {

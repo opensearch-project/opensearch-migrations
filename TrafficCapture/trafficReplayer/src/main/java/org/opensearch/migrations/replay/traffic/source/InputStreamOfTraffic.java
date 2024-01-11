@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.traffic.source;
 
+import io.opentelemetry.api.metrics.LongUpDownCounter;
+import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.Getter;
 import lombok.Lombok;
 import lombok.NonNull;
@@ -8,6 +10,9 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
@@ -22,34 +27,46 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
-    private static final String TELEMETRY_SCOPE_NAME = "InputStreamOfTraffic";
     private final InputStream inputStream;
     private final AtomicInteger trafficStreamsRead = new AtomicInteger();
     private final ChannelContextManager channelContextManager;
 
-    public InputStreamOfTraffic(IInstrumentationAttributes context, InputStream inputStream) {
+    public InputStreamOfTraffic(IInstrumentationAttributes<RootReplayerContext> context, InputStream inputStream) {
         this.channelContextManager = new ChannelContextManager(context);
         this.inputStream = inputStream;
     }
 
-    private static class IOSTrafficStreamContext
-            extends DirectNestedSpanContext<IReplayContexts.IChannelKeyContext>
-            implements IReplayContexts.ITrafficStreamsLifecycleContext {
-        public static final String SCOPE_NAME = TELEMETRY_SCOPE_NAME;
-
+    public static class IOSTrafficStreamContext
+            extends DirectNestedSpanContext<RootReplayerContext, IReplayContexts.IChannelKeyContext<RootReplayerContext>>
+            implements IReplayContexts.ITrafficStreamsLifecycleContext<RootReplayerContext> {
         @Getter private final ITrafficStreamKey trafficStreamKey;
 
-        public IOSTrafficStreamContext(@NonNull IReplayContexts.IChannelKeyContext ctx, ITrafficStreamKey tsk) {
+        public IOSTrafficStreamContext(@NonNull IReplayContexts.IChannelKeyContext<RootReplayerContext> ctx,
+                                       ITrafficStreamKey tsk) {
             super(ctx);
             this.trafficStreamKey = tsk;
             initializeSpan();
+        }
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            final LongUpDownCounter activeChannelCounter;
+            public MetricInstruments(MeterProvider meterProvider) {
+                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+                var meter = meterProvider.get(SCOPE_NAME2);
+                activeChannelCounter = meter
+                        .upDownCounterBuilder(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
+            }
+        }
+
+        public @NonNull ReplayContexts.ChannelKeyContext.MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().channelKeyContext;
         }
 
         @Override
         public String getActivityName() { return "trafficStreamLifecycle"; }
 
         @Override
-        public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
+        public IReplayContexts.IChannelKeyContext<RootReplayerContext> getChannelKeyContext() {
             return getImmediateEnclosingScope();
         }
     }
@@ -61,7 +78,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
      * @return
      */
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(IInstrumentationAttributes context) {
+    readNextTrafficStreamChunk(IInstrumentationAttributes<RootReplayerContext> context) {
         return CompletableFuture.supplyAsync(() -> {
             var builder = TrafficStream.newBuilder();
             try {

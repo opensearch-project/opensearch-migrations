@@ -158,18 +158,18 @@ class TrafficReplayerTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueReplayerRequestKey id,
+                            public void onRequestReceived(@NonNull UniqueReplayerRequestKey id,
                                                           IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                          HttpMessageAndTimestamp request) {
+                                                          @NonNull HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueReplayerRequestKey key,
+                            public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
                                                            IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                           RequestResponsePacketPair fullPair) {
+                                                           @NonNull RequestResponsePacketPair fullPair) {
                                 var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                             }
@@ -213,18 +213,18 @@ class TrafficReplayerTest {
                                 "CapturedTrafficToHttpTransactionAccumulator that's being used in this unit test!",
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueReplayerRequestKey id,
+                            public void onRequestReceived(@NonNull UniqueReplayerRequestKey id,
                                                           IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                          HttpMessageAndTimestamp request) {
+                                                          @NonNull HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueReplayerRequestKey key,
+                            public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
                                                            IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                           RequestResponsePacketPair fullPair) {
+                                                           @NonNull RequestResponsePacketPair fullPair) {
                                 var responseBytes = fullPair.responseData.packetBytes.stream().collect(Collectors.toList());
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
                             }

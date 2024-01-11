@@ -12,6 +12,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -28,13 +29,13 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    private IReplayContexts.IRequestTransformationContext httpTransactionContext;
+    private final IReplayContexts.IRequestTransformationContext<RootReplayerContext> httpTransactionContext;
     static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
-                                                            IReplayContexts.IRequestTransformationContext httpTransactionContext) {
+                                                            IReplayContexts.IRequestTransformationContext<RootReplayerContext> httpTransactionContext) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;

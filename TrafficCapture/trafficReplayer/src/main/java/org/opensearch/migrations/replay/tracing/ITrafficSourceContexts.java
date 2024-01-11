@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public interface ITrafficSourceContexts {
@@ -15,18 +16,23 @@ public interface ITrafficSourceContexts {
         public static final String WAIT_FOR_NEXT_BACK_PRESSURE_CHECK = "waitForNextBackPressureCheck";
     }
 
-    interface ITrafficSourceContext extends IScopedInstrumentationAttributes {
+    interface ITrafficSourceContext<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
         String SCOPE_NAME = ScopeNames.TRAFFIC_SCOPE;
+        @Override default String getScopeName() { return SCOPE_NAME; }
+
     }
-    interface IReadChunkContext extends ITrafficSourceContext {
+    interface IReadChunkContext<S extends IInstrumentConstructor> extends ITrafficSourceContext<S> {
+        String ACTIVITY_NAME = ActivityNames.READ_NEXT_TRAFFIC_CHUNK;
         @Override
-        default String getActivityName() { return ActivityNames.READ_NEXT_TRAFFIC_CHUNK; }
+        default String getActivityName() { return ACTIVITY_NAME; }
     }
-    interface IBackPressureBlockContext extends ITrafficSourceContext {
+    interface IBackPressureBlockContext<S extends IInstrumentConstructor> extends ITrafficSourceContext<S> {
+        String ACTIVITY_NAME = ActivityNames.BACK_PRESSURE_BLOCK;
         @Override
-        default String getActivityName() { return ActivityNames.BACK_PRESSURE_BLOCK; }
+        default String getActivityName() { return ACTIVITY_NAME; }
     }
-    interface IWaitForNextSignal extends ITrafficSourceContext {
-        default String getActivityName() { return ActivityNames.WAIT_FOR_NEXT_BACK_PRESSURE_CHECK; }
+    interface IWaitForNextSignal<S extends IInstrumentConstructor> extends ITrafficSourceContext<S> {
+        String ACTIVITY_NAME = ActivityNames.WAIT_FOR_NEXT_BACK_PRESSURE_CHECK;
+        default String getActivityName() { return ACTIVITY_NAME; }
     }
 }

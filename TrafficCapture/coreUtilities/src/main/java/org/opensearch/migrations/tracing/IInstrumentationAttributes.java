@@ -41,20 +41,23 @@ public interface IInstrumentationAttributes<S extends IInstrumentConstructor> {
         meterIncrementEvent(c, Attributes.builder());
     }
     default void meterIncrementEvent(LongCounter c, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildSimpleMeterClosure(this).meterIncrementEvent(c, attributesBuilder);
+        meterIncrementEvent(c, 1, attributesBuilder);
     }
     default void meterIncrementEvent(LongCounter c, long increment) {
         meterIncrementEvent (c, increment, Attributes.builder());
     }
     default void meterIncrementEvent(LongCounter c, long increment, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildSimpleMeterClosure(this)
-                .meterIncrementEvent(c, increment, attributesBuilder);
+        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
+            c.add(increment);
+        }
     }
     default void meterDeltaEvent(LongUpDownCounter c, long delta) {
         meterDeltaEvent(c, delta, Attributes.builder());
     }
     default void meterDeltaEvent(LongUpDownCounter c, long delta, AttributesBuilder attributesBuilder) {
-        getRootInstrumentationScope().buildSimpleMeterClosure(this).meterDeltaEvent(c, delta, attributesBuilder);
+        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
+            c.add(delta);
+        }
     }
 
 }

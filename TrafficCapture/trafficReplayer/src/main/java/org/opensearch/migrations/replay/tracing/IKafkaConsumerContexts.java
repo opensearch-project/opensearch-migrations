@@ -30,16 +30,16 @@ public interface IKafkaConsumerContexts {
         String SCOPE_NAME = ScopeNames.KAFKA_CONSUMER_SCOPE;
         @Override default String getScopeName() { return SCOPE_NAME; }
     }
-    interface IKafkaConsumerScope<S extends IInstrumentConstructor<S>> extends IScopedInstrumentationAttributes<S> {
+    interface IKafkaConsumerScope<S extends IInstrumentConstructor> extends IScopedInstrumentationAttributes<S> {
         String SCOPE_NAME = ScopeNames.KAFKA_CONSUMER_SCOPE;
         @Override default String getScopeName() { return SCOPE_NAME; }
     }
-    interface ITouchScopeContext<S extends IInstrumentConstructor<S>> extends IKafkaConsumerScope<S> {
+    interface ITouchScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S> {
         String ACTIVITY_NAME = ActivityNames.TOUCH;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
     }
-    interface IPollScopeContext<S extends IInstrumentConstructor<S>> extends IKafkaConsumerScope<S> {
+    interface IPollScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S> {
         String ACTIVITY_NAME = ActivityNames.KAFKA_POLL;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
@@ -48,7 +48,7 @@ public interface IKafkaConsumerContexts {
     /**
      * Context for the KafkaConsumer's bookkeeping around and including the commit service call
      */
-    interface ICommitScopeContext<S extends IInstrumentConstructor<S>> extends IKafkaConsumerScope<S> {
+    interface ICommitScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S> {
         String ACTIVITY_NAME = ActivityNames.COMMIT;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }
@@ -57,7 +57,7 @@ public interface IKafkaConsumerContexts {
     /**
      * Context for ONLY the service call to Kafka to perform the commit.
      */
-    interface IKafkaCommitScopeContext<S extends IInstrumentConstructor<S>> extends IKafkaConsumerScope<S>{
+    interface IKafkaCommitScopeContext<S extends IInstrumentConstructor> extends IKafkaConsumerScope<S>{
         String ACTIVITY_NAME = ActivityNames.KAFKA_COMMIT;
         @Override
         default String getActivityName() { return ACTIVITY_NAME; }

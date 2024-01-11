@@ -9,9 +9,12 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -102,7 +105,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     @AllArgsConstructor
     private static class SpanWrappingAccumulationCallbacks {
         private final AccumulationCallbacks underlying;
-        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
+        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext<IRootReplayerContext> requestCtx,
                                       @NonNull HttpMessageAndTimestamp request) {
             requestCtx.close();
             underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope().getReplayerRequestKey(),
@@ -126,7 +129,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            IReplayContexts.ITrafficStreamsLifecycleContext tsCtx,
+                                            IReplayContexts.ITrafficStreamsLifecycleContext<IInstrumentConstructor> tsCtx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             underlying.onTrafficStreamsExpired(status, tsCtx.getLogicalEnclosingScope(), trafficStreamKeysBeingHeld);
         }
