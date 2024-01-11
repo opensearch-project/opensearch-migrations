@@ -84,8 +84,9 @@ echo "Waiting for Replayer to be stable..."
 aws ecs wait services-stable --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default"
 
 # Kickoff integration tests
-echo "aws ecs execute-command --cluster 'migration-${STAGE}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command '/bin/bash'"
+set -o xtrace
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./setupIntegTests.sh ${MIGRATIONS_GIT_URL} ${MIGRATIONS_GIT_BRANCH} ${source_endpoint} ${proxy_endpoint} ${UNIQUE_ID}"
+set +o xtrace
 test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "awk '/failures/ && /errors/' /root/integ-tests/test/reports/${UNIQUE_ID}.xml")
 echo "Fetch integ test summary: "
 echo "$test_output"
