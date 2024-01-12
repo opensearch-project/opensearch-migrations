@@ -10,6 +10,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -17,6 +18,7 @@ import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.KafkaRecordContext;
 
 import java.io.IOException;
@@ -37,29 +39,31 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     // general Kafka message overhead
     public static final int KAFKA_MESSAGE_OVERHEAD_BYTES = 500;
 
+    private final IRootKafkaOffloaderContext rootScope;
     private final String nodeId;
     // Potential future optimization here to use a direct buffer (e.g. nio) instead of byte array
     private final Producer<String, byte[]> producer;
     private final String topicNameForTraffic;
     private final int bufferSize;
 
-    public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer,
+    public KafkaCaptureFactory(IRootKafkaOffloaderContext rootScope, String nodeId, Producer<String, byte[]> producer,
                                String topicNameForTraffic, int messageSize) {
+        this.rootScope = rootScope;
         this.nodeId = nodeId;
         this.producer = producer;
         this.topicNameForTraffic = topicNameForTraffic;
         this.bufferSize = messageSize - KAFKA_MESSAGE_OVERHEAD_BYTES;
     }
 
-    public KafkaCaptureFactory(String nodeId, Producer<String, byte[]> producer, int messageSize) {
-        this(nodeId, producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, messageSize);
+    public KafkaCaptureFactory(IRootKafkaOffloaderContext rootScope, String nodeId, Producer<String, byte[]> producer, int messageSize) {
+        this(rootScope, nodeId, producer, DEFAULT_TOPIC_NAME_FOR_TRAFFIC, messageSize);
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(IConnectionContext ctx,
-                                                                               String connectionId) {
+    public IChannelConnectionCaptureSerializer<RecordMetadata>
+    createOffloader(IConnectionContext ctx, String connectionId) {
         return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId,
-                new StreamManager(ctx, connectionId));
+                new StreamManager(rootScope, ctx, connectionId));
     }
 
     @AllArgsConstructor
@@ -74,15 +78,14 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
     class StreamManager extends OrderedStreamLifecyleManager<RecordMetadata> {
         IConnectionContext telemetryContext;
+        IRootKafkaOffloaderContext rootScope;
         String connectionId;
         Instant startTime;
 
-        public StreamManager(IConnectionContext ctx, String connectionId) {
+        public StreamManager(IRootKafkaOffloaderContext rootScope, IConnectionContext ctx, String connectionId) {
             // TODO - add https://opentelemetry.io/blog/2022/instrument-kafka-clients/
+            this.rootScope = rootScope;
             this.telemetryContext = ctx;
-            ctx.meterIncrementEvent("offloader_created");
-            telemetryContext.meterDeltaEvent("offloaders_active", 1);
-
             this.connectionId = connectionId;
             this.startTime = Instant.now();
         }
@@ -90,15 +93,12 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         @Override
         public void close() throws IOException {
             log.atInfo().setMessage(() -> "factory.close()").log();
-            telemetryContext.meterHistogramMillis("offloader_stream_lifetime",
-                    Duration.between(startTime, Instant.now()));
-            telemetryContext.meterDeltaEvent("offloaders_active", -1);
-            telemetryContext.meterIncrementEvent("offloader_closed");
+            telemetryContext.close();
         }
 
         @Override
         public CodedOutputStreamWrapper createStream() {
-            telemetryContext.meterIncrementEvent("stream_created");
+            telemetryContext.getCurrentSpan().addEvent("streamCreated");
 
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
             return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb);
@@ -123,9 +123,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 var cf = new CompletableFuture<RecordMetadata>();
                 log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
-                var flushContext = new KafkaRecordContext(telemetryContext,
+                var flushContext = rootScope.createKafkaRecordContext(telemetryContext,
                         topicNameForTraffic, recordId, kafkaRecord.value().length);
-                telemetryContext.meterIncrementEvent("stream_flush_called");
 
                 // Async request to Kafka cluster
                 producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId, flushContext));
@@ -161,6 +160,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         // that field out of scope.
         return (metadata, exception) -> {
             log.atInfo().setMessage(()->"kafka completed sending a record").log();
+
             flushContext.meterHistogramMicros(exception==null ? "stream_flush_success_ms" : "stream_flush_failure_ms");
             flushContext.meterIncrementEvent(exception==null ? "stream_flush_success" : "stream_flush_failure");
             flushContext.meterIncrementEvent(
@@ -169,9 +169,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             flushContext.close();
 
             if (exception != null) {
+                flushContext.addException(exception);
                 log.error("Error sending producer record: {}", recordId, exception);
                 cf.completeExceptionally(exception);
             } else {
+                flushContext.onSuccessfulFlush();
                 log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
                         recordId, metadata.topic(), metadata.partition());
                 cf.complete(metadata);

@@ -177,7 +177,7 @@ public class ClientConnectionPool {
                         .thenAccept(cf-> {
                             cf.channel().close()
                                     .addListener(closeFuture -> {
-                                        channelAndFutureWork.getChannelContext().onTargetConnectionClosed();
+                                        channelAndFutureWork.getChannelContext().onConnectionClosed();
                                         if (closeFuture.isSuccess()) {
                                             channelClosedFuture.future.complete(channelAndFutureWork.getInnerChannelFuture().channel());
                                         } else {

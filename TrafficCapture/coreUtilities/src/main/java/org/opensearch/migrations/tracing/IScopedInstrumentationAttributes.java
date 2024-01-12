@@ -35,5 +35,10 @@ public interface IScopedInstrumentationAttributes
 
     default void addException(Exception e) {
         getCurrentSpan().recordException(e);
+        sendMeterEventsForException(e);
+    }
+
+    default void sendMeterEventsForException(Exception e) {
+        meterIncrementEvent(getMetrics().exceptionCounter);
     }
 }

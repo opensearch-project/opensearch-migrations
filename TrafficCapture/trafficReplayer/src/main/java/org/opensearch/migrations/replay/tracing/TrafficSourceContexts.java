@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
@@ -31,8 +32,8 @@ public class TrafficSourceContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
         public @NonNull MetricInstruments getMetrics() {
@@ -66,8 +67,8 @@ public class TrafficSourceContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
         public @NonNull MetricInstruments getMetrics() {
@@ -85,8 +86,8 @@ public class TrafficSourceContexts {
             extends BaseNestedSpanContext<RootReplayerContext, ITrafficSourceContexts.IBackPressureBlockContext>
             implements ITrafficSourceContexts.IWaitForNextSignal {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
         public @NonNull MetricInstruments getMetrics() {

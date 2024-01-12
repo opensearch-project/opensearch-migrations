@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
@@ -121,7 +122,7 @@ public class TestUtils {
             return baos.toString(StandardCharsets.UTF_8);
         }
     }
-    static void runPipelineAndValidate(IInstrumentationAttributes rootContext,
+    static void runPipelineAndValidate(RootReplayerContext rootContext,
                                        IAuthTransformerFactory authTransformer,
                                        String extraHeaders,
                                        List<String> stringParts,
@@ -132,7 +133,7 @@ public class TestUtils {
                 authTransformer, extraHeaders, stringParts, expectedRequestHeaders, expectedOutputGenerator);
     }
 
-    static void runPipelineAndValidate(IInstrumentationAttributes rootContext,
+    static void runPipelineAndValidate(RootReplayerContext rootContext,
                                        IJsonTransformer transformer,
                                        IAuthTransformerFactory authTransformer,
                                        String extraHeaders,

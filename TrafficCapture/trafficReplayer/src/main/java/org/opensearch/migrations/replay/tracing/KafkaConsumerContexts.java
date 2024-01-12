@@ -4,6 +4,7 @@ import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
+import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -28,8 +29,7 @@ public class KafkaConsumerContexts {
             public final LongCounter kafkaPartitionsRevokedCounter;
             public final LongCounter kafkaPartitionsAssignedCounter;
             public final LongUpDownCounter kafkaActivePartitionsCounter;
-            public MetricInstruments(MeterProvider meterProvider) {
-                var meter = meterProvider.get(SCOPE_NAME);
+            public MetricInstruments(Meter meter) {
                 kafkaPartitionsRevokedCounter = meter
                         .counterBuilder(IKafkaConsumerContexts.MetricNames.PARTITIONS_REVOKED_EVENT_COUNT).build();
                 kafkaPartitionsAssignedCounter = meter
@@ -72,8 +72,8 @@ public class KafkaConsumerContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
         public TouchScopeContext(@NonNull TrafficSourceContexts.BackPressureBlockContext enclosingScope) {
@@ -90,8 +90,8 @@ public class KafkaConsumerContexts {
             extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
             implements IKafkaConsumerContexts.IPollScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
@@ -117,8 +117,8 @@ public class KafkaConsumerContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
@@ -138,8 +138,8 @@ public class KafkaConsumerContexts {
             extends DirectNestedSpanContext<RootReplayerContext, KafkaConsumerContexts.CommitScopeContext, IKafkaConsumerContexts.ICommitScopeContext>
             implements IKafkaConsumerContexts.IKafkaCommitScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 

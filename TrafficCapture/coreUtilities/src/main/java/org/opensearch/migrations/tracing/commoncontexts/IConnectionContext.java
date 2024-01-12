@@ -20,4 +20,8 @@ public interface IConnectionContext extends IScopedInstrumentationAttributes {
         return builder.put(CONNECTION_ID_ATTR, getConnectionId())
                 .put(NODE_ID_ATTR, getNodeId());
     }
+
+    void onConnectionCreated();
+
+    void onConnectionClosed();
 }

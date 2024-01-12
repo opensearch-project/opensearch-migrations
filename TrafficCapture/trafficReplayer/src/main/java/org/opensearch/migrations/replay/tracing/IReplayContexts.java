@@ -72,12 +72,6 @@ public class IReplayContexts {
     }
 
     public interface IAccumulationScope extends IScopedInstrumentationAttributes {
-        String SCOPE_NAME2 = "Replay";
-
-        @Override
-        default String getScopeName() {
-            return SCOPE_NAME2;
-        }
     }
 
     public interface IChannelKeyContext
@@ -98,10 +92,6 @@ public class IReplayContexts {
         default String getNodeId() {
             return getChannelKey().getNodeId();
         }
-
-        void onTargetConnectionCreated();
-
-        void onTargetConnectionClosed();
     }
 
     public interface IKafkaRecordContext

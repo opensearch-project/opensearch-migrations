@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import java.time.Instant;
 
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -15,17 +16,17 @@ public class TestRequestKey {
     private TestRequestKey() {}
 
     public static final ReplayContexts.HttpTransactionContext
-    getTestConnectionRequestContext(IInstrumentationAttributes ctx, int replayerIdx) {
+    getTestConnectionRequestContext(RootReplayerContext ctx, int replayerIdx) {
         return getTestConnectionRequestContext(ctx, DEFAULT_TEST_CONNECTION, replayerIdx);
     }
 
     public static ReplayContexts.HttpTransactionContext
-    getTestConnectionRequestContext(IInstrumentationAttributes ctx, String connectionId, int replayerIdx) {
+    getTestConnectionRequestContext(RootReplayerContext ctx, String connectionId, int replayerIdx) {
         var rk = new UniqueReplayerRequestKey(
                 PojoTrafficStreamKeyAndContext.build(TEST_NODE_ID, connectionId, 0,
                         tsk -> new TestTrafficStreamsLifecycleContext(ctx, tsk)),
                 0, replayerIdx);
-        return new ReplayContexts.HttpTransactionContext(rk.trafficStreamKey.getTrafficStreamsContext(), rk,
-                Instant.EPOCH);
+        return new ReplayContexts.HttpTransactionContext(ctx, rk.trafficStreamKey.getTrafficStreamsContext(),
+                rk, Instant.EPOCH);
     }
 }

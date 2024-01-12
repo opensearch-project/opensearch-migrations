@@ -38,7 +38,7 @@ public abstract class BaseNestedSpanContext
     }
 
     protected void initializeSpan(Span linkedSpan, AttributesBuilder attributesBuilder) {
-        initializeSpan(rootInstrumentationScope.buildSpan(enclosingScope, getScopeName(), getActivityName(),
+        initializeSpan(rootInstrumentationScope.buildSpan(enclosingScope, getActivityName(),
                 linkedSpan, attributesBuilder));
     }
 

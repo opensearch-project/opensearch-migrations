@@ -2,14 +2,20 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
+import org.opensearch.migrations.tracing.BaseNestedSpanContext;
+import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+import org.opensearch.migrations.trafficcapture.tracing.RootOffloaderContext;
 
-public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionContext>
+public class KafkaRecordContext extends
+        BaseNestedSpanContext<IRootKafkaOffloaderContext, IConnectionContext>
         implements IScopedInstrumentationAttributes {
-    public static final String SCOPE_NAME = "KafkaCapture";
+    public static final String ACTIVITY_NAME = "kafkaCommit";
 
     static final AttributeKey<String> TOPIC_ATTR = AttributeKey.stringKey("topic");
     static final AttributeKey<String> RECORD_ID_ATTR = AttributeKey.stringKey("recordId");
@@ -22,15 +28,27 @@ public class KafkaRecordContext extends DirectNestedSpanContext<IConnectionConte
     @Getter
     public final int recordSize;
 
-    public KafkaRecordContext(IConnectionContext enclosingScope, String topic, String recordId, int recordSize) {
-        super(enclosingScope);
+    public KafkaRecordContext(IRootKafkaOffloaderContext rootScope, IConnectionContext enclosingScope,
+                              String topic, String recordId, int recordSize) {
+        super(rootScope, enclosingScope);
         this.topic = topic;
         this.recordId = recordId;
         this.recordSize = recordSize;
         initializeSpan();
     }
 
-    @Override public String getScopeName() { return SCOPE_NAME; }
+    public static class MetricInstruments extends CommonScopedMetricInstruments {
+        private final LongCounter successCount;
+        public MetricInstruments(Meter meter) {
+            super(meter, ACTIVITY_NAME);
+            successCount = meter.counterBuilder()
+        }
+    }
+
+    @Override
+    public MetricInstruments getMetrics() {
+        return getRootInstrumentationScope().getKafkaOffloadingInstruments();
+    }
 
     @Override
     public String getActivityName() { return "stream_flush_called"; }

@@ -21,13 +21,11 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
-import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.netty.tracing.WireCaptureContexts;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.IOException;
@@ -137,7 +135,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected final EmbeddedChannel httpDecoderChannel;
 
-    protected HttpMessageContext messageContext;
+    protected WireCaptureContexts.HttpMessageContext messageContext;
 
     public LoggingHttpHandler(@NonNull IRootWireLoggingContext rootContext, String nodeId, String channelKey,
                               @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
@@ -145,10 +143,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     throws IOException {
         var parentContext = new ConnectionContext(rootContext, channelKey, nodeId);
 
-        this.messageContext = new HttpMessageContext(parentContext, 0, HttpMessageContext.HttpTransactionState.REQUEST);
+        this.messageContext = new WireCaptureContexts.HttpMessageContext(parentContext, 0, WireCaptureContexts.HttpMessageContext.HttpTransactionState.REQUEST);
         messageContext.meterIncrementEvent("requestStarted");
 
-        this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext, channelKey);
+        this.trafficOffloader = trafficOffloaderFactory.createOffloader(rootContext, parentContext, channelKey);
         var captureState = new CaptureState();
         httpDecoderChannel = new EmbeddedChannel(
                 new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher(), captureState),
@@ -156,9 +154,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         );
     }
 
-    protected void rotateNextMessageContext(HttpMessageContext.HttpTransactionState nextState) {
-        messageContext = new HttpMessageContext(messageContext.getLogicalEnclosingScope(),
-                (nextState== HttpMessageContext.HttpTransactionState.REQUEST ? 1 : 0)
+    protected void rotateNextMessageContext(WireCaptureContexts.HttpMessageContext.HttpTransactionState nextState) {
+        messageContext = new WireCaptureContexts.HttpMessageContext(messageContext.getLogicalEnclosingScope(),
+                (nextState== WireCaptureContexts.HttpMessageContext.HttpTransactionState.REQUEST ? 1 : 0)
                         + messageContext.getSourceRequestIndex(),
                 nextState);
     }
@@ -206,7 +204,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, boolean shouldCapture,
                                                        HttpRequest httpRequest) throws Exception {
-        rotateNextMessageContext(HttpMessageContext.HttpTransactionState.WAITING);
+        rotateNextMessageContext(WireCaptureContexts.HttpMessageContext.HttpTransactionState.WAITING);
         super.channelRead(ctx, msg);
         messageContext.meterIncrementEvent("requestReceived");
 
@@ -218,9 +216,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (messageContext.getState() == HttpMessageContext.HttpTransactionState.RESPONSE) {
+        if (messageContext.getState() == WireCaptureContexts.HttpMessageContext.HttpTransactionState.RESPONSE) {
             messageContext.endSpan(); // TODO - make this meter on create/close
-            rotateNextMessageContext(HttpMessageContext.HttpTransactionState.REQUEST);
+            rotateNextMessageContext(WireCaptureContexts.HttpMessageContext.HttpTransactionState.REQUEST);
         }
         var timestamp = Instant.now();
         var requestParsingHandler = getHandlerThatHoldsParsedHttpRequest();
@@ -269,9 +267,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-        if (messageContext.getState() != HttpMessageContext.HttpTransactionState.RESPONSE) {
+        if (messageContext.getState() != WireCaptureContexts.HttpMessageContext.HttpTransactionState.RESPONSE) {
             messageContext.endSpan(); // TODO - make this meter on create/close
-            rotateNextMessageContext(HttpMessageContext.HttpTransactionState.RESPONSE);
+            rotateNextMessageContext(WireCaptureContexts.HttpMessageContext.HttpTransactionState.RESPONSE);
         }
         var bb = (ByteBuf) msg;
         if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {

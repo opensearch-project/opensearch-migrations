@@ -166,10 +166,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public CommitResult commitTrafficStream(Function<ITrafficStreamKey,
-                                                     IKafkaConsumerContexts.ICommitScopeContext> contextFactory,
-                                            ITrafficStreamKey trafficStreamKey) throws IOException {
-        var commitResult = underlyingSource.commitTrafficStream(contextFactory, trafficStreamKey);
+    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
+        var commitResult = underlyingSource.commitTrafficStream(trafficStreamKey);
         if (commitResult == CommitResult.AfterNextRead) {
             readGate.drainPermits();
             readGate.release();

@@ -15,11 +15,8 @@ public interface ITrafficSourceContexts {
         public static final String WAIT_FOR_NEXT_BACK_PRESSURE_CHECK = "waitForNextBackPressureCheck";
     }
 
-    interface ITrafficSourceContext extends IScopedInstrumentationAttributes {
-        String SCOPE_NAME = ScopeNames.TRAFFIC_SCOPE;
-        @Override default String getScopeName() { return SCOPE_NAME; }
+    interface ITrafficSourceContext extends IScopedInstrumentationAttributes { }
 
-    }
     interface IReadChunkContext extends ITrafficSourceContext {
         String ACTIVITY_NAME = ActivityNames.READ_NEXT_TRAFFIC_CHUNK;
         @Override

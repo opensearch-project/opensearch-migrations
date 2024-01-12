@@ -2,7 +2,7 @@ package org.opensearch.migrations.trafficcapture.netty;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
+import org.opensearch.migrations.trafficcapture.netty.tracing.WireCaptureContexts;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 /**
@@ -16,7 +16,7 @@ public class RequestContextStateMachine {
     @Getter
     public final ConnectionContext connectionContext;
     @Getter
-    HttpMessageContext currentRequestContext;
+    WireCaptureContexts.HttpMessageContext currentRequestContext;
 
     public RequestContextStateMachine(ConnectionContext incoming) {
         connectionContext = incoming;

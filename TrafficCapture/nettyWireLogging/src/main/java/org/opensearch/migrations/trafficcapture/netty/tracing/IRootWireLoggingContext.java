@@ -1,8 +1,12 @@
 package org.opensearch.migrations.trafficcapture.netty.tracing;
 
-import io.opentelemetry.api.metrics.Meter;
-import org.opensearch.migrations.trafficcapture.tracing.IRootOffloaderContext;
+import lombok.Getter;
+import org.opensearch.migrations.tracing.IRootOtelContext;
 
-public interface IRootWireLoggingContext extends IRootOffloaderContext {
+public interface IRootWireLoggingContext extends IRootOtelContext {
+    WireCaptureContexts.RequestContext.MetricInstruments getHttpRequestInstruments();
+    WireCaptureContexts.BlockingContext.MetricInstruments getBlockingInstruments();
+    WireCaptureContexts.WaitingForResponseContext.MetricInstruments getWaitingForResponseInstruments();
+    WireCaptureContexts.ResponseContext.MetricInstruments getResponseInstruments();
 
 }

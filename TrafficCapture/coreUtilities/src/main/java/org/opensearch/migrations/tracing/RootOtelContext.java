@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 
 public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
+    private final String scopeName;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
                                                                     @NonNull String serviceName) {
@@ -74,21 +75,17 @@ public class RootOtelContext implements IRootOtelContext {
     }
 
 
-    public RootOtelContext() {
-        this(null);
+    public RootOtelContext(String scopeName) {
+        this(scopeName, null);
     }
 
-    public RootOtelContext(String collectorEndpoint, String serviceName) {
-        this(initializeOpenTelemetry(collectorEndpoint, serviceName));
+    public RootOtelContext(String scopeName, String collectorEndpoint, String serviceName) {
+        this(scopeName, initializeOpenTelemetry(collectorEndpoint, serviceName));
     }
 
-    public RootOtelContext(OpenTelemetry sdk) {
+    public RootOtelContext(String scopeName, OpenTelemetry sdk) {
         openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetry(null, null);
-    }
-
-    @Override
-    public String getScopeName() {
-        return "Root";
+        this.scopeName = scopeName;
     }
 
     @Override
@@ -125,7 +122,7 @@ public class RootOtelContext implements IRootOtelContext {
 
     @Override
     public Span buildSpan(IInstrumentationAttributes enclosingScope,
-                   String scopeName, String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
+                          String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
         var parentSpan = enclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
         return buildSpanWithParent(spanBuilder, getPopulatedAttributes(attributesBuilder), parentSpan, linkedSpan);

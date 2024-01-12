@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.tracing;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
+import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.Getter;
 import lombok.NonNull;
@@ -14,7 +15,6 @@ import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IndirectNestedSpanContext;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -42,16 +42,15 @@ public class ReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongUpDownCounter activeChannelCounter;
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-                var meter = meterProvider.get(SCOPE_NAME2);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
                 activeChannelCounter = meter
                         .upDownCounterBuilder(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().channelKeyContext;
+            return getRootInstrumentationScope().channelKeyInstruments;
         }
 
         @Override
@@ -60,11 +59,11 @@ public class ReplayContexts {
         }
 
         @Override
-        public void onTargetConnectionCreated() {
+        public void onConnectionCreated() {
             meterDeltaEvent(getMetrics().activeChannelCounter, 1);
         }
         @Override
-        public void onTargetConnectionClosed() {
+        public void onConnectionClosed() {
             meterDeltaEvent(getMetrics().activeChannelCounter, -1);
         }
     }
@@ -86,9 +85,8 @@ public class ReplayContexts {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongCounter recordCounter;
             final LongCounter bytesCounter;
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-                var meter = meterProvider.get(SCOPE_NAME2);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
                 recordCounter = meter.counterBuilder(IReplayContexts.MetricNames.KAFKA_RECORD_READ)
                         .setUnit("records").build();
                 bytesCounter = meter.counterBuilder(IReplayContexts.MetricNames.KAFKA_BYTES_READ)
@@ -97,7 +95,7 @@ public class ReplayContexts {
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().kafkaRecordContext;
+            return getRootInstrumentationScope().kafkaRecordInstruments;
         }
 
         @Override
@@ -113,31 +111,41 @@ public class ReplayContexts {
     }
 
     public static class TrafficStreamsLifecycleContext
-            extends IndirectNestedSpanContext<RootReplayerContext,KafkaRecordContext,IReplayContexts.IChannelKeyContext>
+            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
             implements IReplayContexts.ITrafficStreamsLifecycleContext {
         private final ITrafficStreamKey trafficStreamKey;
 
-        public TrafficStreamsLifecycleContext(KafkaRecordContext enclosingScope,
-                                              ITrafficStreamKey trafficStreamKey) {
-            super(enclosingScope);
+        protected TrafficStreamsLifecycleContext(IInstrumentationAttributes enclosingScope,
+                                                 ITrafficStreamKey trafficStreamKey,
+                                                 RootReplayerContext rootScope) {
+            super(rootScope, enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
             initializeSpan();
             meterIncrementEvent(getMetrics().streamsRead);
         }
 
+        public TrafficStreamsLifecycleContext(KafkaRecordContext enclosingScope,
+                                              ITrafficStreamKey trafficStreamKey) {
+            this(enclosingScope, trafficStreamKey, enclosingScope.getRootInstrumentationScope());
+        }
+
+        protected TrafficStreamsLifecycleContext(ChannelKeyContext enclosingScope,
+                                                 ITrafficStreamKey trafficStreamKey) {
+            this(enclosingScope, trafficStreamKey, enclosingScope.getRootInstrumentationScope());
+        }
+
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private final LongCounter streamsRead;
 
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-                var meter = meterProvider.get(SCOPE_NAME2);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
                 streamsRead = meter.counterBuilder(IReplayContexts.MetricNames.TRAFFIC_STREAMS_READ)
                         .setUnit("objects").build();
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().trafficStreamLifecycleContext;
+            return getRootInstrumentationScope().trafficStreamLifecycleInstruments;
         }
 
         @Override
@@ -159,7 +167,11 @@ public class ReplayContexts {
 
         @Override
         public IReplayContexts.IChannelKeyContext getLogicalEnclosingScope() {
-            return getImmediateEnclosingScope().getLogicalEnclosingScope();
+            var parent = getEnclosingScope();
+            while(!(parent instanceof IReplayContexts.IChannelKeyContext)) {
+                parent = parent.getEnclosingScope();
+            }
+            return (IReplayContexts.IChannelKeyContext) parent;
         }
     }
 
@@ -185,13 +197,13 @@ public class ReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().httpTransactionContext;
+            return getRootInstrumentationScope().httpTransactionInstruments;
         }
 
         public IReplayContexts.IChannelKeyContext getChannelKeyContext() {
@@ -243,13 +255,13 @@ public class ReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().requestAccumContext;
+            return getRootInstrumentationScope().requestAccumInstruments;
         }
     }
 
@@ -262,13 +274,13 @@ public class ReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().responseAccumContext;
+            return getRootInstrumentationScope().responseAccumInstruments;
         }
     }
 
@@ -298,9 +310,8 @@ public class ReplayContexts {
             private final LongCounter transformBytesOut;
             private final LongCounter transformChunksOut;
 
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-                var meter = meterProvider.get(SCOPE_NAME2);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
                 headerParses = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_HEADER_PARSE)
                         .setUnit(COUNT_UNIT_STR).build();
                 payloadParses = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_PARSE_REQUIRED)
@@ -338,7 +349,7 @@ public class ReplayContexts {
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().transformationContext;
+            return getRootInstrumentationScope().transformationInstruments;
         }
 
         @Override public void onHeaderParse() {
@@ -400,15 +411,14 @@ public class ReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             DoubleHistogram lag;
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-                var meter = meterProvider.get(SCOPE_NAME2);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
                 lag = meter.histogramBuilder(IReplayContexts.MetricNames.NETTY_SCHEDULE_LAG).setUnit("ms").build();
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().scheduledContext;
+            return getRootInstrumentationScope().scheduledInstruments;
         }
 
         @Override
@@ -434,9 +444,8 @@ public class ReplayContexts {
             private final LongCounter bytesWritten;
             private final LongCounter bytesRead;
 
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
-                var meter = meterProvider.get(SCOPE_NAME2);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
                 sourceTargetGap = meter.histogramBuilder(IReplayContexts.MetricNames.SOURCE_TO_TARGET_REQUEST_LAG)
                         .setUnit("ms").build();
                 bytesWritten = meter.counterBuilder(IReplayContexts.MetricNames.BYTES_WRITTEN_TO_TARGET)
@@ -447,7 +456,7 @@ public class ReplayContexts {
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().targetRequestContext;
+            return getRootInstrumentationScope().targetRequestInstruments;
         }
 
         @Override
@@ -480,13 +489,13 @@ public class ReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().requestSendingContext;
+            return getRootInstrumentationScope().requestSendingInstruments;
         }
     }
 
@@ -499,13 +508,13 @@ public class ReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().waitingForHttpResponseContext;
+            return getRootInstrumentationScope().waitingForHttpResponseInstruments;
         }
 
     }
@@ -519,13 +528,13 @@ public class ReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().receivingHttpContext;
+            return getRootInstrumentationScope().receivingHttpInstruments;
         }
 
     }
@@ -539,13 +548,13 @@ public class ReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(MeterProvider meterProvider) {
-                super(meterProvider, SCOPE_NAME2, ACTIVITY_NAME);
+            public MetricInstruments(Meter meter) {
+                super(meter, ACTIVITY_NAME);
             }
         }
 
         public @NonNull MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().tupleHandlingContext;
+            return getRootInstrumentationScope().tupleHandlingInstruments;
         }
 
     }

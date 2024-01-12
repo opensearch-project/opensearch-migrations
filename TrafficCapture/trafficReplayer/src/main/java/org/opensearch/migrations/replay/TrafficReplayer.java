@@ -639,7 +639,7 @@ public class TrafficReplayer {
             }
         }
 
-        Void handleCompletedTransaction(IInstrumentationAttributes context,
+        Void handleCompletedTransaction(IReplayContexts.IReplayerHttpTransactionContext context,
                                         @NonNull UniqueReplayerRequestKey requestKey,
                                         RequestResponsePacketPair rrPair,
                                         TransformedTargetRequestAndResponse summary, Throwable t) {
@@ -652,7 +652,7 @@ public class TrafficReplayer {
                     try (var tupleHandlingContext = httpContext.createTupleContext()) {
                         packageAndWriteResponse(resultTupleConsumer, requestKey, rrPair, summary, (Exception) t);
                     }
-                    commitTrafficStreams(rrPair.completionStatus, context, rrPair.trafficStreamKeysBeingHeld);
+                    commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                     return null;
                 } else {
                     log.atError().setCause(t).setMessage(()->"Throwable passed to handle() for " + requestKey +
@@ -688,25 +688,23 @@ public class TrafficReplayer {
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                             IReplayContexts.IChannelKeyContext ctx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            commitTrafficStreams(status, ctx, trafficStreamKeysBeingHeld);
+            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
         }
 
         @SneakyThrows
         private void commitTrafficStreams(RequestResponsePacketPair.ReconstructionStatus status,
-                                          IReplayContexts.IChannelKeyContext context,
                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             commitTrafficStreams(status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY,
-                    context, trafficStreamKeysBeingHeld);
+                    trafficStreamKeysBeingHeld);
         }
 
         @SneakyThrows
         private void commitTrafficStreams(boolean shouldCommit,
-                                          IReplayContexts.IChannelKeyContext context,
                                           List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             if (shouldCommit && trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     tsk.getTrafficStreamsContext().close();
-                    trafficCaptureSource.commitTrafficStream(()->context, tsk);
+                    trafficCaptureSource.commitTrafficStream(tsk);
                 }
             }
         }
@@ -720,13 +718,13 @@ public class TrafficReplayer {
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelKey, channelInteractionNum, ctx, timestamp);
             cf.map(f->f.whenComplete((v,t)->{
-                commitTrafficStreams(status, ctx, trafficStreamKeysBeingHeld);
+                commitTrafficStreams(status, trafficStreamKeysBeingHeld);
             }), ()->"closing the channel in the ReplayEngine");
         }
 
         @Override
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk, IReplayContexts.IChannelKeyContext ctx) {
-            commitTrafficStreams(true, ctx, List.of(tsk));
+            commitTrafficStreams(true, List.of(tsk));
         }
 
         private TransformedTargetRequestAndResponse

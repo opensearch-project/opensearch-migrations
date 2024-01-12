@@ -10,7 +10,6 @@ import lombok.NonNull;
 import java.util.ArrayList;
 
 public interface IInstrumentationAttributes {
-    String getScopeName();
     IInstrumentationAttributes getEnclosingScope();
     default Span getCurrentSpan() { return null; }
 

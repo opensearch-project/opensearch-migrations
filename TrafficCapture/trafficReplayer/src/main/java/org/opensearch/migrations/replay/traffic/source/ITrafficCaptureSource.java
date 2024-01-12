@@ -22,9 +22,7 @@ public interface ITrafficCaptureSource extends Closeable {
     CompletableFuture<List<ITrafficStreamWithKey>>
     readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier);
 
-    CommitResult commitTrafficStream(Function<ITrafficStreamKey,
-                                              IKafkaConsumerContexts.ICommitScopeContext> contextFactory,
-                                     ITrafficStreamKey trafficStreamKey) throws IOException;
+    CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
 
     default void close() throws IOException {}
 

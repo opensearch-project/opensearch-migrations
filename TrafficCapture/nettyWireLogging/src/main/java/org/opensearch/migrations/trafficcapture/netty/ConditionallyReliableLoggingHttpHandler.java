@@ -6,11 +6,9 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
-import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.tracing.HttpMessageContext;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.netty.tracing.WireCaptureContexts;
 
 import java.io.IOException;
 import java.util.function.Predicate;
@@ -34,8 +32,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                                                        boolean shouldCapture, HttpRequest httpRequest)
             throws Exception {
         if (shouldCapture && shouldBlockPredicate.test(httpRequest)) {
-            messageContext.meterIncrementEvent("blockingRequestUntilFlush");
-            rotateNextMessageContext(HttpMessageContext.HttpTransactionState.INTERNALLY_BLOCKED);
+            rotateNextMessageContext(WireCaptureContexts.HttpMessageContext.HttpTransactionState.INTERNALLY_BLOCKED);
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
                 log.atInfo().setMessage(()->"Done flushing").log();
                 messageContext.meterIncrementEvent(t != null ? "blockedFlushFailure" : "blockedFlushSuccess");

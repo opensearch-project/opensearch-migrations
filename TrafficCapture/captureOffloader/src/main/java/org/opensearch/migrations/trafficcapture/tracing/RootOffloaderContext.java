@@ -11,8 +11,12 @@ public class RootOffloaderContext extends RootOtelContext {
     public final ConnectionContext.MetricInstruments connectionInstruments;
 
     public RootOffloaderContext(OpenTelemetry openTelemetry) {
-        super(openTelemetry);
-        var meterProvider = openTelemetry.getMeterProvider();
-        connectionInstruments = new ConnectionContext.MetricInstruments(meterProvider, OFFLOADER_SCOPE_NAME);
+        this(openTelemetry, OFFLOADER_SCOPE_NAME);
+    }
+
+    public RootOffloaderContext(OpenTelemetry openTelemetry, String scopeName) {
+        super(scopeName, openTelemetry);
+        var meter = openTelemetry.getMeterProvider().get(scopeName);
+        connectionInstruments = new ConnectionContext.MetricInstruments(meter, scopeName);
     }
 }

@@ -27,12 +27,8 @@ public interface IKafkaConsumerContexts {
     }
 
     interface IAsyncListeningContext extends IInstrumentationAttributes {
-        String SCOPE_NAME = ScopeNames.KAFKA_CONSUMER_SCOPE;
-        @Override default String getScopeName() { return SCOPE_NAME; }
     }
     interface IKafkaConsumerScope extends IScopedInstrumentationAttributes {
-        String SCOPE_NAME = ScopeNames.KAFKA_CONSUMER_SCOPE;
-        @Override default String getScopeName() { return SCOPE_NAME; }
     }
     interface ITouchScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.TOUCH;

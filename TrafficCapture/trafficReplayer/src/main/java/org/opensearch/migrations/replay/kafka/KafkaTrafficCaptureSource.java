@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
@@ -79,12 +80,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final ChannelContextManager channelContextManager;
 
-    public KafkaTrafficCaptureSource(@NonNull IInstrumentationAttributes globalContext,
+    public KafkaTrafficCaptureSource(@NonNull RootReplayerContext globalContext,
                                      Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
         this(globalContext, kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
     }
 
-    public KafkaTrafficCaptureSource(@NonNull IInstrumentationAttributes globalContext,
+    public KafkaTrafficCaptureSource(@NonNull RootReplayerContext globalContext,
                                      Consumer<String, byte[]> kafkaConsumer,
                                      @NonNull String topic,
                                      Duration keepAliveInterval,
@@ -111,7 +112,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         channelContextManager.releaseContextFor(kafkaCtx.getImmediateEnclosingScope());
     }
 
-    public static KafkaTrafficCaptureSource buildKafkaSource(@NonNull IInstrumentationAttributes globalContext,
+    public static KafkaTrafficCaptureSource buildKafkaSource(@NonNull RootReplayerContext globalContext,
                                                              @NonNull String brokers,
                                                              @NonNull String topic,
                                                              @NonNull String groupId,
@@ -171,7 +172,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     @SneakyThrows
-    public void touch(ITrafficSourceContexts.IReadChunkContext context) {
+    public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
         CompletableFuture.runAsync(()->trackingKafkaConsumer.touch(context), kafkaExecutor).get();
     }
 
@@ -192,7 +193,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         log.atTrace().setMessage("readNextTrafficStreamChunk()").log();
         return CompletableFuture.supplyAsync(() -> {
             log.atTrace().setMessage("async...readNextTrafficStreamChunk()").log();
-            return readNextTrafficStreamSynchronously(contextSupplier);
+            return readNextTrafficStreamSynchronously(contextSupplier.get());
         }, kafkaExecutor);
     }
 
@@ -237,8 +238,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CommitResult commitTrafficStream(IInstrumentationAttributes context,
-                                            ITrafficStreamKey trafficStreamKey) {
+    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         if (!(trafficStreamKey instanceof TrafficStreamKeyWithKafkaRecordId)) {
             throw new IllegalArgumentException("Expected key of type "+TrafficStreamKeyWithKafkaRecordId.class+
                     " but received "+trafficStreamKey+" (of type="+trafficStreamKey.getClass()+")");
