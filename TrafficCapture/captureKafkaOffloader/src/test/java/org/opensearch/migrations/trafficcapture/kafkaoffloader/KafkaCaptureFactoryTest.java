@@ -21,9 +21,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
-import org.opensearch.migrations.trafficcapture.tracing.IRootOffloaderContext;
-import org.opensearch.migrations.trafficcapture.tracing.RootOffloaderContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -54,18 +53,17 @@ public class KafkaCaptureFactoryTest {
         int maxAllowableMessageSize = 1024*1024;
         MockProducer<String, byte[]> producer = new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
         KafkaCaptureFactory kafkaCaptureFactory =
-            new KafkaCaptureFactory(TEST_NODE_ID_STRING, producer, maxAllowableMessageSize);
-        IChannelConnectionCaptureSerializer serializer = kafkaCaptureFactory.createOffloader(createCtx(), connectionId);
+            new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
+                    TEST_NODE_ID_STRING, producer, maxAllowableMessageSize);
+        var serializer = kafkaCaptureFactory.createOffloader(createCtx());
 
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < 15000; i++) {
-            sb.append("{ \"create\": { \"_index\": \"office-index\" } }\n{ \"title\": \"Malone's Cones\", \"year\": 2013 }\n");
-        }
-        Assertions.assertTrue(sb.toString().getBytes().length > 1024*1024);
-        byte[] fakeDataBytes = sb.toString().getBytes(StandardCharsets.UTF_8);
+        var testStr = "{ \"create\": { \"_index\": \"office-index\" } }\n{ \"title\": \"Malone's Cones\", \"year\": 2013 }\n"
+                .repeat(15000);
+        var fakeDataBytes = testStr.getBytes(StandardCharsets.UTF_8);
+        Assertions.assertTrue(fakeDataBytes.length > 1024*1024);
         var bb = Unpooled.wrappedBuffer(fakeDataBytes);
         serializer.addReadEvent(referenceTimestamp, bb);
-        CompletableFuture future = serializer.flushCommitAndResetStream(true);
+        var future = serializer.flushCommitAndResetStream(true);
         future.get();
         for (ProducerRecord<String, byte[]> record : producer.history()) {
             int recordSize = calculateRecordSize(record, null);
@@ -78,7 +76,7 @@ public class KafkaCaptureFactoryTest {
     }
 
     private static ConnectionContext createCtx() {
-        return new ConnectionContext(new RootOffloaderContext(null), "test", "test");
+        return new ConnectionContext(new TestRootKafkaOffloaderContext(null), "test", "test");
     }
 
     /**
@@ -104,8 +102,9 @@ public class KafkaCaptureFactoryTest {
     @Test
     public void testLinearOffloadingIsSuccessful() throws IOException {
         KafkaCaptureFactory kafkaCaptureFactory =
-                new KafkaCaptureFactory(TEST_NODE_ID_STRING, mockProducer, 1024*1024);
-        IChannelConnectionCaptureSerializer offloader = kafkaCaptureFactory.createOffloader(createCtx(), connectionId);
+                new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
+                        TEST_NODE_ID_STRING, mockProducer, 1024*1024);
+        var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<Callback> recordSentCallbacks = new ArrayList<>(3);
         when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
@@ -120,11 +119,11 @@ public class KafkaCaptureFactoryTest {
         byte[] fakeDataBytes = "FakeData".getBytes(StandardCharsets.UTF_8);
         var bb = Unpooled.wrappedBuffer(fakeDataBytes);
         offloader.addReadEvent(ts, bb);
-        CompletableFuture cf1 = offloader.flushCommitAndResetStream(false);
+        var cf1 = offloader.flushCommitAndResetStream(false);
         offloader.addReadEvent(ts, bb);
-        CompletableFuture cf2 = offloader.flushCommitAndResetStream(false);
+        var cf2 = offloader.flushCommitAndResetStream(false);
         offloader.addReadEvent(ts, bb);
-        CompletableFuture cf3 = offloader.flushCommitAndResetStream(false);
+        var cf3 = offloader.flushCommitAndResetStream(false);
         bb.release();
 
         Assertions.assertEquals(false, cf1.isDone());

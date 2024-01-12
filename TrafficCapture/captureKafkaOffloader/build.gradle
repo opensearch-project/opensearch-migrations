@@ -23,6 +23,7 @@ dependencies {
 
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'

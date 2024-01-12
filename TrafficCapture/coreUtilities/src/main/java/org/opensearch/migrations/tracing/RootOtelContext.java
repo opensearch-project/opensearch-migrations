@@ -19,7 +19,9 @@ import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
+import lombok.Getter;
 import lombok.NonNull;
+import lombok.Setter;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -28,6 +30,9 @@ import java.util.concurrent.TimeUnit;
 public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
     private final String scopeName;
+    @Getter
+    @Setter
+    Exception observedExceptionToIncludeInMetrics;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
                                                                     @NonNull String serviceName) {
@@ -125,6 +130,6 @@ public class RootOtelContext implements IRootOtelContext {
                           String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
         var parentSpan = enclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
-        return buildSpanWithParent(spanBuilder, getPopulatedAttributes(attributesBuilder), parentSpan, linkedSpan);
+        return buildSpanWithParent(spanBuilder, getPopulatedSpanAttributes(attributesBuilder), parentSpan, linkedSpan);
     }
 }

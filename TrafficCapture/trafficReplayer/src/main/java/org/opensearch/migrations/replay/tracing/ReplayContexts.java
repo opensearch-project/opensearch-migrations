@@ -4,7 +4,6 @@ import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
-import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.Getter;
 import lombok.NonNull;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
@@ -19,12 +18,10 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import java.time.Duration;
 import java.time.Instant;
 
-public class ReplayContexts {
+public abstract class ReplayContexts extends IReplayContexts {
 
     public static final String COUNT_UNIT_STR = "count";
     public static final String BYTES_UNIT_STR = "bytes";
-
-    private ReplayContexts() {}
 
     public static class ChannelKeyContext
             extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
@@ -45,7 +42,7 @@ public class ReplayContexts {
             public MetricInstruments(Meter meter) {
                 super(meter, ACTIVITY_NAME);
                 activeChannelCounter = meter
-                        .upDownCounterBuilder(IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
+                        .upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
             }
         }
 
@@ -69,17 +66,23 @@ public class ReplayContexts {
     }
 
     public static class KafkaRecordContext
-            extends DirectNestedSpanContext<RootReplayerContext,ChannelKeyContext,IReplayContexts.IChannelKeyContext>
+            extends BaseNestedSpanContext<RootReplayerContext, IChannelKeyContext>
             implements IReplayContexts.IKafkaRecordContext {
 
         final String recordId;
 
-        public KafkaRecordContext(ChannelKeyContext enclosingScope, String recordId, int recordSize) {
-            super(enclosingScope);
+        public KafkaRecordContext(RootReplayerContext rootReplayerContext,
+                                  IChannelKeyContext enclosingScope, String recordId, int recordSize) {
+            super(rootReplayerContext, enclosingScope);
             this.recordId = recordId;
             initializeSpan();
             meterIncrementEvent(getMetrics().recordCounter);
             meterIncrementEvent(getMetrics().bytesCounter, recordSize);
+        }
+
+        @Override
+        public IChannelKeyContext getLogicalEnclosingScope() {
+            return (IChannelKeyContext) getEnclosingScope();
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
@@ -87,9 +90,9 @@ public class ReplayContexts {
             final LongCounter bytesCounter;
             public MetricInstruments(Meter meter) {
                 super(meter, ACTIVITY_NAME);
-                recordCounter = meter.counterBuilder(IReplayContexts.MetricNames.KAFKA_RECORD_READ)
+                recordCounter = meter.counterBuilder(MetricNames.KAFKA_RECORD_READ)
                         .setUnit("records").build();
-                bytesCounter = meter.counterBuilder(IReplayContexts.MetricNames.KAFKA_BYTES_READ)
+                bytesCounter = meter.counterBuilder(MetricNames.KAFKA_BYTES_READ)
                         .setUnit(BYTES_UNIT_STR).build();
             }
         }
@@ -106,7 +109,8 @@ public class ReplayContexts {
         @Override
         public IReplayContexts.ITrafficStreamsLifecycleContext
         createTrafficLifecyleContext(ITrafficStreamKey tsk) {
-            return new ReplayContexts.TrafficStreamsLifecycleContext(this, tsk);
+            return new ReplayContexts.TrafficStreamsLifecycleContext(this.getRootInstrumentationScope(), this, tsk
+            );
         }
     }
 
@@ -115,23 +119,13 @@ public class ReplayContexts {
             implements IReplayContexts.ITrafficStreamsLifecycleContext {
         private final ITrafficStreamKey trafficStreamKey;
 
-        protected TrafficStreamsLifecycleContext(IInstrumentationAttributes enclosingScope,
-                                                 ITrafficStreamKey trafficStreamKey,
-                                                 RootReplayerContext rootScope) {
+        protected TrafficStreamsLifecycleContext(RootReplayerContext rootScope,
+                                                 IInstrumentationAttributes enclosingScope,
+                                                 ITrafficStreamKey trafficStreamKey) {
             super(rootScope, enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
             initializeSpan();
             meterIncrementEvent(getMetrics().streamsRead);
-        }
-
-        public TrafficStreamsLifecycleContext(KafkaRecordContext enclosingScope,
-                                              ITrafficStreamKey trafficStreamKey) {
-            this(enclosingScope, trafficStreamKey, enclosingScope.getRootInstrumentationScope());
-        }
-
-        protected TrafficStreamsLifecycleContext(ChannelKeyContext enclosingScope,
-                                                 ITrafficStreamKey trafficStreamKey) {
-            this(enclosingScope, trafficStreamKey, enclosingScope.getRootInstrumentationScope());
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
@@ -139,7 +133,7 @@ public class ReplayContexts {
 
             public MetricInstruments(Meter meter) {
                 super(meter, ACTIVITY_NAME);
-                streamsRead = meter.counterBuilder(IReplayContexts.MetricNames.TRAFFIC_STREAMS_READ)
+                streamsRead = meter.counterBuilder(MetricNames.TRAFFIC_STREAMS_READ)
                         .setUnit("objects").build();
             }
         }
@@ -312,37 +306,37 @@ public class ReplayContexts {
 
             public MetricInstruments(Meter meter) {
                 super(meter, ACTIVITY_NAME);
-                headerParses = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_HEADER_PARSE)
+                headerParses = meter.counterBuilder(MetricNames.TRANSFORM_HEADER_PARSE)
                         .setUnit(COUNT_UNIT_STR).build();
-                payloadParses = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_PARSE_REQUIRED)
+                payloadParses = meter.counterBuilder(MetricNames.TRANSFORM_PAYLOAD_PARSE_REQUIRED)
                         .setUnit(COUNT_UNIT_STR).build();
-                payloadSuccessParses = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_PARSE_SUCCESS)
+                payloadSuccessParses = meter.counterBuilder(MetricNames.TRANSFORM_PAYLOAD_PARSE_SUCCESS)
                         .setUnit(COUNT_UNIT_STR).build();
-                jsonPayloadParses = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_JSON_REQUIRED)
+                jsonPayloadParses = meter.counterBuilder(MetricNames.TRANSFORM_JSON_REQUIRED)
                         .setUnit(COUNT_UNIT_STR).build();
-                jsonTransformSuccess = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_JSON_SUCCEEDED)
+                jsonTransformSuccess = meter.counterBuilder(MetricNames.TRANSFORM_JSON_SUCCEEDED)
                         .setUnit(COUNT_UNIT_STR).build();
-                payloadBytesIn = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_BYTES_IN)
+                payloadBytesIn = meter.counterBuilder(MetricNames.TRANSFORM_PAYLOAD_BYTES_IN)
                         .setUnit(BYTES_UNIT_STR).build();
-                uncompressedBytesIn = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_IN)
+                uncompressedBytesIn = meter.counterBuilder(MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_IN)
                         .setUnit(BYTES_UNIT_STR).build();
-                uncompressedBytesOut = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_OUT)
+                uncompressedBytesOut = meter.counterBuilder(MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_OUT)
                         .setUnit(BYTES_UNIT_STR).build();
-                finalPayloadBytesOut = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_FINAL_PAYLOAD_BYTES_OUT)
+                finalPayloadBytesOut = meter.counterBuilder(MetricNames.TRANSFORM_FINAL_PAYLOAD_BYTES_OUT)
                         .setUnit(BYTES_UNIT_STR).build();
-                transformSuccess = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_SUCCESS)
+                transformSuccess = meter.counterBuilder(MetricNames.TRANSFORM_SUCCESS)
                         .setUnit(COUNT_UNIT_STR).build();
-                transformSkipped = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_SKIPPED)
+                transformSkipped = meter.counterBuilder(MetricNames.TRANSFORM_SKIPPED)
                         .setUnit(COUNT_UNIT_STR).build();
-                transformError = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_ERROR)
+                transformError = meter.counterBuilder(MetricNames.TRANSFORM_ERROR)
                         .setUnit(COUNT_UNIT_STR).build();
-                transformBytesIn = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_BYTES_IN)
+                transformBytesIn = meter.counterBuilder(MetricNames.TRANSFORM_BYTES_IN)
                         .setUnit(BYTES_UNIT_STR).build();
-                transformChunksIn = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_CHUNKS_IN)
+                transformChunksIn = meter.counterBuilder(MetricNames.TRANSFORM_CHUNKS_IN)
                         .setUnit(COUNT_UNIT_STR).build();
-                transformBytesOut = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_BYTES_OUT)
+                transformBytesOut = meter.counterBuilder(MetricNames.TRANSFORM_BYTES_OUT)
                         .setUnit(BYTES_UNIT_STR).build();
-                transformChunksOut = meter.counterBuilder(IReplayContexts.MetricNames.TRANSFORM_CHUNKS_OUT)
+                transformChunksOut = meter.counterBuilder(MetricNames.TRANSFORM_CHUNKS_OUT)
                         .setUnit(COUNT_UNIT_STR).build();
 
             }
@@ -413,7 +407,7 @@ public class ReplayContexts {
             DoubleHistogram lag;
             public MetricInstruments(Meter meter) {
                 super(meter, ACTIVITY_NAME);
-                lag = meter.histogramBuilder(IReplayContexts.MetricNames.NETTY_SCHEDULE_LAG).setUnit("ms").build();
+                lag = meter.histogramBuilder(MetricNames.NETTY_SCHEDULE_LAG).setUnit("ms").build();
             }
         }
 
@@ -446,11 +440,11 @@ public class ReplayContexts {
 
             public MetricInstruments(Meter meter) {
                 super(meter, ACTIVITY_NAME);
-                sourceTargetGap = meter.histogramBuilder(IReplayContexts.MetricNames.SOURCE_TO_TARGET_REQUEST_LAG)
+                sourceTargetGap = meter.histogramBuilder(MetricNames.SOURCE_TO_TARGET_REQUEST_LAG)
                         .setUnit("ms").build();
-                bytesWritten = meter.counterBuilder(IReplayContexts.MetricNames.BYTES_WRITTEN_TO_TARGET)
+                bytesWritten = meter.counterBuilder(MetricNames.BYTES_WRITTEN_TO_TARGET)
                         .setUnit(BYTES_UNIT_STR).build();
-                bytesRead = meter.counterBuilder(IReplayContexts.MetricNames.BYTES_READ_FROM_TARGET)
+                bytesRead = meter.counterBuilder(MetricNames.BYTES_READ_FROM_TARGET)
                         .setUnit(BYTES_UNIT_STR).build();
             }
         }

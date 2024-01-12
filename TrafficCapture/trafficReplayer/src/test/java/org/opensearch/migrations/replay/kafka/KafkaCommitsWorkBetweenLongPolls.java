@@ -1,13 +1,5 @@
 package org.opensearch.migrations.replay.kafka;
 
-import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.sdk.OpenTelemetrySdk;
-import io.opentelemetry.sdk.metrics.SdkMeterProvider;
-import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
-import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
-import io.opentelemetry.sdk.trace.SdkTracerProvider;
-import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -56,6 +48,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
     @Test
     @Tag("longTest")
     public void testThatCommitsAndReadsKeepWorking() throws Exception {
+        final var rootContext = TestContext.noTracking();
         var kafkaSource = new KafkaTrafficCaptureSource(TestContext.noTracking(), buildKafkaConsumer(),
                 TEST_TOPIC_NAME, Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS/3));
         var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMinutes(5));
@@ -76,7 +69,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
                     var ts = chunks.get(0);
                     Thread.sleep(DEFAULT_POLL_INTERVAL_MS*2);
                     log.info("committing "+ts.getKey());
-                    blockingSource.commitTrafficStream(TestContext.noTracking(), ts.getKey());
+                    blockingSource.commitTrafficStream(ts.getKey());
                     blockingSource.stopReadsPast(getTimeAtPoint(i));
                 }
             } catch (Exception e) {
@@ -86,7 +79,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
 
         for (int i=0; i<NUM_RUNS; ++i) {
             while (true) {
-                var chunks = blockingSource.readNextTrafficStreamChunk(TestContext.noTracking()).get();
+                var chunks = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
                 if (!chunks.isEmpty()) {
                     Assertions.assertEquals(1, chunks.size());
                     log.info("GETMSG\n\n");

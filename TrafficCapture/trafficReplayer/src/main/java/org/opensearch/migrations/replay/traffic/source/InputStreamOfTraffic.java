@@ -6,7 +6,7 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
-import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
@@ -18,7 +18,6 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -33,8 +32,10 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     }
 
     public static final class IOSTrafficStreamContext extends ReplayContexts.TrafficStreamsLifecycleContext {
-        private IOSTrafficStreamContext(ReplayContexts.ChannelKeyContext enclosingScope, ITrafficStreamKey trafficStreamKey) {
-            super(enclosingScope, trafficStreamKey);
+        public IOSTrafficStreamContext(RootReplayerContext rootReplayerContext,
+                                       IReplayContexts.IChannelKeyContext enclosingScope,
+                                       ITrafficStreamKey trafficStreamKey) {
+            super(rootReplayerContext, enclosingScope, trafficStreamKey);
         }
     }
 
@@ -60,7 +61,8 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
             return List.<ITrafficStreamWithKey>of(new PojoTrafficStreamAndKey(ts,
                     PojoTrafficStreamKeyAndContext.build(ts, tsk-> {
                         var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                        return new IOSTrafficStreamContext(channelCtx, tsk);
+                        return channelContextManager.getGlobalContext()
+                                .createTrafficStreamContextForStreamSource(channelCtx, tsk);
                     })));
         }).exceptionally(e->{
             var ecf = new CompletableFuture<List<ITrafficStreamWithKey>>();
@@ -72,6 +74,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     @Override
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         // do nothing - this datasource isn't transactional
+        channelContextManager.releaseContextFor(trafficStreamKey.getTrafficStreamsContext().getLogicalEnclosingScope());
         return CommitResult.Immediate;
     }
 

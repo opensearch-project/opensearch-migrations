@@ -1,15 +1,17 @@
 package org.opensearch.migrations.tracing;
 
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
-import lombok.NonNull;
 
 import java.util.ArrayList;
 
 public interface IInstrumentationAttributes {
+    AttributeKey<Boolean> HAD_EXCEPTION_KEY = AttributeKey.booleanKey("hadException");
+
     IInstrumentationAttributes getEnclosingScope();
     default Span getCurrentSpan() { return null; }
 
@@ -17,11 +19,23 @@ public interface IInstrumentationAttributes {
         return builder;
     }
 
-    default Attributes getPopulatedAttributes(AttributesBuilder builder) {
-        return getPopulatedAttributesBuilder(builder).build();
+    Exception getObservedExceptionToIncludeInMetrics();
+    void setObservedExceptionToIncludeInMetrics(Exception e);
+
+    default Attributes getPopulatedMetricAttributes() {
+        final var e = getObservedExceptionToIncludeInMetrics();
+        return e == null ? null : Attributes.builder().put(HAD_EXCEPTION_KEY, true).build();
     }
 
-    default AttributesBuilder getPopulatedAttributesBuilder(AttributesBuilder builder) {
+    default Attributes getPopulatedSpanAttributes() {
+        return getPopulatedSpanAttributes(Attributes.builder());
+    }
+
+    default Attributes getPopulatedSpanAttributes(AttributesBuilder builder) {
+        return getPopulatedSpanAttributesBuilder(builder).build();
+    }
+
+    default AttributesBuilder getPopulatedSpanAttributesBuilder(AttributesBuilder builder) {
         var currentObj = this;
         var stack = new ArrayList<IInstrumentationAttributes>();
         while (currentObj != null) {
@@ -36,25 +50,16 @@ public interface IInstrumentationAttributes {
     }
 
     default void meterIncrementEvent(LongCounter c) {
-        meterIncrementEvent(c, Attributes.builder());
-    }
-    default void meterIncrementEvent(LongCounter c, AttributesBuilder attributesBuilder) {
-        meterIncrementEvent(c, 1, attributesBuilder);
+        meterIncrementEvent(c, 1);
     }
     default void meterIncrementEvent(LongCounter c, long increment) {
-        meterIncrementEvent (c, increment, Attributes.builder());
-    }
-    default void meterIncrementEvent(LongCounter c, long increment, AttributesBuilder attributesBuilder) {
         try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            c.add(increment);
+            c.add(increment, getPopulatedMetricAttributes());
         }
     }
     default void meterDeltaEvent(LongUpDownCounter c, long delta) {
-        meterDeltaEvent(c, delta, Attributes.builder());
-    }
-    default void meterDeltaEvent(LongUpDownCounter c, long delta, AttributesBuilder attributesBuilder) {
         try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            c.add(delta);
+            c.add(delta, getPopulatedMetricAttributes());
         }
     }
 }

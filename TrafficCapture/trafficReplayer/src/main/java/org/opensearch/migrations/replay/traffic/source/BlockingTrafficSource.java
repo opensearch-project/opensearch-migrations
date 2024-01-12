@@ -89,8 +89,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * that barrier isn't meant to be a tight barrier with immediate effect.
      */
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> commitContextSupplier) {
-        var readContext = commitContextSupplier.get();
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier) {
+        var readContext = readChunkContextSupplier.get();
         log.info("BlockingTrafficSource::readNext");
         var trafficStreamListFuture = CompletableFuture
                 .supplyAsync(() -> blockIfNeeded(readContext), task -> new Thread(task).start())

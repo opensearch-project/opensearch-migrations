@@ -13,10 +13,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.TestContext;
@@ -24,7 +26,6 @@ import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSeriali
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
-import org.opensearch.migrations.trafficcapture.tracing.RootOffloaderContext;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -94,7 +95,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         }
     }
 
-    static class TestRootContext extends RootOffloaderContext {
+    static class TestRootContext extends RootOtelContext {
         public TestRootContext() {
             super(null);
         }
@@ -122,11 +123,11 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     }
 
     static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
-                                             List<ObservationDirective> directives) throws Exception {
+                                              List<ObservationDirective> directives, TestContext rootContext) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
-        var offloader = connectionFactory.createOffloader(new ConnectionContext(new TestRootContext(),
-                        "n", "test"),
-                "TEST_"+uniqueIdCounter.incrementAndGet());
+        var tsk = PojoTrafficStreamKeyAndContext.build("n", "test", uniqueIdCounter.incrementAndGet(),
+                k->rootContext.createChannelContext(k).getChannelKey().getTrafficStreamsContext());
+        var offloader = connectionFactory.createOffloader(TestContext.noTracking().createChannelContext(tsk));
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);
         }
@@ -200,7 +201,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                          List<ObservationDirective> directives, List<Integer> expectedSizes) throws Exception {
         var context = TestContext.noTracking();
         var trafficStreams = Arrays.stream(makeTrafficStreams(bufferSize, 0, new AtomicInteger(),
-                        directives)).skip(skipCount);
+                        directives, TestContext.noTracking())).skip(skipCount);
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
         accumulateTrafficStreamsWithNewAccumulator(context, trafficStreams, reconstructedTransactions, requestsReceived);
@@ -217,7 +218,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
      * @return
      */
     static SortedSet<Integer>
-    accumulateTrafficStreamsWithNewAccumulator(IInstrumentationAttributes context,
+    accumulateTrafficStreamsWithNewAccumulator(RootReplayerContext context,
                                                Stream<TrafficStream> trafficStreams,
                                                List<RequestResponsePacketPair> aggregations,
                                                AtomicInteger requestsReceived) {

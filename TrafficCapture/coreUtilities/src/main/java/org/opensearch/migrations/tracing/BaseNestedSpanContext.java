@@ -5,6 +5,7 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.Setter;
 
 import java.time.Instant;
 
@@ -15,6 +16,8 @@ public abstract class BaseNestedSpanContext
     @Getter final Instant startTime;
     @Getter private Span currentSpan;
     @Getter private final S rootInstrumentationScope;
+    @Getter @Setter
+    Exception observedExceptionToIncludeInMetrics;
 
     protected BaseNestedSpanContext(S rootScope, T enclosingScope) {
         this.enclosingScope = enclosingScope;

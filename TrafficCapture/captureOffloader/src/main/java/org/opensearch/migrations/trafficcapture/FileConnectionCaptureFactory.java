@@ -85,7 +85,8 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer createOffloader(IConnectionContext ctx, String connectionId) {
+    public IChannelConnectionCaptureSerializer createOffloader(IConnectionContext ctx) {
+        final var connectionId = ctx.getConnectionId();
         return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager(connectionId));
     }
 }

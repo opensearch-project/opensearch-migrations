@@ -159,17 +159,18 @@ public class KafkaRestartingTrafficReplayerTest {
     }
 
     private Supplier<ISimpleTrafficCaptureSource>
-    loadStreamsToKafkaFromCompressedFile(IInstrumentationAttributes context,
+    loadStreamsToKafkaFromCompressedFile(TestContext rootCtx,
                                          KafkaConsumer<String, byte[]> kafkaConsumer,
                                          String filename, int recordCount) throws Exception {
         var kafkaProducer = buildKafkaProducer();
         loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer,
-                new V0_1TrafficCaptureSource(context, filename),
+                new V0_1TrafficCaptureSource(rootCtx, filename),
                 originalTrafficSource -> {
                     try {
                         for (int i = 0; i < recordCount; ++i) {
                             List<ITrafficStreamWithKey> chunks = null;
-                            chunks = originalTrafficSource.readNextTrafficStreamChunk(TestContext.noTracking()).get();
+                            chunks = originalTrafficSource.readNextTrafficStreamChunk(rootCtx::createReadChunkContext)
+                                    .get();
                             for (int j = 0; j < chunks.size(); ++j) {
                                 KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, chunks.get(j).getStream(),
                                         TEST_TOPIC_NAME, "KEY_" + i + "_" + j);

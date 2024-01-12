@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
 import lombok.Getter;
@@ -68,11 +69,24 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         return new TrafficSourceContexts.ReadChunkContext(this, this);
     }
 
-    public ReplayContexts.ChannelKeyContext createChannelContext(ITrafficStreamKey tsk) {
+    public IReplayContexts.IChannelKeyContext createChannelContext(ITrafficStreamKey tsk) {
         return new ReplayContexts.ChannelKeyContext(this, this, tsk);
     }
 
     public IKafkaConsumerContexts.ICommitScopeContext createCommitContext() {
         return new KafkaConsumerContexts.CommitScopeContext(this, this);
+    }
+
+    public IReplayContexts.ITrafficStreamsLifecycleContext
+    createTrafficStreamContextForStreamSource(IReplayContexts.IChannelKeyContext channelCtx,
+                                              ITrafficStreamKey tsk) {
+        return new InputStreamOfTraffic.IOSTrafficStreamContext(this, channelCtx, tsk);
+    }
+
+    public IReplayContexts.IKafkaRecordContext
+    createTrafficStreamContextForKafkaSource(IReplayContexts.IChannelKeyContext channelCtx,
+                                             String recordId,
+                                             int kafkaRecordSize) {
+        return new ReplayContexts.KafkaRecordContext(this, channelCtx, recordId, kafkaRecordSize);
     }
 }

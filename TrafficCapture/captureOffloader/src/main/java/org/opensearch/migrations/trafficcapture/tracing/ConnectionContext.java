@@ -15,8 +15,8 @@ import org.opensearch.migrations.tracing.FilteringAttributeBuilder;
 import org.opensearch.migrations.tracing.IHasRootInstrumentationScope;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
-public class ConnectionContext extends BaseNestedSpanContext<RootOffloaderContext, RootOffloaderContext>
-        implements IConnectionContext, IHasRootInstrumentationScope<RootOffloaderContext> {
+public class ConnectionContext extends BaseNestedSpanContext<IRootOffloaderContext, IRootOffloaderContext>
+        implements IConnectionContext, IHasRootInstrumentationScope<IRootOffloaderContext> {
 
     private static final AttributeNameMatchingPredicate KEYS_TO_EXCLUDE_FOR_ACTIVE_CONNECTION_COUNT =
             AttributeNameMatchingPredicate.builder(true).add(CONNECTION_ID_ATTR.getKey()).build();
@@ -31,7 +31,7 @@ public class ConnectionContext extends BaseNestedSpanContext<RootOffloaderContex
     @Override
     public String getActivityName() { return ACTIVITY_NAME; }
 
-    public ConnectionContext(RootOffloaderContext rootInstrumentationScope, String connectionId, String nodeId) {
+    public ConnectionContext(IRootOffloaderContext rootInstrumentationScope, String connectionId, String nodeId) {
         super(rootInstrumentationScope, rootInstrumentationScope);
         this.connectionId = connectionId;
         this.nodeId = nodeId;
@@ -42,7 +42,7 @@ public class ConnectionContext extends BaseNestedSpanContext<RootOffloaderContex
     public static class MetricInstruments extends CommonScopedMetricInstruments {
         private final LongUpDownCounter activeConnectionsCounter;
 
-        public MetricInstruments(Meter meter, String scopeName) {
+        public MetricInstruments(Meter meter) {
             super(meter, ACTIVITY_NAME);
             activeConnectionsCounter = meter.upDownCounterBuilder(ConnectionContext.ACTIVE_CONNECTION)
                     .setUnit("count").build();
@@ -50,7 +50,7 @@ public class ConnectionContext extends BaseNestedSpanContext<RootOffloaderContex
     }
 
     public @NonNull MetricInstruments getMetrics() {
-        return getRootInstrumentationScope().connectionInstruments;
+        return getRootInstrumentationScope().getConnectionInstruments();
     }
 
     @Override

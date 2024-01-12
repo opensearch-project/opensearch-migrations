@@ -33,12 +33,12 @@ public interface IScopedInstrumentationAttributes
         sendMeterEventsForEnd();
     }
 
-    default void addException(Exception e) {
+    default void addException(Throwable e) {
         getCurrentSpan().recordException(e);
         sendMeterEventsForException(e);
     }
 
-    default void sendMeterEventsForException(Exception e) {
+    default void sendMeterEventsForException(Throwable e) {
         meterIncrementEvent(getMetrics().exceptionCounter);
     }
 }

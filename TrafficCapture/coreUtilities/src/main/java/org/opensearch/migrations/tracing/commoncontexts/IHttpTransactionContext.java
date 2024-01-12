@@ -2,8 +2,6 @@ package org.opensearch.migrations.tracing.commoncontexts;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
-import org.opensearch.migrations.tracing.IRootOtelContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public interface IHttpTransactionContext extends IScopedInstrumentationAttributes {

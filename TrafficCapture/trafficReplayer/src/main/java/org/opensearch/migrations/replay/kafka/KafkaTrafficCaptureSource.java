@@ -216,7 +216,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             var key = new TrafficStreamKeyWithKafkaRecordId(
                                     tsk -> {
                                         var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);
-                                        return new ReplayContexts.KafkaRecordContext(channelKeyCtx, kafkaRecord.key(),
+                                        return channelContextManager.getGlobalContext()
+                                                .createTrafficStreamContextForKafkaSource(channelKeyCtx, kafkaRecord.key(),
                                                 kafkaRecord.serializedKeySize() + kafkaRecord.serializedValueSize());
                                     },
                                     ts, offsetData);

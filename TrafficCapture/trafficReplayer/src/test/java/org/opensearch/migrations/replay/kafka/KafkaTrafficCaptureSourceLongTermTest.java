@@ -36,6 +36,7 @@ public class KafkaTrafficCaptureSourceLongTermTest {
     @Tag("longTest")
     public void testTrafficCaptureSource() throws Exception {
         String testTopicName = "TEST_TOPIC";
+        final var rootContext = TestContext.noTracking();
 
         var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(embeddedKafkaBroker.getBootstrapServers(),
                 TEST_GROUP_CONSUMER_ID, false,  null);
@@ -60,7 +61,7 @@ public class KafkaTrafficCaptureSourceLongTermTest {
 
         for (int i=0; i<TEST_RECORD_COUNT; ) {
             Thread.sleep(getSleepAmountMsForProducerRun(i));
-            var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.noTracking());
+            var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
             var recordsList = nextChunkFuture.get((2+ TEST_RECORD_COUNT)*PRODUCER_SLEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
             for (int j=0; j<recordsList.size(); ++j) {
                 Assertions.assertEquals(KafkaTestUtils.getConnectionId(i+j), recordsList.get(j).getStream().getConnectionId());
@@ -70,7 +71,7 @@ public class KafkaTrafficCaptureSourceLongTermTest {
         }
         Assertions.assertEquals(TEST_RECORD_COUNT, sendCompleteCount.get());
         Assertions.assertThrows(TimeoutException.class, ()-> {
-                var rogueChunk = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(TestContext.noTracking())
+                var rogueChunk = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                         .get(1, TimeUnit.SECONDS);
                 if (rogueChunk.isEmpty()) {
                     // TimeoutExceptions cannot be thrown by the supplier of the CompletableFuture today, BUT we

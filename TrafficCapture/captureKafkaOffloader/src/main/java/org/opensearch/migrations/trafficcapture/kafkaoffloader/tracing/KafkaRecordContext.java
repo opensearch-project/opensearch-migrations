@@ -10,7 +10,6 @@ import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.trafficcapture.tracing.RootOffloaderContext;
 
 public class KafkaRecordContext extends
         BaseNestedSpanContext<IRootKafkaOffloaderContext, IConnectionContext>
@@ -38,10 +37,8 @@ public class KafkaRecordContext extends
     }
 
     public static class MetricInstruments extends CommonScopedMetricInstruments {
-        private final LongCounter successCount;
         public MetricInstruments(Meter meter) {
             super(meter, ACTIVITY_NAME);
-            successCount = meter.counterBuilder()
         }
     }
 

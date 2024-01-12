@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
 import java.io.Closeable;
@@ -10,7 +9,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 public interface ITrafficCaptureSource extends Closeable {

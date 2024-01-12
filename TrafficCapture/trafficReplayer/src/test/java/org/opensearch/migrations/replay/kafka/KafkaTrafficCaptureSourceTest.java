@@ -43,20 +43,22 @@ class KafkaTrafficCaptureSourceTest {
 
     @Test
     public void testRecordToString() {
+        final var rootContext = TestContext.noTracking();
         var ts = TrafficStream.newBuilder()
                 .setConnectionId("c")
                 .setNodeId("n")
                 .setNumber(7)
                 .build();
         var tsk = new TrafficStreamKeyWithKafkaRecordId(
-                k -> new ReplayContexts.KafkaRecordContext(
-                        new ChannelContextManager(TestContext.noTracking()).retainOrCreateContext(k), "", 1),
+                k -> new ReplayContexts.KafkaRecordContext(rootContext,
+                        new ChannelContextManager(rootContext).retainOrCreateContext(k), "", 1),
                 ts, 1, 2, 123);
         Assertions.assertEquals("n.c.7|partition=2|offset=123", tsk.toString());
     }
 
     @Test
     public void testSupplyTrafficFromSource() {
+        final var rootContext = TestContext.noTracking();
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
         KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.noTracking(),
@@ -79,7 +81,7 @@ class KafkaTrafficCaptureSourceTest {
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk(TestContext.noTracking()).get().stream()
+                protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
                         .forEach(streamWithKey -> {
                             tsCount.incrementAndGet();
                             log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
@@ -127,11 +129,11 @@ class KafkaTrafficCaptureSourceTest {
         // This assertion will fail the test case if not completed within its duration, as would be the case if there
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
-
+        final var rootContext = TestContext.noTracking();
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk(TestContext.noTracking()).get().stream()
+                protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
                         .forEach(streamWithKey->{
                             tsCount.incrementAndGet();
                             log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());

@@ -61,9 +61,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
     @Override
     public IChannelConnectionCaptureSerializer<RecordMetadata>
-    createOffloader(IConnectionContext ctx, String connectionId) {
-        return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId,
-                new StreamManager(rootScope, ctx, connectionId));
+    createOffloader(IConnectionContext ctx) {
+        return new StreamChannelConnectionCaptureSerializer<>(nodeId, ctx.getConnectionId(),
+                new StreamManager(rootScope, ctx));
     }
 
     @AllArgsConstructor
@@ -79,14 +79,12 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     class StreamManager extends OrderedStreamLifecyleManager<RecordMetadata> {
         IConnectionContext telemetryContext;
         IRootKafkaOffloaderContext rootScope;
-        String connectionId;
         Instant startTime;
 
-        public StreamManager(IRootKafkaOffloaderContext rootScope, IConnectionContext ctx, String connectionId) {
+        public StreamManager(IRootKafkaOffloaderContext rootScope, IConnectionContext ctx) {
             // TODO - add https://opentelemetry.io/blog/2022/instrument-kafka-clients/
             this.rootScope = rootScope;
             this.telemetryContext = ctx;
-            this.connectionId = connectionId;
             this.startTime = Instant.now();
         }
 
@@ -113,7 +111,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             }
             var osh = (CodedOutputStreamWrapper) outputStreamHolder;
 
-            // Structured context for MetricsLogger
+            final var connectionId = telemetryContext.getConnectionId();
             try {
                 String recordId = String.format("%s.%d", connectionId, index);
                 var byteBuffer = osh.byteBuffer;
@@ -160,24 +158,16 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         // that field out of scope.
         return (metadata, exception) -> {
             log.atInfo().setMessage(()->"kafka completed sending a record").log();
-
-            flushContext.meterHistogramMicros(exception==null ? "stream_flush_success_ms" : "stream_flush_failure_ms");
-            flushContext.meterIncrementEvent(exception==null ? "stream_flush_success" : "stream_flush_failure");
-            flushContext.meterIncrementEvent(
-                    exception==null ? "stream_flush_success_bytes" : "stream_flush_failure_bytes",
-                    flushContext.getRecordSize());
-            flushContext.close();
-
             if (exception != null) {
                 flushContext.addException(exception);
                 log.error("Error sending producer record: {}", recordId, exception);
                 cf.completeExceptionally(exception);
             } else {
-                flushContext.onSuccessfulFlush();
                 log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
                         recordId, metadata.topic(), metadata.partition());
                 cf.complete(metadata);
             }
+            flushContext.close();
         };
     }
 }

@@ -61,9 +61,9 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer<Void> createOffloader(IConnectionContext ctx, String connectionId) throws IOException {
+    public IChannelConnectionCaptureSerializer<Void> createOffloader(IConnectionContext ctx) throws IOException {
         // This array is only an indirection to work around Java's constraint that lambda values are final
-        return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager());
+        return new StreamChannelConnectionCaptureSerializer<>(nodeId, ctx.getConnectionId(), new StreamManager());
     }
 
     public Stream<TrafficStream> getRecordedTrafficStreamsStream() {

@@ -112,12 +112,13 @@ class TrafficReplayerTest {
     public void testDelimitedDeserializer() throws Exception {
         final Instant timestamp = Instant.now();
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
+        var rootContext = TestContext.noTracking();
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger(0);
             var allMatch = new AtomicBoolean(true);
-            try (var trafficProducer = new InputStreamOfTraffic(TestContext.noTracking(), bais)) {
+            try (var trafficProducer = new InputStreamOfTraffic(rootContext, bais)) {
                 while (true) {
-                    trafficProducer.readNextTrafficStreamChunk(TestContext.noTracking()).get().stream()
+                    trafficProducer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
                             .forEach(ts->{
                         var i = counter.incrementAndGet();
                         var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);

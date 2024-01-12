@@ -12,18 +12,7 @@ import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
 import java.time.Instant;
 
-public class IReplayContexts {
-//
-//    public static class ScopeNames {
-//        private ScopeNames() {}
-//
-//        public static final String KAFKA_RECORD_SCOPE = "KafkaRecord";
-//        public static final String TRAFFIC_STREAM_LIFETIME_SCOPE = "TrafficStreamLifetime";
-//        public static final String ACCUMULATOR_SCOPE = "Accumulator";
-//        public static final String HTTP_TRANSFORMER_SCOPE = "HttpTransformer";
-//        public static final String REQUEST_SENDER_SCOPE = "RequestSender";
-//        public static final String TRAFFIC_REPLAYER_SCOPE = "TrafficReplayer";
-//    }
+public abstract class IReplayContexts {
 
     public static class ActivityNames {
         private ActivityNames() {}

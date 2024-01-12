@@ -90,7 +90,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
         EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(rootInstrumenter,
-                        "n", "c", (ctx, connectionId) -> offloader,
+                        "n", "c", ctx -> offloader,
                         new RequestCapturePredicate(), x->true)); // true: block every request
         channelWriter.accept(channel);
 
@@ -109,7 +109,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                 trafficStream.getSubStream(0).hasRead());
         var combinedTrafficPacketsSteam =
                 new SequenceInputStream(Collections.enumeration(trafficStream.getSubStreamList().stream()
-                .filter(to->to.hasRead())
+                .filter(TrafficObservation::hasRead)
                 .map(to->new ByteArrayInputStream(to.getRead().getData().toByteArray()))
                 .collect(Collectors.toList())));
         Assertions.assertArrayEquals(fullTrafficBytes, combinedTrafficPacketsSteam.readAllBytes());
@@ -165,7 +165,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", "uploader"));
         EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(rootInstrumenter,"n", "c",
-                        (ctx, connectionId) -> offloader, headerCapturePredicate, x->true));
+                        ctx -> offloader, headerCapturePredicate, x->true));
         getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
         channel.close();
         var requestBytes = SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8);
@@ -190,7 +190,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", ".*uploader.*"));
         EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(rootInstrumenter,"n", "c",
-                        (ctx, connectionId) -> offloader, headerCapturePredicate, x->false));
+                        ctx -> offloader, headerCapturePredicate, x->false));
         getWriter(singleBytes, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
         channel.writeOutbound(Unpooled.wrappedBuffer("response1".getBytes(StandardCharsets.UTF_8)));
         getWriter(singleBytes, true, SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8)).accept(channel);

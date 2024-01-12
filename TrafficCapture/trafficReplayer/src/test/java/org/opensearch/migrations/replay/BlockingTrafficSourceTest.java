@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -29,6 +30,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 @Slf4j
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
@@ -38,6 +40,7 @@ class BlockingTrafficSourceTest {
 
     @Test
     void readNextChunkTest() throws Exception {
+        final var rootContext = TestContext.noTracking();
         var nStreamsToCreate = 210;
         var BUFFER_MILLIS = 10;
         var testSource = new TestTrafficCaptureSource(nStreamsToCreate);
@@ -46,7 +49,7 @@ class BlockingTrafficSourceTest {
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
         var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i<=BUFFER_MILLIS+SHIFT; ++i) {
-            var nextPieceFuture = blockingSource.readNextTrafficStreamChunk(TestContext.noTracking());
+            var nextPieceFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
             nextPieceFuture.get(500000, TimeUnit.MILLISECONDS)
                 .forEach(ts->firstChunk.add(ts));
         }
@@ -54,9 +57,10 @@ class BlockingTrafficSourceTest {
         Assertions.assertTrue(BUFFER_MILLIS+SHIFT <= firstChunk.size());
         Instant lastTime = null;
         for (int i =SHIFT; i<nStreamsToCreate-BUFFER_MILLIS-SHIFT; ++i) {
-            var blockedFuture = blockingSource.readNextTrafficStreamChunk(TestContext.noTracking());
+            var blockedFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
             Thread.sleep(5);
-            Assertions.assertFalse(blockedFuture.isDone(), "for i="+i+" and coounter="+testSource.counter.get());
+            Assertions.assertFalse(blockedFuture.isDone(),
+                    "for i="+i+" and coounter="+testSource.counter.get());
             Assertions.assertEquals(i+BUFFER_MILLIS+SHIFT, testSource.counter.get());
             blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i)));
             log.info("after stopReadsPast blockingSource=" + blockingSource);
@@ -66,7 +70,8 @@ class BlockingTrafficSourceTest {
         Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate-SHIFT)), lastTime);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
         var exception = Assertions.assertThrows(ExecutionException.class,
-                ()->blockingSource.readNextTrafficStreamChunk(TestContext.noTracking()).get(10, TimeUnit.MILLISECONDS));
+                ()->blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                        .get(10, TimeUnit.MILLISECONDS));
         Assertions.assertInstanceOf(EOFException.class, exception.getCause());
     }
 
@@ -74,6 +79,7 @@ class BlockingTrafficSourceTest {
         int nStreamsToCreate;
         AtomicInteger counter = new AtomicInteger();
         Instant replayStartTime = Instant.EPOCH.plus(Duration.ofSeconds(SHIFT));
+        TestContext rootContext = TestContext.noTracking();
 
         TestTrafficCaptureSource(int nStreamsToCreate) {
             this.nStreamsToCreate = nStreamsToCreate;
@@ -81,7 +87,7 @@ class BlockingTrafficSourceTest {
 
         @Override
         public CompletableFuture<List<ITrafficStreamWithKey>>
-        readNextTrafficStreamChunk(IInstrumentationAttributes context) {
+        readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
             log.atTrace().setMessage(()->"Test.readNextTrafficStreamChunk.counter="+counter).log();
             var i = counter.getAndIncrement();
             if (i >= nStreamsToCreate) {
@@ -102,7 +108,7 @@ class BlockingTrafficSourceTest {
                             .build())
                     .build();
             var key = PojoTrafficStreamKeyAndContext.build(ts,
-                    tsk->new TestTrafficStreamsLifecycleContext(context, tsk));
+                    tsk->new TestTrafficStreamsLifecycleContext(rootContext, tsk));
             return CompletableFuture.completedFuture(List.of(new PojoTrafficStreamAndKey(ts, key)));
         }
 
@@ -110,7 +116,7 @@ class BlockingTrafficSourceTest {
         public void close() throws IOException {}
 
         @Override
-        public CommitResult commitTrafficStream(IInstrumentationAttributes ctx, ITrafficStreamKey trafficStreamKey) {
+        public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             // do nothing
             return CommitResult.Immediate;
         }

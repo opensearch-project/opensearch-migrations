@@ -9,6 +9,7 @@ import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.Setter;
 import org.apache.kafka.common.TopicPartition;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
@@ -22,9 +23,18 @@ public class KafkaConsumerContexts {
 
     private KafkaConsumerContexts() {}
 
-    @AllArgsConstructor
     public static class AsyncListeningContext
             implements IKafkaConsumerContexts.IAsyncListeningContext {
+        @Getter
+        @NonNull
+        public final RootReplayerContext enclosingScope;
+        @Getter @Setter
+        Exception observedExceptionToIncludeInMetrics;
+
+        public AsyncListeningContext(@NonNull RootReplayerContext enclosingScope) {
+            this.enclosingScope = enclosingScope;
+        }
+
         public static class MetricInstruments {
             public final LongCounter kafkaPartitionsRevokedCounter;
             public final LongCounter kafkaPartitionsAssignedCounter;
@@ -38,10 +48,6 @@ public class KafkaConsumerContexts {
                         .upDownCounterBuilder(IKafkaConsumerContexts.MetricNames.ACTIVE_PARTITIONS_ASSIGNED_COUNT).build();
             }
         }
-
-        @Getter
-        @NonNull
-        public final RootReplayerContext enclosingScope;
 
         private @NonNull MetricInstruments getMetrics() {
             return enclosingScope.asyncListeningInstruments;

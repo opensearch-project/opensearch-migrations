@@ -6,7 +6,7 @@ import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 
 public class TestContext extends RootReplayerContext {
 
-    private final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
+    public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
 
     public static TestContext withTracking() {
         return new TestContext(new InMemoryInstrumentationBundle(InMemorySpanExporter.create(),

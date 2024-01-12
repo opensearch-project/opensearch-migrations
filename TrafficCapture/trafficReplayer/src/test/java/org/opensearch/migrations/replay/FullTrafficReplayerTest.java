@@ -18,6 +18,8 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -155,7 +157,8 @@ public class FullTrafficReplayerTest {
         }
 
         Assertions.assertEquals(numRequests, tuplesReceived.size());
-        checkSpansForSimpleReplayedTransactions(trackingContext.testSpanExporter, numRequests);
+        checkSpansForSimpleReplayedTransactions(trackingContext.inMemoryInstrumentationBundle.testSpanExporter,
+                numRequests);
         log.info("done");
     }
 
@@ -233,7 +236,7 @@ public class FullTrafficReplayerTest {
         public final int trafficStreamIndex;
         @Getter public final IReplayContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
 
-        public TrafficStreamCursorKey(IInstrumentationAttributes ctx, TrafficStream stream, int arrayIndex) {
+        public TrafficStreamCursorKey(RootReplayerContext ctx, TrafficStream stream, int arrayIndex) {
             connectionId = stream.getConnectionId();
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
@@ -270,6 +273,7 @@ public class FullTrafficReplayerTest {
         final PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
         Integer cursorHighWatermark;
         ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory;
+        TestContext rootContext;
 
         public ArrayCursorTrafficCaptureSource(ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
             var startingCursor = arrayCursorTrafficSourceFactory.nextReadCursor.get();
@@ -277,17 +281,19 @@ public class FullTrafficReplayerTest {
             this.readCursor = new AtomicInteger(startingCursor);
             this.arrayCursorTrafficSourceFactory = arrayCursorTrafficSourceFactory;
             cursorHighWatermark = startingCursor;
+            rootContext = TestContext.noTracking();
         }
 
         @Override
-        public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(IInstrumentationAttributes context) {
+        public CompletableFuture<List<ITrafficStreamWithKey>>
+        readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
             var idx = readCursor.getAndIncrement();
             log.info("reading chunk from index="+idx);
             if (arrayCursorTrafficSourceFactory.trafficStreamsList.size() <= idx) {
                 return CompletableFuture.failedFuture(new EOFException());
             }
             var stream = arrayCursorTrafficSourceFactory.trafficStreamsList.get(idx);
-            var key = new TrafficStreamCursorKey(context, stream, idx);
+            var key = new TrafficStreamCursorKey(rootContext, stream, idx);
             synchronized (pQueue) {
                 pQueue.add(key);
                 cursorHighWatermark = idx;
@@ -296,7 +302,7 @@ public class FullTrafficReplayerTest {
         }
 
         @Override
-        public CommitResult commitTrafficStream(IInstrumentationAttributes ctx, ITrafficStreamKey trafficStreamKey) {
+        public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             synchronized (pQueue) { // figure out if I need to do something more efficient later
                 log.info("Commit called for "+trafficStreamKey+" with pQueue.size="+pQueue.size());
                 var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;

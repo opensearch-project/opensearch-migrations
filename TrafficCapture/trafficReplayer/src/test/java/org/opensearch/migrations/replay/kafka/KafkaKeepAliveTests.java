@@ -88,7 +88,7 @@ public class KafkaKeepAliveTests {
                     try {
                         var k = keysReceived.get(0);
                         log.info("Calling commit traffic stream for "+k);
-                        trafficSource.commitTrafficStream(TestContext.noTracking(), k);
+                        trafficSource.commitTrafficStream(k);
                         log.info("finished committing traffic stream");
                         log.info("Stop reads to infinity");
                         // this is a way to signal back to the main thread that this thread is done
@@ -114,7 +114,7 @@ public class KafkaKeepAliveTests {
         }
         readNextNStreams(trafficSource, keysReceived, 1, 1);
 
-        trafficSource.commitTrafficStream(TestContext.noTracking(), keysReceived.get(0));
+        trafficSource.commitTrafficStream(keysReceived.get(0));
         log.info("Called commitTrafficStream but waiting long enough for the client to leave the group.  " +
                 "That will make the previous commit a 'zombie-commit' that should easily be dropped.");
 
@@ -137,7 +137,7 @@ public class KafkaKeepAliveTests {
         keysReceived = new ArrayList<>();
         log.atInfo().setMessage(()->"re-establish... 3 ..."+renderNextCommitsAsString()).log();
         readNextNStreams(trafficSource, keysReceived, 0, 1);
-        trafficSource.commitTrafficStream(TestContext.noTracking(), keysReceivedUntilDrop1.get(1));
+        trafficSource.commitTrafficStream(keysReceivedUntilDrop1.get(1));
         log.atInfo().setMessage(()->"re-establish... 4 ..."+renderNextCommitsAsString()).log();
         readNextNStreams(trafficSource, keysReceived, 1, 1);
         log.atInfo().setMessage(()->"5 ..."+renderNextCommitsAsString()).log();
@@ -158,8 +158,9 @@ public class KafkaKeepAliveTests {
     private static void readNextNStreams(BlockingTrafficSource kafkaSource, List<ITrafficStreamKey> keysReceived,
                                          int from, int count) {
         Assertions.assertEquals(from, keysReceived.size());
+        final var rootContext = TestContext.noTracking();
         for (int i=0; i<count; ) {
-            var trafficStreams = kafkaSource.readNextTrafficStreamChunk(TestContext.noTracking()).get();
+            var trafficStreams = kafkaSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             trafficStreams.forEach(ts->{
                 var tsk = ts.getKey();
                 log.atInfo().setMessage(()->"checking for "+tsk).log();

@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.function.Function;
 
 public class ChannelContextManager implements Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> {
+    @Getter
     private final RootReplayerContext globalContext;
 
     public ChannelContextManager(RootReplayerContext globalContext) {
@@ -15,14 +16,14 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
     }
 
     private static class RefCountedContext {
-        @Getter final ReplayContexts.ChannelKeyContext context;
+        @Getter final IReplayContexts.IChannelKeyContext context;
         private int refCount;
 
-        private RefCountedContext(ReplayContexts.ChannelKeyContext context) {
+        private RefCountedContext(IReplayContexts.IChannelKeyContext context) {
             this.context = context;
         }
 
-        ReplayContexts.ChannelKeyContext retain() {
+        IReplayContexts.IChannelKeyContext retain() {
             refCount++;
             return context;
         }
@@ -41,16 +42,16 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
 
     HashMap<String, RefCountedContext> connectionToChannelContextMap = new HashMap<>();
 
-    public ReplayContexts.ChannelKeyContext apply(ITrafficStreamKey tsk) {
+    public IReplayContexts.IChannelKeyContext apply(ITrafficStreamKey tsk) {
         return retainOrCreateContext(tsk);
     }
 
-    public ReplayContexts.ChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
+    public IReplayContexts.IChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
         return connectionToChannelContextMap.computeIfAbsent(tsk.getConnectionId(),
                 k-> new RefCountedContext(globalContext.createChannelContext(tsk))).retain();
     }
 
-    public ReplayContexts.ChannelKeyContext releaseContextFor(ReplayContexts.ChannelKeyContext ctx) {
+    public IReplayContexts.IChannelKeyContext releaseContextFor(IReplayContexts.IChannelKeyContext ctx) {
         var connId = ctx.getConnectionId();
         var refCountedCtx = connectionToChannelContextMap.get(connId);
         assert ctx == refCountedCtx.context;
