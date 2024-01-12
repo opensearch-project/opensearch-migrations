@@ -23,9 +23,7 @@ Java is used by the opensearch-migrations repo and Gradle, its associated build 
 ```
 More details can be found [here](../../../TrafficCapture/dockerSolution/README.md)
 
-3- Fetch Migration Setup, in order to make use of Fetch Migration for historical data capture, a user should make any
-modifications necessary to the `dp_pipeline_template.yaml` file located in the same directory as this README before deploying.
-More information around the parameters used in the pipeline file can be found [here](https://opensearch.org/docs/latest/data-prepper/pipelines/pipelines/).
+3- Fetch Migration Setup, in order to make use of Fetch Migration for historical data capture, a user should make any modifications necessary to the `dp_pipeline_template.yaml` file located in the same directory as this README before deploying. More information around the parameters used in the pipeline file can be found [here](https://opensearch.org/docs/latest/data-prepper/pipelines/pipelines/).
 
 The existing pipeline template works for the `demo-deploy` stack without any further modifications.
 

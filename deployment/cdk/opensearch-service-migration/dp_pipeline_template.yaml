@@ -30,7 +30,7 @@ historical-data-migration:
       # Example configuration for basic auth
       # disable_authentication: true
       username: "admin"
-      password: "admin"
+      password: "Admin123!"
       connection:
         insecure: true
   # Additional pipeline options/optimizations
