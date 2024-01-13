@@ -187,7 +187,7 @@ public class CaptureProxy {
 
     private static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
-        return (ctx,connectionId) -> new StreamChannelConnectionCaptureSerializer<>(null, connectionId,
+        return ctx -> new StreamChannelConnectionCaptureSerializer<>(null, ctx.getConnectionId(),
                 new StreamLifecycleManager<>() {
                     @Override
                     public void close() {}
@@ -238,13 +238,15 @@ public class CaptureProxy {
         return kafkaProps;
     }
 
-    private static IConnectionCaptureFactory getConnectionCaptureFactory(Parameters params) throws IOException {
+    private static IConnectionCaptureFactory
+    getConnectionCaptureFactory(Parameters params, RootCaptureContext rootContext) throws IOException {
         var nodeId = getNodeId();
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
         } else if (params.kafkaConnection != null) {
-            return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(buildKafkaProperties(params)), params.maximumTrafficStreamSize);
+            return new KafkaCaptureFactory(rootContext,
+                    nodeId, new KafkaProducer<>(buildKafkaProperties(params)), params.maximumTrafficStreamSize);
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
         } else {
@@ -304,7 +306,7 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
-        var rootContext = new RootWireLoggingContext(
+        var rootContext = new RootCaptureContext(
                 RootOtelContext.initializeOpenTelemetry(params.otelCollectorEndpoint, "capture"));
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
@@ -329,7 +331,7 @@ public class CaptureProxy {
             var headerCapturePredicate =
                     new HeaderValueFilteringCapturePredicate(convertPairListToMap(params.suppressCaptureHeaderPairs));
             proxy.start(rootContext, backsideConnectionPool, params.numThreads, sslEngineSupplier,
-                    getConnectionCaptureFactory(params), headerCapturePredicate);
+                    getConnectionCaptureFactory(params, rootContext), headerCapturePredicate);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
