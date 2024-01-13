@@ -1,0 +1,9 @@
+migrations/capture_proxy:latest
+migrations/elasticsearch_searchguard:latest
+migrations/traffic_replayer:latest
+migrations/opensearch_dashboards:latest
+migrations/migration_console:latest
+docker.io/bitnami/zookeeper:3.8
+docker.io/bitnami/kafka:3.6
+opensearchproject/opensearch:latest
+public.ecr.aws/a0w2c5q7/otelcol-with-opensearch:latest
