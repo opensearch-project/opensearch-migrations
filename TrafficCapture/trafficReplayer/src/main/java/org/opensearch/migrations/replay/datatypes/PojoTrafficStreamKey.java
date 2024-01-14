@@ -4,15 +4,16 @@ import lombok.EqualsAndHashCode;
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 
 @EqualsAndHashCode()
-public abstract class PojoTrafficStreamKey implements ITrafficStreamKey {
-    protected final String nodeId;
-    protected final String connectionId;
+public abstract class PojoTrafficStreamKey extends ISourceTrafficChannelKey.PojoImpl
+        implements ITrafficStreamKey {
     protected final int trafficStreamIndex;
 
     protected PojoTrafficStreamKey(String nodeId, String connectionId, int index) {
-        this.nodeId = nodeId;
-        this.connectionId = connectionId;
+        super(nodeId, connectionId);
         this.trafficStreamIndex = index;
+    }
+    protected PojoTrafficStreamKey(PojoImpl tsk, int index) {
+        this(tsk.nodeId, tsk.connectionId, index);
     }
 
     @Override

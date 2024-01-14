@@ -31,7 +31,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
         this.inputStream = inputStream;
     }
 
-    public static final class IOSTrafficStreamContext extends ReplayContexts.TrafficStreamsLifecycleContext {
+    public static final class IOSTrafficStreamContext extends ReplayContexts.TrafficStreamLifecycleContext {
         public IOSTrafficStreamContext(RootReplayerContext rootReplayerContext,
                                        IReplayContexts.IChannelKeyContext enclosingScope,
                                        ITrafficStreamKey trafficStreamKey) {

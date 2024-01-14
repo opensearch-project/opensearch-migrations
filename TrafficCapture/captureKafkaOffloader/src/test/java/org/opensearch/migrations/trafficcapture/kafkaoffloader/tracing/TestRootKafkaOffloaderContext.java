@@ -1,11 +1,11 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing;
 
-import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import lombok.Getter;
+import lombok.NonNull;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.RootOtelContext;
@@ -26,19 +26,19 @@ public class TestRootKafkaOffloaderContext extends RootOtelContext implements IR
     }
 
     public static TestRootKafkaOffloaderContext noTracking() {
-        return new TestRootKafkaOffloaderContext(new InMemoryInstrumentationBundle(null, null));
+        return new TestRootKafkaOffloaderContext();
+    }
+
+    public TestRootKafkaOffloaderContext() {
+        this(new InMemoryInstrumentationBundle(null, null));
     }
 
     public TestRootKafkaOffloaderContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle) {
-        super("tests", inMemoryInstrumentationBundle.openTelemetrySdk);
+        super("tests", inMemoryInstrumentationBundle == null ? null :
+                inMemoryInstrumentationBundle.openTelemetrySdk);
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
         final var meter = getMeterProvider().get("test");
         this.kafkaOffloadingInstruments = new KafkaRecordContext.MetricInstruments(meter);
         this.connectionInstruments = new ConnectionContext.MetricInstruments(meter);
-    }
-
-    @Override
-    public Span buildSpan(IInstrumentationAttributes enclosingScope, String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
-        return null;
     }
 }

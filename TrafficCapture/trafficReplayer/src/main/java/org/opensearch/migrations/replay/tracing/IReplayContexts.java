@@ -7,8 +7,6 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
-import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
 import java.time.Instant;
 
@@ -65,7 +63,7 @@ public abstract class IReplayContexts {
 
     public interface IChannelKeyContext
             extends IAccumulationScope,
-                    IConnectionContext {
+                    org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
         String ACTIVITY_NAME = ActivityNames.CHANNEL;
 
         @Override default String getActivityName() { return ACTIVITY_NAME;}
@@ -108,9 +106,6 @@ public abstract class IReplayContexts {
                     IWithTypedEnclosingScope<IChannelKeyContext> {
         String ACTIVITY_NAME = ActivityNames.TRAFFIC_STREAM_LIFETIME;
 
-        ReplayContexts.HttpTransactionContext createHttpTransactionContext(UniqueReplayerRequestKey requestKey,
-                                                                           Instant sourceTimestamp);
-
         @Override default String getActivityName() { return ACTIVITY_NAME;}
         ITrafficStreamKey getTrafficStreamKey();
         IChannelKeyContext getChannelKeyContext();
@@ -120,15 +115,16 @@ public abstract class IReplayContexts {
         default ISourceTrafficChannelKey getChannelKey() {
             return getChannelKeyContext().getChannelKey();
         }
+
+        IReplayerHttpTransactionContext createHttpTransactionContext(UniqueReplayerRequestKey requestKey,
+                                                                     Instant sourceTimestamp);
     }
 
     public interface IReplayerHttpTransactionContext
-            extends IHttpTransactionContext,
+            extends org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext,
                     IAccumulationScope,
                     IWithTypedEnclosingScope<IChannelKeyContext> {
         AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
-
-        ITupleHandlingContext createTupleContext();
 
         String ACTIVITY_NAME = ActivityNames.HTTP_TRANSACTION;
         @Override default String getActivityName() { return ACTIVITY_NAME;}
@@ -154,17 +150,16 @@ public abstract class IReplayContexts {
 
         @Override
         default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-            return IHttpTransactionContext.super.fillAttributes(
+            return org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext.super.fillAttributes(
                     builder.put(REPLAYER_REQUEST_INDEX_KEY, replayerRequestIndex()));
         }
 
-        ReplayContexts.RequestTransformationContext createTransformationContext();
-
-        IScopedInstrumentationAttributes createAccumulatorContext();
-
-        ReplayContexts.TargetRequestContext createTargetRequestContext();
-
+        IRequestAccumulationContext createRequestAccumulationContext();
+        IResponseAccumulationContext createResponseAccumulationContext();
+        IRequestTransformationContext createTransformationContext();
         IScheduledContext createScheduledContext(Instant timestamp);
+        ITargetRequestContext createTargetRequestContext();
+        ITupleHandlingContext createTupleContext();
     }
 
     public interface IRequestAccumulationContext
@@ -231,8 +226,8 @@ public abstract class IReplayContexts {
         void onBytesSent(int size);
         void onBytesReceived(int size);
 
+        IRequestSendingContext createHttpSendingContext();
         IReceivingHttpResponseContext createHttpReceivingContext();
-
         IWaitingForHttpResponseContext createWaitingForResponseContext();
     }
 

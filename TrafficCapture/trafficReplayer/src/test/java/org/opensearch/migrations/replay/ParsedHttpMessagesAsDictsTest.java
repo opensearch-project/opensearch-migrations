@@ -12,9 +12,11 @@ import java.util.Optional;
 
 class ParsedHttpMessagesAsDictsTest {
 
+    static TestContext rootContext = TestContext.noTracking();
+
     private static final PojoTrafficStreamKeyAndContext TEST_TRAFFIC_STREAM_KEY =
             PojoTrafficStreamKeyAndContext.build("N","C",1,
-                    k->new TestTrafficStreamsLifecycleContext(TestContext.noTracking(), k));
+                    k->rootContext.createTrafficStreamContextForStreamSource(rootContext.createChannelContext(k), k));
 
     ParsedHttpMessagesAsDicts makeTestData() {
         return makeTestData(null, null);

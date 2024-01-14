@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -122,7 +123,7 @@ public class TestUtils {
             return baos.toString(StandardCharsets.UTF_8);
         }
     }
-    static void runPipelineAndValidate(RootReplayerContext rootContext,
+    static void runPipelineAndValidate(TestContext rootContext,
                                        IAuthTransformerFactory authTransformer,
                                        String extraHeaders,
                                        List<String> stringParts,
@@ -133,7 +134,7 @@ public class TestUtils {
                 authTransformer, extraHeaders, stringParts, expectedRequestHeaders, expectedOutputGenerator);
     }
 
-    static void runPipelineAndValidate(RootReplayerContext rootContext,
+    static void runPipelineAndValidate(TestContext rootContext,
                                        IJsonTransformer transformer,
                                        IAuthTransformerFactory authTransformer,
                                        String extraHeaders,

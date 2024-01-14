@@ -25,8 +25,10 @@ public class PojoTrafficStreamKeyAndContext extends PojoTrafficStreamKey {
         return rval;
     }
 
-    protected PojoTrafficStreamKeyAndContext(TrafficStream stream) {
-        this(stream.getNodeId(), stream.getConnectionId(), TrafficStreamUtils.getTrafficStreamIndex(stream));
+    public static PojoTrafficStreamKeyAndContext
+    build(ISourceTrafficChannelKey sourceKey, int index,
+          Function<ITrafficStreamKey, IReplayContexts.ITrafficStreamsLifecycleContext> contextSupplier) {
+        return build(sourceKey.getNodeId(), sourceKey.getConnectionId(), index, contextSupplier);
     }
 
     public static PojoTrafficStreamKeyAndContext
@@ -35,6 +37,10 @@ public class PojoTrafficStreamKeyAndContext extends PojoTrafficStreamKey {
         var rval = new PojoTrafficStreamKeyAndContext(nodeId, connectionId, index);
         rval.setTrafficStreamsContext(contextSupplier.apply(rval));
         return rval;
+    }
+
+    protected PojoTrafficStreamKeyAndContext(TrafficStream stream) {
+        this(stream.getNodeId(), stream.getConnectionId(), TrafficStreamUtils.getTrafficStreamIndex(stream));
     }
 
     private PojoTrafficStreamKeyAndContext(String nodeId, String connectionId, int index) {

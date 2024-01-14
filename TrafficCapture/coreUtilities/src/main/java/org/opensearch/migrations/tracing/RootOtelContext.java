@@ -126,8 +126,8 @@ public class RootOtelContext implements IRootOtelContext {
     }
 
     @Override
-    public Span buildSpan(IInstrumentationAttributes enclosingScope,
-                          String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
+    public @NonNull Span buildSpan(IInstrumentationAttributes enclosingScope,
+                                   String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
         var parentSpan = enclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
         return buildSpanWithParent(spanBuilder, getPopulatedSpanAttributes(attributesBuilder), parentSpan, linkedSpan);

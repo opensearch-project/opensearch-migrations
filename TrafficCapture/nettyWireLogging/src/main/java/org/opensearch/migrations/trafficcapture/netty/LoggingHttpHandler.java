@@ -200,7 +200,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, boolean shouldCapture,
                                                        HttpRequest httpRequest) throws Exception {
-        assert messageContext instanceof IWireCaptureContexts.IRequestContext;
         messageContext = messageContext.createWaitingForResponseContext();
         super.channelRead(ctx, msg);
 

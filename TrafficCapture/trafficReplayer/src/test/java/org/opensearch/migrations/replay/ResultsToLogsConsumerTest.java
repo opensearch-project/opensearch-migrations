@@ -80,7 +80,7 @@ class ResultsToLogsConsumerTest {
         var context = TestContext.noTracking();
         var emptyTuple = new SourceTargetCaptureTuple(
                 new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                        k->new TestTrafficStreamsLifecycleContext(context, k)), 0, 0),
+                        context::createTrafficStreamContextForTest), 0, 0),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             var consumer = new TupleParserChainConsumer(null, new ResultsToLogsConsumer());
@@ -98,7 +98,7 @@ class ResultsToLogsConsumerTest {
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(
                 new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                        k->new TestTrafficStreamsLifecycleContext(context, k)), 0, 0),
+                        context::createTrafficStreamContextForTest), 0, 0),
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
@@ -235,9 +235,7 @@ class ResultsToLogsConsumerTest {
     private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
         var context = TestContext.noTracking();
         var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                k->new TestTrafficStreamsLifecycleContext(context, k));
-        var requestCtx = TestRequestKey.getTestConnectionRequestContext(context, 0);
-        trafficStreamKey.setTrafficStreamsContext(requestCtx.getImmediateEnclosingScope());
+                context::createTrafficStreamContextForTest);
         var sourcePair = new RequestResponsePacketPair(trafficStreamKey, Instant.EPOCH,
                 0, 0);
         var rawRequestData = loadResourceAsBytes("/requests/raw/" + requestResourceName);

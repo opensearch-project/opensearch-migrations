@@ -13,19 +13,15 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -126,7 +122,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
                                               List<ObservationDirective> directives, TestContext rootContext) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
         var tsk = PojoTrafficStreamKeyAndContext.build("n", "test", uniqueIdCounter.incrementAndGet(),
-                k->rootContext.createChannelContext(k).getChannelKey().getTrafficStreamsContext());
+                rootContext::createTrafficStreamContextForTest);
         var offloader = connectionFactory.createOffloader(TestContext.noTracking().createChannelContext(tsk));
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);
@@ -218,7 +214,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
      * @return
      */
     static SortedSet<Integer>
-    accumulateTrafficStreamsWithNewAccumulator(RootReplayerContext context,
+    accumulateTrafficStreamsWithNewAccumulator(TestContext context,
                                                Stream<TrafficStream> trafficStreams,
                                                List<RequestResponsePacketPair> aggregations,
                                                AtomicInteger requestsReceived) {
@@ -277,7 +273,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         ;
         trafficStreams.forEach(ts->trafficAccumulator.accept(
                 new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts,
-                        k->new TestTrafficStreamsLifecycleContext(context, k))
+                        context::createTrafficStreamContextForTest)
                 )));
         trafficAccumulator.close();
         return tsIndicesReceived;

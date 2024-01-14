@@ -19,13 +19,11 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -49,10 +47,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Slf4j
 // It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
@@ -97,7 +93,8 @@ public class FullTrafficReplayerTest {
                 .addSubStream(TrafficObservation.newBuilder()
                         .setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(TestContext.noTracking(),
+                List.of(trafficStreamWithJustClose));
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
                 httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(), trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
@@ -137,9 +134,10 @@ public class FullTrafficReplayerTest {
         var trafficStream = tsb.addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                 .setClose(CloseObservation.getDefaultInstance()))
                 .build();
-        var trafficSource =
-                new ArrayCursorTrafficCaptureSource(new ArrayCursorTrafficSourceFactory(List.of(trafficStream)));
         var trackingContext = TestContext.withTracking();
+        var trafficSource =
+                new ArrayCursorTrafficCaptureSource(trackingContext,
+                        new ArrayCursorTrafficSourceFactory(trackingContext, List.of(trafficStream)));
         var tr = new TrafficReplayer(trackingContext, httpServer.localhostEndpoint(), null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10*1024);
@@ -168,17 +166,16 @@ public class FullTrafficReplayerTest {
      */
     private void checkSpansForSimpleReplayedTransactions(InMemorySpanExporter testSpanExporter, int numRequests) {
         var byName = testSpanExporter.getFinishedSpanItems().stream().collect(Collectors.groupingBy(SpanData::getName));
-        BiConsumer<Integer, String> chk = (i, k)-> {
+        BiConsumer<Integer, String> chk = (i, k) -> {
             Assertions.assertNotNull(byName.get(k));
             Assertions.assertEquals(i, byName.get(k).size());
             byName.remove(k);
         };
         chk.accept(1,"channel");
-        chk.accept(1, "testTrafficSpan");
-
+        chk.accept(1, "trafficStreamLifetime");
+        chk.accept(numRequests, "httpTransaction");
         chk.accept(numRequests, "accumulatingRequest");
         chk.accept(numRequests, "accumulatingResponse");
-        chk.accept(numRequests, "httpTransaction");
         chk.accept(numRequests, "transformation");
         chk.accept(numRequests, "targetTransaction");
         chk.accept(numRequests*2, "scheduled");
@@ -218,7 +215,8 @@ public class FullTrafficReplayerTest {
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(ts->TrafficStreamUtils.summarizeTrafficStream(ts))
                         .collect(Collectors.joining("\n"))).log();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
+        var rootContext = TestContext.noTracking();
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(rootContext, trafficStreams);
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(numExpectedRequests,
                 httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(), trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(), trafficSourceSupplier.nextReadCursor.get());
@@ -236,13 +234,13 @@ public class FullTrafficReplayerTest {
         public final int trafficStreamIndex;
         @Getter public final IReplayContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
 
-        public TrafficStreamCursorKey(RootReplayerContext ctx, TrafficStream stream, int arrayIndex) {
+        public TrafficStreamCursorKey(TestContext context, TrafficStream stream, int arrayIndex) {
             connectionId = stream.getConnectionId();
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
             this.arrayIndex = arrayIndex;
-            var key = PojoTrafficStreamKeyAndContext.build(nodeId, connectionId, trafficStreamIndex, tsk->
-                    new TestTrafficStreamsLifecycleContext(ctx, tsk));
+            var key = PojoTrafficStreamKeyAndContext.build(nodeId, connectionId, trafficStreamIndex,
+                    context::createTrafficStreamContextForTest);
             trafficStreamsContext = key.getTrafficStreamsContext();
             key.setTrafficStreamsContext(trafficStreamsContext);
         }
@@ -254,15 +252,17 @@ public class FullTrafficReplayerTest {
     }
 
     private static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {
+        private final TestContext rootContext;
         List<TrafficStream> trafficStreamsList;
         AtomicInteger nextReadCursor = new AtomicInteger();
 
-        public ArrayCursorTrafficSourceFactory(List<TrafficStream> trafficStreamsList) {
+        public ArrayCursorTrafficSourceFactory(TestContext rootContext, List<TrafficStream> trafficStreamsList) {
+            this.rootContext = rootContext;
             this.trafficStreamsList = trafficStreamsList;
         }
 
         public ISimpleTrafficCaptureSource get() {
-            var rval = new ArrayCursorTrafficCaptureSource(this);
+            var rval = new ArrayCursorTrafficCaptureSource(rootContext, this);
             log.info("trafficSource="+rval+" readCursor="+rval.readCursor.get()+" nextReadCursor="+ nextReadCursor.get());
             return rval;
         }
@@ -275,13 +275,14 @@ public class FullTrafficReplayerTest {
         ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory;
         TestContext rootContext;
 
-        public ArrayCursorTrafficCaptureSource(ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
+        public ArrayCursorTrafficCaptureSource(TestContext rootContext,
+                                               ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
             var startingCursor = arrayCursorTrafficSourceFactory.nextReadCursor.get();
             log.info("startingCursor = "  + startingCursor);
             this.readCursor = new AtomicInteger(startingCursor);
             this.arrayCursorTrafficSourceFactory = arrayCursorTrafficSourceFactory;
             cursorHighWatermark = startingCursor;
-            rootContext = TestContext.noTracking();
+            this.rootContext = rootContext;
         }
 
         @Override
@@ -321,6 +322,8 @@ public class FullTrafficReplayerTest {
                     log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
                 }
             }
+            rootContext.channelContextManager.releaseContextFor(
+                    ((TrafficStreamCursorKey) trafficStreamKey).trafficStreamsContext.getChannelKeyContext());
             return CommitResult.Immediate;
         }
     }

@@ -12,8 +12,6 @@ import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -107,8 +105,7 @@ class BlockingTrafficSourceTest {
                             .setClose(CloseObservation.getDefaultInstance())
                             .build())
                     .build();
-            var key = PojoTrafficStreamKeyAndContext.build(ts,
-                    tsk->new TestTrafficStreamsLifecycleContext(rootContext, tsk));
+            var key = PojoTrafficStreamKeyAndContext.build(ts, rootContext::createTrafficStreamContextForTest);
             return CompletableFuture.completedFuture(List.of(new PojoTrafficStreamAndKey(ts, key)));
         }
 

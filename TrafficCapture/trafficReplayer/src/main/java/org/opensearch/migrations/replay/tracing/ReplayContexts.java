@@ -13,7 +13,6 @@ import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -109,19 +108,19 @@ public abstract class ReplayContexts extends IReplayContexts {
         @Override
         public IReplayContexts.ITrafficStreamsLifecycleContext
         createTrafficLifecyleContext(ITrafficStreamKey tsk) {
-            return new ReplayContexts.TrafficStreamsLifecycleContext(this.getRootInstrumentationScope(), this, tsk
+            return new TrafficStreamLifecycleContext(this.getRootInstrumentationScope(), this, tsk
             );
         }
     }
 
-    public static class TrafficStreamsLifecycleContext
+    public static class TrafficStreamLifecycleContext
             extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
             implements IReplayContexts.ITrafficStreamsLifecycleContext {
         private final ITrafficStreamKey trafficStreamKey;
 
-        protected TrafficStreamsLifecycleContext(RootReplayerContext rootScope,
-                                                 IInstrumentationAttributes enclosingScope,
-                                                 ITrafficStreamKey trafficStreamKey) {
+        protected TrafficStreamLifecycleContext(RootReplayerContext rootScope,
+                                                IInstrumentationAttributes enclosingScope,
+                                                ITrafficStreamKey trafficStreamKey) {
             super(rootScope, enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
             initializeSpan();
@@ -209,11 +208,14 @@ public abstract class ReplayContexts extends IReplayContexts {
             return new ReplayContexts.RequestTransformationContext(this);
         }
 
-        @Override
-        public IScopedInstrumentationAttributes createAccumulatorContext() {
-            return new ReplayContexts.ResponseAccumulationContext(this);
+        public IReplayContexts.IRequestAccumulationContext createRequestAccumulationContext() {
+            return new ReplayContexts.RequestAccumulationContext(this);
         }
 
+        @Override
+        public IReplayContexts.IResponseAccumulationContext createResponseAccumulationContext() {
+            return new ReplayContexts.ResponseAccumulationContext(this);
+        }
         @Override
         public TargetRequestContext createTargetRequestContext() {
             return new ReplayContexts.TargetRequestContext(this);
@@ -461,6 +463,11 @@ public abstract class ReplayContexts extends IReplayContexts {
         @Override
         public void onBytesReceived(int size) {
             meterIncrementEvent(getMetrics().bytesRead, size);
+        }
+
+        @Override
+        public IRequestSendingContext createHttpSendingContext() {
+            return new ReplayContexts.RequestSendingContext(this);
         }
 
         @Override

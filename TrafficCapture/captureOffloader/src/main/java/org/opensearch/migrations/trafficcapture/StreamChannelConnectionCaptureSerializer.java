@@ -246,7 +246,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void addStringMessage(int captureFieldNumber, int dataFieldNumber,
-                                  Instant timestamp, String str) throws IOException {
+                                  Instant timestamp, @NonNull String str) throws IOException {
         int dataSize = 0;
         int lengthSize = 1;
         if (str.length() > 0) {

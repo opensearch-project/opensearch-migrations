@@ -6,6 +6,7 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
+import lombok.NonNull;
 
 import java.util.ArrayList;
 
@@ -22,9 +23,10 @@ public interface IInstrumentationAttributes {
     Exception getObservedExceptionToIncludeInMetrics();
     void setObservedExceptionToIncludeInMetrics(Exception e);
 
-    default Attributes getPopulatedMetricAttributes() {
+    default @NonNull Attributes getPopulatedMetricAttributes() {
         final var e = getObservedExceptionToIncludeInMetrics();
-        return e == null ? null : Attributes.builder().put(HAD_EXCEPTION_KEY, true).build();
+        var b = Attributes.builder();
+        return e == null ? b.build() : b.put(HAD_EXCEPTION_KEY, true).build();
     }
 
     default Attributes getPopulatedSpanAttributes() {

@@ -73,6 +73,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
                                     long sourceRequestIndex) {
             super(rootWireLoggingContext, enclosingScope);
             this.sourceRequestIndex = sourceRequestIndex;
+            initializeSpan();
         }
 
         @Override

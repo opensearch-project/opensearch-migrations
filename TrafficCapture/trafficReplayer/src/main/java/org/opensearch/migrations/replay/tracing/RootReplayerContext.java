@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.tracing.RootOtelContext;
@@ -23,7 +24,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
 
     public final ReplayContexts.ChannelKeyContext.MetricInstruments channelKeyInstruments;
     public final ReplayContexts.KafkaRecordContext.MetricInstruments kafkaRecordInstruments;
-    public final ReplayContexts.TrafficStreamsLifecycleContext.MetricInstruments trafficStreamLifecycleInstruments;
+    public final ReplayContexts.TrafficStreamLifecycleContext.MetricInstruments trafficStreamLifecycleInstruments;
     public final ReplayContexts.HttpTransactionContext.MetricInstruments httpTransactionInstruments;
     public final ReplayContexts.RequestAccumulationContext.MetricInstruments requestAccumInstruments;
     public final ReplayContexts.ResponseAccumulationContext.MetricInstruments responseAccumInstruments;
@@ -51,7 +52,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
 
         channelKeyInstruments = new ReplayContexts.ChannelKeyContext.MetricInstruments(meter);
         kafkaRecordInstruments = new ReplayContexts.KafkaRecordContext.MetricInstruments(meter);
-        trafficStreamLifecycleInstruments = new ReplayContexts.TrafficStreamsLifecycleContext.MetricInstruments(meter);
+        trafficStreamLifecycleInstruments = new ReplayContexts.TrafficStreamLifecycleContext.MetricInstruments(meter);
         httpTransactionInstruments = new ReplayContexts.HttpTransactionContext.MetricInstruments(meter);
         requestAccumInstruments = new ReplayContexts.RequestAccumulationContext.MetricInstruments(meter);
         responseAccumInstruments = new ReplayContexts.ResponseAccumulationContext.MetricInstruments(meter);
@@ -69,7 +70,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         return new TrafficSourceContexts.ReadChunkContext(this, this);
     }
 
-    public IReplayContexts.IChannelKeyContext createChannelContext(ITrafficStreamKey tsk) {
+    public IReplayContexts.IChannelKeyContext createChannelContext(ISourceTrafficChannelKey tsk) {
         return new ReplayContexts.ChannelKeyContext(this, this, tsk);
     }
 

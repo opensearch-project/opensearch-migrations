@@ -62,7 +62,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
-                                     ReplayContexts.HttpTransactionContext httpTransactionContext) {
+                                     IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
         this(createClientConnection(eventLoopGroup, sslContext, serverUri,
                         httpTransactionContext.getLogicalEnclosingScope()), httpTransactionContext);
     }
@@ -70,7 +70,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public NettyPacketToHttpConsumer(ChannelFuture clientConnection,
                                      IReplayContexts.IReplayerHttpTransactionContext ctx) {
         var parentContext = ctx.createTargetRequestContext();
-        this.setCurrentRequestContext(new ReplayContexts.RequestSendingContext(parentContext));
+        this.setCurrentRequestContext(parentContext.createHttpSendingContext());
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<>(),

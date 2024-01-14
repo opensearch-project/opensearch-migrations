@@ -6,8 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
-import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
@@ -43,7 +41,7 @@ public class RequestResponsePacketPair {
                 startingSourceRequestIndex, indexOfCurrentRequest);
         var httpTransactionContext = startingAtTrafficStreamKey.getTrafficStreamsContext()
                 .createHttpTransactionContext(requestKey, sourceTimestamp);
-        requestOrResponseAccumulationContext = new ReplayContexts.RequestAccumulationContext(httpTransactionContext);
+        requestOrResponseAccumulationContext = httpTransactionContext.createRequestAccumulationContext();
     }
 
     @NonNull ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
@@ -75,7 +73,7 @@ public class RequestResponsePacketPair {
         var looseCtx = requestOrResponseAccumulationContext;
         assert looseCtx instanceof IReplayContexts.IRequestAccumulationContext;
         requestOrResponseAccumulationContext =
-                getRequestContext().getLogicalEnclosingScope().createAccumulatorContext();
+                getRequestContext().getLogicalEnclosingScope().createResponseAccumulationContext();
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {

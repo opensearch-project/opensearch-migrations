@@ -76,7 +76,7 @@ public class KafkaCaptureFactoryTest {
     }
 
     private static ConnectionContext createCtx() {
-        return new ConnectionContext(new TestRootKafkaOffloaderContext(null), "test", "test");
+        return new ConnectionContext(new TestRootKafkaOffloaderContext(), "test", "test");
     }
 
     /**

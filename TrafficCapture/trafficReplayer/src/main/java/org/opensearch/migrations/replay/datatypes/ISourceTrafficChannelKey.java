@@ -1,12 +1,16 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import lombok.NonNull;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 
 public interface ISourceTrafficChannelKey {
     String getNodeId();
     String getConnectionId();
-    @NonNull IReplayContexts.ITrafficStreamsLifecycleContext getTrafficStreamsContext();
+
+    @Getter
+    @AllArgsConstructor
+    class PojoImpl implements ISourceTrafficChannelKey {
+        String nodeId;
+        String connectionId;
+    }
 }

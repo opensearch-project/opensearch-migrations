@@ -51,7 +51,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
     private static final MetricsLogger metricsLogger = new MetricsLogger("HttpJsonTransformingConsumer");
-    private ReplayContexts.RequestTransformationContext transformationContext;
+    private IReplayContexts.IRequestTransformationContext transformationContext;
 
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
