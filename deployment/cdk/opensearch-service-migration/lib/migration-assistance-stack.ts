@@ -8,9 +8,11 @@ import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {StreamingSourceType} from "./streaming-source-type";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly streamingSourceType: StreamingSourceType,
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
     readonly mskEnablePublicEndpoints?: boolean,
@@ -37,32 +39,16 @@ export class MigrationAssistanceStack extends Stack {
         }
     }
 
-    constructor(scope: Construct, id: string, props: MigrationStackProps) {
-        super(scope, id, props);
-
-        if (props.mskEnablePublicEndpoints && (!props.mskRestrictPublicAccessTo || !props.mskRestrictPublicAccessType)) {
-            throw new Error("The 'mskEnablePublicEndpoints' option requires both 'mskRestrictPublicAccessTo' and 'mskRestrictPublicAccessType' options to be provided")
-        }
-
+    createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
             name: `migration-msk-config-${props.stage}`,
             serverProperties: "auto.create.topics.enable=true"
         })
 
-        const mskSecurityGroup = new SecurityGroup(this, 'migrationMSKSecurityGroup', {
-            vpc: props.vpc,
-            allowAllOutbound: false
-        });
         if (props.mskEnablePublicEndpoints && props.mskRestrictPublicAccessTo && props.mskRestrictPublicAccessType) {
-            mskSecurityGroup.addIngressRule(this.getPublicEndpointAccess(props.mskRestrictPublicAccessTo, props.mskRestrictPublicAccessType), Port.allTcp())
+            streamingSecurityGroup.addIngressRule(this.getPublicEndpointAccess(props.mskRestrictPublicAccessTo, props.mskRestrictPublicAccessType), Port.allTcp())
         }
-        mskSecurityGroup.addIngressRule(mskSecurityGroup, Port.allTraffic())
-        new StringParameter(this, 'SSMParameterMSKAccessGroupId', {
-            description: 'OpenSearch migration parameter for MSK access security group id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskAccessSecurityGroupId`,
-            stringValue: mskSecurityGroup.securityGroupId
-        });
 
         const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
             retention: RetentionDays.THREE_MONTHS
@@ -71,7 +57,7 @@ export class MigrationAssistanceStack extends Stack {
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
-            kafkaVersion: '2.8.1',
+            kafkaVersion: '3.6.0',
             numberOfBrokerNodes: props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2,
             brokerNodeGroupInfo: {
                 instanceType: 'kafka.m5.large',
@@ -82,7 +68,7 @@ export class MigrationAssistanceStack extends Stack {
                         type: "DISABLED"
                     }
                 },
-                securityGroups: [mskSecurityGroup.securityGroupId]
+                securityGroups: [streamingSecurityGroup.securityGroupId]
             },
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
@@ -125,6 +111,29 @@ export class MigrationAssistanceStack extends Stack {
             parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`,
             stringValue: mskCluster.clusterName
         });
+    }
+
+    constructor(scope: Construct, id: string, props: MigrationStackProps) {
+        super(scope, id, props);
+
+        if (props.mskEnablePublicEndpoints && (!props.mskRestrictPublicAccessTo || !props.mskRestrictPublicAccessType)) {
+            throw new Error("The 'mskEnablePublicEndpoints' option requires both 'mskRestrictPublicAccessTo' and 'mskRestrictPublicAccessType' options to be provided")
+        }
+
+        const streamingSecurityGroup = new SecurityGroup(this, 'trafficStreamSourceSG', {
+            vpc: props.vpc,
+            allowAllOutbound: false
+        });
+        streamingSecurityGroup.addIngressRule(streamingSecurityGroup, Port.allTraffic())
+        new StringParameter(this, 'SSMParameterTrafficStreamSourceGroupId', {
+            description: 'OpenSearch migration parameter for traffic stream source access security group id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`,
+            stringValue: streamingSecurityGroup.securityGroupId
+        });
+
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
+            this.createMSKResources(props, streamingSecurityGroup)
+        }
 
         const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
             vpc: props.vpc,

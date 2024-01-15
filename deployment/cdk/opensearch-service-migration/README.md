@@ -205,7 +205,7 @@ Although this CDK does not set up the Capture Proxy on source cluster nodes (exc
 
 #### Capture Proxy on OpenSearch/Elasticsearch nodes
 Before [setting up Capture Proxy instances](../../../TrafficCapture/trafficCaptureProxyServer/README.md#how-to-attach-a-capture-proxy-on-a-coordinator-node) on the source cluster, the IAM policies and Security Groups for the nodes should allow access to the Migration tooling:
-1. The coordinator nodes should add the `migrationMSKSecurityGroup` security group to allow access to Kafka
+1. The coordinator nodes should add the `trafficStreamSourceSG` security group to allow access to Kafka
 2. The IAM role used by the coordinator nodes should have permissions to publish captured traffic to Kafka. A template policy to use, can be seen below
    * This can be added through the AWS Console (IAM Role -> Add permissions -> Create inline policy -> JSON view)
 ```json

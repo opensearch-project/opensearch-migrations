@@ -8,7 +8,7 @@ import {
     FargateTaskDefinition,
     LogDrivers,
     MountPoint,
-    PortMapping,
+    PortMapping, Ulimit,
     Volume
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
@@ -38,9 +38,10 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly serviceConnectServices?: ServiceConnectService[],
     readonly serviceDiscoveryEnabled?: boolean,
     readonly serviceDiscoveryPort?: number,
-    readonly taskCpuUnits?: number
-    readonly taskMemoryLimitMiB?: number
-    readonly taskInstanceCount?: number
+    readonly taskCpuUnits?: number,
+    readonly taskMemoryLimitMiB?: number,
+    readonly taskInstanceCount?: number,
+    readonly ulimits?: Ulimit[]
 }
 
 export class MigrationServiceCore extends Stack {
@@ -119,7 +120,8 @@ export class MigrationServiceCore extends Stack {
             logging: LogDrivers.awsLogs({
                 streamPrefix: `${props.serviceName}-logs`,
                 logGroup: serviceLogGroup
-            })
+            }),
+            ulimits: props.ulimits
         });
         if (props.mountPoints) {
             serviceContainer.addMountPoints(...props.mountPoints)

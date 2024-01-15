@@ -145,9 +145,9 @@ export class MSKUtilityStack extends Stack {
             // Access BROKER_ENDPOINTS from the Lambda return value
             brokerEndpoints = customResource.getAttString("BROKER_ENDPOINTS")
         }
-        new StringParameter(this, 'SSMParameterMSKBrokers', {
-            description: 'OpenSearch Migration Parameter for MSK Brokers',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskBrokers`,
+        new StringParameter(this, 'SSMParameterKafkaBrokers', {
+            description: 'OpenSearch Migration Parameter for Kafka brokers',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`,
             stringValue: brokerEndpoints
         });
     }
