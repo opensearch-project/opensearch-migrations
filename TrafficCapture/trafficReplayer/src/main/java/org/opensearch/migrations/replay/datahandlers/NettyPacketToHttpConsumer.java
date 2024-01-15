@@ -126,7 +126,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var rval = new DefaultChannelPromise(outboundChannelFuture.channel());
         outboundChannelFuture.addListener((ChannelFutureListener) connectFuture -> {
             if (connectFuture.isSuccess()) {
-                channelKeyContext.onConnectionCreated();
                 var pipeline = connectFuture.channel().pipeline();
                 pipeline.removeFirst();
                 log.atTrace().setMessage(()-> channelKeyContext.getChannelKey() +

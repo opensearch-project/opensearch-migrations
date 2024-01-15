@@ -55,15 +55,6 @@ public class ConnectionContext extends BaseNestedSpanContext<IRootOffloaderConte
 
     @Override
     public void sendMeterEventsForEnd() {
-        meterDeltaEvent(getMetrics().activeConnectionsCounter, 1);
-    }
-
-    @Override
-    public void onConnectionCreated() {
-        meterDeltaEvent(getMetrics().activeConnectionsCounter, 1);
-    }
-    @Override
-    public void onConnectionClosed() {
         meterDeltaEvent(getMetrics().activeConnectionsCounter, -1);
     }
 }

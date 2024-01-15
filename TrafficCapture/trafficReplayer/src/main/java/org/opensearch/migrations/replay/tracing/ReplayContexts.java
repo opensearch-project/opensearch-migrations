@@ -53,15 +53,6 @@ public abstract class ReplayContexts extends IReplayContexts {
         public String toString() {
             return channelKey.toString();
         }
-
-        @Override
-        public void onConnectionCreated() {
-            meterDeltaEvent(getMetrics().activeChannelCounter, 1);
-        }
-        @Override
-        public void onConnectionClosed() {
-            meterDeltaEvent(getMetrics().activeChannelCounter, -1);
-        }
     }
 
     public static class KafkaRecordContext

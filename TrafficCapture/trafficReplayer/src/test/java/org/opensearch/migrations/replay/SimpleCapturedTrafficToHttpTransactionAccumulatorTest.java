@@ -121,8 +121,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
                                               List<ObservationDirective> directives, TestContext rootContext) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
-        var tsk = PojoTrafficStreamKeyAndContext.build("n", "test", uniqueIdCounter.incrementAndGet(),
-                rootContext::createTrafficStreamContextForTest);
+        var tsk = PojoTrafficStreamKeyAndContext.build("n", "test_"+uniqueIdCounter.incrementAndGet(),
+                0, rootContext::createTrafficStreamContextForTest);
         var offloader = connectionFactory.createOffloader(TestContext.noTracking().createChannelContext(tsk));
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);
