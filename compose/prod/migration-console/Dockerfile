@@ -23,14 +23,6 @@ RUN pip3 install \
         awscurl==0.32 \
         tqdm==4.66.1
 
-# Experimental - Migration API
-RUN apt-get install nginx 
-RUN pip3 install \
-        django==5.0.1 \
-        djangorestframework==3.14.0
-RUN update-rc.d nginx defaults
-# End Experimental - Migration API
-
 # TODO upon the next release of opensearch-benchmark the awscli package should be installed by pip3, with the expected boto3 version upgrade resolving the current conflicts between opensearch-benchmark and awscli
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
 RUN mkdir /root/kafka-tools

@@ -7,6 +7,7 @@ services:
     build:
       context: .
       dockerfile: ./compose/local/source-with-proxy/Dockerfile
+    container_name: capture-proxy-and-source
     networks:
       - migrations
     ports:
@@ -54,6 +55,7 @@ services:
     build:
       context: .
       dockerfile: ./compose/local/replayer/Dockerfile
+    container_name: traffic-replayer
     networks:
       - migrations
     volumes:
@@ -63,13 +65,14 @@ services:
     depends_on:
       kafka:
         condition: service_started
-      opensearchtarget:
+      opensearch-target:
         condition: service_started
     command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46YWRtaW4= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id default-logging-group --otelCollectorEndpoint http://otel-collector:4317"
 
-  opensearchtarget:
+  opensearch-target:
     # TODO: Move image command to Dockerfile file and specify image version
     image: 'opensearchproject/opensearch:latest'
+    container_name: opensearch-target
     environment:
       - discovery.type=single-node
     networks:
@@ -77,23 +80,24 @@ services:
     ports:
       - "29200:9200"
 
-  opensearchanalytics:
+  comparison-analytics:
     # TODO: Move image command to Dockerfile file and specify image version
     image: 'opensearchproject/opensearch:latest'
     environment:
       - discovery.type=single-node
+    container_name: comparison-analytics
     networks:
       - migrations
     ports:
       - "39200:9200"
 
-  opensearch-dashboards:
+  comparison-dashboard:
     # TODO: Create docker file and specify image version
     image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
     build:
       context: .
       dockerfile: ./compose/local/analytics-dashboards/Dockerfile
-    container_name: opensearch-dashboards
+    container_name: comparison-name
     ports:
       - "5601:5601" # Map host port 5601 to container port 5601
     expose:
@@ -103,7 +107,7 @@ services:
     volumes:
       - ./TrafficCapture/dockerSolution/src/main/docker/opensearchDashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
     depends_on:
-      - opensearchanalytics
+      - comparison-analytics
 
   otel-collector:
     build:
@@ -119,18 +123,23 @@ services:
     networks:
       - migrations
     depends_on:
-      - opensearchanalytics
+      - comparison-analytics
 
   migration-console:
     build:
       context: .
       dockerfile: ./compose/local/migration-console/Dockerfile
+    container_name: migration-console
     networks:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
+      - ./console:/console
+    ports:
+      - "8000:8000"
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
+    stdin_open: true
 
   fetch:
     build:
