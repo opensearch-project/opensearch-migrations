@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.Utils;
 
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -17,7 +18,7 @@ class UtilsTest {
                         .collect(Collectors.joining());
 
         var foldedValue =
-                IntStream.range('A','F').mapToObj(c->(char)c+"").collect(Utils.foldLeft("", (a,b) -> a+b));
+                IntStream.range('A','F').mapToObj(c->(char)c+"").collect(Utils.foldLeft("", (a, b) -> a+b));
 
         log.info("stream concatenated value: " + foldedValue);
         Assertions.assertEquals(groundTruth, foldedValue);

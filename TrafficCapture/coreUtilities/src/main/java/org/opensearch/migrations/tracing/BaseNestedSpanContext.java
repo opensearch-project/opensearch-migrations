@@ -8,6 +8,7 @@ import lombok.NonNull;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.stream.Stream;
 
 public abstract class BaseNestedSpanContext
         <S extends IInstrumentConstructor, T extends IInstrumentationAttributes>
@@ -40,9 +41,9 @@ public abstract class BaseNestedSpanContext
         initializeSpan(null, attributesBuilder);
     }
 
-    protected void initializeSpan(Span linkedSpan, AttributesBuilder attributesBuilder) {
-        initializeSpan(rootInstrumentationScope.buildSpan(enclosingScope, getActivityName(),
-                linkedSpan, attributesBuilder));
+    protected void initializeSpan(Stream<Span> linkedSpans, AttributesBuilder attributesBuilder) {
+        initializeSpan(rootInstrumentationScope.buildSpan(this, getActivityName(),
+                linkedSpans, attributesBuilder));
     }
 
     public void initializeSpan(@NonNull Span s) {

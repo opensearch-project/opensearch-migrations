@@ -22,10 +22,13 @@ import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
+import org.opensearch.migrations.Utils;
 
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
@@ -112,24 +115,26 @@ public class RootOtelContext implements IRootOtelContext {
         return builder; // nothing more to do
     }
 
-    private static SpanBuilder addLinkedToBuilder(Span linkedSpanContext, SpanBuilder spanBuilder) {
-        return Optional.ofNullable(linkedSpanContext)
-                .map(Span::getSpanContext).map(spanBuilder::addLink).orElse(spanBuilder);
+    private static SpanBuilder addLinkedToBuilder(Stream<Span> linkedSpanContexts, SpanBuilder spanBuilder) {
+        return Optional.ofNullable(linkedSpanContexts)
+                .map(ss->ss.collect(Utils.foldLeft(spanBuilder, (b,s)->b.addLink(s.getSpanContext()))))
+                .orElse(spanBuilder);
     }
 
     private static Span buildSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan,
-                                            Span linkedSpanContext) {
-        return addLinkedToBuilder(linkedSpanContext, Optional.ofNullable(parentSpan)
+                                            Stream<Span> linkedSpanContexts) {
+        return addLinkedToBuilder(linkedSpanContexts, Optional.ofNullable(parentSpan)
                 .map(p -> builder.setParent(Context.current().with(p)))
                 .orElseGet(builder::setNoParent))
                 .startSpan().setAllAttributes(attrs);
     }
 
     @Override
-    public @NonNull Span buildSpan(IInstrumentationAttributes enclosingScope,
-                                   String spanName, Span linkedSpan, AttributesBuilder attributesBuilder) {
-        var parentSpan = enclosingScope.getCurrentSpan();
+    public @NonNull Span buildSpan(IInstrumentationAttributes forScope,
+                                   String spanName, Stream<Span> linkedSpans, AttributesBuilder attributesBuilder) {
+        assert forScope.getCurrentSpan() == null;
+        var parentSpan = forScope.getEnclosingScope().getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
-        return buildSpanWithParent(spanBuilder, getPopulatedSpanAttributes(attributesBuilder), parentSpan, linkedSpan);
+        return buildSpanWithParent(spanBuilder, forScope.getPopulatedSpanAttributes(), parentSpan, linkedSpans);
     }
 }

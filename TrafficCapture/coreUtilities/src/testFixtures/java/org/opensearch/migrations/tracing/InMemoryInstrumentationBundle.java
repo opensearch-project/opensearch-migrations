@@ -17,6 +17,12 @@ public class InMemoryInstrumentationBundle {
     public final InMemorySpanExporter testSpanExporter;
     public final InMemoryMetricExporter testMetricExporter;
 
+    public InMemoryInstrumentationBundle(boolean collectTraces,
+                                         boolean collectMetrics) {
+        this(collectTraces ? InMemorySpanExporter.create() : null,
+                collectMetrics ? InMemoryMetricExporter.create() : null);
+    }
+
     public InMemoryInstrumentationBundle(InMemorySpanExporter testSpanExporter,
                                          InMemoryMetricExporter testMetricExporter) {
         this.testSpanExporter = testSpanExporter;

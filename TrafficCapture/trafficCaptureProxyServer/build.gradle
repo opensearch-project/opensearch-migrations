@@ -45,6 +45,7 @@ dependencies {
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':captureOffloader'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
 
     testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
 }
