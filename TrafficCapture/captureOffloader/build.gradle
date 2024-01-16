@@ -20,7 +20,7 @@ sourceSets {
     }
 }
 dependencies {
-    implementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
+    implementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
     api group: 'io.netty', name: 'netty-buffer', version: '4.1.100.Final'
 
     implementation project(':captureProtobufs')

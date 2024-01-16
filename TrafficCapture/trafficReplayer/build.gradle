@@ -35,7 +35,7 @@ repositories {
 dependencies {
     //spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
     def resilience4jVersion = "1.7.0";
-    implementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
+    implementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
@@ -70,7 +70,7 @@ dependencies {
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
 
-    testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.32.0")
+    testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
     testFixturesImplementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
