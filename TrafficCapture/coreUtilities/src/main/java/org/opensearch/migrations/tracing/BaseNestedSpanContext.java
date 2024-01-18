@@ -21,9 +21,16 @@ public abstract class BaseNestedSpanContext
     Exception observedExceptionToIncludeInMetrics;
 
     protected BaseNestedSpanContext(S rootScope, T enclosingScope) {
+        rootScope.onContextCreated(this);
         this.enclosingScope = enclosingScope;
         this.startTime = Instant.now();
         this.rootInstrumentationScope = rootScope;
+    }
+
+    @Override
+    public void endSpan() {
+        IScopedInstrumentationAttributes.super.endSpan();
+        rootInstrumentationScope.onContextClosed(this);
     }
 
     @Override

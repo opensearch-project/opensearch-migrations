@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -32,16 +33,15 @@ import java.util.function.Supplier;
 
 @Slf4j
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
-class BlockingTrafficSourceTest {
+class BlockingTrafficSourceTest extends InstrumentationTest {
     private static final Instant sourceStartTime = Instant.EPOCH;
     public static final int SHIFT = 1;
 
     @Test
     void readNextChunkTest() throws Exception {
-        final var rootContext = TestContext.noTracking();
         var nStreamsToCreate = 210;
         var BUFFER_MILLIS = 10;
-        var testSource = new TestTrafficCaptureSource(nStreamsToCreate);
+        var testSource = new TestTrafficCaptureSource(rootContext, nStreamsToCreate);
 
         var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS));
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
@@ -76,10 +76,10 @@ class BlockingTrafficSourceTest {
     private static class TestTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         int nStreamsToCreate;
         AtomicInteger counter = new AtomicInteger();
-        Instant replayStartTime = Instant.EPOCH.plus(Duration.ofSeconds(SHIFT));
-        TestContext rootContext = TestContext.noTracking();
+        final TestContext rootContext;
 
-        TestTrafficCaptureSource(int nStreamsToCreate) {
+        TestTrafficCaptureSource(TestContext rootContext, int nStreamsToCreate) {
+            this.rootContext = rootContext;
             this.nStreamsToCreate = nStreamsToCreate;
         }
 

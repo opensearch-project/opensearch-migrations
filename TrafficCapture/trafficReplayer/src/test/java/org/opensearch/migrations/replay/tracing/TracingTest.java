@@ -2,31 +2,26 @@ package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.sdk.trace.data.SpanData;
-import lombok.Getter;
 import lombok.Lombok;
-import lombok.Setter;
-import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.TestContext;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class TracingTest {
     @Test
     public void tracingWorks() {
-        TestContext rootContext = TestContext.withTracking();
+        TestContext rootContext = TestContext.withAllTracking();
         var tssk = new ISourceTrafficChannelKey.PojoImpl("n", "c");
         try (var channelCtx = rootContext.createChannelContext(tssk);
              var kafkaRecordCtx =
@@ -62,6 +57,8 @@ public class TracingTest {
 
         checkSpans(recordedSpans);
         checkMetrics(recordedMetrics);
+
+        Assertions.assertTrue(rootContext.contextTracker.getAllRemainingActiveScopes().isEmpty());
     }
 
     private void checkMetrics(List<MetricData> recordedMetrics) {

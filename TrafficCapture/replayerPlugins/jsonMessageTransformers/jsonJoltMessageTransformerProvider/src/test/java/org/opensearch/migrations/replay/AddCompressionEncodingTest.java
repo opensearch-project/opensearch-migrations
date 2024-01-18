@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 
@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPInputStream;
 
 @Slf4j
-public class AddCompressionEncodingTest {
+public class AddCompressionEncodingTest extends InstrumentationTest {
 
     public static final byte BYTE_FILL_VALUE = (byte) '7';
 
@@ -35,29 +35,30 @@ public class AddCompressionEncodingTest {
                 JsonJoltTransformer.newBuilder()
                         .addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP)
                         .build(), null, testPacketCapture,
-                TestRequestKey.getTestConnectionRequestContext(TestContext.noTracking(), 0));
+                TestRequestKey.getTestConnectionRequestContext(rootContext, 0));
 
         final var payloadPartSize = 511;
         final var numParts = 1025;
 
         String sourceHeaders = "GET / HTTP/1.1\n" +
                 "host: localhost\n" +
-                "content-length: " + (numParts*payloadPartSize) + "\n";
+                "content-length: " + (numParts * payloadPartSize) + "\n";
 
-        DiagnosticTrackableCompletableFuture<String,Void> tail =
+        DiagnosticTrackableCompletableFuture<String, Void> tail =
                 compressingTransformer.consumeBytes(sourceHeaders.getBytes(StandardCharsets.UTF_8))
-                        .thenCompose(v-> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
-                                ()->"AddCompressionEncodingTest.compressingTransformer");
+                        .thenCompose(v -> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
+                                () -> "AddCompressionEncodingTest.compressingTransformer");
         final byte[] payloadPart = new byte[payloadPartSize];
         Arrays.fill(payloadPart, BYTE_FILL_VALUE);
-        for (var i = new AtomicInteger(numParts); i.get()>0; i.decrementAndGet()) {
-            tail = tail.thenCompose(v->compressingTransformer.consumeBytes(payloadPart),
-                    ()->"AddCompressionEncodingTest.consumeBytes:"+i.get());
+        for (var i = new AtomicInteger(numParts); i.get() > 0; i.decrementAndGet()) {
+            tail = tail.thenCompose(v -> compressingTransformer.consumeBytes(payloadPart),
+                    () -> "AddCompressionEncodingTest.consumeBytes:" + i.get());
         }
         var fullyProcessedResponse =
-                tail.thenCompose(v->compressingTransformer.finalizeRequest(),
-                        ()->"AddCompressionEncodingTest.fullyProcessedResponse");
+                tail.thenCompose(v -> compressingTransformer.finalizeRequest(),
+                        () -> "AddCompressionEncodingTest.fullyProcessedResponse");
         fullyProcessedResponse.get();
+
         try (var bais = new ByteArrayInputStream(testPacketCapture.getBytesCaptured());
              var unzipStream = new GZIPInputStream(bais);
              var isr = new InputStreamReader(unzipStream, StandardCharsets.UTF_8);

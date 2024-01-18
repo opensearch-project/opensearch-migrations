@@ -24,9 +24,7 @@ import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringingHandler;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
-import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
@@ -37,6 +35,7 @@ import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
@@ -51,6 +50,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private static final MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
+    public static final String SSL_HANDLER_NAME = "ssl";
+    public static final String WRITE_COUNT_WATCHER_HANDLER_NAME = "writeCountWatcher";
+    public static final String READ_COUNT_WATCHER_HANDLER_NAME = "readCountWatcher";
     /**
      * This is a future that chains work onto the channel.  If the value is ready, the future isn't waiting
      * on anything to happen for the channel.  If the future isn't done, something in the chain is still
@@ -70,7 +72,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public NettyPacketToHttpConsumer(ChannelFuture clientConnection,
                                      IReplayContexts.IReplayerHttpTransactionContext ctx) {
         var parentContext = ctx.createTargetRequestContext();
-        this.setCurrentRequestContext(parentContext.createHttpSendingContext());
+        this.setCurrentMessageContext(parentContext.createHttpSendingContext());
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
                 new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
@@ -95,7 +97,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
     private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> &
             IScopedInstrumentationAttributes>
-    void setCurrentRequestContext(T requestSendingContext) {
+    void setCurrentMessageContext(T requestSendingContext) {
         currentRequestContextUnion = requestSendingContext;
     }
 
@@ -135,7 +137,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     sslEngine.setUseClientMode(true);
                     var sslHandler = new SslHandler(sslEngine);
                     addLoggingHandler(pipeline, "A");
-                    pipeline.addLast("ssl", sslHandler);
+                    pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
                     sslHandler.handshakeFuture().addListener(handshakeFuture -> {
                         if (handshakeFuture.isSuccess()) {
                             rval.setSuccess();
@@ -174,15 +176,25 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             throw new IllegalStateException("Channel " + channel + "is being used elsewhere already!");
         }
         var pipeline = channel.pipeline();
-        // add this size counter BEFORE TLS?
-        pipeline.addFirst(new ReadMeteringingHandler(size->{
+        // add these size counters BEFORE TLS?  Notice that when removing from the pipeline, we need to be more careful
+        pipeline.addFirst(WRITE_COUNT_WATCHER_HANDLER_NAME, new WriteMeteringHandler(size->{
+            // client side, so this is the request
+            if (size == 0) { return; }
             if (!(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
                 this.getCurrentRequestSpan().close();
-                this.setCurrentRequestContext(getParentContext().createHttpReceivingContext());
+                this.setCurrentMessageContext(getParentContext().createHttpSendingContext());
+            }
+            getParentContext().onBytesSent(size);
+        }));
+        pipeline.addFirst(READ_COUNT_WATCHER_HANDLER_NAME, new ReadMeteringingHandler(size->{
+            // client side, so this is the response
+            if (size == 0) { return; }
+            if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
+                this.getCurrentRequestSpan().close();
+                this.setCurrentMessageContext(getParentContext().createHttpReceivingContext());
             }
             getParentContext().onBytesReceived(size);
         }));
-        pipeline.addFirst(new WriteMeteringHandler(size->getParentContext().onBytesSent(size)));
         addLoggingHandler(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         addLoggingHandler(pipeline, "C");
@@ -208,6 +220,13 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         try {
             var pipeline = channel.pipeline();
             log.atDebug().setMessage(() -> "Resetting the pipeline currently at: " + pipeline).log();
+            for (var handlerName : new String[]{WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME}) {
+                try {
+                    pipeline.remove(handlerName);
+                } catch (NoSuchElementException e) {
+                    log.atDebug().setMessage(()->"Ignoring an exception that the "+handlerName+" wasn't present").log();
+                }
+            }
             while (!(pipeline.last() instanceof SslHandler) && (pipeline.last() != null)) {
                 pipeline.removeLast();
             }
@@ -295,8 +314,10 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
-                    this.getCurrentRequestSpan().close();
-                    this.setCurrentRequestContext(getParentContext().createWaitingForResponseContext());
+                    if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
+                        this.getCurrentRequestSpan().close();
+                        this.setCurrentMessageContext(getParentContext().createWaitingForResponseContext());
+                    }
 
                     var future = new CompletableFuture<AggregatedRawResponse>();
                     var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,
@@ -309,7 +330,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         future.complete(responseBuilder.addErrorCause(t).build());
                     }
                     return rval;
-                }, ()->"Waiting for previous consumes to set the callback")
+                }, ()->"Waiting for previous consumes to set the future")
                 .map(f->f.whenComplete((v,t)-> deactivateChannel()), ()->"clearing pipeline");
         log.atTrace().setMessage(()->"Chaining finalization work off of " + activeChannelFuture +
                 ".  Returning finalization future="+ff).log();

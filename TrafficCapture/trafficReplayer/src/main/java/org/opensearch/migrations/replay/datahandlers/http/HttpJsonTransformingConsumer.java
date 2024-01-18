@@ -136,13 +136,13 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return offloadingHandler.getPacketReceiverCompletionFuture()
                 .getDeferredFutureThroughHandle(
                         (v, t) -> {
-                            transformationContext.close();
                             if (t != null) {
                                 transformationContext.onTransformFailure();
                                 t = unwindPossibleCompletionException(t);
                                 if (t instanceof NoContentException) {
                                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                                 } else {
+                                    transformationContext.close();
                                     metricsLogger.atError(MetricsEvent.TRANSFORMING_REQUEST_FAILED, t)
                                             .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext.toString())
                                             .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
@@ -150,6 +150,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                     throw new CompletionException(t);
                                 }
                             } else {
+                                transformationContext.close();
                                 transformationContext.onTransformSuccess();
                                 metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
                                         .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)

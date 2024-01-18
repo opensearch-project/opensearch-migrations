@@ -16,7 +16,7 @@ import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -39,7 +39,7 @@ import java.util.stream.Stream;
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("requiresDocker")
-public class KafkaRestartingTrafficReplayerTest {
+public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
     public static final String TEST_GROUP_PRODUCER_ID = "TEST_GROUP_PRODUCER_ID";
@@ -88,17 +88,18 @@ public class KafkaRestartingTrafficReplayerTest {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response->TestHttpServerContext.makeResponse(random, response));
-        var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
+        var streamAndConsumer =
+                TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(rootContext, testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
                 .collect(Collectors.joining("\n"))).log();
 
         loadStreamsToKafka(buildKafkaConsumer(),
                 Streams.concat(trafficStreams.stream(), Stream.of(SENTINEL_TRAFFIC_STREAM)));
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(rootContext, streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
                 () -> new SentinelSensingTrafficSource(
-                        new KafkaTrafficCaptureSource(TestContext.noTracking(), buildKafkaConsumer(), TEST_TOPIC_NAME,
+                        new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(), TEST_TOPIC_NAME,
                                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
         log.info("done");
     }
@@ -181,7 +182,7 @@ public class KafkaRestartingTrafficReplayerTest {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-        return () -> new KafkaTrafficCaptureSource(TestContext.noTracking(), kafkaConsumer, TEST_TOPIC_NAME,
+        return () -> new KafkaTrafficCaptureSource(rootCtx, kafkaConsumer, TEST_TOPIC_NAME,
                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS));
     }
 

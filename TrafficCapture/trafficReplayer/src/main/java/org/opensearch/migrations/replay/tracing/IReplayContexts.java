@@ -227,8 +227,8 @@ public abstract class IReplayContexts {
         void onBytesReceived(int size);
 
         IRequestSendingContext createHttpSendingContext();
-        IReceivingHttpResponseContext createHttpReceivingContext();
         IWaitingForHttpResponseContext createWaitingForResponseContext();
+        IReceivingHttpResponseContext createHttpReceivingContext();
     }
 
     public interface IRequestSendingContext

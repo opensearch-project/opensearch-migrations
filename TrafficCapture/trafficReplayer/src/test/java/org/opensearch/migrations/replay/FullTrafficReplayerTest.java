@@ -10,7 +10,6 @@ import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -24,6 +23,7 @@ import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSour
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -57,13 +57,13 @@ import java.util.stream.Collectors;
 // to the test server, a shutdown will stop those work threads without letting them flush through all of their work
 // (since that could take a very long time) and some of the work might have been followed by resource releases.
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
-public class FullTrafficReplayerTest {
+public class FullTrafficReplayerTest extends InstrumentationTest {
 
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_NODE_ID = "TestNodeId";
     public static final String TEST_CONNECTION_ID = "testConnectionId";
 
-    private static class IndexWatchingListenerFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
+    protected static class IndexWatchingListenerFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
         AtomicInteger nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
 
         @Override
@@ -82,122 +82,6 @@ public class FullTrafficReplayerTest {
         }
     }
 
-    @Test
-    public void testSingleStreamWithCloseIsCommitted() throws Throwable {
-        var random = new Random(1);
-        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                response->TestHttpServerContext.makeResponse(random, response));
-        var trafficStreamWithJustClose = TrafficStream.newBuilder()
-                .setNodeId(TEST_NODE_ID)
-                .setConnectionId(TEST_CONNECTION_ID)
-                .addSubStream(TrafficObservation.newBuilder()
-                        .setClose(CloseObservation.newBuilder().build()).build())
-                .build();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(TestContext.noTracking(),
-                List.of(trafficStreamWithJustClose));
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
-                httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(), trafficSourceSupplier);
-        Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
-        log.info("done");
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {1,2})
-    public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
-        var random = new Random(1);
-        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                response->TestHttpServerContext.makeResponse(random, response));
-        var baseTime = Instant.now();
-        var fixedTimestamp =
-                Timestamp.newBuilder().setSeconds(baseTime.getEpochSecond()).setNanos(baseTime.getNano()).build();
-        var tsb = TrafficStream.newBuilder().setConnectionId("C");
-        for (int i=0; i<numRequests; ++i) {
-            tsb = tsb
-                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                            .setRead(ReadObservation.newBuilder()
-                                    .setData(ByteString.copyFrom(("GET /" +  i + " HTTP/1.0\r\n")
-                                            .getBytes(StandardCharsets.UTF_8)))
-                                    .build())
-                            .build())
-                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                            .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
-                                    .setFirstLineByteLength(14)
-                                    .setHeadersByteLength(14)
-                                    .build())
-                            .build())
-                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                            .setWrite(WriteObservation.newBuilder()
-                                    .setData(ByteString.copyFrom("HTTP/1.0 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
-                                    .build())
-                            .build());
-        }
-        var trafficStream = tsb.addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                .setClose(CloseObservation.getDefaultInstance()))
-                .build();
-        var trackingContext = TestContext.withTracking();
-        var trafficSource =
-                new ArrayCursorTrafficCaptureSource(trackingContext,
-                        new ArrayCursorTrafficSourceFactory(trackingContext, List.of(trafficStream)));
-        var tr = new TrafficReplayer(trackingContext, httpServer.localhostEndpoint(), null,
-                new StaticAuthTransformerFactory("TEST"), null,
-                true, 10, 10*1024);
-
-        var tuplesReceived = new HashSet<String>();
-        try (var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
-                    new TimeShifter(10 * 1000), (t) -> {
-                        var key = t.uniqueRequestKey;
-                        var wasNew = tuplesReceived.add(key.toString());
-                        Assertions.assertTrue(wasNew);
-                    });
-        } finally {
-            tr.shutdown(null);
-        }
-
-        Assertions.assertEquals(numRequests, tuplesReceived.size());
-        checkSpansForSimpleReplayedTransactions(trackingContext.inMemoryInstrumentationBundle.testSpanExporter,
-                numRequests);
-        log.info("done");
-    }
-
-    /**
-     * This function is written like this rather than with a loop so that the backtrace will show WHICH
-     * key was corrupted.
-     */
-    private void checkSpansForSimpleReplayedTransactions(InMemorySpanExporter testSpanExporter, int numRequests) {
-        var byName = testSpanExporter.getFinishedSpanItems().stream().collect(Collectors.groupingBy(SpanData::getName));
-        BiConsumer<Integer, String> chk = (i, k) -> {
-            Assertions.assertNotNull(byName.get(k));
-            Assertions.assertEquals(i, byName.get(k).size());
-            byName.remove(k);
-        };
-        chk.accept(1,"channel");
-        chk.accept(1, "trafficStreamLifetime");
-        chk.accept(numRequests, "httpTransaction");
-        chk.accept(numRequests, "accumulatingRequest");
-        chk.accept(numRequests, "accumulatingResponse");
-        chk.accept(numRequests, "transformation");
-        chk.accept(numRequests, "targetTransaction");
-        chk.accept(numRequests*2, "scheduled");
-        chk.accept(numRequests, "requestSending");
-        chk.accept(numRequests, "waitingForResponse");
-        chk.accept(numRequests, "tupleHandling");
-
-        Consumer<String> chkNonZero = k-> {
-            Assertions.assertNotNull(byName.get(k));
-            Assertions.assertFalse(byName.get(k).isEmpty());
-            byName.remove(k);
-        };
-        chkNonZero.accept("readNextTrafficStreamChunk");
-        // ideally, we'd be getting these back too, but our requests are malformed, so the server closes, which
-        // may occur before we've started to accumulate the response.  So - just ignore these, but make sure that
-        // there isn't anything else that we've missed.
-        byName.remove("receivingResponse");
-
-        Assertions.assertEquals("", byName.entrySet().stream()
-                .map(kvp->kvp.getKey()+":"+kvp.getValue()).collect(Collectors.joining()));
-    }
-
     @ParameterizedTest
     @CsvSource(value = {
             "3,false",
@@ -209,15 +93,15 @@ public class FullTrafficReplayerTest {
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
-                response->TestHttpServerContext.makeResponse(random,response));
-        var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
+                response -> TestHttpServerContext.makeResponse(random, response));
+        var streamAndConsumer =
+                TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(rootContext, testSize, randomize);
         var numExpectedRequests = streamAndConsumer.numHttpTransactions;
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
-        log.atInfo().setMessage(()->trafficStreams.stream().map(ts->TrafficStreamUtils.summarizeTrafficStream(ts))
-                        .collect(Collectors.joining("\n"))).log();
-        var rootContext = TestContext.noTracking();
+        log.atInfo().setMessage(() -> trafficStreams.stream().map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
+                .collect(Collectors.joining("\n"))).log();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(rootContext, trafficStreams);
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(numExpectedRequests,
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(rootContext, numExpectedRequests,
                 httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(), trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(), trafficSourceSupplier.nextReadCursor.get());
         log.info("done");
@@ -251,7 +135,7 @@ public class FullTrafficReplayerTest {
         }
     }
 
-    private static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {
+    protected static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {
         private final TestContext rootContext;
         List<TrafficStream> trafficStreamsList;
         AtomicInteger nextReadCursor = new AtomicInteger();
@@ -268,7 +152,7 @@ public class FullTrafficReplayerTest {
         }
     }
 
-    private static class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSource {
+    protected static class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         final AtomicInteger readCursor;
         final PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
         Integer cursorHighWatermark;

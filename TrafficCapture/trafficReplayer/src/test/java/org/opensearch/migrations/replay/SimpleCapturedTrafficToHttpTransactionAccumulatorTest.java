@@ -17,6 +17,7 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -52,7 +53,7 @@ import java.util.stream.Stream;
  * @return
  */
 @Slf4j
-public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
+public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends InstrumentationTest {
 
     public static final int MAX_COMMANDS_IN_CONNECTION = 256;
 
@@ -123,7 +124,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
         var tsk = PojoTrafficStreamKeyAndContext.build("n", "test_"+uniqueIdCounter.incrementAndGet(),
                 0, rootContext::createTrafficStreamContextForTest);
-        var offloader = connectionFactory.createOffloader(TestContext.noTracking().createChannelContext(tsk));
+        var offloader = connectionFactory.createOffloader(rootContext.createChannelContext(tsk));
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);
         }
@@ -195,12 +196,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     @MethodSource("loadSimpleCombinations")
     void generateAndTest(String testName, int bufferSize, int skipCount,
                          List<ObservationDirective> directives, List<Integer> expectedSizes) throws Exception {
-        var context = TestContext.noTracking();
         var trafficStreams = Arrays.stream(makeTrafficStreams(bufferSize, 0, new AtomicInteger(),
-                        directives, TestContext.noTracking())).skip(skipCount);
+                directives, rootContext)).skip(skipCount);
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
-        accumulateTrafficStreamsWithNewAccumulator(context, trafficStreams, reconstructedTransactions, requestsReceived);
+        accumulateTrafficStreamsWithNewAccumulator(rootContext, trafficStreams, reconstructedTransactions,
+                requestsReceived);
         var splitSizes = unzipRequestResponseSizes(expectedSizes);
         assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, splitSizes._1, splitSizes._2);
         Assertions.assertEquals(requestsReceived.get(), reconstructedTransactions.size());

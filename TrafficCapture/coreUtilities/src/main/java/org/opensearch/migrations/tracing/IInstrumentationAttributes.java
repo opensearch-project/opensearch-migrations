@@ -61,7 +61,8 @@ public interface IInstrumentationAttributes {
     }
     default void meterDeltaEvent(LongUpDownCounter c, long delta) {
         try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            c.add(delta, getPopulatedMetricAttributes());
+            var attributes = getPopulatedMetricAttributes();
+            c.add(delta, attributes);
         }
     }
 }

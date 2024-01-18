@@ -91,7 +91,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         @Override
         public void close() throws IOException {
             log.atInfo().setMessage(() -> "factory.close()").log();
-            telemetryContext.close();
         }
 
         @Override

@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -39,7 +40,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @WrapWithNettyLeakDetection
-class TrafficReplayerTest {
+class TrafficReplayerTest extends InstrumentationTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
     private static String TEST_TRAFFIC_STREAM_ID_STRING = "testId";
@@ -112,7 +113,6 @@ class TrafficReplayerTest {
     public void testDelimitedDeserializer() throws Exception {
         final Instant timestamp = Instant.now();
         byte[] serializedChunks = synthesizeTrafficStreamsIntoByteArray(timestamp, 3);
-        var rootContext = TestContext.noTracking();
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
             AtomicInteger counter = new AtomicInteger(0);
             var allMatch = new AtomicBoolean(true);
@@ -152,7 +152,7 @@ class TrafficReplayerTest {
 
     @Test
     public void testReader() throws Exception {
-        var tr = new TrafficReplayer(TestContext.noTracking(),
+        var tr = new TrafficReplayer(rootContext,
                 new URI("http://localhost:9200"), null, null, false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
@@ -178,7 +178,8 @@ class TrafficReplayerTest {
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                                                 IReplayContexts.IChannelKeyContext ctx,
-                                                                @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
+                                                                @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
 
                             @Override
                             public void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
@@ -188,23 +189,25 @@ class TrafficReplayerTest {
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
-                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         IReplayContexts.IChannelKeyContext ctx) {}
+                            @Override
+                            public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
+                                                               IReplayContexts.IChannelKeyContext ctx) {
+                            }
                         });
         var bytes = synthesizeTrafficStreamsIntoByteArray(Instant.now(), 1);
 
         try (var bais = new ByteArrayInputStream(bytes)) {
-            try (var trafficSource = new InputStreamOfTraffic(TestContext.noTracking(), bais)) {
+            try (var trafficSource = new InputStreamOfTraffic(rootContext, bais)) {
                 tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         Assertions.assertEquals(1, byteArrays.size());
-        Assertions.assertTrue(byteArrays.stream().allMatch(ba->ba.size()==2));
+        Assertions.assertTrue(byteArrays.stream().allMatch(ba -> ba.size() == 2));
     }
 
     @Test
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
-        var tr = new TrafficReplayer(TestContext.noTracking(),
+        var tr = new TrafficReplayer(rootContext,
                 new URI("http://localhost:9200"), null, null, false);
         List<List<byte[]>> byteArrays = new ArrayList<>();
         var remainingAccumulations = new AtomicInteger();
@@ -233,7 +236,8 @@ class TrafficReplayerTest {
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                                                 IReplayContexts.IChannelKeyContext ctx,
-                                                                @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
+                                                                @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                            }
 
                             @Override
                             public void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
@@ -241,8 +245,11 @@ class TrafficReplayerTest {
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
-                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         IReplayContexts.IChannelKeyContext ctx) {}
+
+                            @Override
+                            public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
+                                                               IReplayContexts.IChannelKeyContext ctx) {
+                            }
                         }
                 );
         byte[] serializedChunks;
@@ -263,13 +270,13 @@ class TrafficReplayerTest {
         }
 
         try (var bais = new ByteArrayInputStream(serializedChunks)) {
-            try (var trafficSource = new InputStreamOfTraffic(TestContext.noTracking(), bais)) {
+            try (var trafficSource = new InputStreamOfTraffic(rootContext, bais)) {
                 tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
             }
         }
         trafficAccumulator.close();
         Assertions.assertEquals(2, byteArrays.size());
-        Assertions.assertTrue(byteArrays.stream().allMatch(ba->ba.size()==2));
+        Assertions.assertTrue(byteArrays.stream().allMatch(ba -> ba.size() == 2));
         Assertions.assertEquals(0, remainingAccumulations.get());
     }
 

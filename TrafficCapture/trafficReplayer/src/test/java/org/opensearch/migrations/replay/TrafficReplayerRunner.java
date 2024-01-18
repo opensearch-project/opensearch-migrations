@@ -5,10 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
@@ -19,7 +17,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Optional;
-import java.util.Random;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,7 +35,7 @@ public class TrafficReplayerRunner {
 
     private TrafficReplayerRunner() {}
 
-    static void runReplayerUntilSourceWasExhausted(int numExpectedRequests, URI endpoint,
+    static void runReplayerUntilSourceWasExhausted(TestContext rootContext, int numExpectedRequests, URI endpoint,
                                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
                                                    Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier)
             throws Throwable {
@@ -54,7 +51,7 @@ public class TrafficReplayerRunner {
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
             try {
-                runTrafficReplayer(trafficSourceSupplier, endpoint, (t) -> {
+                runTrafficReplayer(rootContext, trafficSourceSupplier, endpoint, (t) -> {
                     if (runNumber != runNumberRef.get()) {
                         // for an old replayer.  I'm not sure why shutdown isn't blocking until all threads are dead,
                         // but that behavior only impacts this test as far as I can tell.
@@ -137,11 +134,12 @@ public class TrafficReplayerRunner {
         Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
     }
 
-    private static void runTrafficReplayer(Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
+    private static void runTrafficReplayer(TestContext rootContext,
+                                           Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
                                            URI endpoint,
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
         log.info("Starting a new replayer and running it");
-        var tr = new TrafficReplayer(TestContext.noTracking(), endpoint, null,
+        var tr = new TrafficReplayer(rootContext, endpoint, null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10*1024);
 

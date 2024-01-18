@@ -5,14 +5,12 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.Producer;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -26,7 +24,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("requiresDocker")
-public class KafkaCommitsWorkBetweenLongPolls {
+public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
     private static final long DEFAULT_POLL_INTERVAL_MS = 1000;
     private static final int NUM_RUNS = 5;
     public static final String TEST_TOPIC_NAME = "test-topic";
@@ -48,8 +46,7 @@ public class KafkaCommitsWorkBetweenLongPolls {
     @Test
     @Tag("longTest")
     public void testThatCommitsAndReadsKeepWorking() throws Exception {
-        final var rootContext = TestContext.noTracking();
-        var kafkaSource = new KafkaTrafficCaptureSource(TestContext.noTracking(), buildKafkaConsumer(),
+        var kafkaSource = new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(),
                 TEST_TOPIC_NAME, Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS/3));
         var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMinutes(5));
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());

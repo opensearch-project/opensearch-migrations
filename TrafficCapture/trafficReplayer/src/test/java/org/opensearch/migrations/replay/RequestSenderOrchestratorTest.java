@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
 import java.nio.charset.StandardCharsets;
@@ -23,7 +24,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
-class RequestSenderOrchestratorTest {
+class RequestSenderOrchestratorTest extends InstrumentationTest {
 
     public static final int NUM_REQUESTS_TO_SCHEDULE = 20;
     public static final int NUM_REPEATS = 2;
@@ -31,7 +32,6 @@ class RequestSenderOrchestratorTest {
     @Test
     @Tag("longTest")
     public void testThatSchedulingWorks() throws Exception {
-        var ctx = TestContext.noTracking();
         var httpServer = SimpleHttpServer.makeServer(false,
                 r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)));
         var testServerUri = httpServer.localhostEndpoint();
@@ -41,7 +41,7 @@ class RequestSenderOrchestratorTest {
         Instant lastEndTime = baseTime;
         var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
         for (int i = 0; i<NUM_REQUESTS_TO_SCHEDULE; ++i) {
-            var requestContext = TestRequestKey.getTestConnectionRequestContext(ctx, i);
+            var requestContext = TestRequestKey.getTestConnectionRequestContext(rootContext, i);
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
             var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
@@ -52,7 +52,7 @@ class RequestSenderOrchestratorTest {
             scheduledItems.add(arr);
             lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
-        var connectionCtx = TestRequestKey.getTestConnectionRequestContext(ctx, NUM_REQUESTS_TO_SCHEDULE);
+        var connectionCtx = TestRequestKey.getTestConnectionRequestContext(rootContext, NUM_REQUESTS_TO_SCHEDULE);
         var closeFuture = senderOrchestrator.scheduleClose(
                 connectionCtx.getLogicalEnclosingScope(), NUM_REQUESTS_TO_SCHEDULE,
                 lastEndTime.plus(Duration.ofMillis(100)));
@@ -61,7 +61,7 @@ class RequestSenderOrchestratorTest {
         for (int i=0; i<scheduledItems.size(); ++i) {
             var cf = scheduledItems.get(i);
             var arr = cf.get();
-            Assertions.assertEquals(null, arr.error);
+            Assertions.assertNull(arr.error);
             Assertions.assertTrue(arr.responseSizeInBytes > 0);
             var httpMessage = HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
                     arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())), false);

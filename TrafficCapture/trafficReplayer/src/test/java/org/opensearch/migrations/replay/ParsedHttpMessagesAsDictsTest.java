@@ -5,18 +5,13 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.MockMetricsBuilder;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
 import java.util.Map;
 import java.util.Optional;
 
-class ParsedHttpMessagesAsDictsTest {
-
-    static TestContext rootContext = TestContext.noTracking();
-
-    private static final PojoTrafficStreamKeyAndContext TEST_TRAFFIC_STREAM_KEY =
-            PojoTrafficStreamKeyAndContext.build("N","C",1,
-                    k->rootContext.createTrafficStreamContextForStreamSource(rootContext.createChannelContext(k), k));
+class ParsedHttpMessagesAsDictsTest extends InstrumentationTest {
 
     ParsedHttpMessagesAsDicts makeTestData() {
         return makeTestData(null, null);
@@ -30,6 +25,9 @@ class ParsedHttpMessagesAsDictsTest {
 
     String getLoggedMetrics(ParsedHttpMessagesAsDicts parsedMessage) {
         var metricsBuilder = new MockMetricsBuilder();
+        var TEST_TRAFFIC_STREAM_KEY =
+                PojoTrafficStreamKeyAndContext.build("N","C",1,
+                        k->rootContext.createTrafficStreamContextForStreamSource(rootContext.createChannelContext(k), k));
         metricsBuilder = (MockMetricsBuilder) parsedMessage.buildStatusCodeMetrics(metricsBuilder,
                 new PojoUniqueSourceRequestKey(TEST_TRAFFIC_STREAM_KEY, 0));
         return metricsBuilder.getLoggedAttributes();

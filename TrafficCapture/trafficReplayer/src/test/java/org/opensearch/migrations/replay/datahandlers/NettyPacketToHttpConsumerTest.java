@@ -27,6 +27,7 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
 import javax.net.ssl.SSLException;
@@ -46,7 +47,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 @WrapWithNettyLeakDetection
-public class NettyPacketToHttpConsumerTest {
+public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
 
@@ -123,7 +124,6 @@ public class NettyPacketToHttpConsumerTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testHttpResponseIsSuccessfullyCaptured(boolean useTls) throws Exception {
-        var ctx = TestContext.noTracking();
         for (int i = 0; i < 3; ++i) {
             var testServer = testServers.get(useTls);
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
@@ -132,7 +132,7 @@ public class NettyPacketToHttpConsumerTest {
                     new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
                     testServer.localhostEndpoint(),
                     sslContext,
-                    TestRequestKey.getTestConnectionRequestContext(ctx, 0));
+                    TestRequestKey.getTestConnectionRequestContext(rootContext, 0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -147,11 +147,9 @@ public class NettyPacketToHttpConsumerTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
-            throws SSLException, ExecutionException, InterruptedException
-    {
-        var rootCtx = TestContext.noTracking();
+            throws SSLException, ExecutionException, InterruptedException {
         var testServer = testServers.get(useTls);
-        var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
+        var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
                 new TransformationLoader().getTransformerFactoryLoader(null), null);
@@ -161,13 +159,13 @@ public class NettyPacketToHttpConsumerTest {
                 new RequestSenderOrchestrator(
                         new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
                 new TestFlowController(), timeShifter);
-        for (int j=0; j<2; ++j) {
+        for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {
-                var ctx = TestRequestKey.getTestConnectionRequestContext(rootCtx, "TEST_"+i, j);
+                var ctx = TestRequestKey.getTestConnectionRequestContext(rootContext, "TEST_" + i, j);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(), ctx.getReplayerRequestKey(),
-                        ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-                log.info("requestFinishFuture="+requestFinishFuture);
+                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                log.info("requestFinishFuture=" + requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();
                 log.debug("Got aggregated response=" + aggregatedResponse);
                 Assertions.assertNull(aggregatedResponse.getError());

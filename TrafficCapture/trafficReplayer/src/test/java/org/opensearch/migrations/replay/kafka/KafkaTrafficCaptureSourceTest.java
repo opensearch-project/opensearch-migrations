@@ -10,13 +10,11 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -37,13 +35,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 @Slf4j
-class KafkaTrafficCaptureSourceTest {
+class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public static final int NUM_READ_ITEMS_BOUND = 1000;
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
     @Test
     public void testRecordToString() {
-        final var rootContext = TestContext.noTracking();
         var ts = TrafficStream.newBuilder()
                 .setConnectionId("c")
                 .setNodeId("n")
@@ -58,10 +55,9 @@ class KafkaTrafficCaptureSourceTest {
 
     @Test
     public void testSupplyTrafficFromSource() {
-        final var rootContext = TestContext.noTracking();
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.noTracking(),
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
                 mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
@@ -103,7 +99,7 @@ class KafkaTrafficCaptureSourceTest {
     public void testSupplyTrafficWithUnformattedMessages() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(TestContext.noTracking(),
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
                 mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
@@ -129,7 +125,6 @@ class KafkaTrafficCaptureSourceTest {
         // This assertion will fail the test case if not completed within its duration, as would be the case if there
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
-        final var rootContext = TestContext.noTracking();
         var tsCount = new AtomicInteger();
         Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
             while (tsCount.get() < numTrafficStreams) {

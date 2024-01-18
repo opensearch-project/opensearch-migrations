@@ -34,6 +34,7 @@ public abstract class ReplayContexts extends IReplayContexts {
             super(rootScope, enclosingScope);
             this.channelKey = channelKey;
             initializeSpan();
+            meterDeltaEvent(getMetrics().activeChannelCounter, 1);
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
@@ -52,6 +53,12 @@ public abstract class ReplayContexts extends IReplayContexts {
         @Override
         public String toString() {
             return channelKey.toString();
+        }
+
+        @Override
+        public void sendMeterEventsForEnd() {
+            super.sendMeterEventsForEnd();
+            meterDeltaEvent(getMetrics().activeChannelCounter, -1);
         }
     }
 

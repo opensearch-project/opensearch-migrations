@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -29,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("requiresDocker")
-public class KafkaKeepAliveTests {
+public class KafkaKeepAliveTests extends InstrumentationTest {
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
     public static final String HEARTBEAT_INTERVAL_MS_KEY = "heartbeat.interval.ms";
     public static final long MAX_POLL_INTERVAL_MS = 1000;
@@ -55,7 +56,7 @@ public class KafkaKeepAliveTests {
      * @throws Exception
      */
     @BeforeEach
-    private void setupTestCase() throws Exception {
+    private void setupTestCase(TestContext testContext) throws Exception {
         kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
         this.sendCompleteCount = new AtomicInteger(0);
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 0, sendCompleteCount).get();
@@ -69,12 +70,12 @@ public class KafkaKeepAliveTests {
         kafkaProperties.put(HEARTBEAT_INTERVAL_MS_KEY, HEARTBEAT_INTERVAL_MS+"");
         kafkaProperties.put("max.poll.records", 1);
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaProperties);
-        this.kafkaSource = new KafkaTrafficCaptureSource(TestContext.noTracking(),
+        this.kafkaSource = new KafkaTrafficCaptureSource(testContext,
                 kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS));
         this.trafficSource = new BlockingTrafficSource(kafkaSource, Duration.ZERO);
         this.keysReceived = new ArrayList<>();
 
-        readNextNStreams(trafficSource,  keysReceived, 0, 1);
+        readNextNStreams(testContext, trafficSource,  keysReceived, 0, 1);
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1, sendCompleteCount);
     }
 
@@ -100,7 +101,7 @@ public class KafkaKeepAliveTests {
                 pollIntervalMs, TimeUnit.MILLISECONDS);
 
         // wait for 2 messages so that they include the last one produced by the async schedule call previously
-        readNextNStreams(trafficSource,  keysReceived, 1, 2);
+        readNextNStreams(rootContext, trafficSource,  keysReceived, 1, 2);
         Assertions.assertEquals(3, keysReceived.size());
         // At this point, we've read all (3) messages produced , committed the first one
         // (all the way through to Kafka), and no commits are in-flight yet for the last two messages.
@@ -112,7 +113,7 @@ public class KafkaKeepAliveTests {
         for (int i=0; i<2; ++i) {
             KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1 + i, sendCompleteCount).get();
         }
-        readNextNStreams(trafficSource, keysReceived, 1, 1);
+        readNextNStreams(rootContext, trafficSource, keysReceived, 1, 1);
 
         trafficSource.commitTrafficStream(keysReceived.get(0));
         log.info("Called commitTrafficStream but waiting long enough for the client to leave the group.  " +
@@ -127,7 +128,7 @@ public class KafkaKeepAliveTests {
 
         log.info("re-establish a client connection so that the following commit will work");
         log.atInfo().setMessage(()->"1 ..."+renderNextCommitsAsString()).log();
-        readNextNStreams(trafficSource, keysReceived, 0, 1);
+        readNextNStreams(rootContext, trafficSource, keysReceived, 0, 1);
         log.atInfo().setMessage(()->"2 ..."+renderNextCommitsAsString()).log();
 
         log.info("wait long enough to fall out of the group again");
@@ -136,16 +137,16 @@ public class KafkaKeepAliveTests {
         var keysReceivedUntilDrop2 = keysReceived;
         keysReceived = new ArrayList<>();
         log.atInfo().setMessage(()->"re-establish... 3 ..."+renderNextCommitsAsString()).log();
-        readNextNStreams(trafficSource, keysReceived, 0, 1);
+        readNextNStreams(rootContext, trafficSource, keysReceived, 0, 1);
         trafficSource.commitTrafficStream(keysReceivedUntilDrop1.get(1));
         log.atInfo().setMessage(()->"re-establish... 4 ..."+renderNextCommitsAsString()).log();
-        readNextNStreams(trafficSource, keysReceived, 1, 1);
+        readNextNStreams(rootContext, trafficSource, keysReceived, 1, 1);
         log.atInfo().setMessage(()->"5 ..."+renderNextCommitsAsString()).log();
 
         Thread.sleep(2*MAX_POLL_INTERVAL_MS);
         var keysReceivedUntilDrop3 = keysReceived;
         keysReceived = new ArrayList<>();
-        readNextNStreams(trafficSource, keysReceived, 0, 3);
+        readNextNStreams(rootContext, trafficSource, keysReceived, 0, 3);
         log.atInfo().setMessage(()->"6 ..."+kafkaSource.trackingKafkaConsumer.nextCommitsToString()).log();
         trafficSource.close();
     }
@@ -155,10 +156,9 @@ public class KafkaKeepAliveTests {
     }
 
     @SneakyThrows
-    private static void readNextNStreams(BlockingTrafficSource kafkaSource, List<ITrafficStreamKey> keysReceived,
-                                         int from, int count) {
+    private static void readNextNStreams(TestContext rootContext, BlockingTrafficSource kafkaSource,
+                                         List<ITrafficStreamKey> keysReceived, int from, int count) {
         Assertions.assertEquals(from, keysReceived.size());
-        final var rootContext = TestContext.noTracking();
         for (int i=0; i<count; ) {
             var trafficStreams = kafkaSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             trafficStreams.forEach(ts->{

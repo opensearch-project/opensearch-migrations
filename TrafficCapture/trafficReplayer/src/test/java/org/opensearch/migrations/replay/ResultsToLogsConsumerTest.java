@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.datatypes.PojoUniqueSourceRequestKey;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
 import java.io.IOException;
@@ -33,7 +34,7 @@ import java.util.function.BiConsumer;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
-class ResultsToLogsConsumerTest {
+class ResultsToLogsConsumerTest extends InstrumentationTest {
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
@@ -77,10 +78,9 @@ class ResultsToLogsConsumerTest {
 
     @Test
     public void testOutputterWithNulls() throws IOException {
-        var context = TestContext.noTracking();
         var emptyTuple = new SourceTargetCaptureTuple(
-                new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                        context::createTrafficStreamContextForTest), 0, 0),
+                new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
+                        rootContext::createTrafficStreamContextForTest), 0, 0),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             var consumer = new TupleParserChainConsumer(null, new ResultsToLogsConsumer());
@@ -94,11 +94,10 @@ class ResultsToLogsConsumerTest {
 
     @Test
     public void testOutputterWithException() throws IOException {
-        var context = TestContext.noTracking();
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(
-                new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                        context::createTrafficStreamContextForTest), 0, 0),
+                new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
+                        rootContext::createTrafficStreamContextForTest), 0, 0),
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
@@ -231,11 +230,9 @@ class ResultsToLogsConsumerTest {
         testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT);
     }
 
-    @Test
-    private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
-        var context = TestContext.noTracking();
-        var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(NODE_ID,"c",0,
-                context::createTrafficStreamContextForTest);
+    public void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
+        var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
+                rootContext::createTrafficStreamContextForTest);
         var sourcePair = new RequestResponsePacketPair(trafficStreamKey, Instant.EPOCH,
                 0, 0);
         var rawRequestData = loadResourceAsBytes("/requests/raw/" + requestResourceName);
