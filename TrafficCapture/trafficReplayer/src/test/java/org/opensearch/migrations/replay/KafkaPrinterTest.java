@@ -22,6 +22,7 @@ import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -64,16 +65,16 @@ class KafkaPrinterTest {
         }
     }
 
-    private static class CountingConsumer implements Consumer<Stream<byte[]>> {
-        final java.util.function.Consumer<Stream<byte[]>> underlyingConsumer;
+    private static class CountingConsumer implements Consumer<Stream<ConsumerRecord<String, byte[]>>> {
+        final java.util.function.Consumer<Stream<ConsumerRecord<String, byte[]>>> underlyingConsumer;
         int count;
 
-        public CountingConsumer(Consumer<Stream<byte[]>> underlyingConsumer) {
+        public CountingConsumer(Consumer<Stream<ConsumerRecord<String, byte[]>>> underlyingConsumer) {
             this.underlyingConsumer = underlyingConsumer;
         }
 
         @Override
-        public void accept(Stream<byte[]> stream) {
+        public void accept(Stream<ConsumerRecord<String, byte[]>> stream) {
             underlyingConsumer.accept(stream.map(msg->{log.trace("read msg"); count++; return msg;}));
         }
     }
@@ -83,16 +84,18 @@ class KafkaPrinterTest {
         Random random = new Random(2);
         var numTrafficStreams = 10;
         var kafkaConsumer = makeKafkaConsumer(numTrafficStreams, () -> random.nextInt(NUM_READ_ITEMS_BOUND));
-        var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, numTrafficStreams);
+        var capturedRecords = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
+        capturedRecords.put(new KafkaPrinter.Partition(TEST_TOPIC_NAME, 0), new KafkaPrinter.PartitionTracker(0,50));
+        var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, numTrafficStreams, capturedRecords);
         validateNumberOfTrafficStreamsEmitted(NUM_PROTOBUF_OBJECTS, delimitedOutputBytes);
     }
 
     private byte[] getOutputFromConsumer(org.apache.kafka.clients.consumer.Consumer<String,byte[]> kafkaConsumer,
-                                         int expectedMessageCount)
+                                         int expectedMessageCount, Map<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker> capturedRecords)
             throws Exception
     {
         try (var baos = new ByteArrayOutputStream()) {
-            var wrappedConsumer = new CountingConsumer(KafkaPrinter.getDelimitedProtoBufOutputter(baos));
+            var wrappedConsumer = new CountingConsumer(KafkaPrinter.getDelimitedProtoBufOutputter(baos, capturedRecords));
             while (wrappedConsumer.count < expectedMessageCount) {
                 KafkaPrinter.processNextChunkOfKafkaEvents(kafkaConsumer, wrappedConsumer);
             }

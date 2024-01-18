@@ -61,7 +61,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         command = props.analyticsServiceEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
         this.createService({
             serviceName: "capture-proxy-es",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
             dockerImageCommand: ['/bin/sh', '-c', command.concat(" & wait -n 1")],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,

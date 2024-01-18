@@ -9,6 +9,7 @@ import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "./streaming-source-type";
+import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -169,6 +170,17 @@ export class MigrationAssistanceStack extends Stack {
             description: 'OpenSearch migration parameter for Service Connect security group id',
             parameterName: `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`,
             stringValue: serviceConnectSecurityGroup.securityGroupId
+        });
+
+        const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
+            bucketName: `migration-artifacts-${props.stage}-${this.region}`,
+            encryption: BucketEncryption.S3_MANAGED,
+            enforceSSL: true
+        });
+        new StringParameter(this, 'SSMParameterArtifactS3Arn', {
+            description: 'OpenSearch migration parameter for Artifact S3 bucket ARN',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/artifactS3Arn`,
+            stringValue: artifactBucket.bucketArn
         });
 
         const ecsCluster = new Cluster(this, 'migrationECSCluster', {
