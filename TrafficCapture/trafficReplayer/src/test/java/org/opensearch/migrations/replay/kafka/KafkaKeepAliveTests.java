@@ -56,7 +56,7 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
      * @throws Exception
      */
     @BeforeEach
-    private void setupTestCase(TestContext testContext) throws Exception {
+    private void setupTestCase() throws Exception {
         kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
         this.sendCompleteCount = new AtomicInteger(0);
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 0, sendCompleteCount).get();
@@ -70,12 +70,12 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         kafkaProperties.put(HEARTBEAT_INTERVAL_MS_KEY, HEARTBEAT_INTERVAL_MS+"");
         kafkaProperties.put("max.poll.records", 1);
         var kafkaConsumer = new KafkaConsumer<String,byte[]>(kafkaProperties);
-        this.kafkaSource = new KafkaTrafficCaptureSource(testContext,
+        this.kafkaSource = new KafkaTrafficCaptureSource(rootContext,
                 kafkaConsumer, testTopicName, Duration.ofMillis(MAX_POLL_INTERVAL_MS));
         this.trafficSource = new BlockingTrafficSource(kafkaSource, Duration.ZERO);
         this.keysReceived = new ArrayList<>();
 
-        readNextNStreams(testContext, trafficSource,  keysReceived, 0, 1);
+        readNextNStreams(rootContext, trafficSource,  keysReceived, 0, 1);
         KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1, sendCompleteCount);
     }
 
