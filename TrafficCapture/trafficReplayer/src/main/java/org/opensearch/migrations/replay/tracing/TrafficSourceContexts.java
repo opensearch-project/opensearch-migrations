@@ -32,10 +32,14 @@ public class TrafficSourceContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
         }
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
         public @NonNull MetricInstruments getMetrics() {
             return getRootInstrumentationScope().readChunkInstruments;
         }
@@ -67,10 +71,14 @@ public class TrafficSourceContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
         }
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
         public @NonNull MetricInstruments getMetrics() {
             return getRootInstrumentationScope().backPressureInstruments;
         }
@@ -86,10 +94,14 @@ public class TrafficSourceContexts {
             extends BaseNestedSpanContext<RootReplayerContext, ITrafficSourceContexts.IBackPressureBlockContext>
             implements ITrafficSourceContexts.IWaitForNextSignal {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
         }
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
         public @NonNull MetricInstruments getMetrics() {
             return getRootInstrumentationScope().waitForNextSignalInstruments;
         }

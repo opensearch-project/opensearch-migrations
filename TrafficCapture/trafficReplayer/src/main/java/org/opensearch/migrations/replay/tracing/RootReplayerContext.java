@@ -40,29 +40,29 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         super(SCOPE_NAME, sdk);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
-        asyncListeningInstruments = new KafkaConsumerContexts.AsyncListeningContext.MetricInstruments(meter);
-        touchInstruments = new KafkaConsumerContexts.TouchScopeContext.MetricInstruments(meter);
-        pollInstruments = new KafkaConsumerContexts.PollScopeContext.MetricInstruments(meter);
-        commitInstruments = new KafkaConsumerContexts.CommitScopeContext.MetricInstruments(meter);
-        kafkaCommitInstruments = new KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments(meter);
+        asyncListeningInstruments = KafkaConsumerContexts.AsyncListeningContext.makeMetrics(meter);
+        touchInstruments = KafkaConsumerContexts.TouchScopeContext.makeMetrics(meter);
+        pollInstruments = KafkaConsumerContexts.PollScopeContext.makeMetrics(meter);
+        commitInstruments = KafkaConsumerContexts.CommitScopeContext.makeMetrics(meter);
+        kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
 
-        readChunkInstruments = new TrafficSourceContexts.ReadChunkContext.MetricInstruments(meter);
-        backPressureInstruments = new TrafficSourceContexts.BackPressureBlockContext.MetricInstruments(meter);
-        waitForNextSignalInstruments = new TrafficSourceContexts.WaitForNextSignal.MetricInstruments(meter);
+        readChunkInstruments = TrafficSourceContexts.ReadChunkContext.makeMetrics(meter);
+        backPressureInstruments = TrafficSourceContexts.BackPressureBlockContext.makeMetrics(meter);
+        waitForNextSignalInstruments = TrafficSourceContexts.WaitForNextSignal.makeMetrics(meter);
 
-        channelKeyInstruments = new ReplayContexts.ChannelKeyContext.MetricInstruments(meter);
-        kafkaRecordInstruments = new ReplayContexts.KafkaRecordContext.MetricInstruments(meter);
-        trafficStreamLifecycleInstruments = new ReplayContexts.TrafficStreamLifecycleContext.MetricInstruments(meter);
-        httpTransactionInstruments = new ReplayContexts.HttpTransactionContext.MetricInstruments(meter);
-        requestAccumInstruments = new ReplayContexts.RequestAccumulationContext.MetricInstruments(meter);
-        responseAccumInstruments = new ReplayContexts.ResponseAccumulationContext.MetricInstruments(meter);
-        transformationInstruments = new ReplayContexts.RequestTransformationContext.MetricInstruments(meter);
-        scheduledInstruments = new ReplayContexts.ScheduledContext.MetricInstruments(meter);
-        targetRequestInstruments = new ReplayContexts.TargetRequestContext.MetricInstruments(meter);
-        requestSendingInstruments = new ReplayContexts.RequestSendingContext.MetricInstruments(meter);
-        waitingForHttpResponseInstruments = new ReplayContexts.WaitingForHttpResponseContext.MetricInstruments(meter);
-        receivingHttpInstruments = new ReplayContexts.ReceivingHttpResponseContext.MetricInstruments(meter);
-        tupleHandlingInstruments = new ReplayContexts.TupleHandlingContext.MetricInstruments(meter);
+        channelKeyInstruments = ReplayContexts.ChannelKeyContext.makeMetrics(meter);
+        kafkaRecordInstruments = ReplayContexts.KafkaRecordContext.makeMetrics(meter);
+        trafficStreamLifecycleInstruments = ReplayContexts.TrafficStreamLifecycleContext.makeMetrics(meter);
+        httpTransactionInstruments = ReplayContexts.HttpTransactionContext.makeMetrics(meter);
+        requestAccumInstruments = ReplayContexts.RequestAccumulationContext.makeMetrics(meter);
+        responseAccumInstruments = ReplayContexts.ResponseAccumulationContext.makeMetrics(meter);
+        transformationInstruments = ReplayContexts.RequestTransformationContext.makeMetrics(meter);
+        scheduledInstruments = ReplayContexts.ScheduledContext.makeMetrics(meter);
+        targetRequestInstruments = ReplayContexts.TargetRequestContext.makeMetrics(meter);
+        requestSendingInstruments = ReplayContexts.RequestSendingContext.makeMetrics(meter);
+        waitingForHttpResponseInstruments = ReplayContexts.WaitingForHttpResponseContext.makeMetrics(meter);
+        receivingHttpInstruments = ReplayContexts.ReceivingHttpResponseContext.makeMetrics(meter);
+        tupleHandlingInstruments = ReplayContexts.TupleHandlingContext.makeMetrics(meter);
     }
 
     @Override

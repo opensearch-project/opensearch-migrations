@@ -13,6 +13,6 @@ public class RootCaptureContext extends RootWireLoggingContext implements IRootK
     @Override
     public KafkaRecordContext.MetricInstruments getKafkaOffloadingInstruments() {
         var meter = getMeterProvider().get("captureProxy");
-        return new KafkaRecordContext.MetricInstruments(meter);
+        return KafkaRecordContext.makeMetrics(meter);
     }
 }

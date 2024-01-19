@@ -38,7 +38,7 @@ public class TestRootKafkaOffloaderContext extends RootOtelContext implements IR
                 inMemoryInstrumentationBundle.openTelemetrySdk);
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
         final var meter = getMeterProvider().get("test");
-        this.kafkaOffloadingInstruments = new KafkaRecordContext.MetricInstruments(meter);
-        this.connectionInstruments = new ConnectionContext.MetricInstruments(meter);
+        this.kafkaOffloadingInstruments = KafkaRecordContext.makeMetrics(meter);
+        this.connectionInstruments = ConnectionContext.makeMetrics(meter);
     }
 }

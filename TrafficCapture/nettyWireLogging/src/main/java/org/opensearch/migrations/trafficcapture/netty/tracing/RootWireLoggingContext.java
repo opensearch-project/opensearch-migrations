@@ -21,11 +21,11 @@ public class RootWireLoggingContext extends RootOtelContext implements IRootWire
     public RootWireLoggingContext(OpenTelemetry openTelemetry, String scopeName) {
         super(scopeName, openTelemetry);
         var meter = this.getMeterProvider().get(scopeName);
-        connectionInstruments = new WireCaptureContexts.ConnectionContext.MetricInstruments(meter);
-        requestInstruments = new WireCaptureContexts.RequestContext.MetricInstruments(meter);
-        blockingInstruments = new WireCaptureContexts.BlockingContext.MetricInstruments(meter);
-        waitingForResponseInstruments = new WireCaptureContexts.WaitingForResponseContext.MetricInstruments(meter);
-        responseInstruments = new WireCaptureContexts.ResponseContext.MetricInstruments(meter);
+        connectionInstruments = WireCaptureContexts.ConnectionContext.makeMetrics(meter);
+        requestInstruments = WireCaptureContexts.RequestContext.makeMetrics(meter);
+        blockingInstruments = WireCaptureContexts.BlockingContext.makeMetrics(meter);
+        waitingForResponseInstruments = WireCaptureContexts.WaitingForResponseContext.makeMetrics(meter);
+        responseInstruments = WireCaptureContexts.ResponseContext.makeMetrics(meter);
     }
 
     @Override

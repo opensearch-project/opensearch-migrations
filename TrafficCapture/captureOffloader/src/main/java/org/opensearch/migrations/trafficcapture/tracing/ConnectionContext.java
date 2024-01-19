@@ -42,11 +42,15 @@ public class ConnectionContext extends BaseNestedSpanContext<IRootOffloaderConte
     public static class MetricInstruments extends CommonScopedMetricInstruments {
         private final LongUpDownCounter activeConnectionsCounter;
 
-        public MetricInstruments(Meter meter) {
-            super(meter, ACTIVITY_NAME);
+        protected MetricInstruments(Meter meter, String activityName) {
+            super(meter, activityName);
             activeConnectionsCounter = meter.upDownCounterBuilder(ConnectionContext.ACTIVE_CONNECTION)
                     .setUnit("count").build();
         }
+    }
+
+    public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+        return new MetricInstruments(meter, ACTIVITY_NAME);
     }
 
     public @NonNull MetricInstruments getMetrics() {

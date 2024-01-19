@@ -39,11 +39,15 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongUpDownCounter activeChannelCounter;
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 activeChannelCounter = meter
                         .upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
             }
+        }
+        
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -85,13 +89,17 @@ public abstract class ReplayContexts extends IReplayContexts {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongCounter recordCounter;
             final LongCounter bytesCounter;
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 recordCounter = meter.counterBuilder(MetricNames.KAFKA_RECORD_READ)
                         .setUnit("records").build();
                 bytesCounter = meter.counterBuilder(MetricNames.KAFKA_BYTES_READ)
                         .setUnit(BYTES_UNIT_STR).build();
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -128,11 +136,15 @@ public abstract class ReplayContexts extends IReplayContexts {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private final LongCounter streamsRead;
 
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 streamsRead = meter.counterBuilder(MetricNames.TRAFFIC_STREAMS_READ)
                         .setUnit("objects").build();
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -188,9 +200,13 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -249,9 +265,13 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -268,9 +288,13 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -304,8 +328,8 @@ public abstract class ReplayContexts extends IReplayContexts {
             private final LongCounter transformBytesOut;
             private final LongCounter transformChunksOut;
 
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 headerParses = meter.counterBuilder(MetricNames.TRANSFORM_HEADER_PARSE)
                         .setUnit(COUNT_UNIT_STR).build();
                 payloadParses = meter.counterBuilder(MetricNames.TRANSFORM_PAYLOAD_PARSE_REQUIRED)
@@ -340,6 +364,10 @@ public abstract class ReplayContexts extends IReplayContexts {
                         .setUnit(COUNT_UNIT_STR).build();
 
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -405,10 +433,14 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             DoubleHistogram lag;
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 lag = meter.histogramBuilder(MetricNames.NETTY_SCHEDULE_LAG).setUnit("ms").build();
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -438,8 +470,8 @@ public abstract class ReplayContexts extends IReplayContexts {
             private final LongCounter bytesWritten;
             private final LongCounter bytesRead;
 
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 sourceTargetGap = meter.histogramBuilder(MetricNames.SOURCE_TO_TARGET_REQUEST_LAG)
                         .setUnit("ms").build();
                 bytesWritten = meter.counterBuilder(MetricNames.BYTES_WRITTEN_TO_TARGET)
@@ -447,6 +479,10 @@ public abstract class ReplayContexts extends IReplayContexts {
                 bytesRead = meter.counterBuilder(MetricNames.BYTES_READ_FROM_TARGET)
                         .setUnit(BYTES_UNIT_STR).build();
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -488,9 +524,13 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -507,9 +547,13 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -527,9 +571,13 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -547,9 +595,13 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {

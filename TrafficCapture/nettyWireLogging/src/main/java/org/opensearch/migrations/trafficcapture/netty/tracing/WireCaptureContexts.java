@@ -31,13 +31,17 @@ public class WireCaptureContexts extends IWireCaptureContexts {
             public final LongCounter unregisteredCounter;
             public final LongCounter removedCounter;
 
-            public MetricInstruments(Meter meter) {
-                super(meter);
+            public MetricInstruments(Meter meter, String activityMeter) {
+                super(meter, activityMeter);
                 unregisteredCounter = meter
                         .counterBuilder(MetricNames.UNREGISTERED).setUnit(COUNT_UNITS).build();
                 removedCounter = meter
                         .counterBuilder(MetricNames.REMOVED).setUnit(COUNT_UNITS).build();
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         @Override
@@ -130,8 +134,8 @@ public class WireCaptureContexts extends IWireCaptureContexts {
             public final LongCounter fullyParsedRequestCounter;
             public final LongCounter bytesReadCounter;
 
-            public MetricInstruments(Meter meter) {
-                super(meter);
+            public MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 blockingRequestCounter = meter
                         .counterBuilder(MetricNames.BLOCKING_REQUEST).setUnit(COUNT_UNITS).build();
                 requestsNotOffloadedCounter = meter
@@ -141,6 +145,10 @@ public class WireCaptureContexts extends IWireCaptureContexts {
                 bytesReadCounter = meter
                         .counterBuilder(MetricNames.BYTES_READ).setUnit(BYTES_UNIT).build();
             }
+        }
+        
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         @Override
@@ -185,9 +193,13 @@ public class WireCaptureContexts extends IWireCaptureContexts {
             return ACTIVITY_NAME;
         }
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         @Override
@@ -211,9 +223,13 @@ public class WireCaptureContexts extends IWireCaptureContexts {
             return ACTIVITY_NAME;
         }
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         @Override
@@ -240,15 +256,19 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
 
             private final LongCounter bytesWritten;
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
                 bytesWritten = meter
                         .counterBuilder(MetricNames.BYTES_WRITTEN).setUnit(BYTES_UNIT).build();
             }
         }
 
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
         @Override
-        public MetricInstruments getMetrics() {
+        public @NonNull MetricInstruments getMetrics() {
             return getRootInstrumentationScope().getResponseInstruments();
         }
 

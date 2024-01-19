@@ -11,6 +11,7 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
 import org.apache.kafka.common.TopicPartition;
+import org.checkerframework.checker.units.qual.N;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
@@ -39,7 +40,7 @@ public class KafkaConsumerContexts {
             public final LongCounter kafkaPartitionsRevokedCounter;
             public final LongCounter kafkaPartitionsAssignedCounter;
             public final LongUpDownCounter kafkaActivePartitionsCounter;
-            public MetricInstruments(Meter meter) {
+            private MetricInstruments(Meter meter) {
                 kafkaPartitionsRevokedCounter = meter
                         .counterBuilder(IKafkaConsumerContexts.MetricNames.PARTITIONS_REVOKED_EVENT_COUNT).build();
                 kafkaPartitionsAssignedCounter = meter
@@ -47,6 +48,10 @@ public class KafkaConsumerContexts {
                 kafkaActivePartitionsCounter = meter
                         .upDownCounterBuilder(IKafkaConsumerContexts.MetricNames.ACTIVE_PARTITIONS_ASSIGNED_COUNT).build();
             }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter);
         }
 
         private @NonNull MetricInstruments getMetrics() {
@@ -78,13 +83,17 @@ public class KafkaConsumerContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
         }
         public TouchScopeContext(@NonNull TrafficSourceContexts.BackPressureBlockContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
         }
 
         public @NonNull MetricInstruments getMetrics() {
@@ -96,13 +105,17 @@ public class KafkaConsumerContexts {
             extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
             implements IKafkaConsumerContexts.IPollScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
         }
 
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
         @Override
-        public CommonScopedMetricInstruments getMetrics() {
+        public @NonNull MetricInstruments getMetrics() {
             return getRootInstrumentationScope().pollInstruments;
         }
 
@@ -123,13 +136,17 @@ public class KafkaConsumerContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
         }
 
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
         @Override
-        public MetricInstruments getMetrics() {
+        public @NonNull MetricInstruments getMetrics() {
             return getRootInstrumentationScope().commitInstruments;
         }
 
@@ -144,13 +161,17 @@ public class KafkaConsumerContexts {
             extends DirectNestedSpanContext<RootReplayerContext, KafkaConsumerContexts.CommitScopeContext, IKafkaConsumerContexts.ICommitScopeContext>
             implements IKafkaConsumerContexts.IKafkaCommitScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
-            public MetricInstruments(Meter meter) {
-                super(meter, ACTIVITY_NAME);
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
             }
         }
 
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
         @Override
-        public MetricInstruments getMetrics() {
+        public @NonNull MetricInstruments getMetrics() {
             return getRootInstrumentationScope().kafkaCommitInstruments;
         }
 

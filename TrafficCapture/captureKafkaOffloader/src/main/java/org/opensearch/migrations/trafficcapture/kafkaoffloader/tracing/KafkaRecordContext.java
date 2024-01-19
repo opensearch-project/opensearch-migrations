@@ -5,6 +5,7 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
+import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
@@ -37,13 +38,17 @@ public class KafkaRecordContext extends
     }
 
     public static class MetricInstruments extends CommonScopedMetricInstruments {
-        public MetricInstruments(Meter meter) {
-            super(meter, ACTIVITY_NAME);
+        private MetricInstruments(Meter meter, String activityName) {
+            super(meter, activityName);
         }
     }
 
+    public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+        return new MetricInstruments(meter, ACTIVITY_NAME);
+    }
+
     @Override
-    public MetricInstruments getMetrics() {
+    public @NonNull MetricInstruments getMetrics() {
         return getRootInstrumentationScope().getKafkaOffloadingInstruments();
     }
 
