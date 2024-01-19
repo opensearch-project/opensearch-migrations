@@ -4,10 +4,8 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
-import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -17,20 +15,15 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.OutputStream;
-import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 @Slf4j
 class KafkaPrinterTest {
@@ -83,11 +76,53 @@ class KafkaPrinterTest {
     public void testStreamFormatting() throws Exception {
         Random random = new Random(2);
         var numTrafficStreams = 10;
-        var kafkaConsumer = makeKafkaConsumer(numTrafficStreams, () -> random.nextInt(NUM_READ_ITEMS_BOUND));
-        var capturedRecords = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
-        capturedRecords.put(new KafkaPrinter.Partition(TEST_TOPIC_NAME, 0), new KafkaPrinter.PartitionTracker(0,50));
-        var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, numTrafficStreams, capturedRecords);
+        var kafkaConsumer = makeKafkaConsumer(Map.of(0, numTrafficStreams), () -> random.nextInt(NUM_READ_ITEMS_BOUND));
+        var emptyPartitionLimits = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
+        var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, numTrafficStreams, emptyPartitionLimits);
         validateNumberOfTrafficStreamsEmitted(NUM_PROTOBUF_OBJECTS, delimitedOutputBytes);
+    }
+
+    @Test
+    public void testSinglePartitionLimiting() throws Exception {
+        Random random = new Random(3);
+        // Use larger number of streams than recordLimit cutoff
+        var numTrafficStreams = 20;
+        var recordLimit = 10;
+        var kafkaConsumer = makeKafkaConsumer(Map.of(0, numTrafficStreams), () -> random.nextInt(NUM_READ_ITEMS_BOUND));
+        var partitionLimits = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
+        KafkaPrinter.Partition partition0 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 0);
+        partitionLimits.put(partition0, new KafkaPrinter.PartitionTracker(0, recordLimit));
+        var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, numTrafficStreams, partitionLimits);
+        Assertions.assertEquals(recordLimit, partitionLimits.get(partition0).currentRecordCount);
+        validateNumberOfTrafficStreamsEmitted(NUM_PROTOBUF_OBJECTS, delimitedOutputBytes);
+    }
+
+    @Test
+    public void testMultiplePartitionLimiting() throws Exception {
+        Random random = new Random(4);
+        // Use larger number of streams than recordLimit cutoff
+        var numTrafficStreamsPartition0 = 30;
+        var numTrafficStreamsPartition1 = 20;
+        var numTrafficStreamsPartition2 = 0;
+        var totalTrafficStreams = numTrafficStreamsPartition0 + numTrafficStreamsPartition1 + numTrafficStreamsPartition2;
+        var recordLimitPartition0 = 17;
+        var recordLimitPartition1 = 8;
+        var recordLimitPartition2 = 0;
+        var totalLimitTrafficStreams = recordLimitPartition0 + recordLimitPartition1 + recordLimitPartition2;
+
+        var kafkaConsumer = makeKafkaConsumer(Map.of(0, numTrafficStreamsPartition0, 1, numTrafficStreamsPartition1, 2, numTrafficStreamsPartition2), () -> random.nextInt(NUM_READ_ITEMS_BOUND));
+        var partitionLimits = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
+        KafkaPrinter.Partition partition0 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 0);
+        KafkaPrinter.Partition partition1 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 1);
+        KafkaPrinter.Partition partition2 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 2);
+        partitionLimits.put(partition0, new KafkaPrinter.PartitionTracker(0, recordLimitPartition0));
+        partitionLimits.put(partition1, new KafkaPrinter.PartitionTracker(0, recordLimitPartition1));
+        partitionLimits.put(partition2, new KafkaPrinter.PartitionTracker(0, recordLimitPartition2));
+        var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, totalTrafficStreams, partitionLimits);
+        Assertions.assertEquals(recordLimitPartition0, partitionLimits.get(partition0).currentRecordCount);
+        Assertions.assertEquals(recordLimitPartition1, partitionLimits.get(partition1).currentRecordCount);
+        Assertions.assertEquals(recordLimitPartition2, partitionLimits.get(partition2).currentRecordCount);
+        validateNumberOfTrafficStreamsEmitted(totalLimitTrafficStreams, delimitedOutputBytes);
     }
 
     private byte[] getOutputFromConsumer(org.apache.kafka.clients.consumer.Consumer<String,byte[]> kafkaConsumer,
@@ -120,20 +155,29 @@ class KafkaPrinterTest {
     }
 
     private org.apache.kafka.clients.consumer.Consumer<String, byte[]>
-    makeKafkaConsumer(int numTrafficStreams, Supplier<Integer> numReadGenerator)
+    makeKafkaConsumer(Map<Integer, Integer> partitionIdToNumTrafficStreams, Supplier<Integer> numReadGenerator)
             throws Exception
     {
         var mockConsumer = new MockConsumer(OffsetResetStrategy.EARLIEST);
-        var topicPartition = new TopicPartition(TEST_TOPIC_NAME, 0);
-        var tpList = List.of(topicPartition);
+        var tpList = new ArrayList<TopicPartition>();
+        var offsetMap = new HashMap<TopicPartition, Long> ();
+        for (int partitionId : partitionIdToNumTrafficStreams.keySet()) {
+            var topicPartition = new TopicPartition(TEST_TOPIC_NAME, partitionId);
+            tpList.add(topicPartition);
+            offsetMap.put(topicPartition, 0L);
+        }
         mockConsumer.assign(tpList);
-        mockConsumer.updateBeginningOffsets(Map.of(topicPartition, 0L));
-        for (int i=0; i<numTrafficStreams; ++i) {
-            var payload = (""+(char)('A'+(char)i)).repeat(10);
-            var data = makeTrafficStreamBytes(Instant.now(), payload, numReadGenerator.get());
-            var record = new ConsumerRecord(TEST_TOPIC_NAME, 0, 1+i, Instant.now().toString(), data);
-            log.trace("adding record");
-            mockConsumer.addRecord(record);
+        mockConsumer.updateBeginningOffsets(offsetMap);
+        for (Map.Entry<Integer,Integer> partitionEntry : partitionIdToNumTrafficStreams.entrySet()) {
+            var partitionId = partitionEntry.getKey();
+            var numTrafficStreams = partitionEntry.getValue();
+            for (int i = 0; i < numTrafficStreams; ++i) {
+                var payload = ("" + (char) ('A' + (char) i)).repeat(10);
+                var data = makeTrafficStreamBytes(Instant.now(), payload, numReadGenerator.get());
+                var record = new ConsumerRecord(TEST_TOPIC_NAME, partitionId, 1 + i, Instant.now().toString(), data);
+                log.trace("adding record");
+                mockConsumer.addRecord(record);
+            }
         }
         return mockConsumer;
     }

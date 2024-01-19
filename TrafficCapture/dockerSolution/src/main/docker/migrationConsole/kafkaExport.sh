@@ -9,6 +9,7 @@ if [ -n "$AWS_REGION" ]; then
     kafka_command_settings="--command-config kafka-tools/aws/msk-iam-auth.properties"
     s3_bucket_name="migration-artifacts-$MIGRATION_STAGE-$AWS_REGION"
 fi
+topic="logging-traffic-topic"
 timeout_seconds=60
 enable_s3=false
 
@@ -54,18 +55,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-partition_offsets=$(./kafka-tools/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic logging-traffic-topic --time -1 $(echo "$kafka_command_settings"))
-# TODO update for multiple partitions
+partition_offsets=$(./kafka-tools/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
+comma_sep_partition_offsets=$(echo $partition_offsets | sed 's/ /,/g')
 echo "Collected offsets from current Kafka topic: "
-echo $partition_offsets
+echo $comma_sep_partition_offsets
 
 epoch_ts=$(date +%s)
-file_name="kafka_export_$epoch_ts.log"
+file_name="kafka_export_$epoch_ts.proto"
 archive_name="$file_name.tar.gz"
 group="export_$epoch_ts"
 
 set -o xtrace
-./runJavaWithClasspath.sh org.opensearch.migrations.replay.KafkaPrinter --kafka-traffic-brokers "$broker_endpoints" --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id "$group" $(echo "$msk_auth_settings") --timeout-seconds "$timeout_seconds" --partition-limit "$partition_offsets" >> "$file_name"
+./runJavaWithClasspath.sh org.opensearch.migrations.replay.KafkaPrinter --kafka-traffic-brokers "$broker_endpoints" --kafka-traffic-topic "$topic" --kafka-traffic-group-id "$group" $(echo "$msk_auth_settings") --timeout-seconds "$timeout_seconds" --partition-limit "$comma_sep_partition_offsets" >> "$file_name"
 set +o xtrace
 
 tar -czvf "$archive_name" "$file_name" && rm "$file_name"

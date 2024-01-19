@@ -166,7 +166,7 @@ public class KafkaPrinter {
 
         Map<Partition, PartitionTracker> capturedRecords = new HashMap<>();
         if (!params.partitionLimits.isEmpty()) {
-            for(String partitionLimit : params.partitionLimits) {
+            for (String partitionLimit : params.partitionLimits) {
                 String[] partitionElements = partitionLimit.split(":");
                 if (partitionElements.length != 3) {
                     throw new ParameterException("Partition limit provided does not match the expected format: topic_name:partition_id:num_records, actual value: " + partitionLimit);
