@@ -27,6 +27,19 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 
+  grafana:
+    image: grafana/grafana:latest
+    networks:
+      - migrations
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+
   # Collector
   otel-collector:
     image: otel/opentelemetry-collector:latest
@@ -154,6 +167,8 @@ volumes:
   sharedComparatorSqlResults:
     driver: local
   sharedReplayerOutput:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:
