@@ -8,11 +8,15 @@ historical-data-migration:
       hosts:
       - <SOURCE_CLUSTER_HOST>
       # Example configuration on how to disable authentication (default: false)
-      disable_authentication: true
       indices:
         # Indices to exclude - exclude system indices by default
         exclude:
         - index_name_regex: \.*
+      # disable_authentication: true
+      username: "admin"
+      password: "admin"
+      connection:
+        insecure: true
   # Target cluster configuration
   sink:
   - opensearch:
@@ -24,9 +28,11 @@ historical-data-migration:
       # Use the same document ID as the source cluster document
       document_id: ${getMetadata("opensearch-document_id")}
       # Example configuration for basic auth
-      username: user
-      password: pass
-      #disable_authentication: true
+      # disable_authentication: true
+      username: "admin"
+      password: "Admin123!"
+      connection:
+        insecure: true
   # Additional pipeline options/optimizations
   # For maximum throughput, match workers to number of vCPUs (default: 1)
   workers: 1
