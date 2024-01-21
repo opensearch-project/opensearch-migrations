@@ -71,7 +71,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             log.info("StopAt="+nextStopPointRef.get());
             var stopPoint = nextStopPointRef.get();
             return tuple -> {
-                var key = tuple.uniqueRequestKey;
+                var key = tuple.getRequestKey();
                 if (((TrafficStreamCursorKey) (key.getTrafficStreamKey())).arrayIndex > stopPoint) {
                     log.error("Request received after our ingest threshold. Throwing.  Discarding " + key);
                     var nextStopPoint = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
@@ -123,10 +123,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             nodeId = stream.getNodeId();
             trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
             this.arrayIndex = arrayIndex;
-            var key = PojoTrafficStreamKeyAndContext.build(nodeId, connectionId, trafficStreamIndex,
-                    context::createTrafficStreamContextForTest);
-            trafficStreamsContext = key.getTrafficStreamsContext();
-            key.setTrafficStreamsContext(trafficStreamsContext);
+            trafficStreamsContext = context.createTrafficStreamContextForTest(this);
         }
 
         @Override

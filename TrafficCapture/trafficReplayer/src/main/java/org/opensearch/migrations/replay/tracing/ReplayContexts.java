@@ -1,11 +1,14 @@
 package org.opensearch.migrations.replay.tracing;
 
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.Setter;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -16,6 +19,8 @@ import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
+import java.util.stream.Stream;
 
 public abstract class ReplayContexts extends IReplayContexts {
 
@@ -586,17 +591,39 @@ public abstract class ReplayContexts extends IReplayContexts {
 
     }
 
+    @Getter
+    @Setter
     public static class TupleHandlingContext
             extends DirectNestedSpanContext<RootReplayerContext,HttpTransactionContext,IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.ITupleHandlingContext {
+        Integer sourceStatus;
+        Integer targetStatus;
+        String method;
+        String httpVersion;
+
         public TupleHandlingContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
 
+        @Override
+        public void close() {
+            super.close();
+        }
+
         public static class MetricInstruments extends CommonScopedMetricInstruments {
+            //private final LongCounter statusMatchCounter;
+            private final LongCounter resultCounter;
+//            private final LongCounter sourceStatus;
+//            private final LongCounter targetStatus;
+//            private final LongCounter methodCounter;
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
+                //statusMatchCounter = meter.counterBuilder(MetricNames.STATUS_MATCH).build();
+//                sourceStatus = meter.counterBuilder("sourceStatus").build();
+//                targetStatus = meter.counterBuilder("targetStatus").build();
+//                methodCounter = meter.counterBuilder("method").build();
+                resultCounter = meter.counterBuilder("tupleResult").build();
             }
         }
 
@@ -608,5 +635,46 @@ public abstract class ReplayContexts extends IReplayContexts {
             return getRootInstrumentationScope().tupleHandlingInstruments;
         }
 
+        @Override
+        public void sendMeterEventsForEnd() {
+            super.sendMeterEventsForEnd();
+            final var sourceOp = Optional.ofNullable(sourceStatus);
+            final var targetOp = Optional.ofNullable(targetStatus);
+            final boolean didMatch = sourceOp.flatMap(ss -> targetOp.map(ss::equals)).orElse(false);
+            AttributesBuilder attributesBuilderForAggregate =
+                    addAttributeIfPresent(addAttributeIfPresent(addAttributeIfPresent(
+                                            Attributes.builder(),
+                                            METHOD_KEY, Optional.ofNullable(method)),
+                                    SOURCE_STATUS_CODE_KEY, sourceOp.map(TupleHandlingContext::categorizeStatus)),
+                            TARGET_STATUS_CODE_KEY, targetOp.map(TupleHandlingContext::categorizeStatus))
+                            .put(STATUS_CODE_MATCH_KEY, didMatch);
+
+            getCurrentSpan().setAllAttributes(attributesBuilderForAggregate.build());
+            meterIncrementEvent(getMetrics().resultCounter, 1, attributesBuilderForAggregate);
+        }
+
+        /**
+         * Convert everything in the 2xx range to 200; 300-399 to 300
+         * @param status
+         * @return
+         */
+        public static long categorizeStatus(int status) {
+            return (status / 100L) * 100L;
+        }
+
+        @Override
+        public void setEndpoint(String endpointUrl) {
+            getCurrentSpan().setAttribute(ENDPOINT_KEY, endpointUrl);
+        }
+
+        @Override
+        public void setHttpVersions(String httpVersion) {
+            getCurrentSpan().setAttribute(HTTP_VERSION_KEY, httpVersion);
+        }
+
+        @Override
+        public String toString() {
+            return getReplayerRequestKey().toString();
+        }
     }
 }

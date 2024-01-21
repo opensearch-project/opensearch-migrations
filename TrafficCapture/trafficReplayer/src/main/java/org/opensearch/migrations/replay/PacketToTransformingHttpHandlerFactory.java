@@ -27,7 +27,7 @@ public class PacketToTransformingHttpHandlerFactory implements
 
     @Override
     public IPacketFinalizingConsumer<TransformedOutputAndResult<TransformedPackets>>
-    create(UniqueReplayerRequestKey requestKey, IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
+    create(IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
         log.trace("creating HttpJsonTransformingConsumer");
         return new HttpJsonTransformingConsumer<>(jsonTransformer, authTransformerFactory,
                 new TransformedPacketReceiver(), httpTransactionContext);

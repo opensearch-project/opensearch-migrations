@@ -10,7 +10,9 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -67,7 +69,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
             return tuple -> {
                 if (counter.incrementAndGet() > stopPoint) {
                     log.warn("Request received after our ingest threshold. Throwing.  Discarding " +
-                            tuple.uniqueRequestKey);
+                            tuple.context);
                     var nextStopPoint = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
                     nextStopPointRef.compareAndSet(stopPoint, nextStopPoint);
                     throw new TrafficReplayerRunner.FabricatedErrorToKillTheReplayer(false);

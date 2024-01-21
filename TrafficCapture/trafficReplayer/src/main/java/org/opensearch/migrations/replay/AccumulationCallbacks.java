@@ -10,20 +10,17 @@ import java.time.Instant;
 import java.util.List;
 
 public interface AccumulationCallbacks {
-    void onRequestReceived(@NonNull UniqueReplayerRequestKey key,
-                           IReplayContexts.IReplayerHttpTransactionContext ctx,
+    void onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                            @NonNull HttpMessageAndTimestamp request);
-    void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
-                            IReplayContexts.IReplayerHttpTransactionContext ctx,
+    void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                             @NonNull RequestResponsePacketPair rrpp);
     void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                 IReplayContexts.IChannelKeyContext ctx,
+                                 @NonNull IReplayContexts.IChannelKeyContext ctx,
                                  @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
-    void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
-                           IReplayContexts.IChannelKeyContext ctx,
+    void onConnectionClose(int channelInteractionNumber,
+                           @NonNull IReplayContexts.IChannelKeyContext ctx,
                            RequestResponsePacketPair.ReconstructionStatus status,
                            @NonNull Instant when,
                            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
-    void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                IReplayContexts.IChannelKeyContext ctx);
+    void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx);
 }

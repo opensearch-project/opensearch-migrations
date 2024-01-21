@@ -10,20 +10,15 @@ import java.time.Instant;
 public interface IWithStartTimeAndAttributes extends IInstrumentationAttributes {
     Instant getStartTime();
 
+    default Duration getSpanDuration() {
+        return Duration.between(getStartTime(), Instant.now());
+    }
+
     default void meterHistogramMillis(DoubleHistogram histogram) {
-        meterHistogramMillis(histogram, Duration.between(getStartTime(), Instant.now()));
+        meterHistogramMillis(histogram, getSpanDuration());
     }
-    default void meterHistogramMillis(DoubleHistogram histogram, Duration value) {
-        meterHistogram(histogram, value.toNanos()/1_000_000.0);
-    }
-    default void meterHistogram(DoubleHistogram histogram, double value) {
-        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            histogram.record(value, getPopulatedMetricAttributes());
-        }
-    }
-    default void meterHistogram(LongHistogram histogram, long value) {
-        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            histogram.record(value, getPopulatedMetricAttributes());
-        }
+
+    default void meterHistogramMillis(DoubleHistogram histogram, AttributesBuilder attributesBuilder) {
+        meterHistogramMillis(histogram, getSpanDuration(), attributesBuilder);
     }
 }

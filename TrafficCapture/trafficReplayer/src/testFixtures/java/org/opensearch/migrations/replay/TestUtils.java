@@ -145,7 +145,7 @@ public class TestUtils {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
                 new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null));
         var transformingHandler = new HttpJsonTransformingConsumer<>(transformer, authTransformer, testPacketCapture,
-                TestRequestKey.getTestConnectionRequestContext(rootContext, "TEST_CONNECTION", 0));
+                rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0));
 
         var contentLength = stringParts.stream().mapToInt(String::length).sum();
         var headerString = "GET / HTTP/1.1\r\n" +

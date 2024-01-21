@@ -2,16 +2,19 @@ package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
-import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 
-import java.util.stream.Collectors;
+import java.time.Instant;
 
 public class TestContext extends RootReplayerContext implements AutoCloseable {
 
+    public static final String TEST_NODE_ID = "testNodeId";
+    public static final String DEFAULT_TEST_CONNECTION = "testConnection";
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
     public final ContextTracker contextTracker = new ContextTracker();
     public final ChannelContextManager channelContextManager = new ChannelContextManager(this);
@@ -29,6 +32,11 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
         return new TestContext(new InMemoryInstrumentationBundle(null, null));
     }
 
+    public TestContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle) {
+        super(inMemoryInstrumentationBundle.openTelemetrySdk);
+        this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
+    }
+
     @Override
     public void onContextCreated(IScopedInstrumentationAttributes newScopedContext) {
         contextTracker.onCreated(newScopedContext);
@@ -39,11 +47,6 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
         contextTracker.onClosed(newScopedContext);
     }
 
-    public TestContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle) {
-        super(inMemoryInstrumentationBundle.openTelemetrySdk);
-        this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
-    }
-
     public IReplayContexts.ITrafficStreamsLifecycleContext createTrafficStreamContextForTest(ITrafficStreamKey tsk) {
         return createTrafficStreamContextForStreamSource(channelContextManager.retainOrCreateContext(tsk), tsk);
     }
@@ -52,5 +55,29 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     public void close() {
 //        Assertions.assertEquals("", contextTracker.getAllRemainingActiveScopes().entrySet().stream()
 //                .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()));
+    }
+
+
+    public final IReplayContexts.IReplayerHttpTransactionContext
+    getTestConnectionRequestContext(int replayerIdx) {
+        return getTestConnectionRequestContext(DEFAULT_TEST_CONNECTION, replayerIdx);
+    }
+
+    public IReplayContexts.IReplayerHttpTransactionContext
+    getTestConnectionRequestContext(String connectionId, int replayerIdx) {
+        var rk = new UniqueReplayerRequestKey(
+                PojoTrafficStreamKeyAndContext.build(TEST_NODE_ID, connectionId, 0,
+                        this::createTrafficStreamContextForTest),
+                0, replayerIdx);
+        return rk.trafficStreamKey.getTrafficStreamsContext().createHttpTransactionContext(rk, Instant.EPOCH);
+    }
+    public IReplayContexts.ITupleHandlingContext
+    getTestTupleContext() {
+        return getTestTupleContext(DEFAULT_TEST_CONNECTION, 1);
+    }
+
+    public IReplayContexts.ITupleHandlingContext
+    getTestTupleContext(String connectionId, int replayerIdx) {
+        return getTestConnectionRequestContext(connectionId, replayerIdx).createTupleContext();
     }
 }

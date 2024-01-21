@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.tracing.TestContext;
@@ -58,7 +59,7 @@ public class TrafficReplayerRunner {
                         return;
                     }
                     Assertions.assertEquals(runNumber, runNumberRef.get());
-                    var key = t.uniqueRequestKey;
+                    var key = t.getRequestKey();
                     ISourceTrafficChannelKey tsk = key.getTrafficStreamKey();
                     var keyString = tsk.getConnectionId() + "_" + key.getSourceRequestIndex();
                     var prevKeyString = tsk.getConnectionId() + "_" + (key.getSourceRequestIndex()-1);

@@ -8,7 +8,6 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import java.time.Duration;
@@ -36,7 +35,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, null, testPacketCapture,
-                TestRequestKey.getTestConnectionRequestContext(rootContext, 0));
+                rootContext.getTestConnectionRequestContext(0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
@@ -88,7 +87,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
                 httpBasicAuthTransformer, testPacketCapture,
-                TestRequestKey.getTestConnectionRequestContext(rootContext, 0));
+                rootContext.getTestConnectionRequestContext(0));
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
@@ -114,7 +113,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME, null,
                         "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
-                null, testPacketCapture, TestRequestKey.getTestConnectionRequestContext(rootContext, 0));
+                null, testPacketCapture, rootContext.getTestConnectionRequestContext(0));
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)

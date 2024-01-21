@@ -105,14 +105,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         public void onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
                                       @NonNull HttpMessageAndTimestamp request) {
             requestCtx.close();
-            underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope().getReplayerRequestKey(),
-                    requestCtx.getLogicalEnclosingScope(), request);
+            underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
         }
 
         public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
                                        @NonNull RequestResponsePacketPair rrpp) {
             rrpp.getResponseContext().close();
-            underlying.onFullDataReceived(key, rrpp.getHttpTransactionContext(), rrpp);
+            underlying.onFullDataReceived(rrpp.getHttpTransactionContext(), rrpp);
         }
 
         public void onConnectionClose(@NonNull Accumulation accum,
@@ -120,8 +119,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                       @NonNull Instant when,
                                       @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             var tsCtx = accum.trafficChannelKey.getTrafficStreamsContext();
-            underlying.onConnectionClose(accum.trafficChannelKey,
-                    accum.numberOfResets.get(), tsCtx.getLogicalEnclosingScope(),
+            underlying.onConnectionClose(accum.numberOfResets.get(), tsCtx.getLogicalEnclosingScope(),
                     status, when, trafficStreamKeysBeingHeld);
         }
 
@@ -133,7 +131,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
             var tsCtx = tsk.getTrafficStreamsContext();
-            underlying.onTrafficStreamIgnored(tsk, tsk.getTrafficStreamsContext().getLogicalEnclosingScope());
+            underlying.onTrafficStreamIgnored(tsk.getTrafficStreamsContext());
         }
     };
 

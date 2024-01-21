@@ -16,7 +16,6 @@ import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
-import org.opensearch.migrations.replay.TestRequestKey;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TransformationLoader;
@@ -28,7 +27,6 @@ import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.tracing.TestContext;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
@@ -132,7 +130,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
                     testServer.localhostEndpoint(),
                     sslContext,
-                    TestRequestKey.getTestConnectionRequestContext(rootContext, 0));
+                    rootContext.getTestConnectionRequestContext(0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -161,9 +159,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 new TestFlowController(), timeShifter);
         for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {
-                var ctx = TestRequestKey.getTestConnectionRequestContext(rootContext, "TEST_" + i, j);
+                var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
-                        sendingFactory, ctx, Instant.now(), Instant.now(), ctx.getReplayerRequestKey(),
+                        sendingFactory, ctx, Instant.now(), Instant.now(),
                         () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 log.info("requestFinishFuture=" + requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();

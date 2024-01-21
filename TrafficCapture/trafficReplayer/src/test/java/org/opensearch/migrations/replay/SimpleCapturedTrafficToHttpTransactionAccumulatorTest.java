@@ -224,17 +224,15 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(@NonNull UniqueReplayerRequestKey key,
-                                                          IReplayContexts.IReplayerHttpTransactionContext ctx,
+                            public void onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                           @NonNull HttpMessageAndTimestamp request) {
                                 requestsReceived.incrementAndGet();
                             }
 
                             @Override
-                            public void onFullDataReceived(@NonNull UniqueReplayerRequestKey requestKey,
-                                                           IReplayContexts.IReplayerHttpTransactionContext ctx,
+                            public void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                            @NonNull RequestResponsePacketPair fullPair) {
-                                var sourceIdx = requestKey.getSourceRequestIndex();
+                                var sourceIdx = ctx.getReplayerRequestKey().getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
                                         RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
                                     return;
@@ -253,20 +251,19 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                IReplayContexts.IChannelKeyContext ctx,
+                                                                IReplayContexts.@NonNull IChannelKeyContext ctx,
                                                                 @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(@NonNull ISourceTrafficChannelKey key, int channelInteractionNumber,
-                                                          IReplayContexts.IChannelKeyContext ctx,
+                            public void onConnectionClose(int channelInteractionNumber,
+                                                          @NonNull IReplayContexts.IChannelKeyContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
-                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk,
-                                                                         IReplayContexts.IChannelKeyContext ctx) {
-                                tsIndicesReceived.add(tsk.getTrafficStreamIndex());
+                            @Override public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {
+                                tsIndicesReceived.add(ctx.getTrafficStreamKey().getTrafficStreamIndex());
                             }
                         });
         var tsList = trafficStreams.collect(Collectors.toList());

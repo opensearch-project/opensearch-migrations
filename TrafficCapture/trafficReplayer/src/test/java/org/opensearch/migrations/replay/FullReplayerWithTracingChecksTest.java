@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -100,8 +101,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         try (var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
             tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
                     new TimeShifter(10 * 1000), (t) -> {
-                        var key = t.uniqueRequestKey;
-                        var wasNew = tuplesReceived.add(key.toString());
+                        var wasNew = tuplesReceived.add(t.getRequestKey().toString());
                         Assertions.assertTrue(wasNew);
                     });
         } finally {
@@ -134,7 +134,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         chk.accept(numRequests, "targetTransaction");
         chk.accept(numRequests*2, "scheduled");
         chk.accept(numRequests, "requestSending");
-        chk.accept(numRequests, "tupleHandling");
+        chk.accept(numRequests, "finalizingResults");
 
         Consumer<String> chkNonZero = k-> {
             Assertions.assertNotNull(byName.get(k));

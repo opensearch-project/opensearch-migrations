@@ -35,7 +35,7 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
                 JsonJoltTransformer.newBuilder()
                         .addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP)
                         .build(), null, testPacketCapture,
-                TestRequestKey.getTestConnectionRequestContext(rootContext, 0));
+                rootContext.getTestConnectionRequestContext(0));
 
         final var payloadPartSize = 511;
         final var numParts = 1025;

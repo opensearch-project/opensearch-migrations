@@ -1,5 +1,6 @@
 package org.opensearch.migrations.tracing;
 
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
@@ -8,6 +9,7 @@ import lombok.NonNull;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 public abstract class BaseNestedSpanContext
@@ -19,6 +21,11 @@ public abstract class BaseNestedSpanContext
     @Getter private final S rootInstrumentationScope;
     @Getter @Setter
     Exception observedExceptionToIncludeInMetrics;
+
+    protected static <T> AttributesBuilder addAttributeIfPresent(AttributesBuilder attributesBuilder,
+                                                       AttributeKey<T> key, Optional<T> value) {
+        return value.map(v -> attributesBuilder.put(key, v)).orElse(attributesBuilder);
+    }
 
     protected BaseNestedSpanContext(S rootScope, T enclosingScope) {
         rootScope.onContextCreated(this);

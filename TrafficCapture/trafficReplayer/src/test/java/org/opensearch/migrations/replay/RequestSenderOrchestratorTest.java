@@ -12,7 +12,6 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.tracing.TestContext;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -41,7 +40,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         Instant lastEndTime = baseTime;
         var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
         for (int i = 0; i<NUM_REQUESTS_TO_SCHEDULE; ++i) {
-            var requestContext = TestRequestKey.getTestConnectionRequestContext(rootContext, i);
+            var requestContext = rootContext.getTestConnectionRequestContext(i);
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
             var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
@@ -52,7 +51,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             scheduledItems.add(arr);
             lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
-        var connectionCtx = TestRequestKey.getTestConnectionRequestContext(rootContext, NUM_REQUESTS_TO_SCHEDULE);
+        var connectionCtx = rootContext.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
         var closeFuture = senderOrchestrator.scheduleClose(
                 connectionCtx.getLogicalEnclosingScope(), NUM_REQUESTS_TO_SCHEDULE,
                 lastEndTime.plus(Duration.ofMillis(100)));

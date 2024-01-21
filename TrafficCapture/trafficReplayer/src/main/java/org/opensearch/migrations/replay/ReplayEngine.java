@@ -135,7 +135,7 @@ public class ReplayEngine {
     }
 
     public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
-    scheduleRequest(UniqueReplayerRequestKey requestKey, IReplayContexts.IReplayerHttpTransactionContext ctx,
+    scheduleRequest(IReplayContexts.IReplayerHttpTransactionContext ctx,
                     Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
@@ -143,6 +143,7 @@ public class ReplayEngine {
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1L) : Duration.ZERO;
+        var requestKey = ctx.getReplayerRequestKey();
         logStartOfWork(requestKey, newCount, start, label);
         metricsLogger.atSuccess(MetricsEvent.SCHEDULED_REQUEST_TO_BE_SENT)
                 .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
@@ -154,11 +155,12 @@ public class ReplayEngine {
     }
 
     public DiagnosticTrackableCompletableFuture<String, Void>
-    closeConnection(ISourceTrafficChannelKey channelKey, int channelInteractionNum,
+    closeConnection(int channelInteractionNum,
                     IReplayContexts.IChannelKeyContext ctx, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
+        var channelKey = ctx.getChannelKey();
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
         var future = networkSendOrchestrator.scheduleClose(ctx, channelInteractionNum, atTime);
         return hookWorkFinishingUpdates(future, timestamp, channelKey, label);

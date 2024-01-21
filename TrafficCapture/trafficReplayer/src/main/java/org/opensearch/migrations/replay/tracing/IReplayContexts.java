@@ -9,6 +9,7 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.time.Instant;
+import java.util.Optional;
 
 public abstract class IReplayContexts {
 
@@ -27,7 +28,7 @@ public abstract class IReplayContexts {
         public static final String REQUEST_SENDING = "requestSending";
         public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
         public static final String RECEIVING_RESPONSE = "receivingResponse";
-        public static final String TUPLE_HANDLING = "tupleHandling";
+        public static final String TUPLE_HANDLING = "finalizingResults";
     }
 
     public static class MetricNames {
@@ -56,6 +57,7 @@ public abstract class IReplayContexts {
         public static final String ACTIVE_TARGET_CONNECTIONS = "activeTargetConnections";
         public static final String BYTES_WRITTEN_TO_TARGET = "bytesWrittenToTarget";
         public static final String BYTES_READ_FROM_TARGET = "bytesReadFromTarget";
+        public static final String STATUS_MATCH = "statusMatch";
     }
 
     public interface IAccumulationScope extends IScopedInstrumentationAttributes {
@@ -256,6 +258,26 @@ public abstract class IReplayContexts {
             extends IAccumulationScope,
                     IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TUPLE_HANDLING;
+        AttributeKey<Long> SOURCE_STATUS_CODE_KEY = AttributeKey.longKey("sourceStatusCode");
+        AttributeKey<Long> TARGET_STATUS_CODE_KEY = AttributeKey.longKey("targetStatusCode");
+        AttributeKey<Boolean> STATUS_CODE_MATCH_KEY = AttributeKey.booleanKey("statusCodesMatch");
+        AttributeKey<String> METHOD_KEY = AttributeKey.stringKey("method");
+        AttributeKey<String> HTTP_VERSION_KEY = AttributeKey.stringKey("version"); // for the span, not metric
+        AttributeKey<String> ENDPOINT_KEY = AttributeKey.stringKey("endpoint"); // for the span, not metric
+
         @Override default String getActivityName() { return ACTIVITY_NAME; }
+
+        void setSourceStatus(Integer sourceStatus);
+        void setTargetStatus(Integer targetStatus);
+
+        void setMethod(String method);
+
+        void setEndpoint(String endpointUrl);
+
+        void setHttpVersions(String string);
+
+        default UniqueReplayerRequestKey getReplayerRequestKey() {
+            return getLogicalEnclosingScope().getReplayerRequestKey();
+        }
     }
 }
