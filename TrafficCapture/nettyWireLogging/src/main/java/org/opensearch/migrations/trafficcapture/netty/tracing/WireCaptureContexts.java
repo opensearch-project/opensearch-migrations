@@ -127,8 +127,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
                     sourceRequestIndex);
         }
 
-        public static class MetricInstruments
-                extends org.opensearch.migrations.trafficcapture.tracing.ConnectionContext.MetricInstruments {
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
             public final LongCounter blockingRequestCounter;
             public final LongCounter requestsNotOffloadedCounter;
             public final LongCounter fullyParsedRequestCounter;
