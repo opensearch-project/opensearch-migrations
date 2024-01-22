@@ -41,7 +41,7 @@ repositories {
 }
 
 dependencies {
-    implementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
+    api platform("io.opentelemetry:opentelemetry-bom:1.34.1")
 
     implementation project(':captureProtobufs')
 
@@ -59,15 +59,18 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
 
     // OpenTelemetry core
-    implementation group: 'io.opentelemetry', name:'opentelemetry-api'
+    api group: 'io.opentelemetry', name:'opentelemetry-api'
+    api group: 'io.opentelemetry', name:'opentelemetry-sdk'
     implementation group: 'io.opentelemetry', name:'opentelemetry-exporter-otlp'
-    implementation group: 'io.opentelemetry', name:'opentelemetry-sdk'
     implementation group: 'io.opentelemetry.instrumentation', name:'opentelemetry-log4j-appender-2.17', version: '1.30.0-alpha'
     implementation group: 'io.opentelemetry', name:'opentelemetry-semconv', version: '1.30.0-alpha'
 
     // OpenTelemetry log4j appender
     implementation("io.opentelemetry.instrumentation:opentelemetry-log4j-appender-2.17:1.30.0-alpha")
 
+    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-api'
+    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk'
+    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
     testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
     testFixturesImplementation group: 'io.opentelemetry', name:'opentelemetry-api'
     testFixturesImplementation group: 'io.opentelemetry', name:'opentelemetry-sdk-testing'
