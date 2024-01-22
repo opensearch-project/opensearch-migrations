@@ -71,6 +71,7 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
                 0, replayerIdx);
         return rk.trafficStreamKey.getTrafficStreamsContext().createHttpTransactionContext(rk, Instant.EPOCH);
     }
+
     public IReplayContexts.ITupleHandlingContext
     getTestTupleContext() {
         return getTestTupleContext(DEFAULT_TEST_CONNECTION, 1);

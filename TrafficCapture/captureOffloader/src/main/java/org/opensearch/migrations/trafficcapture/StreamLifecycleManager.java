@@ -7,5 +7,6 @@ public interface StreamLifecycleManager<T> extends AutoCloseable {
     CodedOutputStreamHolder createStream();
 
     CompletableFuture<T> closeStream(CodedOutputStreamHolder outputStreamHolder, int index);
+
     void close() throws IOException;
 }

@@ -9,7 +9,6 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.time.Instant;
-import java.util.Optional;
 
 public abstract class IReplayContexts {
 
@@ -68,7 +67,10 @@ public abstract class IReplayContexts {
                     org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
         String ACTIVITY_NAME = ActivityNames.CHANNEL;
 
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         // do not add this as a property
         // because its components are already being added in the IConnectionContext implementation
@@ -89,7 +91,10 @@ public abstract class IReplayContexts {
     {
         String ACTIVITY_NAME = ActivityNames.RECORD_LIFETIME;
 
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         static final AttributeKey<String> RECORD_ID_KEY = AttributeKey.stringKey("recordId");
 
@@ -108,12 +113,19 @@ public abstract class IReplayContexts {
                     IWithTypedEnclosingScope<IChannelKeyContext> {
         String ACTIVITY_NAME = ActivityNames.TRAFFIC_STREAM_LIFETIME;
 
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+
         ITrafficStreamKey getTrafficStreamKey();
+
         IChannelKeyContext getChannelKeyContext();
+
         default String getConnectionId() {
             return getChannelKey().getConnectionId();
         }
+
         default ISourceTrafficChannelKey getChannelKey() {
             return getChannelKeyContext().getChannelKey();
         }
@@ -129,15 +141,22 @@ public abstract class IReplayContexts {
         AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
 
         String ACTIVITY_NAME = ActivityNames.HTTP_TRANSACTION;
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         UniqueReplayerRequestKey getReplayerRequestKey();
+
         IChannelKeyContext getChannelKeyContext();
+
         Instant getTimeOfOriginalRequest();
 
         default String getConnectionId() {
             return getChannelKey().getConnectionId();
         }
+
         default ISourceTrafficChannelKey getChannelKey() {
             return getChannelKeyContext().getChannelKey();
         }
@@ -157,10 +176,15 @@ public abstract class IReplayContexts {
         }
 
         IRequestAccumulationContext createRequestAccumulationContext();
+
         IResponseAccumulationContext createResponseAccumulationContext();
+
         IRequestTransformationContext createTransformationContext();
+
         IScheduledContext createScheduledContext(Instant timestamp);
+
         ITargetRequestContext createTargetRequestContext();
+
         ITupleHandlingContext createTupleContext();
     }
 
@@ -170,7 +194,9 @@ public abstract class IReplayContexts {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_REQUEST;
 
         @Override
-        default String getActivityName() { return ACTIVITY_NAME;}
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     public interface IResponseAccumulationContext
@@ -179,7 +205,9 @@ public abstract class IReplayContexts {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_RESPONSE;
 
         @Override
-        default String getActivityName() { return ACTIVITY_NAME;}
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     public interface IRequestTransformationContext
@@ -187,9 +215,13 @@ public abstract class IReplayContexts {
                     IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TRANSFORMATION;
 
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         void onHeaderParse();
+
         void onPayloadParse();
 
         void onPayloadParseSuccess();
@@ -199,13 +231,21 @@ public abstract class IReplayContexts {
         void onJsonPayloadParseSucceeded();
 
         void onPayloadBytesIn(int inputSize);
+
         void onUncompressedBytesIn(int inputSize);
+
         void onUncompressedBytesOut(int inputSize);
+
         void onFinalBytesOut(int outputSize);
+
         void onTransformSuccess();
+
         void onTransformSkip();
+
         void onTransformFailure();
+
         void aggregateInputChunk(int sizeInBytes);
+
         void aggregateOutputChunk(int sizeInBytes);
     }
 
@@ -215,7 +255,9 @@ public abstract class IReplayContexts {
         String ACTIVITY_NAME = ActivityNames.SCHEDULED;
 
         @Override
-        default String getActivityName() { return ACTIVITY_NAME;}
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     public interface ITargetRequestContext
@@ -223,13 +265,19 @@ public abstract class IReplayContexts {
                     IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TARGET_TRANSACTION;
 
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         void onBytesSent(int size);
+
         void onBytesReceived(int size);
 
         IRequestSendingContext createHttpSendingContext();
+
         IWaitingForHttpResponseContext createWaitingForResponseContext();
+
         IReceivingHttpResponseContext createHttpReceivingContext();
     }
 
@@ -237,21 +285,33 @@ public abstract class IReplayContexts {
             extends IAccumulationScope,
                     IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.REQUEST_SENDING;
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     public interface IWaitingForHttpResponseContext
             extends IAccumulationScope,
                     IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.WAITING_FOR_RESPONSE;
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     public interface IReceivingHttpResponseContext
             extends IAccumulationScope,
                     IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.RECEIVING_RESPONSE;
-        @Override default String getActivityName() { return ACTIVITY_NAME;}
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     public interface ITupleHandlingContext
@@ -265,9 +325,13 @@ public abstract class IReplayContexts {
         AttributeKey<String> HTTP_VERSION_KEY = AttributeKey.stringKey("version"); // for the span, not metric
         AttributeKey<String> ENDPOINT_KEY = AttributeKey.stringKey("endpoint"); // for the span, not metric
 
-        @Override default String getActivityName() { return ACTIVITY_NAME; }
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         void setSourceStatus(Integer sourceStatus);
+
         void setTargetStatus(Integer targetStatus);
 
         void setMethod(String method);

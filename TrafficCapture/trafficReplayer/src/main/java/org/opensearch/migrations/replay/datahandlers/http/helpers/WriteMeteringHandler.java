@@ -18,9 +18,9 @@ public class WriteMeteringHandler extends ChannelOutboundHandlerAdapter {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         if (msg instanceof ByteBuf) {
-            sizeConsumer.accept(((ByteBuf)msg).readableBytes());
+            sizeConsumer.accept(((ByteBuf) msg).readableBytes());
         } else if (msg instanceof HttpContent) {
-            sizeConsumer.accept(((HttpContent)msg).content().readableBytes());
+            sizeConsumer.accept(((HttpContent) msg).content().readableBytes());
         }
         super.write(ctx, msg, promise);
     }

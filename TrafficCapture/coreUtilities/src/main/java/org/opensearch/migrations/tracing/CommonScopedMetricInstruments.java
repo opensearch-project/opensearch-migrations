@@ -15,6 +15,7 @@ public class CommonScopedMetricInstruments {
     final LongCounter contextCounter;
     final LongCounter exceptionCounter;
     final DoubleHistogram contextDuration;
+
     public CommonScopedMetricInstruments(Meter meter, String activityName) {
         this(meter, activityName, null);
     }

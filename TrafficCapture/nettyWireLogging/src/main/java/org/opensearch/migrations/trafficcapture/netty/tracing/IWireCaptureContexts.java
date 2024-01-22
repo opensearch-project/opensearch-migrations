@@ -32,14 +32,17 @@ public abstract class IWireCaptureContexts {
                     IWithTypedEnclosingScope<ICapturingConnectionContext>
     {
         IBlockingContext createBlockingContext();
+
         IWaitingForResponseContext createWaitingForResponseContext();
+
         IResponseContext createResponseContext();
+
         IRequestContext createNextRequestContext();
     }
 
-    public interface IRequestContext extends IHttpMessageContext
-    {
+    public interface IRequestContext extends IHttpMessageContext {
         String ACTIVITY_NAME = "gatheringRequest";
+
         default String getActivityName() {
             return ACTIVITY_NAME;
         }
@@ -55,6 +58,7 @@ public abstract class IWireCaptureContexts {
 
     public interface IBlockingContext extends IHttpMessageContext {
         String ACTIVITY_NAME = "blocked";
+
         default String getActivityName() {
             return ACTIVITY_NAME;
         }
@@ -62,6 +66,7 @@ public abstract class IWireCaptureContexts {
 
     public interface IWaitingForResponseContext extends IHttpMessageContext {
         String ACTIVITY_NAME = "waitingForResponse";
+
         default String getActivityName() {
             return ACTIVITY_NAME;
         }
@@ -69,6 +74,7 @@ public abstract class IWireCaptureContexts {
 
     public interface IResponseContext extends IHttpMessageContext {
         String ACTIVITY_NAME = "gatheringResponse";
+
         default String getActivityName() {
             return ACTIVITY_NAME;
         }

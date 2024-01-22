@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;

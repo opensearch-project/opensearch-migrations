@@ -6,7 +6,6 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.tracing.TestContext;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;

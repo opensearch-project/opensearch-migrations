@@ -27,7 +27,8 @@ public class RequestResponsePacketPair {
 
     HttpMessageAndTimestamp requestData;
     HttpMessageAndTimestamp responseData;
-    @NonNull final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
+    @NonNull
+    final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
     // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,

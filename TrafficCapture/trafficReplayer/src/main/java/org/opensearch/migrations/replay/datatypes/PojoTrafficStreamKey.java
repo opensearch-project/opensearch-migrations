@@ -12,6 +12,7 @@ public abstract class PojoTrafficStreamKey extends ISourceTrafficChannelKey.Pojo
         super(nodeId, connectionId);
         this.trafficStreamIndex = index;
     }
+
     protected PojoTrafficStreamKey(PojoImpl tsk, int index) {
         this(tsk.nodeId, tsk.connectionId, index);
     }

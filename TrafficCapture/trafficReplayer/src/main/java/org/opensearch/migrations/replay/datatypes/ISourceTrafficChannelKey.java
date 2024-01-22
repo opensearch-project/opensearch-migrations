@@ -5,6 +5,7 @@ import lombok.Getter;
 
 public interface ISourceTrafficChannelKey {
     String getNodeId();
+
     String getConnectionId();
 
     @Getter

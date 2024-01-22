@@ -1,9 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 
-import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -11,7 +9,7 @@ public class TupleParserChainConsumer implements Consumer<SourceTargetCaptureTup
     private final BiConsumer<SourceTargetCaptureTuple, ParsedHttpMessagesAsDicts> innerConsumer;
 
     public TupleParserChainConsumer(@NonNull BiConsumer<SourceTargetCaptureTuple,
-                                            ParsedHttpMessagesAsDicts> innerConsumer) {
+            ParsedHttpMessagesAsDicts> innerConsumer) {
         this.innerConsumer = innerConsumer;
     }
 

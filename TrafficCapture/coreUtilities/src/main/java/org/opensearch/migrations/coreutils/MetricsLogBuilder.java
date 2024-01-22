@@ -1,8 +1,8 @@
 package org.opensearch.migrations.coreutils;
 
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.event.Level;
 import org.slf4j.Logger;
+import org.slf4j.event.Level;
 import org.slf4j.spi.LoggingEventBuilder;
 
 import java.util.Optional;

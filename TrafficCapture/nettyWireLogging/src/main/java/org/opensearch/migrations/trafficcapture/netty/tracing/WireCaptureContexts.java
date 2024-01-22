@@ -51,7 +51,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
 
         @Override
         public IWireCaptureContexts.IHttpMessageContext createInitialRequestContext() {
-            return new RequestContext((RootWireLoggingContext)getRootInstrumentationScope(),
+            return new RequestContext((RootWireLoggingContext) getRootInstrumentationScope(),
                     this, 0);
         }
 
@@ -74,7 +74,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         final long sourceRequestIndex;
 
         protected HttpMessageContext(RootWireLoggingContext rootWireLoggingContext, IConnectionContext enclosingScope,
-                                    long sourceRequestIndex) {
+                                     long sourceRequestIndex) {
             super(rootWireLoggingContext, enclosingScope);
             this.sourceRequestIndex = sourceRequestIndex;
             initializeSpan();
@@ -108,7 +108,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         public IWireCaptureContexts.IRequestContext createNextRequestContext() {
             close();
             return new RequestContext(getRootInstrumentationScope(), getImmediateEnclosingScope(),
-                    sourceRequestIndex+1);
+                    sourceRequestIndex + 1);
         }
     }
 
@@ -145,7 +145,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
                         .counterBuilder(MetricNames.BYTES_READ).setUnit(BYTES_UNIT).build();
             }
         }
-        
+
         public static @NonNull MetricInstruments makeMetrics(Meter meter) {
             return new MetricInstruments(meter, ACTIVITY_NAME);
         }
@@ -182,8 +182,8 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         public static final String ACTIVITY_NAME = "blocked";
 
         public BlockingContext(RootWireLoggingContext rootWireLoggingContext,
-                              IConnectionContext enclosingScope,
-                              long sourceRequestIndex) {
+                               IConnectionContext enclosingScope,
+                               long sourceRequestIndex) {
             super(rootWireLoggingContext, enclosingScope, sourceRequestIndex);
         }
 
@@ -191,6 +191,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         public String getActivityName() {
             return ACTIVITY_NAME;
         }
+
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
@@ -211,9 +212,10 @@ public class WireCaptureContexts extends IWireCaptureContexts {
             extends HttpMessageContext
             implements IWireCaptureContexts.IWaitingForResponseContext {
         public static final String ACTIVITY_NAME = "waitingForResponse";
+
         public WaitingForResponseContext(RootWireLoggingContext rootWireLoggingContext,
-                              IConnectionContext enclosingScope,
-                              long sourceRequestIndex) {
+                                         IConnectionContext enclosingScope,
+                                         long sourceRequestIndex) {
             super(rootWireLoggingContext, enclosingScope, sourceRequestIndex);
         }
 
@@ -221,6 +223,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         public String getActivityName() {
             return ACTIVITY_NAME;
         }
+
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
@@ -241,9 +244,10 @@ public class WireCaptureContexts extends IWireCaptureContexts {
             extends HttpMessageContext
             implements IWireCaptureContexts.IResponseContext {
         public static final String ACTIVITY_NAME = "gatheringResponse";
+
         public ResponseContext(RootWireLoggingContext rootWireLoggingContext,
-                              IConnectionContext enclosingScope,
-                              long sourceRequestIndex) {
+                               IConnectionContext enclosingScope,
+                               long sourceRequestIndex) {
             super(rootWireLoggingContext, enclosingScope, sourceRequestIndex);
         }
 
@@ -255,6 +259,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
 
             private final LongCounter bytesWritten;
+
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
                 bytesWritten = meter

@@ -2,7 +2,6 @@ package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.DoubleHistogram;
-import io.opentelemetry.api.metrics.LongHistogram;
 
 import java.time.Duration;
 import java.time.Instant;

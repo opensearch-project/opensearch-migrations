@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.TestContext;
 
 import java.time.Duration;
@@ -66,21 +65,21 @@ public class TracingTest {
 
     private void checkSpans(List<SpanData> recordedSpans) {
         var byName = recordedSpans.stream().collect(Collectors.groupingBy(SpanData::getName));
-        var keys = Arrays.stream(IReplayContexts.ActivityNames.class.getFields()).map(f-> {
-                    try {
-                        return f.get(null);
-                    } catch (Exception e) {
-                        Lombok.sneakyThrow(e);
-                        return null;
-                    }
-                }).toArray(String[]::new);
+        var keys = Arrays.stream(IReplayContexts.ActivityNames.class.getFields()).map(f -> {
+            try {
+                return f.get(null);
+            } catch (Exception e) {
+                Lombok.sneakyThrow(e);
+                return null;
+            }
+        }).toArray(String[]::new);
         Stream.of(keys).forEach(spanName -> {
-                Assertions.assertNotNull(byName.get(spanName));
+            Assertions.assertNotNull(byName.get(spanName));
             Assertions.assertEquals(1, byName.get(spanName).size());
             byName.remove(spanName);
         });
 
         Assertions.assertEquals("", byName.entrySet().stream()
-                .map(kvp->kvp.getKey()+":"+kvp.getValue()).collect(Collectors.joining()));
+                .map(kvp -> kvp.getKey() + ":" + kvp.getValue()).collect(Collectors.joining()));
     }
 }

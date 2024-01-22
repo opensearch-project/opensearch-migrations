@@ -2,15 +2,13 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
-import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
 public class KafkaRecordContext extends
         BaseNestedSpanContext<IRootKafkaOffloaderContext, IConnectionContext>

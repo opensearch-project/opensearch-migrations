@@ -1,21 +1,15 @@
 package org.opensearch.migrations.replay.tracing;
 
-import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
-import io.opentelemetry.api.metrics.MeterProvider;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
 import org.apache.kafka.common.TopicPartition;
-import org.checkerframework.checker.units.qual.N;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.tracing.IHasRootInstrumentationScope;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 
 import java.util.Collection;
@@ -29,7 +23,8 @@ public class KafkaConsumerContexts {
         @Getter
         @NonNull
         public final RootReplayerContext enclosingScope;
-        @Getter @Setter
+        @Getter
+        @Setter
         Exception observedExceptionToIncludeInMetrics;
 
         public AsyncListeningContext(@NonNull RootReplayerContext enclosingScope) {
@@ -40,6 +35,7 @@ public class KafkaConsumerContexts {
             public final LongCounter kafkaPartitionsRevokedCounter;
             public final LongCounter kafkaPartitionsAssignedCounter;
             public final LongUpDownCounter kafkaActivePartitionsCounter;
+
             private MetricInstruments(Meter meter) {
                 kafkaPartitionsRevokedCounter = meter
                         .counterBuilder(IKafkaConsumerContexts.MetricNames.PARTITIONS_REVOKED_EVENT_COUNT).build();
@@ -87,6 +83,7 @@ public class KafkaConsumerContexts {
                 super(meter, activityName);
             }
         }
+
         public TouchScopeContext(@NonNull TrafficSourceContexts.BackPressureBlockContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();

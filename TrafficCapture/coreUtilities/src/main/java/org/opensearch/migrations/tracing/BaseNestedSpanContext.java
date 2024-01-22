@@ -6,7 +6,6 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import lombok.NonNull;
-import lombok.Setter;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -16,14 +15,17 @@ public abstract class BaseNestedSpanContext
         <S extends IInstrumentConstructor, T extends IInstrumentationAttributes>
         implements IScopedInstrumentationAttributes, IWithStartTimeAndAttributes, IHasRootInstrumentationScope<S>, AutoCloseable {
     final T enclosingScope;
-    @Getter final Instant startTime;
-    @Getter private Span currentSpan;
-    @Getter private final S rootInstrumentationScope;
+    @Getter
+    final Instant startTime;
+    @Getter
+    private Span currentSpan;
+    @Getter
+    private final S rootInstrumentationScope;
     @Getter
     Throwable observedExceptionToIncludeInMetrics;
 
     protected static <T> AttributesBuilder addAttributeIfPresent(AttributesBuilder attributesBuilder,
-                                                       AttributeKey<T> key, Optional<T> value) {
+                                                                 AttributeKey<T> key, Optional<T> value) {
         return value.map(v -> attributesBuilder.put(key, v)).orElse(attributesBuilder);
     }
 
@@ -45,7 +47,9 @@ public abstract class BaseNestedSpanContext
         return enclosingScope;
     }
 
-    public T getImmediateEnclosingScope() { return enclosingScope; }
+    public T getImmediateEnclosingScope() {
+        return enclosingScope;
+    }
 
     protected void initializeSpan() {
         initializeSpan(Attributes.builder());

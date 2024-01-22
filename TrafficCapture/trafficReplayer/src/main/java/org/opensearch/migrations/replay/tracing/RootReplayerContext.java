@@ -1,12 +1,11 @@
 package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
+import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.tracing.RootOtelContext;
-
-import lombok.Getter;
 
 @Getter
 public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {

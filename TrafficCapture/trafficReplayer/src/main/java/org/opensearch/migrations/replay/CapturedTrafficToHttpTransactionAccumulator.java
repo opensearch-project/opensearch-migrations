@@ -162,17 +162,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
         var yetToBeSequencedTrafficStream = trafficStreamAndKey.getStream();
-        log.atTrace().setMessage(()->"Got trafficStream: "+summarizeTrafficStream(yetToBeSequencedTrafficStream)).log();
+        log.atTrace().setMessage(() -> "Got trafficStream: " + summarizeTrafficStream(yetToBeSequencedTrafficStream)).log();
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
         var tsk = trafficStreamAndKey.getKey();
-        var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k->createInitialAccumulation(trafficStreamAndKey));
+        var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k -> createInitialAccumulation(trafficStreamAndKey));
         var trafficStream = trafficStreamAndKey.getStream();
-        for (int i=0; i<trafficStream.getSubStreamCount(); ++i) {
+        for (int i = 0; i < trafficStream.getSubStreamCount(); ++i) {
             var o = trafficStream.getSubStreamList().get(i);
             var connectionStatus = addObservationToAccumulation(accum, tsk, o);
             if (CONNECTION_STATUS.CLOSED == connectionStatus) {
-                log.atInfo().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
+                log.atInfo().setMessage(() -> "Connection terminated: removing " + partitionId + ":" + connectionId +
                         " from liveStreams map").log();
                 liveStreams.remove(partitionId, connectionId);
                 break;

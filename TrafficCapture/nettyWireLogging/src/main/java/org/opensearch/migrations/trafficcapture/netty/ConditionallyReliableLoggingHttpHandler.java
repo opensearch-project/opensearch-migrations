@@ -9,7 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContexts;
-import org.opensearch.migrations.trafficcapture.netty.tracing.WireCaptureContexts;
 
 import java.io.IOException;
 import java.util.function.Predicate;

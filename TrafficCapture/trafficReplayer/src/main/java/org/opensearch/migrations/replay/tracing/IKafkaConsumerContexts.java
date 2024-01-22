@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.tracing;
 
-import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
@@ -28,19 +27,28 @@ public interface IKafkaConsumerContexts {
 
     interface IAsyncListeningContext extends IInstrumentationAttributes {
     }
+
     interface IKafkaConsumerScope extends IScopedInstrumentationAttributes {
     }
+
     interface ITouchScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.TOUCH;
+
         @Override
-        default String getActivityName() { return ACTIVITY_NAME; }
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         IPollScopeContext createNewPollContext();
     }
+
     interface IPollScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.KAFKA_POLL;
+
         @Override
-        default String getActivityName() { return ACTIVITY_NAME; }
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     /**
@@ -48,8 +56,11 @@ public interface IKafkaConsumerContexts {
      */
     interface ICommitScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.COMMIT;
+
         @Override
-        default String getActivityName() { return ACTIVITY_NAME; }
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         IKafkaCommitScopeContext createNewKafkaCommitContext();
     }
@@ -57,9 +68,12 @@ public interface IKafkaConsumerContexts {
     /**
      * Context for ONLY the service call to Kafka to perform the commit.
      */
-    interface IKafkaCommitScopeContext extends IKafkaConsumerScope{
+    interface IKafkaCommitScopeContext extends IKafkaConsumerScope {
         String ACTIVITY_NAME = ActivityNames.KAFKA_COMMIT;
+
         @Override
-        default String getActivityName() { return ACTIVITY_NAME; }
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 }

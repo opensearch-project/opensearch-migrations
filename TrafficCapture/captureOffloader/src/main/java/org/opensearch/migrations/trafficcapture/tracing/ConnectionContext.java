@@ -1,25 +1,17 @@
 package org.opensearch.migrations.trafficcapture.tracing;
 
-import io.opentelemetry.api.common.Attributes;
-import io.opentelemetry.api.metrics.DoubleHistogram;
-import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
-import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.Getter;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
-import org.opensearch.migrations.tracing.AttributeNameMatchingPredicate;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
-import org.opensearch.migrations.tracing.FilteringAttributeBuilder;
 import org.opensearch.migrations.tracing.IHasRootInstrumentationScope;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
 public class ConnectionContext extends BaseNestedSpanContext<IRootOffloaderContext, IRootOffloaderContext>
         implements IConnectionContext, IHasRootInstrumentationScope<IRootOffloaderContext> {
 
-    private static final AttributeNameMatchingPredicate KEYS_TO_EXCLUDE_FOR_ACTIVE_CONNECTION_COUNT =
-            AttributeNameMatchingPredicate.builder(true).add(CONNECTION_ID_ATTR.getKey()).build();
     public static final String ACTIVE_CONNECTION = "activeConnection";
     public static final String ACTIVITY_NAME = "captureConnection";
 

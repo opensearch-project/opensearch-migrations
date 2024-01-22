@@ -116,15 +116,16 @@ public class RootOtelContext implements IRootOtelContext {
 
     private static SpanBuilder addLinkedToBuilder(Stream<Span> linkedSpanContexts, SpanBuilder spanBuilder) {
         return Optional.ofNullable(linkedSpanContexts)
-                .map(ss->ss.collect(Utils.foldLeft(spanBuilder, (b,s)->b.addLink(s.getSpanContext()))))
+                .map(ss -> ss.collect(Utils.foldLeft(spanBuilder, (b, s) -> b.addLink(s.getSpanContext()))))
                 .orElse(spanBuilder);
     }
 
     private static Span buildSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan,
                                             Stream<Span> linkedSpanContexts) {
-        return addLinkedToBuilder(linkedSpanContexts, Optional.ofNullable(parentSpan)
-                .map(p -> builder.setParent(Context.current().with(p)))
-                .orElseGet(builder::setNoParent))
+        return addLinkedToBuilder(linkedSpanContexts,
+                Optional.ofNullable(parentSpan)
+                        .map(p -> builder.setParent(Context.current().with(p)))
+                        .orElseGet(builder::setNoParent))
                 .startSpan().setAllAttributes(attrs);
     }
 

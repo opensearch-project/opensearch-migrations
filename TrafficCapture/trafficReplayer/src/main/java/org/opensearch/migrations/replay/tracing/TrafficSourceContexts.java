@@ -1,11 +1,9 @@
 package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.metrics.Meter;
-import io.opentelemetry.api.metrics.MeterProvider;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
-import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 
 public class TrafficSourceContexts {
@@ -36,6 +34,7 @@ public class TrafficSourceContexts {
                 super(meter, activityName);
             }
         }
+
         public static @NonNull MetricInstruments makeMetrics(Meter meter) {
             return new MetricInstruments(meter, ACTIVITY_NAME);
         }
@@ -75,6 +74,7 @@ public class TrafficSourceContexts {
                 super(meter, activityName);
             }
         }
+
         public static @NonNull MetricInstruments makeMetrics(Meter meter) {
             return new MetricInstruments(meter, ACTIVITY_NAME);
         }
@@ -98,6 +98,7 @@ public class TrafficSourceContexts {
                 super(meter, activityName);
             }
         }
+
         public static @NonNull MetricInstruments makeMetrics(Meter meter) {
             return new MetricInstruments(meter, ACTIVITY_NAME);
         }

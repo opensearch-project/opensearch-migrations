@@ -79,11 +79,11 @@ public interface IInstrumentationAttributes {
     }
 
     default void meterHistogramMillis(DoubleHistogram histogram, Duration value) {
-        meterHistogram(histogram, value.toNanos()/1_000_000.0);
+        meterHistogram(histogram, value.toNanos() / 1_000_000.0);
     }
 
     default void meterHistogramMillis(DoubleHistogram histogram, Duration value, AttributesBuilder attributesBuilder) {
-        meterHistogram(histogram, value.toNanos()/1_000_000.0, attributesBuilder);
+        meterHistogram(histogram, value.toNanos() / 1_000_000.0, attributesBuilder);
     }
 
     default void meterHistogram(DoubleHistogram histogram, double value) {

@@ -3,12 +3,9 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.HttpHeaders;
-import io.opentelemetry.api.common.AttributesBuilder;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsLogBuilder;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
-import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import java.time.Duration;
@@ -100,8 +97,8 @@ public class ParsedHttpMessagesAsDicts {
     public static void fillStatusCodeMetrics(@NonNull IReplayContexts.ITupleHandlingContext context,
                                              Optional<Map<String, Object>> sourceResponseOp,
                                              Optional<Map<String, Object>> targetResponseOp) {
-        sourceResponseOp.ifPresent(r -> context.setMethod((String)r.get("Method")));
-        sourceResponseOp.ifPresent(r -> context.setEndpoint((String)r.get("Request-URI")));
+        sourceResponseOp.ifPresent(r -> context.setMethod((String) r.get("Method")));
+        sourceResponseOp.ifPresent(r -> context.setEndpoint((String) r.get("Request-URI")));
         sourceResponseOp.ifPresent(r -> context.setSourceStatus((Integer) r.get(STATUS_CODE_KEY)));
         targetResponseOp.ifPresent(r -> context.setTargetStatus((Integer) r.get(STATUS_CODE_KEY)));
     }
@@ -137,8 +134,8 @@ public class ParsedHttpMessagesAsDicts {
         } catch (Exception e) {
             // TODO - this isn't a good design choice.
             // We should follow through with the spirit of this class and leave this as empty optional values
-            log.atWarn().setMessage(()->"Putting what may be a bogus value in the output because transforming it " +
-                    "into json threw an exception for "+context).setCause(e).log();
+            log.atWarn().setMessage(() -> "Putting what may be a bogus value in the output because transforming it " +
+                    "into json threw an exception for " + context).setCause(e).log();
             return Map.of("Exception", (Object) e.toString());
         }
     }

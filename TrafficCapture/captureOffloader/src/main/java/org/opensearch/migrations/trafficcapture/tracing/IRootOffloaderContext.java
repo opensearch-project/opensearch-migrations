@@ -1,11 +1,6 @@
 package org.opensearch.migrations.trafficcapture.tracing;
 
-import io.opentelemetry.api.OpenTelemetry;
-import io.opentelemetry.api.metrics.LongUpDownCounter;
-import io.opentelemetry.api.metrics.Meter;
-import lombok.Getter;
 import org.opensearch.migrations.tracing.IRootOtelContext;
-import org.opensearch.migrations.tracing.RootOtelContext;
 
 public interface IRootOffloaderContext extends IRootOtelContext {
     //public static final String OFFLOADER_SCOPE_NAME = "Offloader";

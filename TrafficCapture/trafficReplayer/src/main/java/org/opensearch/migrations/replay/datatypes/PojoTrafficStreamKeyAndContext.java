@@ -1,14 +1,13 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import java.util.function.Function;
-
 import lombok.EqualsAndHashCode;
-import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+
+import java.util.function.Function;
 
 
 @EqualsAndHashCode(callSuper = true)

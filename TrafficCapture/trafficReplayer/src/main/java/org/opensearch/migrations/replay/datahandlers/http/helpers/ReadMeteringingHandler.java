@@ -15,9 +15,9 @@ public class ReadMeteringingHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof ByteBuf) {
-            sizeConsumer.accept(((ByteBuf)msg).readableBytes());
+            sizeConsumer.accept(((ByteBuf) msg).readableBytes());
         } else if (msg instanceof HttpContent) {
-            sizeConsumer.accept(((HttpContent)msg).content().readableBytes());
+            sizeConsumer.accept(((HttpContent) msg).content().readableBytes());
         }
         super.channelRead(ctx, msg);
     }
