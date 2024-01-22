@@ -19,8 +19,8 @@ public abstract class BaseNestedSpanContext
     @Getter final Instant startTime;
     @Getter private Span currentSpan;
     @Getter private final S rootInstrumentationScope;
-    @Getter @Setter
-    Exception observedExceptionToIncludeInMetrics;
+    @Getter
+    Throwable observedExceptionToIncludeInMetrics;
 
     protected static <T> AttributesBuilder addAttributeIfPresent(AttributesBuilder attributesBuilder,
                                                        AttributeKey<T> key, Optional<T> value) {
@@ -63,5 +63,11 @@ public abstract class BaseNestedSpanContext
     public void initializeSpan(@NonNull Span s) {
         assert currentSpan == null : "only expect to set the current span once";
         currentSpan = s;
+    }
+
+    @Override
+    public void addException(Throwable e) {
+        IScopedInstrumentationAttributes.super.addException(e);
+        observedExceptionToIncludeInMetrics = e;
     }
 }

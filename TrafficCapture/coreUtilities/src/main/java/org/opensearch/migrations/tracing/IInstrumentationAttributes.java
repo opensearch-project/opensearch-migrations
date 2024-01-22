@@ -9,12 +9,9 @@ import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsLogBuilder;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Optional;
 
 public interface IInstrumentationAttributes {
     AttributeKey<Boolean> HAD_EXCEPTION_KEY = AttributeKey.booleanKey("hadException");
@@ -27,8 +24,7 @@ public interface IInstrumentationAttributes {
         return builder;
     }
 
-    Exception getObservedExceptionToIncludeInMetrics();
-    void setObservedExceptionToIncludeInMetrics(Exception e);
+    Throwable getObservedExceptionToIncludeInMetrics();
 
     default @NonNull Attributes getPopulatedMetricAttributes(AttributesBuilder attributesBuilder) {
         final var e = getObservedExceptionToIncludeInMetrics();
