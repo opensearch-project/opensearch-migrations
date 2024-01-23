@@ -386,7 +386,7 @@ public class TrafficReplayer {
             System.exit(3);
             return;
         }
-        var topContext = new RootReplayerContext(RootOtelContext.initializeOpenTelemetry(params.otelCollectorEndpoint,
+        var topContext = new RootReplayerContext(RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint,
                 "replay"));
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
                      Duration.ofSeconds(params.lookaheadTimeSeconds));

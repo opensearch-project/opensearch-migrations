@@ -306,7 +306,7 @@ public class CaptureProxy {
         var backsideUri = convertStringToUri(params.backsideUriString);
 
         var rootContext = new RootCaptureContext(
-                RootOtelContext.initializeOpenTelemetry(params.otelCollectorEndpoint, "capture"));
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture"));
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),

@@ -18,10 +18,11 @@ import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
-import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
+import io.opentelemetry.semconv.ResourceAttributes;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.Utils;
 
 import java.time.Duration;
@@ -29,11 +30,11 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+@Slf4j
 public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
     private final String scopeName;
     @Getter
-    @Setter
     Exception observedExceptionToIncludeInMetrics;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
@@ -46,7 +47,6 @@ public class RootOtelContext implements IRootOtelContext {
                         .setEndpoint(collectorEndpoint)
                         .setTimeout(2, TimeUnit.SECONDS)
                         .build())
-                .setScheduleDelay(100, TimeUnit.MILLISECONDS)
                 .build();
         final var metricReader = PeriodicMetricReader.builder(OtlpGrpcMetricExporter.builder()
                         .setEndpoint(collectorEndpoint)
@@ -75,23 +75,40 @@ public class RootOtelContext implements IRootOtelContext {
         return openTelemetrySdk;
     }
 
-    public static OpenTelemetry initializeOpenTelemetry(String collectorEndpoint, String serviceName) {
-        return Optional.ofNullable(collectorEndpoint)
-                .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName))
-                .orElse(OpenTelemetrySdk.builder().build());
+    public static OpenTelemetry initializeNoopOpenTelemetry() {
+        return OpenTelemetrySdk.builder().build();
     }
 
+    /**
+     * Initialize the Otel SDK for a collector if collectorEndpoint != null or setup an empty,
+     * do-nothing SDK when it is null.
+     * @param collectorEndpoint - URL of the otel-collector
+     * @param serviceName - name of this service that is sending data to the collector
+     * @return a fully initialize OpenTelemetry object capable of producing MeterProviders and TraceProviders
+     */
+    public static OpenTelemetry
+    initializeOpenTelemetryWithCollectorOrAsNoop(String collectorEndpoint, String serviceName) {
+        return Optional.ofNullable(collectorEndpoint)
+                .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName))
+                .orElseGet(() -> {
+                    if (serviceName != null) {
+                        log.atWarn().setMessage("Collector endpoint=null, so serviceName parameter '" + serviceName +
+                                "' is being ignored since a no-op OpenTelemetry object is being created").log();
+                    }
+                    return initializeNoopOpenTelemetry();
+                });
+    }
 
     public RootOtelContext(String scopeName) {
         this(scopeName, null);
     }
 
     public RootOtelContext(String scopeName, String collectorEndpoint, String serviceName) {
-        this(scopeName, initializeOpenTelemetry(collectorEndpoint, serviceName));
+        this(scopeName, initializeOpenTelemetryWithCollectorOrAsNoop(collectorEndpoint, serviceName));
     }
 
     public RootOtelContext(String scopeName, OpenTelemetry sdk) {
-        openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetry(null, null);
+        openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetryWithCollectorOrAsNoop(null, null);
         this.scopeName = scopeName;
     }
 
@@ -111,6 +128,7 @@ public class RootOtelContext implements IRootOtelContext {
 
     @Override
     public AttributesBuilder fillAttributes(AttributesBuilder builder) {
+        assert observedExceptionToIncludeInMetrics == null;
         return builder; // nothing more to do
     }
 

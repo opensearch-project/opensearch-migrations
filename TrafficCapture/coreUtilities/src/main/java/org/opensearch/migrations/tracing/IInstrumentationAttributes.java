@@ -9,9 +9,16 @@ import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
+import org.opensearch.migrations.Utils;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 public interface IInstrumentationAttributes {
     AttributeKey<Boolean> HAD_EXCEPTION_KEY = AttributeKey.booleanKey("hadException");
@@ -32,25 +39,21 @@ public interface IInstrumentationAttributes {
     }
 
     default Attributes getPopulatedSpanAttributes() {
-        return getPopulatedSpanAttributes(Attributes.builder());
+        return getPopulatedSpanAttributesBuilder().build();
     }
 
-    default Attributes getPopulatedSpanAttributes(AttributesBuilder builder) {
-        return getPopulatedSpanAttributesBuilder(builder).build();
-    }
-
-    default AttributesBuilder getPopulatedSpanAttributesBuilder(AttributesBuilder builder) {
+    default AttributesBuilder getPopulatedSpanAttributesBuilder() {
+        var builder = Attributes.builder();
         var currentObj = this;
-        var stack = new ArrayList<IInstrumentationAttributes>();
+        var stack = new ArrayDeque<IInstrumentationAttributes>();
         while (currentObj != null) {
             stack.add(currentObj);
             currentObj = currentObj.getEnclosingScope();
         }
         // reverse the order so that the lowest attribute scopes will overwrite the upper ones if there were conflicts
-        for (int i=stack.size()-1; i>=0; --i) {
-            builder = stack.get(i).fillAttributes(builder);
-        }
-        return builder;
+        return StreamSupport.stream(
+                Spliterators.spliteratorUnknownSize(stack.descendingIterator(), Spliterator.ORDERED), false)
+                .collect(Utils.foldLeft(builder, (b, iia)->iia.fillAttributes(b)));
     }
 
     default void meterIncrementEvent(LongCounter c) {
