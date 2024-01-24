@@ -117,12 +117,16 @@ def doc_count(indices: set, endpoint: EndpointInfo) -> IndexDocCount:
 def __fetch_templates(endpoint: EndpointInfo, path: str, root_key: str, factory) -> set:
     url: str = endpoint.add_path(path)
     # raises RuntimeError in case of any request errors
-    resp = __send_get_request(url, endpoint)
-    result = set()
-    if root_key in resp.json():
-        for template in resp.json()[root_key]:
-            result.add(factory(template))
-    return result
+    try:
+        resp = __send_get_request(url, endpoint)
+        result = set()
+        if root_key in resp.json():
+            for template in resp.json()[root_key]:
+                result.add(factory(template))
+        return result
+    except RuntimeError as e:
+        # Chain the underlying exception as a cause
+        raise RuntimeError("Failed to fetch template metadata from cluster endpoint") from e
 
 
 def fetch_all_component_templates(endpoint: EndpointInfo) -> set[ComponentTemplateInfo]:
@@ -131,7 +135,7 @@ def fetch_all_component_templates(endpoint: EndpointInfo) -> set[ComponentTempla
         return __fetch_templates(endpoint, __COMPONENT_TEMPLATES_PATH, __COMPONENT_TEMPLATE_LIST_KEY,
                                  lambda t: ComponentTemplateInfo(t))
     except RuntimeError as e:
-        raise RuntimeError(f"Failed to fetch component template metadata from cluster endpoint: {e!s}")
+        raise RuntimeError("Failed to fetch component template metadata") from e
 
 
 def fetch_all_index_templates(endpoint: EndpointInfo) -> set[IndexTemplateInfo]:
@@ -140,7 +144,7 @@ def fetch_all_index_templates(endpoint: EndpointInfo) -> set[IndexTemplateInfo]:
         return __fetch_templates(endpoint, __INDEX_TEMPLATES_PATH, __INDEX_TEMPLATE_LIST_KEY,
                                  lambda t: IndexTemplateInfo(t))
     except RuntimeError as e:
-        raise RuntimeError(f"Failed to fetch index template metadata from cluster endpoint: {e!s}")
+        raise RuntimeError("Failed to fetch index template metadata") from e
 
 
 def __create_templates(templates: set[ComponentTemplateInfo], endpoint: EndpointInfo, template_path: str) -> dict:
