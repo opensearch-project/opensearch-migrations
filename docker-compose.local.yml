@@ -136,7 +136,8 @@ services:
       - sharedReplayerOutput:/shared-replayer-output
       - ./console:/console
     ports:
-      - "8000:8000"
+      #- "8000:8000"
+      - "${PORT:-9999}:80"
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
     stdin_open: true

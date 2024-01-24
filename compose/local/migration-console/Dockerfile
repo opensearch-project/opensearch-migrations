@@ -24,11 +24,15 @@ RUN pip3 install \
         tqdm==4.66.1
 
 # Experimental - Migration API
-RUN apt-get install nginx 
+#RUN apt-get install nginx 
+#RUN update-rc.d nginx defaults
+# TODO Move these to requirements.txt file
 RUN pip3 install \
         django==5.0.1 \
-        djangorestframework==3.14.0
-RUN update-rc.d nginx defaults
+        djangorestframework==3.14.0 \
+        django-extensions==3.2.3 \
+        werkzeug==3.0.1
+
 # End Experimental - Migration API
 
 # TODO upon the next release of opensearch-benchmark the awscli package should be installed by pip3, with the expected boto3 version upgrade resolving the current conflicts between opensearch-benchmark and awscli
@@ -52,4 +56,7 @@ RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz |
 RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v1.1.9/aws-msk-iam-auth-1.1.9-all.jar
 WORKDIR /root
 
+# Experimental
+#CMD python3 manage.py runserver_plus --reload-type=stat 0.0.0.0:8000
+CMD python3 /console/console_api/manage.py runserver_plus 0.0.0.0:8000
 CMD tail -f /dev/null
