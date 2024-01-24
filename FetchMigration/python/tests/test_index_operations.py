@@ -212,10 +212,16 @@ class TestIndexOperations(unittest.TestCase):
         # Set up error responses
         responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", body=requests.Timeout())
         responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", body=requests.HTTPError())
-        self.assertRaises(RuntimeError, index_operations.fetch_all_component_templates,
-                          EndpointInfo(test_constants.SOURCE_ENDPOINT))
-        self.assertRaises(RuntimeError, index_operations.fetch_all_index_templates,
-                          EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        try:
+            self.assertRaises(RuntimeError, index_operations.fetch_all_component_templates,
+                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except RuntimeError as e:
+            self.assertIsNotNone(e.__cause__)
+        try:
+            self.assertRaises(RuntimeError, index_operations.fetch_all_index_templates,
+                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except RuntimeError as e:
+            self.assertIsNotNone(e.__cause__)
 
     @responses.activate
     def test_create_templates(self):
