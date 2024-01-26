@@ -2,9 +2,11 @@ receivers:
   otlp:
     protocols:
       grpc:
-
 processors:
   batch:
+    timeout: 10s
+    send_batch_size: 8192
+    send_batch_max_size: 10000
   attributes:
     # This processor is currently renaming two attributes
     # that are prefixed with `log4j.context_data.` to the base attribute name
@@ -33,26 +35,32 @@ processors:
       - key: log4j.context_data.http_status_match
         action: convert
         converted_type: int
-
 extensions:
   health_check:
-
 exporters:
+  logging:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
   opensearch:
     namespace: migrations
     http:
       endpoint: "${ANALYTICS_DOMAIN_ENDPOINT}"
-  logging:
-    verbosity: detailed
-  debug:
-
+  awsemf:
+    namespace: 'TrafficCaptureReplay'
+  awsxray:
 service:
   extensions: [health_check]
-  telemetry:
-    logs:
-      level: "debug"
   pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, awsemf]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, awsxray]
     logs:
       receivers: [otlp]
       processors: [attributes]
-      exporters: [logging, debug, opensearch]
+      exporters: [opensearch, logging]

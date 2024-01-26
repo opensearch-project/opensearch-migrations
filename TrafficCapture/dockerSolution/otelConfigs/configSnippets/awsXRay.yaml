@@ -1,0 +1,7 @@
+exporters:
+  awsxray:
+
+service:
+  pipelines:
+    traces:
+      exporters: [ awsxray ]

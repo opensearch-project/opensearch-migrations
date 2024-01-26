@@ -1,0 +1,6 @@
+extensions:
+  zpages:
+    endpoint: :55679
+
+service:
+  extensions: [ zpages]

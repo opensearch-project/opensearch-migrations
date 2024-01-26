@@ -5,9 +5,7 @@ plugins {
 }
 
 import org.opensearch.migrations.common.CommonUtils
-import java.security.MessageDigest
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-import org.apache.tools.ant.taskdefs.condition.Os
 
 def calculateDockerHash = { projectName ->
     CommonUtils.calculateDockerHash(projectName, project)
@@ -22,6 +20,7 @@ def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
         "migrationConsole": "migration_console",
         "opensearchDashboards": "opensearch_dashboards",
+        "otelCollector": "otel_collector"
 ]
 // Create the static docker files that aren't hosting migrations java code from this repo
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
@@ -59,15 +58,21 @@ javaContainerServices.forEach { projectName, dockerImageName ->
 }
 
 dockerCompose {
-    useComposeFiles = project.hasProperty('multiProxy') ?
-            ['src/main/docker/docker-compose.yml', 'src/main/docker/docker-compose-multi.yml'] :
-            ['src/main/docker/docker-compose.yml', 'src/main/docker/docker-compose-single.yml']
+    def extensionsDir = "src/main/docker/composeExtensions/"
+    useComposeFiles =
+            ['src/main/docker/docker-compose.yml',
+             "${extensionsDir}/" + (project.hasProperty("otel-collector") ?
+                     "${project.getProperty('otel-collector')}" :
+                     "otel-prometheus-jaeger-opensearch.yml"),
+             "${extensionsDir}" + (project.hasProperty("multiProxy") ? "proxy-multi.yml" : "proxy-single.yml")
+                     ]
 }
 
 task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
     dependsOn buildDockerImage_migrationConsole
     dependsOn buildDockerImage_opensearchDashboards
+    dependsOn buildDockerImage_otelCollector
     
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer

@@ -1,0 +1,14 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+processors:
+
+extensions:
+
+exporters:
+
+service:
+  extensions:
+  pipelines:

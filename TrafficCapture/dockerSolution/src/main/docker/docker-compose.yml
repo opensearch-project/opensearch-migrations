@@ -34,30 +34,11 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - grafana_data:/var/lib/grafana
+      - ./grafana_data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
       - prometheus
-
-  # Collector
-  otel-collector:
-    image: otel/opentelemetry-collector:latest
-#    command: ["--config=/etc/otel-collector-config.yaml", "${OTELCOL_ARGS}"]
-    networks:
-      - migrations
-    volumes:
-#      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
-      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml
-    ports:
-      - "1888:1888"   # pprof extension
-      - "8888:8888"   # Prometheus metrics exposed by the collector
-      - "8889:8889"   # Prometheus exporter metrics
-      - "13133:13133" # health_check extension
-      - "55679:55679" # zpages extension
-      - "4317:4317"   # otlp receiver
-    depends_on:
-      - jaeger
 
   zookeeper:
     image: docker.io/bitnami/zookeeper:3.8
@@ -142,7 +123,7 @@ services:
 #      - "4317:4317"
 #      - "13133:13133"
 #    volumes:
-#      - ./otelcol/otel-config.yml:/etc/otel-config.yml
+#      - ./otelcol/otel-config-debug-only.yaml:/etc/otel-config-debug-only.yaml
 #    networks:
 #      - migrations
 #    depends_on:

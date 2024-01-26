@@ -1,0 +1,4 @@
+service:
+  pipelines:
+    logs:
+      receivers: [ otlp ]
