@@ -87,6 +87,8 @@ services:
       - migrations
     ports:
       - "29200:9200"
+    depends_on: # Fetch immediately starts running once the container is up, so making sure it's up before one of the clusters prevents any unintentional migrations from happening.
+      - fetch-migration
 
   opensearchanalytics:
     image: 'opensearchproject/opensearch:latest'
@@ -130,8 +132,16 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
+
+  fetch-migration:
+    image: migrations/fetch-migration
+    volumes:
+      - ./pipeline_yaml.yml:/code/input.yaml # The only way to provide this to Fetch is either by mounting it or by having it already existed at "/code" in the container as "input.yaml"
+    networks:
+      - migrations
 
 volumes:
   zookeeper_data:
