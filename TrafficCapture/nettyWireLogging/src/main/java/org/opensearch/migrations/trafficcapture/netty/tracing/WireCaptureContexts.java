@@ -179,8 +179,6 @@ public class WireCaptureContexts extends IWireCaptureContexts {
     public static class BlockingContext
             extends HttpMessageContext
             implements IWireCaptureContexts.IBlockingContext {
-        public static final String ACTIVITY_NAME = "blocked";
-
         public BlockingContext(RootWireLoggingContext rootWireLoggingContext,
                                IConnectionContext enclosingScope,
                                long sourceRequestIndex) {
@@ -211,8 +209,6 @@ public class WireCaptureContexts extends IWireCaptureContexts {
     public static class WaitingForResponseContext
             extends HttpMessageContext
             implements IWireCaptureContexts.IWaitingForResponseContext {
-        public static final String ACTIVITY_NAME = "waitingForResponse";
-
         public WaitingForResponseContext(RootWireLoggingContext rootWireLoggingContext,
                                          IConnectionContext enclosingScope,
                                          long sourceRequestIndex) {
@@ -243,8 +239,6 @@ public class WireCaptureContexts extends IWireCaptureContexts {
     public static class ResponseContext
             extends HttpMessageContext
             implements IWireCaptureContexts.IResponseContext {
-        public static final String ACTIVITY_NAME = "gatheringResponse";
-
         public ResponseContext(RootWireLoggingContext rootWireLoggingContext,
                                IConnectionContext enclosingScope,
                                long sourceRequestIndex) {

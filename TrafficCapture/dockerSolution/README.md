@@ -31,7 +31,7 @@ containers AND the AWS services.
 
 ### Otel-Collector configurations
 
-The migrations components use OpenTelemetry for instrumentation so that different systems can be utilized acrpss 
+The migrations components use OpenTelemetry for instrumentation so that different systems can be utilized across 
 (Prometheus, CloudWatch, Zipkin, etc) and across different types of infrastructure.  The docker solutions vended 
 in this directory try to provide flexibility and consistency between different environments.  Base images may 
 change in the future as otel matures and configurations will also need to be updated over time due to external

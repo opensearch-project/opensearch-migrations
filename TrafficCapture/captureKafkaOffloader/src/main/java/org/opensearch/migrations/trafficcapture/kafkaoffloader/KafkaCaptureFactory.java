@@ -87,11 +87,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         }
 
         @Override
-        public void close() throws IOException {
-            log.atInfo().setMessage(() -> "factory.close()").log();
-        }
-
-        @Override
         public CodedOutputStreamWrapper createStream() {
             telemetryContext.getCurrentSpan().addEvent("streamCreated");
 

@@ -128,8 +128,8 @@ public class RootOtelContext implements IRootOtelContext {
 
     @Override
     public AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        assert observedExceptionToIncludeInMetrics == null;
-        return builder; // nothing more to do
+        assert observedExceptionToIncludeInMetrics == null; // nothing more to do than this check
+        return IRootOtelContext.super.fillAttributes(builder);
     }
 
     private static SpanBuilder addLinkedToBuilder(Stream<Span> linkedSpanContexts, SpanBuilder spanBuilder) {

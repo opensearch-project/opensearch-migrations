@@ -45,15 +45,13 @@ public interface IInstrumentationAttributes {
     default AttributesBuilder getPopulatedSpanAttributesBuilder() {
         var builder = Attributes.builder();
         var currentObj = this;
+        // reverse the order so that the lowest attribute scopes will overwrite the upper ones if there were conflicts
         var stack = new ArrayDeque<IInstrumentationAttributes>();
         while (currentObj != null) {
-            stack.add(currentObj);
+            stack.addFirst(currentObj);
             currentObj = currentObj.getEnclosingScope();
         }
-        // reverse the order so that the lowest attribute scopes will overwrite the upper ones if there were conflicts
-        return StreamSupport.stream(
-                Spliterators.spliteratorUnknownSize(stack.descendingIterator(), Spliterator.ORDERED), false)
-                .collect(Utils.foldLeft(builder, (b, iia)->iia.fillAttributes(b)));
+        return stack.stream().collect(Utils.foldLeft(builder, (b, iia)->iia.fillAttributes(b)));
     }
 
     default void meterIncrementEvent(LongCounter c) {

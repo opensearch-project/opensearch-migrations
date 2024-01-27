@@ -202,7 +202,6 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             currentCodedOutputStreamHolderOrNull = null;
             if (isFinal) {
                 streamHasBeenClosed = true;
-                streamManager.close();
             }
         }
     }

@@ -189,9 +189,6 @@ public class CaptureProxy {
         return ctx -> new StreamChannelConnectionCaptureSerializer<>(null, ctx.getConnectionId(),
                 new StreamLifecycleManager<>() {
                     @Override
-                    public void close() {}
-
-                    @Override
                     public CodedOutputStreamHolder createStream() {
                         return () -> CodedOutputStream.newInstance(NullOutputStream.getInstance());
                     }

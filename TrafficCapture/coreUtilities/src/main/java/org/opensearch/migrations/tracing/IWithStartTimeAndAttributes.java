@@ -4,13 +4,12 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 
 import java.time.Duration;
-import java.time.Instant;
 
 public interface IWithStartTimeAndAttributes extends IInstrumentationAttributes {
-    Instant getStartTime();
+    long getStartNanoTime();
 
     default Duration getSpanDuration() {
-        return Duration.between(getStartTime(), Instant.now());
+        return Duration.ofNanos(System.nanoTime() - getStartNanoTime());
     }
 
     default void meterHistogramMillis(DoubleHistogram histogram) {

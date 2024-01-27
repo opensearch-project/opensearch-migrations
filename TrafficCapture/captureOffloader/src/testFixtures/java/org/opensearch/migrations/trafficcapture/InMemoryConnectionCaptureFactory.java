@@ -34,8 +34,6 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
 
     @AllArgsConstructor
     class StreamManager extends OrderedStreamLifecyleManager<Void> {
-        @Override
-        public void close() {}
 
         @Override
         public CodedOutputStreamHolder createStream() {

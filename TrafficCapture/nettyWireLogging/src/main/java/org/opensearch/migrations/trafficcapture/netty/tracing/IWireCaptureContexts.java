@@ -6,6 +6,13 @@ import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
 public abstract class IWireCaptureContexts {
 
+    public static class ActivityNames {
+        public static final String BLOCKED = "blocked";
+        public static final String GATHERING_REQUEST = "gatheringRequest";
+        public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
+        public static final String GATHERING_RESPONSE = "gatheringResponse";
+    }
+
     public static class MetricNames {
         public static final String UNREGISTERED = "unregistered";
         public static final String REMOVED = "removed";
@@ -41,7 +48,7 @@ public abstract class IWireCaptureContexts {
     }
 
     public interface IRequestContext extends IHttpMessageContext {
-        String ACTIVITY_NAME = "gatheringRequest";
+        String ACTIVITY_NAME = ActivityNames.GATHERING_REQUEST;
 
         default String getActivityName() {
             return ACTIVITY_NAME;
@@ -57,7 +64,7 @@ public abstract class IWireCaptureContexts {
     }
 
     public interface IBlockingContext extends IHttpMessageContext {
-        String ACTIVITY_NAME = "blocked";
+        String ACTIVITY_NAME = ActivityNames.BLOCKED;
 
         default String getActivityName() {
             return ACTIVITY_NAME;
@@ -65,7 +72,7 @@ public abstract class IWireCaptureContexts {
     }
 
     public interface IWaitingForResponseContext extends IHttpMessageContext {
-        String ACTIVITY_NAME = "waitingForResponse";
+        String ACTIVITY_NAME = ActivityNames.WAITING_FOR_RESPONSE;
 
         default String getActivityName() {
             return ACTIVITY_NAME;
@@ -73,7 +80,7 @@ public abstract class IWireCaptureContexts {
     }
 
     public interface IResponseContext extends IHttpMessageContext {
-        String ACTIVITY_NAME = "gatheringResponse";
+        String ACTIVITY_NAME = ActivityNames.GATHERING_RESPONSE;
 
         default String getActivityName() {
             return ACTIVITY_NAME;

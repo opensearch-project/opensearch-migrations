@@ -7,7 +7,6 @@ import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import lombok.NonNull;
 
-import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -16,7 +15,7 @@ public abstract class BaseNestedSpanContext
         implements IScopedInstrumentationAttributes, IWithStartTimeAndAttributes, IHasRootInstrumentationScope<S>, AutoCloseable {
     final T enclosingScope;
     @Getter
-    final Instant startTime;
+    final long startNanoTime;
     @Getter
     private Span currentSpan;
     @Getter
@@ -32,7 +31,7 @@ public abstract class BaseNestedSpanContext
     protected BaseNestedSpanContext(S rootScope, T enclosingScope) {
         rootScope.onContextCreated(this);
         this.enclosingScope = enclosingScope;
-        this.startTime = Instant.now();
+        this.startNanoTime = System.nanoTime();
         this.rootInstrumentationScope = rootScope;
     }
 

@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
+import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
@@ -55,7 +56,8 @@ public class KafkaRecordContext extends
 
     @Override
     public AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        return builder.put(TOPIC_ATTR, getTopic())
+        return super.fillAttributes(builder)
+                .put(TOPIC_ATTR, getTopic())
                 .put(RECORD_ID_ATTR, getRecordId())
                 .put(RECORD_SIZE_ATTR, getRecordSize());
     }

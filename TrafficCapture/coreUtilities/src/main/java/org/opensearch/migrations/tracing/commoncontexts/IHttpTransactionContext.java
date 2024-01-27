@@ -11,6 +11,7 @@ public interface IHttpTransactionContext extends IScopedInstrumentationAttribute
 
     @Override
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        return builder.put(SOURCE_REQUEST_INDEX_KEY, getSourceRequestIndex());
+        return IScopedInstrumentationAttributes.super.fillAttributes(builder)
+                .put(SOURCE_REQUEST_INDEX_KEY, getSourceRequestIndex());
     }
 }

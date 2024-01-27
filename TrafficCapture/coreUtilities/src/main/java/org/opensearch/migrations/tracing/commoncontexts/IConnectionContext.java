@@ -17,7 +17,8 @@ public interface IConnectionContext extends IScopedInstrumentationAttributes {
 
     @Override
     default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        return builder.put(CONNECTION_ID_ATTR, getConnectionId())
+        return IScopedInstrumentationAttributes.super.fillAttributes(builder)
+                .put(CONNECTION_ID_ATTR, getConnectionId())
                 .put(NODE_ID_ATTR, getNodeId());
     }
 }
