@@ -118,7 +118,7 @@ read -r -d '' cdk_context << EOM
     "mskBrokerNodeCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
-    "migrationAnalyticsServiceEnabled": false,
+    "migrationAnalyticsServiceEnabled": true,
     "fetchMigrationEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
     "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml"
