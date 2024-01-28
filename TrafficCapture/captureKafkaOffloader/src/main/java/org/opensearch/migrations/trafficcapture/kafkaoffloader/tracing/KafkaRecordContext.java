@@ -7,7 +7,6 @@ import lombok.Getter;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
@@ -55,10 +54,15 @@ public class KafkaRecordContext extends
     public String getActivityName() { return "stream_flush_called"; }
 
     @Override
-    public AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        return super.fillAttributes(builder)
+    public AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+        return super.fillAttributesForSpansBelow(builder)
                 .put(TOPIC_ATTR, getTopic())
-                .put(RECORD_ID_ATTR, getRecordId())
+                .put(RECORD_ID_ATTR, getRecordId());
+    }
+
+    @Override
+    public AttributesBuilder fillExtraAttributesForThisSpan(AttributesBuilder builder) {
+        return super.fillExtraAttributesForThisSpan(builder)
                 .put(RECORD_SIZE_ATTR, getRecordSize());
     }
 }

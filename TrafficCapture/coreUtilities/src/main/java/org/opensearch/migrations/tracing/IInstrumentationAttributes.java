@@ -13,12 +13,6 @@ import org.opensearch.migrations.Utils;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Spliterator;
-import java.util.Spliterators;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 public interface IInstrumentationAttributes {
     AttributeKey<Boolean> HAD_EXCEPTION_KEY = AttributeKey.booleanKey("hadException");
@@ -26,10 +20,6 @@ public interface IInstrumentationAttributes {
     IInstrumentationAttributes getEnclosingScope();
 
     default Span getCurrentSpan() { return null; }
-
-    default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        return builder;
-    }
 
     Throwable getObservedExceptionToIncludeInMetrics();
 
@@ -43,7 +33,6 @@ public interface IInstrumentationAttributes {
     }
 
     default AttributesBuilder getPopulatedSpanAttributesBuilder() {
-        var builder = Attributes.builder();
         var currentObj = this;
         // reverse the order so that the lowest attribute scopes will overwrite the upper ones if there were conflicts
         var stack = new ArrayDeque<IInstrumentationAttributes>();
@@ -51,7 +40,17 @@ public interface IInstrumentationAttributes {
             stack.addFirst(currentObj);
             currentObj = currentObj.getEnclosingScope();
         }
-        return stack.stream().collect(Utils.foldLeft(builder, (b, iia)->iia.fillAttributes(b)));
+        var builder = stack.stream()
+                .collect(Utils.foldLeft(Attributes.builder(), (b, iia)->iia.fillAttributesForSpansBelow(b)));
+        return fillExtraAttributesForThisSpan(builder);
+    }
+
+    default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+        return builder;
+    }
+
+    default AttributesBuilder fillExtraAttributesForThisSpan(AttributesBuilder builder) {
+        return builder;
     }
 
     default void meterIncrementEvent(LongCounter c) {

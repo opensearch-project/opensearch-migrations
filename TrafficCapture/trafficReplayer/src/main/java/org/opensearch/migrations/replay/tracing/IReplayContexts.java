@@ -5,7 +5,6 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
@@ -102,8 +101,8 @@ public abstract class IReplayContexts {
         String getRecordId();
 
         @Override
-        default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-            return IAccumulationScope.super.fillAttributes(
+        default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+            return IAccumulationScope.super.fillAttributesForSpansBelow(
                     builder.put(RECORD_ID_KEY, getRecordId()));
         }
 
@@ -172,8 +171,8 @@ public abstract class IReplayContexts {
         }
 
         @Override
-        default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-            return org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext.super.fillAttributes(builder)
+        default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+            return org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext.super.fillAttributesForSpansBelow(builder)
                     .put(REPLAYER_REQUEST_INDEX_KEY, replayerRequestIndex());
         }
 

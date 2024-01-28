@@ -21,7 +21,6 @@ import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.semconv.ResourceAttributes;
 import lombok.Getter;
 import lombok.NonNull;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.Utils;
 
@@ -34,8 +33,6 @@ import java.util.stream.Stream;
 public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
     private final String scopeName;
-    @Getter
-    Exception observedExceptionToIncludeInMetrics;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
                                                                     @NonNull String serviceName) {
@@ -113,6 +110,11 @@ public class RootOtelContext implements IRootOtelContext {
     }
 
     @Override
+    public Exception getObservedExceptionToIncludeInMetrics() {
+        return null;
+    }
+
+    @Override
     public RootOtelContext getEnclosingScope() {
         return null;
     }
@@ -124,12 +126,6 @@ public class RootOtelContext implements IRootOtelContext {
     @Override
     public MeterProvider getMeterProvider() {
         return getOpenTelemetry().getMeterProvider();
-    }
-
-    @Override
-    public AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        assert observedExceptionToIncludeInMetrics == null; // nothing more to do than this check
-        return IRootOtelContext.super.fillAttributes(builder);
     }
 
     private static SpanBuilder addLinkedToBuilder(Stream<Span> linkedSpanContexts, SpanBuilder spanBuilder) {

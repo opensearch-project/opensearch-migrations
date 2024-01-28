@@ -10,8 +10,8 @@ public interface IHttpTransactionContext extends IScopedInstrumentationAttribute
     long getSourceRequestIndex();
 
     @Override
-    default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        return IScopedInstrumentationAttributes.super.fillAttributes(builder)
+    default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+        return IScopedInstrumentationAttributes.super.fillAttributesForSpansBelow(builder)
                 .put(SOURCE_REQUEST_INDEX_KEY, getSourceRequestIndex());
     }
 }

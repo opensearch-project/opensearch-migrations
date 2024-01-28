@@ -16,8 +16,8 @@ public interface IConnectionContext extends IScopedInstrumentationAttributes {
     default IInstrumentationAttributes getEnclosingScope() { return null; }
 
     @Override
-    default AttributesBuilder fillAttributes(AttributesBuilder builder) {
-        return IScopedInstrumentationAttributes.super.fillAttributes(builder)
+    default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+        return IScopedInstrumentationAttributes.super.fillAttributesForSpansBelow(builder)
                 .put(CONNECTION_ID_ATTR, getConnectionId())
                 .put(NODE_ID_ATTR, getNodeId());
     }
