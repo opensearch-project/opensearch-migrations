@@ -77,6 +77,28 @@ export function createMSKProducerIAMPolicies(scope: Construct, region: string, a
     return [mskClusterConnectPolicy, mskTopicProducerPolicy]
 }
 
+export function createAwsDistroForOtelPushInstrumentationPolicy(): PolicyStatement {
+    // see https://aws-otel.github.io/docs/setup/permissions
+    return new PolicyStatement( {
+        effect: Effect.ALLOW,
+        resources: ["*"],
+        actions: [
+            "logs:PutLogEvents",
+            "logs:CreateLogGroup",
+            "logs:CreateLogStream",
+            "logs:DescribeLogStreams",
+            "logs:DescribeLogGroups",
+            "logs:PutRetentionPolicy",
+            "xray:PutTraceSegments",
+            "xray:PutTelemetryRecords",
+            "xray:GetSamplingRules",
+            "xray:GetSamplingTargets",
+            "xray:GetSamplingStatisticSummaries",
+            "ssm:GetParameters"
+        ]
+    })
+}
+
 export function createDefaultECSTaskRole(scope: Construct, serviceName: string): Role {
     const serviceTaskRole = new Role(scope, `${serviceName}-TaskRole`, {
         assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
