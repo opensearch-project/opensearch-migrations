@@ -51,13 +51,13 @@ exporters:
     sampling_initial: 5
     sampling_thereafter: 200
   opensearch:
-    namespace: migrations
     http:
       endpoint: "https://opensearchanalytics:9200"
       auth:
         authenticator: basicauth/client
       tls:
         insecure_skip_verify: true
+    namespace: migrations
   prometheus:
     endpoint: "0.0.0.0:8889"
     send_timestamps: true

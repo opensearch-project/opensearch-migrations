@@ -3,10 +3,20 @@ base:
     batchMetrics:
       prometheus:
       awsCloudWatch:
+    debugMetricsDetailed:
+    infoMetricsDetailed:
   traces:
     batchTraces:
       awsXRay:
       jaeger:
+    debugTracesDetailed:
+    infoTracessDetailed:
+  logs:
+    openSearch:
+      openSearchAws:
+      openSearchLocal:
+    debugLogsDetailed:
+    infoLogsDetailed:
   basicAuthClient:
     openSearchLocal:
   batch:
@@ -14,16 +24,12 @@ base:
     batchTraces:
   debugDetailed:
     debugMetricsDetailed:
-    debugTracesDetailed:
     debugLogsDetailed:
+    debugTracesDetailed:
   debugInfo:
     debugMetricsInfo:
-    debugTracesInfo:
     debugLogsInfo:
+    debugTracesInfo:
   healthCheck:
-  logs:
-    openSearch:
-      openSearchAws:
-      openSearchLocal:
   pprof:
   zpages:

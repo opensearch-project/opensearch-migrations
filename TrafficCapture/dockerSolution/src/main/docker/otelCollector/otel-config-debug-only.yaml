@@ -18,8 +18,14 @@ service:
   extensions: [zpages, pprof, health_check]
   pipelines:
     traces:
+      receivers: [otlp]
+      processors:
       exporters: [logging]
     metrics:
+      receivers: [otlp]
+      processors:
       exporters: [logging]
     logs:
+      receivers: [otlp]
+      processors:
       exporters: [logging]
