@@ -31,7 +31,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @Slf4j
 class StreamChannelConnectionCaptureSerializerTest {
@@ -313,6 +314,28 @@ class StreamChannelConnectionCaptureSerializerTest {
             }
         }
         Assertions.assertEquals(0, foundEndOfSegments);
+    }
+
+    @Test
+    public void testAssertionErrorDuringInitializationWhenInitializeWithTooLargeId() {
+        final String realNodeId = "b671d2f2-577b-414e-9eb4-8bc3e89ee182";
+        final String realKafkaConnectionId = "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2";
+
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        assertThrows(AssertionError.class, () ->
+                new StreamChannelConnectionCaptureSerializer<>("a" + realNodeId, realKafkaConnectionId,
+                        new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated))
+        );
+    }
+
+    @Test
+    public void testInitializationWithRealIds() {
+        final String realNodeId = "b671d2f2-577b-414e-9eb4-8bc3e89ee182";
+        final String realKafkaConnectionId = "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2";
+
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        new StreamChannelConnectionCaptureSerializer<>(realNodeId, realKafkaConnectionId,
+                new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated));
     }
 
     @AllArgsConstructor

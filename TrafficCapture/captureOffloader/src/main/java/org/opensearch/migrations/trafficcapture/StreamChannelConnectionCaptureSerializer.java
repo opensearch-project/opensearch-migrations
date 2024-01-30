@@ -26,15 +26,16 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * At a basic level, this class aims to be a generic serializer which can receive ByteBuffer data and serialize the data
- * into the defined Protobuf format {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream}, and then write
- * this formatted data to the provided CodedOutputStream.
- *
- * Commented throughout the class are example markers such as (e.g. 1: "1234ABCD") which line up with the textual
- * representation of this Protobuf format to be used as a guide as fields are written. An example TrafficStream can
- * also be visualized below for reference.
- *
- * 1: "91ba4f3a-0b34-11ee-be56-0242ac120002"
+ * This class serves as a generic serializer. Its primary function is to take ByteBuffer data,
+ * serialize it into the Protobuf format as defined by
+ * {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream}, and then output
+ * the formatted data to a given CodedOutputStream.
+ * <p>
+ * Within the class, example markers are commented (e.g., 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2").
+ * These markers correspond to the textual representation of the Protobuf format and serve as a guide
+ * for field serialization. Below is a visual representation of an example `TrafficStream` for further reference:
+ * <pre>{@code
+ * 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2"
  * 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
  * 2 {
  *   1 {
@@ -42,7 +43,7 @@ import java.util.concurrent.CompletableFuture;
  *     2: 682312000
  *   }
  *   4 {
- *     1: "POST /test-index/_bulk?pretty…”
+ *     1: "POST /test-index/_bulk?pretty…"
  *   }
  * }
  * 2 {
@@ -56,11 +57,13 @@ import java.util.concurrent.CompletableFuture;
  *   }
  * }
  * 3: 1
+ * }
+ * </pre>
  */
 @Slf4j
 public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConnectionCaptureSerializer<T> {
 
-    private static final int MAX_ID_SIZE = 96;
+    private static final int MAX_ID_SIZE = 100;
 
     private boolean readObservationsAreWaitingForEom;
     private int eomsSoFar;
@@ -106,7 +109,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         } else {
             currentCodedOutputStreamHolderOrNull = streamManager.createStream();
             var currentCodedOutputStream = currentCodedOutputStreamHolderOrNull.getOutputStream();
-            // e.g. 1: "1234ABCD"
+            // e.g. 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2"
             currentCodedOutputStream.writeString(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionIdString);
             if (nodeIdString != null) {
                 // e.g. 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
@@ -145,8 +148,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         final var observationContentSize = tsTagSize + tsContentSize + captureTagNoLengthSize + captureTagLengthAndContentSize;
         // Ensure space is available before starting an observation
         if (getOrCreateCodedOutputStream().spaceLeft() <
-            CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1))
-        {
+                CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1)) {
             flushCommitAndResetStream(false);
         }
         // e.g. 2 {
@@ -265,8 +267,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
             segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = ReadSegmentObservation.DATA_FIELD_NUMBER;
-        }
-        else {
+        } else {
             segmentFieldNumber = TrafficObservation.WRITESEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = WriteSegmentObservation.DATA_FIELD_NUMBER;
         }
@@ -276,7 +277,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         // when considering the case of a message that does not need segments or for the case of a smaller segment created
         // from a much larger message
         int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp,
-            segmentFieldNumber, segmentDataFieldNumber, byteBuffer);
+                segmentFieldNumber, segmentDataFieldNumber, byteBuffer);
         int trafficStreamOverhead = messageAndOverheadBytesLeft - byteBuffer.capacity();
 
         // Ensure that space for at least one data byte and overhead exists, otherwise a flush is necessary.
@@ -292,7 +293,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             return;
         }
 
-        while(byteBuffer.position() < byteBuffer.limit()) {
+        while (byteBuffer.position() < byteBuffer.limit()) {
             int availableCOSSpace = getOrCreateCodedOutputStream().spaceLeft();
             int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : byteBuffer.limit() - byteBuffer.position();
             ByteBuffer bb = byteBuffer.slice();
@@ -313,7 +314,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, int dataCountFieldNumber, int dataCount,
-        Instant timestamp, java.nio.ByteBuffer byteBuffer) throws IOException {
+                                     Instant timestamp, java.nio.ByteBuffer byteBuffer) throws IOException {
         int dataSize = 0;
         int segmentCountSize = 0;
         int captureClosureLength = 1;
@@ -345,7 +346,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp,
-        java.nio.ByteBuffer byteBuffer) throws IOException {
+                                     java.nio.ByteBuffer byteBuffer) throws IOException {
         addSubstreamMessage(captureFieldNumber, dataFieldNumber, 0, 0, timestamp, byteBuffer);
     }
 
@@ -452,8 +453,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         int actualRemainingSpace = getOrCreateCodedOutputStream().spaceLeft();
         if (actualRemainingSpace < minExpectedSpaceAfterObservation || minExpectedSpaceAfterObservation < 0) {
             log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
-                    "at least {} bytes remaining, this should be investigated", fieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
-                actualRemainingSpace, minExpectedSpaceAfterObservation);
+                            "at least {} bytes remaining, this should be investigated", fieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
+                    actualRemainingSpace, minExpectedSpaceAfterObservation);
         }
     }
 }
