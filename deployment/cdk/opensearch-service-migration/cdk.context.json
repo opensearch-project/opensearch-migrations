@@ -11,6 +11,6 @@
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
     "fetchMigrationEnabled": true,
-    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:9200"
+    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:29200"
   }
 }
