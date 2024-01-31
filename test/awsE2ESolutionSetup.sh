@@ -84,16 +84,16 @@ usage() {
   echo "an OpenSearch Service Domain as the target cluster, and the Migration infrastructure for simulating a migration from source to target."
   echo ""
   echo "Usage: "
-  echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--stage] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy] [--run-post-actions]"
+  echo "  ./awsE2ESolutionSetup.sh <>"
   echo ""
   echo "Options:"
   echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --stage                                          The stage name to use for naming/grouping of AWS deployment resources, default is 'aws-integ'."
   echo "  --run-post-actions                               Flag to enable only running post test actions for cleaning up and recording a test run."
-  echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
-  echo "  --bootstrap-region                               If included, will attempt to CDK bootstrap the region to allow CDK deployments"
-  echo "  --enable-capture-proxy                           If included, will attempt to enable the capture proxy on all source nodes"
+  echo "  --create-service-linked-roles                    Flag to create required service linked roles for the AWS account"
+  echo "  --bootstrap-region                               Flag to CDK bootstrap the region to allow CDK deployments"
+  echo "  --skip-capture-proxy                             Flag to skip setting up the Capture Proxy on source cluster nodes"
   echo ""
   exit 1
 }
@@ -102,7 +102,7 @@ STAGE='aws-integ'
 RUN_POST_ACTIONS=false
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
-ENABLE_CAPTURE_PROXY=false
+SKIP_CAPTURE_PROXY=false
 MIGRATIONS_GIT_URL='https://github.com/opensearch-project/opensearch-migrations.git'
 MIGRATIONS_GIT_BRANCH='main'
 
@@ -120,8 +120,8 @@ while [[ $# -gt 0 ]]; do
       RUN_POST_ACTIONS=true
       shift # past argument
       ;;
-    --enable-capture-proxy)
-      ENABLE_CAPTURE_PROXY=true
+    --skip-capture-proxy)
+      SKIP_CAPTURE_PROXY=true
       shift # past argument
       ;;
     --migrations-git-url)
@@ -139,7 +139,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    -h|--help)
+    -h|--h|--help)
       usage
       ;;
     -*)
@@ -207,6 +207,6 @@ cd ../../deployment/cdk/opensearch-service-migration
 ./buildDockerImages.sh
 npm install
 cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
-if [ "$ENABLE_CAPTURE_PROXY" = true ] ; then
+if [ "$SKIP_CAPTURE_PROXY" = false ] ; then
   prepare_source_nodes_for_capture "$STAGE"
 fi
