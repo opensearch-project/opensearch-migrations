@@ -157,6 +157,7 @@ export class StackComposer {
         const mskRestrictPublicAccessTo = this.getContextForType('mskRestrictPublicAccessTo', 'string', defaultValues, contextJSON)
         const mskRestrictPublicAccessType = this.getContextForType('mskRestrictPublicAccessType', 'string', defaultValues, contextJSON)
         const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
+        const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyESExtraArgs = this.getContextForType('captureProxyESExtraArgs', 'string', defaultValues, contextJSON)
@@ -314,6 +315,7 @@ export class StackComposer {
                 mskRestrictPublicAccessTo: mskRestrictPublicAccessTo,
                 mskRestrictPublicAccessType: mskRestrictPublicAccessType,
                 mskBrokerNodeCount: mskBrokerNodeCount,
+                mskSubnetIds: mskSubnetIds,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,
