@@ -341,7 +341,7 @@ export class StackComposer {
         let migrationAnalyticsStack;
         let analyticsDomainStack;
         if (migrationAnalyticsServiceEnabled && networkStack) {
-            const analyticsDomainName = "migration-analytics-domain"
+            const analyticsDomainName = `migration-analytics-domain-${stage}-${region}`
             analyticsDomainStack = new OpenSearchDomainStack(scope, `analyticsDomainStack`,
             {
                 stackName: `OSMigrations-${stage}-${region}-AnalyticsDomain`,
