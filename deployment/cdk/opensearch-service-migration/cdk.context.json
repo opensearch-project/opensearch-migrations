@@ -10,8 +10,7 @@
     "enableDemoAdmin": true,
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
-    "captureProxyESExtraArgs": "--suppressCaptureForHeaderMatch user-agent .*elastic-java/7.17.0.*",
     "fetchMigrationEnabled": true,
-    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:9200"
+    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:19200"
   }
 }
