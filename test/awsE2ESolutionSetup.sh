@@ -174,7 +174,7 @@ read -r -d '' cdk_context << EOM
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "trafficReplayerExtraArgs": "--speedup-factor 10.0",
-    "migrationAnalyticsServiceEnabled": false,
+    "migrationAnalyticsServiceEnabled": true,
     "fetchMigrationEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
     "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml"
