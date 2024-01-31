@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "Just KafkaConfigurationProxyTest",
+            "type": "gradle",
+            "workingDir": "/home/akurait/workspace/opensearch-migrations/TrafficCapture",
+            "tasks": [
+                ":trafficCaptureProxyServer:test",
+                "--tests",
+                "org.opensearch.migrations.trafficcapture.proxyserver.KafkaConfigurationProxyTest"
+            ],
+            "args": [
+                ""
+            ],
+            "initScripts": {
+                "flmapper": "ext.mapPath = { path -> null }"
+            }
+        }
+    ]
+}

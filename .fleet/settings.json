@@ -1,0 +1,28 @@
+{
+    "toolchains": [],
+    "editor.formatOnSave": true,
+    "plugins": [
+        {
+            "type": "add",
+            "pluginName": "fleet.intellij"
+        },
+        {
+            "type": "add",
+            "pluginName": "fleet.docker"
+        },
+        {
+            "type": "add",
+            "pluginName": "fleet.git.frontend"
+        },
+        {
+            "type": "add",
+            "pluginName": "fleet.gradle"
+        },
+        {
+            "type": "add",
+            "pluginName": "fleet.java"
+        }
+    ],
+    "java.debugger.reloadClassesAfterCompilation": "Always",
+    "run.destination.stop.already.running": "Always"
+}
