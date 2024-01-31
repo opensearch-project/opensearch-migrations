@@ -5,7 +5,6 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
 
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -66,6 +65,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     private final org.slf4j.Logger log;
 
+    // 100 is the default size of netty connectionId and kafka nodeId along with serializationTags
     private static final int MAX_ID_SIZE = 100;
 
     private boolean readObservationsAreWaitingForEom;
