@@ -196,7 +196,7 @@ vpc_id=$(aws cloudformation describe-stacks --stack-name opensearch-network-stac
 echo $vpc_id
 
 cdk_context=$(echo "${cdk_context/<VPC_ID>/$vpc_id}")
-cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:19200}")
+cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:39200}")
 cdk_context=$(echo $cdk_context | jq '@json')
 # TODO Further verify space escaping for JSON
 # Escape spaces for CDK JSON parsing to handle
