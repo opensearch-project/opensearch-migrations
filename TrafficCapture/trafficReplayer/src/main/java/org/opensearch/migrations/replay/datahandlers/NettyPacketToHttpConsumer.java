@@ -23,7 +23,7 @@ import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringingHandler;
+import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringHandler;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
@@ -186,7 +186,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             }
             getParentContext().onBytesSent(size);
         }));
-        pipeline.addFirst(READ_COUNT_WATCHER_HANDLER_NAME, new ReadMeteringingHandler(size->{
+        pipeline.addFirst(READ_COUNT_WATCHER_HANDLER_NAME, new ReadMeteringHandler(size->{
             // client side, so this is the response
             if (size == 0) { return; }
             if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {

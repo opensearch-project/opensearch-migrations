@@ -9,7 +9,7 @@ import lombok.AllArgsConstructor;
 import java.util.function.IntConsumer;
 
 @AllArgsConstructor
-public class ReadMeteringingHandler extends ChannelInboundHandlerAdapter {
+public class ReadMeteringHandler extends ChannelInboundHandlerAdapter {
     private final IntConsumer sizeConsumer;
 
     @Override
