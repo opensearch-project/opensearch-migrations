@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;
@@ -8,6 +9,8 @@ import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -16,6 +19,7 @@ import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
+import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -347,6 +351,32 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
         new StreamChannelConnectionCaptureSerializer<>(realNodeId, realKafkaConnectionId,
                 new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated));
+    }
+
+    @Test
+    public void testOutputStreamReportsIncorrectSpaceLeft_thenObservationSizeSanityCheckLogAppears() throws IOException {
+        Logger mockLogger = Mockito.mock(Logger.class);
+
+        StreamManager mockStreamManager = Mockito.mock(StreamManager.class);
+        CodedOutputStreamHolder mockHolder = Mockito.mock(CodedOutputStreamHolder.class);
+        CodedOutputStream mockOutputStream = Mockito.mock(CodedOutputStream.class);
+
+        Mockito.when(mockStreamManager.createStream()).thenReturn(mockHolder);
+        Mockito.when(mockHolder.getOutputStream()).thenReturn(mockOutputStream);
+        Mockito.when(mockOutputStream.spaceLeft()).thenReturn(5);
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(TEST_NODE_ID_STRING, TEST_TRAFFIC_STREAM_ID_STRING,
+                mockStreamManager, mockLogger);
+        var bb = Unpooled.buffer(getEstimatedTrafficStreamByteSize(1, 0));
+        serializer.addWriteEvent(Instant.now(), bb);
+        serializer.flushCommitAndResetStream(true);
+        bb.release();
+
+        Mockito.verify(mockLogger, Mockito.times(1)).warn(
+                ArgumentMatchers.eq("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated at least {} bytes remaining, this should be investigated"),
+                ArgumentMatchers.any(int.class),
+                ArgumentMatchers.any(String.class),
+                ArgumentMatchers.any(int.class),
+                ArgumentMatchers.any(int.class));
     }
 
     @AllArgsConstructor

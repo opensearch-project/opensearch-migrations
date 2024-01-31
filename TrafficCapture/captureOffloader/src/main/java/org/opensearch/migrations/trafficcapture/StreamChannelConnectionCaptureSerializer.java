@@ -18,6 +18,8 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -60,8 +62,9 @@ import java.util.concurrent.CompletableFuture;
  * }
  * </pre>
  */
-@Slf4j
 public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConnectionCaptureSerializer<T> {
+
+    private final org.slf4j.Logger log;
 
     private static final int MAX_ID_SIZE = 100;
 
@@ -79,6 +82,15 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
                                                     @NonNull StreamLifecycleManager<T> streamLifecycleManager) {
+        this(nodeId, connectionId, streamLifecycleManager, LoggerFactory.getLogger(StreamChannelConnectionCaptureSerializer.class));
+    }
+
+
+    // Exposed for testing
+    public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
+                                                    StreamLifecycleManager<T> streamLifecycleManager,
+                                                    Logger log) {
+        this.log = log;
         this.streamManager = streamLifecycleManager;
         assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId)) +
                 CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId)
