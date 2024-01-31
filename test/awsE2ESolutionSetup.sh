@@ -59,7 +59,7 @@ restore_and_record () {
   console_task_arn=$(aws ecs list-tasks --cluster migration-${deploy_stage}-ecs-cluster --family "migration-${deploy_stage}-migration-console" | jq --raw-output '.taskArns[0]')
 
   # Print final doc counts and Kafka topic status
-  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source_endpoint $source_endpoint --source_no_auth --target_no_auth"
+  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source-endpoint $source_endpoint --source-no-auth --target-no-auth"
   unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${kafka_brokers} --timeout 100000 --describe --group logging-group-default --command-config kafka-tools/aws/msk-iam-auth.properties"
 
   # Turn off Replayer

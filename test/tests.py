@@ -268,7 +268,7 @@ class E2ETests(unittest.TestCase):
             if self.source_auth_type == "none":
                 cmd_exec = cmd_exec + " --no-auth"
             elif self.source_auth_type == "basic":
-                cmd_exec = cmd_exec + f" --auth_user {self.source_username} --auth_pass {self.source_password}"
+                cmd_exec = cmd_exec + f" --auth-user {self.source_username} --auth-pass {self.source_password}"
             if not self.source_verify_ssl:
                 cmd_exec = cmd_exec + " --no-ssl"
             logger.warning(f"Running local command: {cmd_exec}")
