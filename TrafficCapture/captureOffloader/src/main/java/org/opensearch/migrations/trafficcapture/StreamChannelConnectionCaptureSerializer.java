@@ -5,6 +5,7 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -17,8 +18,6 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -61,9 +60,8 @@ import java.util.concurrent.CompletableFuture;
  * }
  * </pre>
  */
+@Slf4j
 public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConnectionCaptureSerializer<T> {
-
-    private final org.slf4j.Logger log;
 
     // 100 is the default size of netty connectionId and kafka nodeId along with serializationTags
     private static final int MAX_ID_SIZE = 100;
@@ -82,15 +80,6 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
                                                     @NonNull StreamLifecycleManager<T> streamLifecycleManager) {
-        this(nodeId, connectionId, streamLifecycleManager, LoggerFactory.getLogger(StreamChannelConnectionCaptureSerializer.class));
-    }
-
-
-    // Exposed for testing
-    public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
-                                                    StreamLifecycleManager<T> streamLifecycleManager,
-                                                    Logger log) {
-        this.log = log;
         this.streamManager = streamLifecycleManager;
         assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId)) +
                 CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId)
@@ -160,7 +149,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         final var observationContentSize = tsTagSize + tsContentSize + captureTagNoLengthSize + captureTagLengthAndContentSize;
         // Ensure space is available before starting an observation
         if (getOrCreateCodedOutputStream().spaceLeft() <
-                CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1)) {
+            CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1))
+        {
             flushCommitAndResetStream(false);
         }
         // e.g. 2 {
@@ -279,7 +269,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
             segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = ReadSegmentObservation.DATA_FIELD_NUMBER;
-        } else {
+        }
+        else {
             segmentFieldNumber = TrafficObservation.WRITESEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = WriteSegmentObservation.DATA_FIELD_NUMBER;
         }
@@ -289,7 +280,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         // when considering the case of a message that does not need segments or for the case of a smaller segment created
         // from a much larger message
         int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp,
-                segmentFieldNumber, segmentDataFieldNumber, byteBuffer);
+            segmentFieldNumber, segmentDataFieldNumber, byteBuffer);
         int trafficStreamOverhead = messageAndOverheadBytesLeft - byteBuffer.capacity();
 
         // Ensure that space for at least one data byte and overhead exists, otherwise a flush is necessary.
@@ -305,7 +296,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             return;
         }
 
-        while (byteBuffer.position() < byteBuffer.limit()) {
+        while(byteBuffer.position() < byteBuffer.limit()) {
             int availableCOSSpace = getOrCreateCodedOutputStream().spaceLeft();
             int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : byteBuffer.limit() - byteBuffer.position();
             ByteBuffer bb = byteBuffer.slice();
@@ -326,7 +317,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, int dataCountFieldNumber, int dataCount,
-                                     Instant timestamp, java.nio.ByteBuffer byteBuffer) throws IOException {
+        Instant timestamp, java.nio.ByteBuffer byteBuffer) throws IOException {
         int dataSize = 0;
         int segmentCountSize = 0;
         int captureClosureLength = 1;
@@ -358,7 +349,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp,
-                                     java.nio.ByteBuffer byteBuffer) throws IOException {
+        java.nio.ByteBuffer byteBuffer) throws IOException {
         addSubstreamMessage(captureFieldNumber, dataFieldNumber, 0, 0, timestamp, byteBuffer);
     }
 
@@ -465,8 +456,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         int actualRemainingSpace = getOrCreateCodedOutputStream().spaceLeft();
         if (actualRemainingSpace < minExpectedSpaceAfterObservation || minExpectedSpaceAfterObservation < 0) {
             log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
-                            "at least {} bytes remaining, this should be investigated", fieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
-                    actualRemainingSpace, minExpectedSpaceAfterObservation);
+                    "at least {} bytes remaining, this should be investigated", fieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
+                actualRemainingSpace, minExpectedSpaceAfterObservation);
         }
     }
 }
