@@ -1,5 +1,5 @@
 import {Stack} from "aws-cdk-lib";
-import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -18,7 +18,8 @@ export interface MigrationStackProps extends StackPropsExt {
     readonly mskEnablePublicEndpoints?: boolean,
     readonly mskRestrictPublicAccessTo?: string,
     readonly mskRestrictPublicAccessType?: string,
-    readonly mskBrokerNodeCount?: number
+    readonly mskBrokerNodeCount?: number,
+    readonly mskSubnetIds?: string[]
 }
 
 
@@ -54,6 +55,15 @@ export class MigrationAssistanceStack extends Stack {
             retention: RetentionDays.THREE_MONTHS
         });
 
+        let subnets
+        if (props.mskSubnetIds) {
+            subnets = props.vpc.selectSubnets({
+                subnetFilters: [SubnetFilter.byIds(props.mskSubnetIds)]
+            }).subnetIds
+        } else {
+            subnets = props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}).subnetIds
+        }
+
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
@@ -61,7 +71,7 @@ export class MigrationAssistanceStack extends Stack {
             numberOfBrokerNodes: props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2,
             brokerNodeGroupInfo: {
                 instanceType: 'kafka.m5.large',
-                clientSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}).subnetIds,
+                clientSubnets: subnets,
                 connectivityInfo: {
                     // Public access cannot be enabled on cluster creation
                     publicAccess: {
