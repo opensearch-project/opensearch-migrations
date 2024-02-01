@@ -64,10 +64,12 @@ if [ "$target_no_auth" = true ]; then
 fi
 
 echo "SOURCE CLUSTER"
+curl $source_endpoint/_refresh --insecure $source_auth_string &> /dev/null
 echo "curl $source_endpoint/_cat/indices?v"
 curl $source_endpoint/_cat/indices?v --insecure $source_auth_string
 echo ""
 echo "TARGET CLUSTER"
+curl $target_endpoint/_refresh --insecure $target_auth_string &> /dev/null
 echo "curl $target_endpoint/_cat/indices?v"
 curl $target_endpoint/_cat/indices?v --insecure $target_auth_string
 echo ""
