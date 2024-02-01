@@ -81,6 +81,8 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 4096,
             portMappings: [otelCollectorPort, otelHealthCheckPort],
             serviceConnectServices: [serviceConnectServiceCollector, serviceConnectServiceHealthCheck],
+            serviceDiscoveryEnabled: true,
+            serviceDiscoveryPort: 4317,
             environment: {
               "ANALYTICS_DOMAIN_ENDPOINT": analyticsDomainEndpoint
             },
