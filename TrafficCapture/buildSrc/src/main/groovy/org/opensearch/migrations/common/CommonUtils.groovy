@@ -10,15 +10,15 @@ class CommonUtils {
         def MessageDigest = java.security.MessageDigest
         def digest = MessageDigest.getInstance('SHA-256')
         project.fileTree("src/main/docker/${projectName}")
-                .each { file ->
-                    file.withInputStream { is ->
-                        byte[] buffer = new byte[1024]
-                        int read
-                        while ((read = is.read(buffer)) != -1) {
-                            digest.update(buffer, 0, read)
-                        }
+            .each { file ->
+                file.withInputStream { is ->
+                    byte[] buffer = new byte[1024]
+                    int read
+                    while ((read = is.read(buffer)) != -1) {
+                        digest.update(buffer, 0, read)
                     }
                 }
+            }
         return digest.digest().encodeHex().toString()
     }
 
@@ -62,7 +62,7 @@ class CommonUtils {
             // constructed in the configuration phase and the classpath won't be realized until the
             // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
             // and it's simplest to pack that up into a helper script.
-            runCommand("printf \"#!/bin/sh\\njava -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
+            runCommand("printf \"#!/bin/sh\\njava -enableassertions -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
             runCommand("chmod +x /runJavaWithClasspath.sh")
             // container stay-alive
             defaultCommand('tail', '-f', '/dev/null')
