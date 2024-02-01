@@ -15,25 +15,35 @@ prepare_source_nodes_for_capture () {
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
   kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
+  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/analyticsDomainSGId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
     group_ids=($(aws ec2 describe-instance-attribute --instance-id $id --attribute groupSet  --query 'Groups[*].GroupId' --output text))
-    match=false
+    kafka_sg_match=false
+    otel_sg_match=false
     for group_id in "${group_ids[@]}"; do
         if [[ $group_id = "$kafka_sg_id" ]]; then
-            match=true
-            break
+            kafka_sg_match=true
+        fi
+        if [[ $group_id = "$otel_sg_id" ]]; then
+            otel_sg_match=true
         fi
     done
-    if [[ $match = false ]]; then
-      echo "Adding security group: $kafka_sg_id to node: $id"
-      group_ids+=("$kafka_sg_id")
+    if [ $kafka_sg_match = false ] || [ $otel_sg_match = false ]; then
+      if [[ $kafka_sg_match = false ]]; then
+          echo "Adding security group: $kafka_sg_id to node: $id"
+          group_ids+=("$kafka_sg_id")
+      fi
+      if [[ $otel_sg_match = false ]]; then
+          echo "Adding security group: $otel_sg_id to node: $id"
+          group_ids+=("$otel_sg_id")
+      fi
       printf -v group_ids_string '%s ' "${group_ids[@]}"
       aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
     fi
     echo "Executing ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH on node: $id"
-    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH" --output text --query 'Command.CommandId')
+    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --stage $deploy_stage --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH" --output text --query 'Command.CommandId')
     sleep 10
     command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'Status')
     # TODO for multi-node setups, we should collect all command ids and allow to run in parallel
