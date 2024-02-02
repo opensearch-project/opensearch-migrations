@@ -1,2 +1,13 @@
-# This should match the owning team set up in https://github.com/orgs/opensearch-project/teams
-*   @chelma @gregschohn @kartg @lewijacn @mikaylathompson @okhasawn @sumobrian
+# CODEOWNERS manages notifications, not PR approvals
+
+# Files have a single rule applied, the last match decides the owner
+# If you would like to more specifically apply ownership, include existing owner in new sub fields
+
+# To verify changes of CODEOWNERS file
+# In VSCode
+#   1. Install extension https://marketplace.visualstudio.com/items?itemName=jasonnutter.vscode-codeowners
+#   2. Go to a file
+#   3. Use the command palette to run the CODEOWNERS: Show owners of current file command, which will display all code owners for the current file.
+
+# Default ownership for all repo files
+*   @opensearch-project/opensearch-migrations
