@@ -41,9 +41,9 @@ dependencies {
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':captureOffloader'))
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.0'
-    testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.0'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.0'
+    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.4'
+    testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.4'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.4'
 }
 
 tasks.withType(Tar) {
