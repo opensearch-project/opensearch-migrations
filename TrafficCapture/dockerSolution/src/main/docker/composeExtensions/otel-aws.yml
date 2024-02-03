@@ -6,11 +6,11 @@ services:
     command: ["--config=/etc/otel-config-aws.yaml", "${OTELCOL_ARGS}"]
     networks:
       - migrations
-    volumes:
-      - ~/.aws:/home/aoc/.aws
     ports:
       - "13133:13133" # health_check extension
       - "4317:4317"   # otlp receiver
+    volumes:
+      - ~/.aws:/home/aoc/.aws
     environment:
       - ANALYTICS_DOMAIN_ENDPOINT=opensearchanalytics # use the local container for compose here
       - AWS_REGION=us-east-1

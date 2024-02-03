@@ -265,7 +265,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class RequestAccumulationContext
-            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext, IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext,
+                                            IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IRequestAccumulationContext {
         public RequestAccumulationContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -288,7 +289,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class ResponseAccumulationContext
-            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext, IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext,
+                                            IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IResponseAccumulationContext {
         public ResponseAccumulationContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -311,7 +313,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class RequestTransformationContext
-            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext, IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext,
+                                            IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IRequestTransformationContext {
         public RequestTransformationContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -456,7 +459,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class ScheduledContext
-            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext, IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext,
+                                            IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IScheduledContext {
         private final Instant scheduledFor;
 
@@ -491,7 +495,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class TargetRequestContext
-            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext, IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext,
+                                            IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.ITargetRequestContext {
         public TargetRequestContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
@@ -552,7 +557,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class RequestSendingContext
-            extends DirectNestedSpanContext<RootReplayerContext, TargetRequestContext, IReplayContexts.ITargetRequestContext>
+            extends DirectNestedSpanContext<RootReplayerContext, TargetRequestContext,
+                                            IReplayContexts.ITargetRequestContext>
             implements IReplayContexts.IRequestSendingContext {
         public RequestSendingContext(TargetRequestContext enclosingScope) {
             super(enclosingScope);
@@ -575,7 +581,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class WaitingForHttpResponseContext
-            extends DirectNestedSpanContext<RootReplayerContext, TargetRequestContext, IReplayContexts.ITargetRequestContext>
+            extends DirectNestedSpanContext<RootReplayerContext, TargetRequestContext,
+                                            IReplayContexts.ITargetRequestContext>
             implements IReplayContexts.IWaitingForHttpResponseContext {
         public WaitingForHttpResponseContext(TargetRequestContext enclosingScope) {
             super(enclosingScope);
@@ -599,7 +606,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class ReceivingHttpResponseContext
-            extends DirectNestedSpanContext<RootReplayerContext, TargetRequestContext, IReplayContexts.ITargetRequestContext>
+            extends DirectNestedSpanContext<RootReplayerContext, TargetRequestContext,
+                                            IReplayContexts.ITargetRequestContext>
             implements IReplayContexts.IReceivingHttpResponseContext {
         public ReceivingHttpResponseContext(TargetRequestContext enclosingScope) {
             super(enclosingScope);
@@ -625,7 +633,8 @@ public abstract class ReplayContexts extends IReplayContexts {
     @Getter
     @Setter
     public static class TupleHandlingContext
-            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext, IReplayContexts.IReplayerHttpTransactionContext>
+            extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext,
+                                            IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.ITupleHandlingContext {
         Integer sourceStatus;
         Integer targetStatus;
