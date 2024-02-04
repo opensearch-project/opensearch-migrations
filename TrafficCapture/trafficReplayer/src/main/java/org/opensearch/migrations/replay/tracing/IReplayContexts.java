@@ -27,7 +27,7 @@ public abstract class IReplayContexts {
         public static final String REQUEST_SENDING = "requestSending";
         public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
         public static final String RECEIVING_RESPONSE = "receivingResponse";
-        public static final String TUPLE_HANDLING = "finalizingResults";
+        public static final String TUPLE_COMPARISON = "comparingResults";
     }
 
     public static class MetricNames {
@@ -56,7 +56,7 @@ public abstract class IReplayContexts {
         public static final String ACTIVE_TARGET_CONNECTIONS = "activeTargetConnections";
         public static final String BYTES_WRITTEN_TO_TARGET = "bytesWrittenToTarget";
         public static final String BYTES_READ_FROM_TARGET = "bytesReadFromTarget";
-        public static final String STATUS_MATCH = "statusMatch";
+        public static final String TUPLE_COMPARISON = "tupleComparison";
     }
 
     public interface IAccumulationScope extends IScopedInstrumentationAttributes {
@@ -318,7 +318,7 @@ public abstract class IReplayContexts {
     public interface ITupleHandlingContext
             extends IAccumulationScope,
                     IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
-        String ACTIVITY_NAME = ActivityNames.TUPLE_HANDLING;
+        String ACTIVITY_NAME = ActivityNames.TUPLE_COMPARISON;
         AttributeKey<Long> SOURCE_STATUS_CODE_KEY = AttributeKey.longKey("sourceStatusCode");
         AttributeKey<Long> TARGET_STATUS_CODE_KEY = AttributeKey.longKey("targetStatusCode");
         AttributeKey<Boolean> STATUS_CODE_MATCH_KEY = AttributeKey.booleanKey("statusCodesMatch");
@@ -339,7 +339,7 @@ public abstract class IReplayContexts {
 
         void setEndpoint(String endpointUrl);
 
-        void setHttpVersions(String string);
+        void setHttpVersion(String string);
 
         default UniqueReplayerRequestKey getReplayerRequestKey() {
             return getLogicalEnclosingScope().getReplayerRequestKey();

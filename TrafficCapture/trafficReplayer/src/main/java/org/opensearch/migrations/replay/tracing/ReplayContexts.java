@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.DoubleHistogram;
@@ -16,6 +17,7 @@ import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -27,7 +29,7 @@ public abstract class ReplayContexts extends IReplayContexts {
     public static final String BYTES_UNIT_STR = "bytes";
 
     public static class ChannelKeyContext
-            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+            extends BaseNestedSpanContext<RootReplayerContext, IScopedInstrumentationAttributes>
             implements IReplayContexts.IChannelKeyContext {
         @Getter
         final ISourceTrafficChannelKey channelKey;
@@ -35,7 +37,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         public ChannelKeyContext(RootReplayerContext rootScope,
                                  IInstrumentationAttributes enclosingScope,
                                  ISourceTrafficChannelKey channelKey) {
-            super(rootScope, enclosingScope);
+            super(rootScope, null);
             this.channelKey = channelKey;
             initializeSpan();
             meterDeltaEvent(getMetrics().activeChannelCounter, 1);
@@ -126,12 +128,12 @@ public abstract class ReplayContexts extends IReplayContexts {
     }
 
     public static class TrafficStreamLifecycleContext
-            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+            extends BaseNestedSpanContext<RootReplayerContext, IScopedInstrumentationAttributes>
             implements IReplayContexts.ITrafficStreamsLifecycleContext {
         private final ITrafficStreamKey trafficStreamKey;
 
         protected TrafficStreamLifecycleContext(RootReplayerContext rootScope,
-                                                IInstrumentationAttributes enclosingScope,
+                                                IScopedInstrumentationAttributes enclosingScope,
                                                 ITrafficStreamKey trafficStreamKey) {
             super(rootScope, enclosingScope);
             this.trafficStreamKey = trafficStreamKey;
@@ -639,16 +641,10 @@ public abstract class ReplayContexts extends IReplayContexts {
         Integer sourceStatus;
         Integer targetStatus;
         String method;
-        String httpVersion;
 
         public TupleHandlingContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
-        }
-
-        @Override
-        public void close() {
-            super.close();
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
@@ -656,7 +652,7 @@ public abstract class ReplayContexts extends IReplayContexts {
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
-                resultCounter = meter.counterBuilder("tupleResult").build();
+                resultCounter = meter.counterBuilder(MetricNames.TUPLE_COMPARISON).build();
             }
         }
 
@@ -668,20 +664,29 @@ public abstract class ReplayContexts extends IReplayContexts {
             return getRootInstrumentationScope().tupleHandlingInstruments;
         }
 
-        @Override
-        public void sendMeterEventsForEnd() {
-            super.sendMeterEventsForEnd();
+        static final AttributeKey<Long> TARGET_STATUS_CODE_ATTR = AttributeKey.longKey("targetStatusCode");
+
+        public AttributesBuilder getSharedAttributes(AttributesBuilder attributesBuilder) {
             final var sourceOp = Optional.ofNullable(sourceStatus);
             final var targetOp = Optional.ofNullable(targetStatus);
             final boolean didMatch = sourceOp.flatMap(ss -> targetOp.map(ss::equals)).orElse(false);
-            AttributesBuilder attributesBuilderForAggregate =
-                    addAttributeIfPresent(addAttributeIfPresent(addAttributeIfPresent(
-                                            Attributes.builder(),
-                                            METHOD_KEY, Optional.ofNullable(method)),
-                                    SOURCE_STATUS_CODE_KEY, sourceOp.map(TupleHandlingContext::categorizeStatus)),
-                            TARGET_STATUS_CODE_KEY, targetOp.map(TupleHandlingContext::categorizeStatus))
-                            .put(STATUS_CODE_MATCH_KEY, didMatch);
+            return addAttributeIfPresent(addAttributeIfPresent(addAttributeIfPresent(
+                                    attributesBuilder,
+                                    METHOD_KEY, Optional.ofNullable(method)),
+                            SOURCE_STATUS_CODE_KEY, sourceOp.map(TupleHandlingContext::categorizeStatus)),
+                    TARGET_STATUS_CODE_KEY, targetOp.map(TupleHandlingContext::categorizeStatus))
+                    .put(STATUS_CODE_MATCH_KEY, didMatch);
+        }
 
+        @Override
+        public AttributesBuilder fillExtraAttributesForThisSpan(AttributesBuilder builder) {
+            return getSharedAttributes(super.fillExtraAttributesForThisSpan(builder));
+        }
+
+        @Override
+        public void sendMeterEventsForEnd() {
+            super.sendMeterEventsForEnd();
+            AttributesBuilder attributesBuilderForAggregate = getSharedAttributes(Attributes.builder());
             getCurrentSpan().setAllAttributes(attributesBuilderForAggregate.build());
             meterIncrementEvent(getMetrics().resultCounter, 1, attributesBuilderForAggregate);
         }
@@ -696,13 +701,23 @@ public abstract class ReplayContexts extends IReplayContexts {
             return (status / 100L) * 100L;
         }
 
+        /**
+         * Like httpVersion, Endpoint doesn't have a field because it isn't used as an attribute for metrics
+         * (it would create too much cardinality pressure).  So just drop an attribute into a span instead of
+         * stashing it for both the span and final metric.
+         */
         @Override
         public void setEndpoint(String endpointUrl) {
             getCurrentSpan().setAttribute(ENDPOINT_KEY, endpointUrl);
         }
 
+        /**
+         * Like Endpoint, httpVersion doesn't have a field because it isn't used as an attribute for metrics
+         * (it just isn't expected to be super-useful and could create too much cardinality pressure).
+         * So just drop an attribute into a span instead of stashing it for both the span and final metric.
+         */
         @Override
-        public void setHttpVersions(String httpVersion) {
+        public void setHttpVersion(String httpVersion) {
             getCurrentSpan().setAttribute(HTTP_VERSION_KEY, httpVersion);
         }
 

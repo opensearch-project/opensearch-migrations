@@ -13,7 +13,7 @@ public interface IConnectionContext extends IScopedInstrumentationAttributes {
     String getNodeId();
 
     @Override
-    default IInstrumentationAttributes getEnclosingScope() { return null; }
+    default IScopedInstrumentationAttributes getEnclosingScope() { return null; }
 
     @Override
     default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {

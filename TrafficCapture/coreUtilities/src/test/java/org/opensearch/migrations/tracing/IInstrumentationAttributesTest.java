@@ -12,14 +12,19 @@ class IInstrumentationAttributesTest {
     private static final AttributeKey<String> OVERRIDE_KEY = AttributeKey.stringKey("overrideKey");
     private static final AttributeKey<String> UNIQUE_KEY = AttributeKey.stringKey("uniqueKey");
 
-    private static class AContext extends BaseNestedSpanContext<RootOtelContext, RootOtelContext>{
-        protected AContext(RootOtelContext rootScope, RootOtelContext enclosingScope) {
-            super(rootScope, enclosingScope);
+    private static class AContext extends BaseSpanContext<RootOtelContext> {
+        protected AContext(RootOtelContext rootScope) {
+            super(rootScope);
         }
 
         @Override
         public String getActivityName() {
             return "A";
+        }
+
+        @Override
+        public IScopedInstrumentationAttributes getEnclosingScope() {
+            return null;
         }
 
         @Override
@@ -60,7 +65,7 @@ class IInstrumentationAttributesTest {
     @Test
     public void getPopulatedAttributesAreOverrideCorrectly() {
         var rootCtx = new RootOtelContext("test");
-        var aCtx = new AContext(rootCtx, rootCtx);
+        var aCtx = new AContext(rootCtx);
         var bCtx = new BContext(rootCtx, aCtx);
 
         Optional.ofNullable(aCtx.getPopulatedSpanAttributes()).ifPresent(attrs-> {

@@ -5,13 +5,14 @@ import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public class TrafficSourceContexts {
 
     private TrafficSourceContexts() {}
 
     public static class ReadChunkContext
-            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+            extends BaseNestedSpanContext<RootReplayerContext, IScopedInstrumentationAttributes>
             implements ITrafficSourceContexts.IReadChunkContext
     {
         @Override
@@ -43,7 +44,7 @@ public class TrafficSourceContexts {
             return getRootInstrumentationScope().readChunkInstruments;
         }
 
-        public ReadChunkContext(RootReplayerContext rootScope, IInstrumentationAttributes enclosingScope) {
+        public ReadChunkContext(RootReplayerContext rootScope, IScopedInstrumentationAttributes enclosingScope) {
             super(rootScope, enclosingScope);
             initializeSpan();
         }

@@ -8,9 +8,11 @@ import lombok.NonNull;
 import lombok.Setter;
 import org.apache.kafka.common.TopicPartition;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
+import org.opensearch.migrations.tracing.CommonMetricInstruments;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.util.Collection;
 
@@ -31,12 +33,13 @@ public class KafkaConsumerContexts {
             this.enclosingScope = enclosingScope;
         }
 
-        public static class MetricInstruments {
+        public static class MetricInstruments extends CommonMetricInstruments {
             public final LongCounter kafkaPartitionsRevokedCounter;
             public final LongCounter kafkaPartitionsAssignedCounter;
             public final LongUpDownCounter kafkaActivePartitionsCounter;
 
             private MetricInstruments(Meter meter) {
+                super(meter, "asyncKafkaProcessing");
                 kafkaPartitionsRevokedCounter = meter
                         .counterBuilder(IKafkaConsumerContexts.MetricNames.PARTITIONS_REVOKED_EVENT_COUNT).build();
                 kafkaPartitionsAssignedCounter = meter
@@ -50,7 +53,7 @@ public class KafkaConsumerContexts {
             return new MetricInstruments(meter);
         }
 
-        private @NonNull MetricInstruments getMetrics() {
+        @NonNull public MetricInstruments getMetrics() {
             return enclosingScope.asyncListeningInstruments;
         }
 
@@ -99,7 +102,7 @@ public class KafkaConsumerContexts {
     }
 
     public static class PollScopeContext
-            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+            extends BaseNestedSpanContext<RootReplayerContext, IScopedInstrumentationAttributes>
             implements IKafkaConsumerContexts.IPollScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
@@ -117,14 +120,14 @@ public class KafkaConsumerContexts {
         }
 
         public PollScopeContext(@NonNull RootReplayerContext rootScope,
-                                @NonNull IInstrumentationAttributes enclosingScope) {
+                                @NonNull IScopedInstrumentationAttributes enclosingScope) {
             super(rootScope, enclosingScope);
             initializeSpan();
         }
     }
 
     public static class CommitScopeContext
-            extends BaseNestedSpanContext<RootReplayerContext, IInstrumentationAttributes>
+            extends BaseNestedSpanContext<RootReplayerContext, IScopedInstrumentationAttributes>
         implements IKafkaConsumerContexts.ICommitScopeContext {
 
         @Override
@@ -148,7 +151,7 @@ public class KafkaConsumerContexts {
         }
 
         public CommitScopeContext(@NonNull RootReplayerContext rootScope,
-                                  @NonNull IInstrumentationAttributes enclosingScope) {
+                                  @NonNull IScopedInstrumentationAttributes enclosingScope) {
             super(rootScope, enclosingScope);
             initializeSpan();
         }

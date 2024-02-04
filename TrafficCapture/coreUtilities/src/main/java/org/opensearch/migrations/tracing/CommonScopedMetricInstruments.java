@@ -11,9 +11,8 @@ import java.util.stream.DoubleStream;
 
 
 @Slf4j
-public class CommonScopedMetricInstruments {
+public class CommonScopedMetricInstruments extends CommonMetricInstruments {
     final LongCounter contextCounter;
-    final LongCounter exceptionCounter;
     final DoubleHistogram contextDuration;
 
     public CommonScopedMetricInstruments(Meter meter, String activityName) {
@@ -27,22 +26,30 @@ public class CommonScopedMetricInstruments {
 
     private static List<Double> getBuckets(String activityName,
                                            double firstBucketSize, double lastBucketCeiling) {
-        double[] bucketBoundary = new double[]{firstBucketSize};
-        var buckets = DoubleStream.generate(() -> {
-            var tmp = bucketBoundary[0];
-            bucketBoundary[0] *= 2.0;
-            return tmp;
-        }).takeWhile(v -> v <= lastBucketCeiling).boxed().collect(Collectors.toList());
+        var buckets = getExponentialBucketsBetween(firstBucketSize, lastBucketCeiling, 2.0);
         log.atInfo().setMessage(() -> "Setting buckets for " + activityName + " to " +
                 buckets.stream().map(x -> "" + x).collect(Collectors.joining(",", "[", "]"))).log();
         return buckets;
     }
 
+    private static List<Double> getExponentialBucketsBetween(double firstBucketSize, double lastBucketCeiling) {
+        return getExponentialBucketsBetween(firstBucketSize, lastBucketCeiling, 2.0);
+    }
+
+    private static List<Double> getExponentialBucketsBetween(double firstBucketSize, double lastBucketCeiling,
+                                                             double rate) {
+        double[] bucketBoundary = new double[]{firstBucketSize};
+        return DoubleStream.generate(() -> {
+            var tmp = bucketBoundary[0];
+            bucketBoundary[0] *= rate;
+            return tmp;
+        }).takeWhile(v -> v <= lastBucketCeiling).boxed().collect(Collectors.toList());
+    }
+
     public CommonScopedMetricInstruments(Meter meter, String activityName, List<Double> buckets) {
+        super(meter, activityName);
         contextCounter = meter
                 .counterBuilder(activityName + "Count").build();
-        exceptionCounter = meter
-                .counterBuilder(activityName + "ExceptionCount").build();
         var durationBuilder = meter
                 .histogramBuilder(activityName + "Duration")
                 .setUnit("ms");

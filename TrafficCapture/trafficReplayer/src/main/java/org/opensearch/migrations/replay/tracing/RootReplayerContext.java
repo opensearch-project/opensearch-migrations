@@ -66,15 +66,15 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
 
     @Override
     public TrafficSourceContexts.ReadChunkContext createReadChunkContext() {
-        return new TrafficSourceContexts.ReadChunkContext(this, this);
+        return new TrafficSourceContexts.ReadChunkContext(this, null);
     }
 
     public IReplayContexts.IChannelKeyContext createChannelContext(ISourceTrafficChannelKey tsk) {
-        return new ReplayContexts.ChannelKeyContext(this, this, tsk);
+        return new ReplayContexts.ChannelKeyContext(this, null, tsk);
     }
 
     public IKafkaConsumerContexts.ICommitScopeContext createCommitContext() {
-        return new KafkaConsumerContexts.CommitScopeContext(this, this);
+        return new KafkaConsumerContexts.CommitScopeContext(this, null);
     }
 
     public IReplayContexts.ITrafficStreamsLifecycleContext

@@ -7,8 +7,7 @@ import lombok.NonNull;
 import java.util.stream.Stream;
 
 public interface IInstrumentConstructor {
-    @NonNull Span buildSpan(IInstrumentationAttributes forScope, String spanName, Stream<Span> linkedSpans,
-                            AttributesBuilder attributesBuilder);
+    @NonNull Span buildSpan(IScopedInstrumentationAttributes forScope, String spanName, Stream<Span> linkedSpans);
 
     /**
      * For debugging, this will be overridden to track creation and termination of spans

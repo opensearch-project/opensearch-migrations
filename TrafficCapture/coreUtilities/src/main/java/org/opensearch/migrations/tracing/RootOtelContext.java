@@ -1,8 +1,7 @@
 package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
-import io.opentelemetry.api.common.Attributes;
-import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
@@ -33,6 +32,8 @@ import java.util.stream.Stream;
 public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
     private final String scopeName;
+    @Getter
+    private final MetricInstruments metrics;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
                                                                     @NonNull String serviceName) {
@@ -96,6 +97,12 @@ public class RootOtelContext implements IRootOtelContext {
                 });
     }
 
+    public static class MetricInstruments extends CommonMetricInstruments {
+        public MetricInstruments(Meter meter, String activityName) {
+            super(meter, activityName);
+        }
+    }
+
     public RootOtelContext(String scopeName) {
         this(scopeName, null);
     }
@@ -107,6 +114,7 @@ public class RootOtelContext implements IRootOtelContext {
     public RootOtelContext(String scopeName, OpenTelemetry sdk) {
         openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetryWithCollectorOrAsNoop(null, null);
         this.scopeName = scopeName;
+        metrics = new MetricInstruments(this.getMeterProvider().get(scopeName), "root");
     }
 
     @Override
@@ -134,21 +142,20 @@ public class RootOtelContext implements IRootOtelContext {
                 .orElse(spanBuilder);
     }
 
-    private static Span buildSpanWithParent(SpanBuilder builder, Attributes attrs, Span parentSpan,
-                                            Stream<Span> linkedSpanContexts) {
+    private static Span buildSpanWithParent(SpanBuilder builder, Span parentSpan, Stream<Span> linkedSpanContexts) {
         return addLinkedToBuilder(linkedSpanContexts,
                 Optional.ofNullable(parentSpan)
                         .map(p -> builder.setParent(Context.current().with(p)))
                         .orElseGet(builder::setNoParent))
-                .startSpan().setAllAttributes(attrs);
+                .startSpan();
     }
 
     @Override
-    public @NonNull Span buildSpan(IInstrumentationAttributes forScope,
-                                   String spanName, Stream<Span> linkedSpans, AttributesBuilder attributesBuilder) {
+    public @NonNull Span buildSpan(IScopedInstrumentationAttributes forScope, String spanName, Stream<Span> linkedSpans) {
         assert forScope.getCurrentSpan() == null;
-        var parentSpan = forScope.getEnclosingScope().getCurrentSpan();
+        var forEnclosingScope = forScope.getEnclosingScope();
+        var parentSpan = forEnclosingScope == null ? null : forEnclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);
-        return buildSpanWithParent(spanBuilder, forScope.getPopulatedSpanAttributes(), parentSpan, linkedSpans);
+        return buildSpanWithParent(spanBuilder, parentSpan, linkedSpans);
     }
 }

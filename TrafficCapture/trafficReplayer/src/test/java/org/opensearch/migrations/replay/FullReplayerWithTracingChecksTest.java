@@ -133,7 +133,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         chk.accept(numRequests, "targetTransaction");
         chk.accept(numRequests*2, "scheduled");
         chk.accept(numRequests, "requestSending");
-        chk.accept(numRequests, "finalizingResults");
+        chk.accept(numRequests, "comparingResults");
 
         Consumer<String> chkNonZero = k-> {
             Assertions.assertNotNull(byName.get(k));

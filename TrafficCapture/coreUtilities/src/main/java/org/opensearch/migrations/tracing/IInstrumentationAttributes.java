@@ -19,7 +19,7 @@ public interface IInstrumentationAttributes {
 
     IInstrumentationAttributes getEnclosingScope();
 
-    default Span getCurrentSpan() { return null; }
+    CommonMetricInstruments getMetrics();
 
     Throwable getObservedExceptionToIncludeInMetrics();
 
@@ -28,29 +28,8 @@ public interface IInstrumentationAttributes {
         return e == null ? attributesBuilder.build() : attributesBuilder.put(HAD_EXCEPTION_KEY, true).build();
     }
 
-    default Attributes getPopulatedSpanAttributes() {
-        return getPopulatedSpanAttributesBuilder().build();
-    }
-
-    default AttributesBuilder getPopulatedSpanAttributesBuilder() {
-        var currentObj = this;
-        // reverse the order so that the lowest attribute scopes will overwrite the upper ones if there were conflicts
-        var stack = new ArrayDeque<IInstrumentationAttributes>();
-        while (currentObj != null) {
-            stack.addFirst(currentObj);
-            currentObj = currentObj.getEnclosingScope();
-        }
-        var builder = stack.stream()
-                .collect(Utils.foldLeft(Attributes.builder(), (b, iia)->iia.fillAttributesForSpansBelow(b)));
-        return fillExtraAttributesForThisSpan(builder);
-    }
-
-    default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-        return builder;
-    }
-
-    default AttributesBuilder fillExtraAttributesForThisSpan(AttributesBuilder builder) {
-        return builder;
+    default void addException(Throwable e) {
+        meterIncrementEvent(getMetrics().exceptionCounter);
     }
 
     default void meterIncrementEvent(LongCounter c) {
@@ -62,9 +41,7 @@ public interface IInstrumentationAttributes {
     }
 
     default void meterIncrementEvent(LongCounter c, long increment, AttributesBuilder attributesBuilder) {
-        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            c.add(increment, getPopulatedMetricAttributes(attributesBuilder));
-        }
+        c.add(increment, getPopulatedMetricAttributes(attributesBuilder));
     }
 
     default void meterDeltaEvent(LongUpDownCounter c, long delta) {
@@ -72,10 +49,8 @@ public interface IInstrumentationAttributes {
     }
 
     default void meterDeltaEvent(LongUpDownCounter c, long delta, AttributesBuilder attributesBuilder) {
-        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            var attributes = getPopulatedMetricAttributes(attributesBuilder);
-            c.add(delta, attributes);
-        }
+        var attributes = getPopulatedMetricAttributes(attributesBuilder);
+        c.add(delta, attributes);
     }
 
     default void meterHistogramMillis(DoubleHistogram histogram, Duration value) {
@@ -91,9 +66,7 @@ public interface IInstrumentationAttributes {
     }
 
     default void meterHistogram(DoubleHistogram histogram, double value, AttributesBuilder attributesBuilder) {
-        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            histogram.record(value, getPopulatedMetricAttributes(attributesBuilder));
-        }
+        histogram.record(value, getPopulatedMetricAttributes(attributesBuilder));
     }
 
     default void meterHistogram(LongHistogram histogram, long value) {
@@ -101,9 +74,7 @@ public interface IInstrumentationAttributes {
     }
 
     default void meterHistogram(LongHistogram histogram, long value, AttributesBuilder attributesBuilder) {
-        try (var scope = new NullableExemplarScope(getCurrentSpan())) {
-            histogram.record(value, getPopulatedMetricAttributes(attributesBuilder));
-        }
+        histogram.record(value, getPopulatedMetricAttributes(attributesBuilder));
     }
 
 }

@@ -97,8 +97,6 @@ public class ParsedHttpMessagesAsDicts {
     public static void fillStatusCodeMetrics(@NonNull IReplayContexts.ITupleHandlingContext context,
                                              Optional<Map<String, Object>> sourceResponseOp,
                                              Optional<Map<String, Object>> targetResponseOp) {
-        sourceResponseOp.ifPresent(r -> context.setMethod((String) r.get("Method")));
-        sourceResponseOp.ifPresent(r -> context.setEndpoint((String) r.get("Request-URI")));
         sourceResponseOp.ifPresent(r -> context.setSourceStatus((Integer) r.get(STATUS_CODE_KEY)));
         targetResponseOp.ifPresent(r -> context.setTargetStatus((Integer) r.get(STATUS_CODE_KEY)));
     }
@@ -150,7 +148,7 @@ public class ParsedHttpMessagesAsDicts {
             map.put("HTTP-Version", message.protocolVersion().toString());
             context.setMethod(message.method().toString());
             context.setEndpoint(message.uri());
-            context.setHttpVersions(message.protocolVersion().toString());
+            context.setHttpVersion(message.protocolVersion().toString());
             return fillMap(map, message.headers(), message.content());
         });
     }

@@ -4,12 +4,12 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
 import lombok.NonNull;
-import org.opensearch.migrations.tracing.BaseNestedSpanContext;
+import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IHasRootInstrumentationScope;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
-public class ConnectionContext extends BaseNestedSpanContext<IRootOffloaderContext, IRootOffloaderContext>
+public class ConnectionContext extends BaseSpanContext<IRootOffloaderContext>
         implements IConnectionContext, IHasRootInstrumentationScope<IRootOffloaderContext> {
 
     public static final String ACTIVE_CONNECTION = "activeConnection";
@@ -24,7 +24,7 @@ public class ConnectionContext extends BaseNestedSpanContext<IRootOffloaderConte
     public String getActivityName() { return ACTIVITY_NAME; }
 
     public ConnectionContext(IRootOffloaderContext rootInstrumentationScope, String connectionId, String nodeId) {
-        super(rootInstrumentationScope, rootInstrumentationScope);
+        super(rootInstrumentationScope);
         this.connectionId = connectionId;
         this.nodeId = nodeId;
         initializeSpan();
