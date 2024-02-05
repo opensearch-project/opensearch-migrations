@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -12,6 +12,7 @@ import {
     createOpenSearchServerlessIAMAccessPolicy
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
+import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
@@ -62,6 +63,18 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         ]
         if (props.migrationAnalyticsEnabled) {
             securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)))
+        }
+
+        const servicePort: PortMapping = {
+            name: "django-connect",
+            hostPort: 8000,
+            containerPort: 8000,
+            protocol: Protocol.TCP
+        }
+        const serviceConnectService: ServiceConnectService = {
+            portMappingName: "django-connect",
+            dnsName: "migration-console",
+            port: 8000
         }
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
@@ -139,6 +152,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             serviceName: "migration-console",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
+            portMappings: [servicePort],
+            serviceConnectServices: [serviceConnectService],
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
