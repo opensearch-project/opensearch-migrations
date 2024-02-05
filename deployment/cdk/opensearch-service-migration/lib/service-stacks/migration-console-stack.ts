@@ -66,14 +66,14 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
 
         const servicePort: PortMapping = {
-            name: "elasticsearch-connect",
+            name: "django-connect",
             hostPort: 8000,
             containerPort: 8000,
             protocol: Protocol.TCP
         }
         const serviceConnectService: ServiceConnectService = {
-            portMappingName: "elasticsearch-connect",
-            dnsName: "elasticsearch",
+            portMappingName: "django-connect",
+            dnsName: "migration-console",
             port: 8000
         }
 
@@ -152,6 +152,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             serviceName: "migration-console",
             dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
+            portMappings: [servicePort],
+            serviceConnectServices: [serviceConnectService],
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
