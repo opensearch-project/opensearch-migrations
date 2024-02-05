@@ -154,6 +154,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
+            serviceDiscoveryEnabled: true,
+            serviceDiscoveryPort: 8000,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
