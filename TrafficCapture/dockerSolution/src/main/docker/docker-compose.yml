@@ -130,6 +130,9 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
+    ports:
+        #- "${PORT:-}:8000"
+      - "8000:8000"
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
 

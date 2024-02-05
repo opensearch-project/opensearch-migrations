@@ -1,10 +1,35 @@
 FROM ubuntu:jammy
+ARG EXPERIMENTAL
 
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    pip3 install urllib3==1.25.11 opensearch-benchmark==1.1.0 awscurl tqdm
+    apt-get install -y --no-install-recommends \
+    python3.9 \
+    python3-pip \
+    python3-dev \
+    openjdk-11-jre-headless \
+    wget \
+    gcc \
+    libc-dev \
+    git \
+    curl \
+    vim \
+    jq \
+    unzip \
+    less 
+
+    #pip3 install urllib3==1.25.11 opensearch-benchmark==1.1.0 awscurl tqdm
+
+# Experimental libraries needed for API
+#RUN if [ "$EXPERIMENTAL" = "true" ]; then \
+    #pip3 install \
+        #django==5.0.1 \
+        #djangorestframework==3.14.0 \
+        #django-extensions==3.2.3 \
+        #werkzeug==3.0.1; \
+    #fi
+
 # TODO upon the next release of opensearch-benchmark the awscli package should be installed by pip3, with the expected boto3 version upgrade resolving the current conflicts between opensearch-benchmark and awscli
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
 RUN mkdir /root/kafka-tools
@@ -26,4 +51,11 @@ RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz |
 RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v1.1.9/aws-msk-iam-auth-1.1.9-all.jar
 WORKDIR /root
 
-CMD tail -f /dev/null
+# Experimental
+COPY console /console
+RUN pip3 install -r /console/requirements.txt
+
+
+COPY init.sh /init.sh
+RUN chmod +x /init.sh
+ENTRYPOINT ["/init.sh"]

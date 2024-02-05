@@ -15,8 +15,18 @@ import responses
 from responses import matchers
 
 import index_operations
+from component_template_info import ComponentTemplateInfo
 from endpoint_info import EndpointInfo
+from index_template_info import IndexTemplateInfo
 from tests import test_constants
+
+
+# Helper method to create a template API response
+def create_base_template_response(list_name: str, body: dict) -> dict:
+    return {list_name: [{"name": "test", list_name[:-1]: {"template": {
+        test_constants.SETTINGS_KEY: body.get(test_constants.SETTINGS_KEY, {}),
+        test_constants.MAPPINGS_KEY: body.get(test_constants.MAPPINGS_KEY, {})
+    }}}]}
 
 
 class TestIndexOperations(unittest.TestCase):
@@ -125,6 +135,143 @@ class TestIndexOperations(unittest.TestCase):
             responses.get(test_constants.SOURCE_ENDPOINT + "*", body=e)
             self.assertRaises(RuntimeError, index_operations.fetch_all_indices,
                               EndpointInfo(test_constants.SOURCE_ENDPOINT))
+
+    @responses.activate
+    def test_fetch_all_component_templates_empty(self):
+        # 1 - Empty response
+        responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json={})
+        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        # Missing key returns empty result
+        self.assertEqual(0, len(result))
+        # 2 - Valid response structure but no templates
+        responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json={"component_templates": []})
+        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        self.assertEqual(0, len(result))
+        # 2 - Invalid response structure
+        responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json={"templates": []})
+        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        self.assertEqual(0, len(result))
+
+    @responses.activate
+    def test_fetch_all_component_templates(self):
+        # Set up response
+        test_index = test_constants.BASE_INDICES_DATA[test_constants.INDEX3_NAME]
+        test_resp = create_base_template_response("component_templates", test_index)
+        responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json=test_resp)
+        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        # Result should contain one template
+        self.assertEqual(1, len(result))
+        template = result.pop()
+        self.assertTrue(isinstance(template, ComponentTemplateInfo))
+        self.assertEqual("test", template.get_name())
+        template_def = template.get_template_definition()["template"]
+        self.assertEqual(test_index[test_constants.SETTINGS_KEY], template_def[test_constants.SETTINGS_KEY])
+        self.assertEqual(test_index[test_constants.MAPPINGS_KEY], template_def[test_constants.MAPPINGS_KEY])
+
+    @responses.activate
+    def test_fetch_all_index_templates_empty(self):
+        # 1 - Empty response
+        responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json={})
+        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        # Missing key returns empty result
+        self.assertEqual(0, len(result))
+        # 2 - Valid response structure but no templates
+        responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json={"index_templates": []})
+        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        self.assertEqual(0, len(result))
+        # 2 - Invalid response structure
+        responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json={"templates": []})
+        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        self.assertEqual(0, len(result))
+
+    @responses.activate
+    def test_fetch_all_index_templates(self):
+        # Set up base response
+        key = "index_templates"
+        test_index_pattern = "test-*"
+        test_component_template_name = "test_component_template"
+        test_index = test_constants.BASE_INDICES_DATA[test_constants.INDEX2_NAME]
+        test_resp = create_base_template_response(key, test_index)
+        # Add fields specific to index templates
+        template_body = test_resp[key][0][key[:-1]]
+        template_body["index_patterns"] = [test_index_pattern]
+        template_body["composed_of"] = [test_component_template_name]
+        responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json=test_resp)
+        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        # Result should contain one template
+        self.assertEqual(1, len(result))
+        template = result.pop()
+        self.assertTrue(isinstance(template, IndexTemplateInfo))
+        self.assertEqual("test", template.get_name())
+        template_def = template.get_template_definition()["template"]
+        self.assertEqual(test_index[test_constants.SETTINGS_KEY], template_def[test_constants.SETTINGS_KEY])
+        self.assertEqual(test_index[test_constants.MAPPINGS_KEY], template_def[test_constants.MAPPINGS_KEY])
+
+    @responses.activate
+    def test_fetch_all_templates_errors(self):
+        # Set up error responses
+        responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", body=requests.Timeout())
+        responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", body=requests.HTTPError())
+        try:
+            self.assertRaises(RuntimeError, index_operations.fetch_all_component_templates,
+                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except RuntimeError as e:
+            self.assertIsNotNone(e.__cause__)
+        try:
+            self.assertRaises(RuntimeError, index_operations.fetch_all_index_templates,
+                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except RuntimeError as e:
+            self.assertIsNotNone(e.__cause__)
+
+    @responses.activate
+    def test_create_templates(self):
+        # Set up test input
+        test1_template_def = copy.deepcopy(test_constants.BASE_INDICES_DATA[test_constants.INDEX2_NAME])
+        test2_template_def = copy.deepcopy(test_constants.BASE_INDICES_DATA[test_constants.INDEX3_NAME])
+        # Remove "aliases" since that's not a valid component template entry
+        del test1_template_def[test_constants.ALIASES_KEY]
+        del test2_template_def[test_constants.ALIASES_KEY]
+        # Test component templates first
+        test_templates = set()
+        test_templates.add(ComponentTemplateInfo({"name": "test1", "component_template": test1_template_def}))
+        test_templates.add(ComponentTemplateInfo({"name": "test2", "component_template": test2_template_def}))
+        # Set up expected PUT calls with a mock response status
+        responses.put(test_constants.TARGET_ENDPOINT + "_component_template/test1",
+                      match=[matchers.json_params_matcher(test1_template_def)])
+        responses.put(test_constants.TARGET_ENDPOINT + "_component_template/test2",
+                      match=[matchers.json_params_matcher(test2_template_def)])
+        failed = index_operations.create_component_templates(test_templates,
+                                                             EndpointInfo(test_constants.TARGET_ENDPOINT))
+        self.assertEqual(0, len(failed))
+        # Also test index templates
+        test_templates.clear()
+        test_templates.add(IndexTemplateInfo({"name": "test1", "index_template": test1_template_def}))
+        test_templates.add(IndexTemplateInfo({"name": "test2", "index_template": test2_template_def}))
+        # Set up expected PUT calls with a mock response status
+        responses.put(test_constants.TARGET_ENDPOINT + "_index_template/test1",
+                      match=[matchers.json_params_matcher(test1_template_def)])
+        responses.put(test_constants.TARGET_ENDPOINT + "_index_template/test2",
+                      match=[matchers.json_params_matcher(test2_template_def)])
+        failed = index_operations.create_index_templates(test_templates, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        self.assertEqual(0, len(failed))
+
+    @responses.activate
+    def test_create_templates_failure(self):
+        # Set up failures
+        responses.put(test_constants.TARGET_ENDPOINT + "_component_template/test1", body=requests.Timeout())
+        responses.put(test_constants.TARGET_ENDPOINT + "_index_template/test2", body=requests.HTTPError())
+        test_input = ComponentTemplateInfo({"name": "test1", "component_template": {}})
+        failed = index_operations.create_component_templates({test_input}, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        # Verify that failures return their respective errors
+        self.assertEqual(1, len(failed))
+        self.assertTrue("test1" in failed)
+        self.assertTrue(isinstance(failed["test1"], requests.Timeout))
+        test_input = IndexTemplateInfo({"name": "test2", "index_template": {}})
+        failed = index_operations.create_index_templates({test_input}, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        # Verify that failures return their respective errors
+        self.assertEqual(1, len(failed))
+        self.assertTrue("test2" in failed)
+        self.assertTrue(isinstance(failed["test2"], requests.HTTPError))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,11 @@
+awscurl==0.32
+boto3==1.10.32
+botocore==1.13.50
+Django==5.0.1
+django-extensions==3.2.3
+djangorestframework==3.14.0
+opensearch-benchmark
+opensearch-py==2.2.0
+tqdm==4.66.1
+urllib3==1.25.11
+Werkzeug
