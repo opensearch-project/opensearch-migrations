@@ -25,15 +25,16 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * At a basic level, this class aims to be a generic serializer which can receive ByteBuffer data and serialize the data
- * into the defined Protobuf format {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream}, and then write
- * this formatted data to the provided CodedOutputStream.
- *
- * Commented throughout the class are example markers such as (e.g. 1: "1234ABCD") which line up with the textual
- * representation of this Protobuf format to be used as a guide as fields are written. An example TrafficStream can
- * also be visualized below for reference.
- *
- * 1: "91ba4f3a-0b34-11ee-be56-0242ac120002"
+ * This class serves as a generic serializer. Its primary function is to take ByteBuffer data,
+ * serialize it into the Protobuf format as defined by
+ * {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream}, and then output
+ * the formatted data to a given CodedOutputStream.
+ * <p>
+ * Within the class, example markers are commented (e.g., 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2").
+ * These markers correspond to the textual representation of the Protobuf format and serve as a guide
+ * for field serialization. Below is a visual representation of an example `TrafficStream` for further reference:
+ * <pre>{@code
+ * 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2"
  * 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
  * 2 {
  *   1 {
@@ -41,7 +42,7 @@ import java.util.concurrent.CompletableFuture;
  *     2: 682312000
  *   }
  *   4 {
- *     1: "POST /test-index/_bulk?pretty…”
+ *     1: "POST /test-index/_bulk?pretty…"
  *   }
  * }
  * 2 {
@@ -55,11 +56,14 @@ import java.util.concurrent.CompletableFuture;
  *   }
  * }
  * 3: 1
+ * }
+ * </pre>
  */
 @Slf4j
 public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConnectionCaptureSerializer<T> {
 
-    private static final int MAX_ID_SIZE = 96;
+    // 100 is the default size of netty connectionId and kafka nodeId along with serializationTags
+    private static final int MAX_ID_SIZE = 100;
 
     private boolean readObservationsAreWaitingForEom;
     private int eomsSoFar;
@@ -105,7 +109,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         } else {
             currentCodedOutputStreamHolderOrNull = streamManager.createStream();
             var currentCodedOutputStream = currentCodedOutputStreamHolderOrNull.getOutputStream();
-            // e.g. 1: "1234ABCD"
+            // e.g. 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2"
             currentCodedOutputStream.writeString(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionIdString);
             if (nodeIdString != null) {
                 // e.g. 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"

@@ -50,4 +50,3 @@ def main(selected_keys):
 if __name__ == "__main__":
     args = sys.argv[1:]  # Arguments from command line
     main(args)
-

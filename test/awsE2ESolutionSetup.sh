@@ -15,25 +15,35 @@ prepare_source_nodes_for_capture () {
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
   kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
+  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/analyticsDomainSGId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
     group_ids=($(aws ec2 describe-instance-attribute --instance-id $id --attribute groupSet  --query 'Groups[*].GroupId' --output text))
-    match=false
+    kafka_sg_match=false
+    otel_sg_match=false
     for group_id in "${group_ids[@]}"; do
         if [[ $group_id = "$kafka_sg_id" ]]; then
-            match=true
-            break
+            kafka_sg_match=true
+        fi
+        if [[ $group_id = "$otel_sg_id" ]]; then
+            otel_sg_match=true
         fi
     done
-    if [[ $match = false ]]; then
-      echo "Adding security group: $kafka_sg_id to node: $id"
-      group_ids+=("$kafka_sg_id")
+    if [ $kafka_sg_match = false ] || [ $otel_sg_match = false ]; then
+      if [[ $kafka_sg_match = false ]]; then
+          echo "Adding security group: $kafka_sg_id to node: $id"
+          group_ids+=("$kafka_sg_id")
+      fi
+      if [[ $otel_sg_match = false ]]; then
+          echo "Adding security group: $otel_sg_id to node: $id"
+          group_ids+=("$otel_sg_id")
+      fi
       printf -v group_ids_string '%s ' "${group_ids[@]}"
       aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
     fi
     echo "Executing ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH on node: $id"
-    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH" --output text --query 'Command.CommandId')
+    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --stage $deploy_stage --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH" --output text --query 'Command.CommandId')
     sleep 10
     command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'Status')
     # TODO for multi-node setups, we should collect all command ids and allow to run in parallel
@@ -59,7 +69,7 @@ restore_and_record () {
   console_task_arn=$(aws ecs list-tasks --cluster migration-${deploy_stage}-ecs-cluster --family "migration-${deploy_stage}-migration-console" | jq --raw-output '.taskArns[0]')
 
   # Print final doc counts and Kafka topic status
-  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source_endpoint $source_endpoint --source_no_auth --target_no_auth"
+  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source-endpoint $source_endpoint --source-no-auth --target-no-auth"
   unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${kafka_brokers} --timeout 100000 --describe --group logging-group-default --command-config kafka-tools/aws/msk-iam-auth.properties"
 
   # Turn off Replayer
@@ -84,16 +94,16 @@ usage() {
   echo "an OpenSearch Service Domain as the target cluster, and the Migration infrastructure for simulating a migration from source to target."
   echo ""
   echo "Usage: "
-  echo "  ./awsE2ESolutionSetup.sh [--migrations-git-url] [--migrations-git-branch] [--stage] [--create-service-linked-roles] [--bootstrap-region] [--enable-capture-proxy] [--run-post-actions]"
+  echo "  ./awsE2ESolutionSetup.sh <>"
   echo ""
   echo "Options:"
   echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --stage                                          The stage name to use for naming/grouping of AWS deployment resources, default is 'aws-integ'."
   echo "  --run-post-actions                               Flag to enable only running post test actions for cleaning up and recording a test run."
-  echo "  --create-service-linked-roles                    If included, will attempt to create required service linked roles for the AWS account"
-  echo "  --bootstrap-region                               If included, will attempt to CDK bootstrap the region to allow CDK deployments"
-  echo "  --enable-capture-proxy                           If included, will attempt to enable the capture proxy on all source nodes"
+  echo "  --create-service-linked-roles                    Flag to create required service linked roles for the AWS account"
+  echo "  --bootstrap-region                               Flag to CDK bootstrap the region to allow CDK deployments"
+  echo "  --skip-capture-proxy                             Flag to skip setting up the Capture Proxy on source cluster nodes"
   echo ""
   exit 1
 }
@@ -102,7 +112,7 @@ STAGE='aws-integ'
 RUN_POST_ACTIONS=false
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
-ENABLE_CAPTURE_PROXY=false
+SKIP_CAPTURE_PROXY=false
 MIGRATIONS_GIT_URL='https://github.com/opensearch-project/opensearch-migrations.git'
 MIGRATIONS_GIT_BRANCH='main'
 
@@ -120,8 +130,8 @@ while [[ $# -gt 0 ]]; do
       RUN_POST_ACTIONS=true
       shift # past argument
       ;;
-    --enable-capture-proxy)
-      ENABLE_CAPTURE_PROXY=true
+    --skip-capture-proxy)
+      SKIP_CAPTURE_PROXY=true
       shift # past argument
       ;;
     --migrations-git-url)
@@ -139,7 +149,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    -h|--help)
+    -h|--h|--help)
       usage
       ;;
     -*)
@@ -189,14 +199,14 @@ if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
 fi
 # Deploy source cluster on EC2 instances
-cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=1 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
 source_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
 echo $source_endpoint
 vpc_id=$(aws cloudformation describe-stacks --stack-name opensearch-network-stack --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" --output text)
 echo $vpc_id
 
 cdk_context=$(echo "${cdk_context/<VPC_ID>/$vpc_id}")
-cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:19200}")
+cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:9200}")
 cdk_context=$(echo $cdk_context | jq '@json')
 # TODO Further verify space escaping for JSON
 # Escape spaces for CDK JSON parsing to handle
@@ -207,6 +217,6 @@ cd ../../deployment/cdk/opensearch-service-migration
 ./buildDockerImages.sh
 npm install
 cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
-if [ "$ENABLE_CAPTURE_PROXY" = true ] ; then
+if [ "$SKIP_CAPTURE_PROXY" = false ] ; then
   prepare_source_nodes_for_capture "$STAGE"
 fi
