@@ -59,7 +59,7 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
         return this.startNanoTime;
     }
 
-    public Span getCurrentSpan() {
+    public @NonNull Span getCurrentSpan() {
         return this.currentSpan;
     }
 

@@ -23,16 +23,14 @@ public class KafkaRecordContext extends
     public final String topic;
     @Getter
     public final String recordId;
-    @Getter
-    public final int recordSize;
 
     public KafkaRecordContext(IRootKafkaOffloaderContext rootScope, IConnectionContext enclosingScope,
                               String topic, String recordId, int recordSize) {
         super(rootScope, enclosingScope);
         this.topic = topic;
         this.recordId = recordId;
-        this.recordSize = recordSize;
         initializeSpan();
+        getCurrentSpan().setAttribute(RECORD_SIZE_ATTR, recordSize);
     }
 
     public static class MetricInstruments extends CommonScopedMetricInstruments {
@@ -58,11 +56,5 @@ public class KafkaRecordContext extends
         return super.fillAttributesForSpansBelow(builder)
                 .put(TOPIC_ATTR, getTopic())
                 .put(RECORD_ID_ATTR, getRecordId());
-    }
-
-    @Override
-    public AttributesBuilder fillExtraAttributesForThisSpan(AttributesBuilder builder) {
-        return super.fillExtraAttributesForThisSpan(builder)
-                .put(RECORD_SIZE_ATTR, getRecordSize());
     }
 }
