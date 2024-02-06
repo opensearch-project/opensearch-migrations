@@ -38,6 +38,9 @@ public class CommonScopedMetricInstruments extends CommonMetricInstruments {
 
     private static List<Double> getExponentialBucketsBetween(double firstBucketSize, double lastBucketCeiling,
                                                              double rate) {
+        if (firstBucketSize <= 0) {
+            throw new IllegalArgumentException("firstBucketSize value " + firstBucketSize + " must be > 0");
+        }
         double[] bucketBoundary = new double[]{firstBucketSize};
         return DoubleStream.generate(() -> {
             var tmp = bucketBoundary[0];
