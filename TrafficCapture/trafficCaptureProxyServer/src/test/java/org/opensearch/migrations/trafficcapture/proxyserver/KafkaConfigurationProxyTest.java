@@ -1,94 +1,172 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import eu.rekawek.toxiproxy.Proxy;
+import eu.rekawek.toxiproxy.model.ToxicDirection;
 import java.io.IOException;
 import java.net.URI;
-import java.util.function.Supplier;
+import java.time.Duration;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.ThrowingConsumer;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.lifecycle.Startables;
-import org.testcontainers.utility.DockerImageName;
-
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
-public class KafkaConfigurationProxyTest {
-
-  // see https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-  private static final Supplier<KafkaContainer> getKafkaContainer = () -> new KafkaContainer(
-      DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
-
-
-  private static final Supplier<GenericContainer<?>> getApacheHttpdContainer = () -> new GenericContainer<>(
-      "httpd:alpine").withExposedPorts(80); // Container Port
-
+public class KafkaConfigurationProxyTest extends ContainerTestBase {
 
   private static final String HTTPD_GET_EXPECTED_RESPONSE = "<html><body><h1>It works!</h1></body></html>\n";
 
-  @Test
-  @Disabled
-  public void testCaptureProxyWithKafkaDownBeforeStart_proxysRequest() {
-    try (
-        var httpd = getApacheHttpdContainer.get();
-        var proxy = new ProxyCaptureContainer(httpd, "http://kafkaNotAvailable:33323")) {
+  @ParameterizedTest
+  @EnumSource(FailureMode.class)
+  public void testCaptureProxyWithKafkaImpairedBeforeStart(FailureMode failureMode) {
+    try (var captureProxy = new CaptureProxyContainer(destinationProxyUrl, kafkaProxyUrl)) {
+      failureMode.apply(kafkaProxy);
 
-      httpd.start();
+      captureProxy.start();
 
-      proxy.start();
+      var latency = assertBasicCall(captureProxy);
 
-      assertBasicCall(proxy);
+      Assertions.assertTrue(latency.minus(Duration.ofMillis(100)).isNegative(),
+          "Latency must be less than 100ms");
+    }
+  }
+
+  @ParameterizedTest
+  @EnumSource(FailureMode.class)
+  public void testCaptureProxyWithKafkaImpairedAfterStart(FailureMode failureMode) {
+    try (var captureProxy = new CaptureProxyContainer(destinationProxyUrl, kafkaProxyUrl)) {
+      captureProxy.start();
+
+      failureMode.apply(kafkaProxy);
+
+      var latency = assertBasicCall(captureProxy);
+
+      Assertions.assertTrue(latency.minus(Duration.ofMillis(100)).isNegative(),
+          "Latency must be less than 100ms");
+    }
+  }
+
+  @ParameterizedTest
+  @EnumSource(FailureMode.class)
+  @Execution(ExecutionMode.SAME_THREAD)
+  public void testCaptureProxyWithKafkaImpairedDoesNotAffectRequest_proxysRequest(
+      FailureMode failureMode) {
+    try (var captureProxy = new CaptureProxyContainer(destinationProxyUrl, kafkaProxyUrl)) {
+      captureProxy.start();
+      final int numberOfTests = 20;
+
+      // Performance is different for first few calls so throw them away
+      IntStream.range(0, 3).forEach(i -> assertBasicCall(captureProxy));
+
+      // Calculate average duration of baseline calls
+      Duration averageBaselineDuration = IntStream.range(0, numberOfTests)
+          .mapToObj(i -> assertBasicCall(captureProxy)).reduce(Duration.ZERO, Duration::plus)
+          .dividedBy(numberOfTests);
+
+      failureMode.apply(kafkaProxy);
+
+      // Calculate average duration of impaired calls
+      Duration averageImpairedDuration = IntStream.range(0, numberOfTests)
+          .mapToObj(i -> assertBasicCall(captureProxy)).reduce(Duration.ZERO, Duration::plus)
+          .dividedBy(numberOfTests);
+
+      long acceptableDifference = Duration.ofMillis(25).toMillis();
+
+      log.info("Baseline Duration: {}ms, Impaired Duration: {}ms",
+          averageBaselineDuration.toMillis(), averageImpairedDuration.toMillis());
+
+      assertEquals(averageBaselineDuration.toMillis(), averageImpairedDuration.toMillis(),
+          acceptableDifference, "The average durations are not close enough");
     }
   }
 
   @Test
-  @Disabled
-  public void testCaptureProxyWithKafkaDownAfterStart_proxysRequest() {
-    try (
-        var httpd = getApacheHttpdContainer.get();
-        var kafka = getKafkaContainer.get();
-        var proxy = new ProxyCaptureContainer(httpd, kafka)) {
+  @Execution(ExecutionMode.SAME_THREAD)
+  public void testCaptureProxyLatencyAddition() {
+    try (var captureProxy = new CaptureProxyContainer(destinationProxyUrl, kafkaProxyUrl)) {
+      captureProxy.start();
+      final int numberOfTests = 25;
 
-      Startables.deepStart(httpd, kafka).join();
+      // Performance is different for first few calls so throw them away
+      IntStream.range(0, 3).forEach(i -> assertBasicCall(captureProxy));
 
-      proxy.start();
+      // Calculate average duration of baseline calls
+      Duration averageBaselineDuration = IntStream.range(0, numberOfTests)
+          .mapToObj(i -> assertBasicCall(captureProxy)).reduce(Duration.ZERO, Duration::plus)
+          .dividedBy(numberOfTests);
 
-      kafka.stop();
+      // Calculate average duration of impaired calls
+      Duration averageImpairedDuration = IntStream.range(0, numberOfTests)
+          .mapToObj(i -> assertBasicCall(destinationProxyUrl)).reduce(Duration.ZERO, Duration::plus)
+          .dividedBy(numberOfTests);
 
-      assertBasicCall(proxy);
+      long acceptableDifference = Duration.ofMillis(25).toMillis();
+
+      log.info("Baseline Duration: {}ms, Impaired Duration: {}ms",
+          averageBaselineDuration.toMillis(), averageImpairedDuration.toMillis());
+
+      assertEquals(averageImpairedDuration.toMillis(), averageBaselineDuration.toMillis(),
+          acceptableDifference, "The average durations are not close enough");
     }
   }
 
-  @Test
-  public void testCaptureProxyWithKafkaAndApacheHttpd() {
-    try (
-        var httpd = getApacheHttpdContainer.get();
-        var kafka = getKafkaContainer.get();
-        var proxy = new ProxyCaptureContainer(httpd, kafka)) {
-
-      Startables.deepStart(httpd, kafka).join();
-
-      proxy.start();
-
-      assertBasicCall(proxy);
-    }
+  private Duration assertBasicCall(CaptureProxyContainer proxy) {
+    return assertBasicCall(CaptureProxyContainer.getUriFromContainer(proxy));
   }
 
-  private void assertBasicCall(ProxyCaptureContainer proxy) {
+  private Duration assertBasicCall(String endpoint) {
     try (var client = new SimpleHttpClientForTesting()) {
-      var proxyEndpoint = URI.create("http://localhost:" + proxy.getFirstMappedPort() + "/");
-      var response = client.makeGetRequest(proxyEndpoint, Stream.empty());
+      long startTimeNanos = System.nanoTime();
+      var response = client.makeGetRequest(URI.create(endpoint), Stream.empty());
+      long endTimeNanos = System.nanoTime();
+
       var responseBody = new String(response.payloadBytes);
-      Assertions.assertEquals(HTTPD_GET_EXPECTED_RESPONSE, responseBody);
+      assertEquals(HTTPD_GET_EXPECTED_RESPONSE, responseBody);
+      return Duration.ofNanos(endTimeNanos - startTimeNanos);
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
   }
 
+  public enum FailureMode {
+    LATENCY(
+        (proxy) -> proxy.toxics().latency("latency", ToxicDirection.UPSTREAM, 5000)),
+    BANDWIDTH(
+        (proxy) -> proxy.toxics().bandwidth("bandwidth", ToxicDirection.UPSTREAM, 5000)),
+    TIMEOUT(
+        (proxy) -> proxy.toxics().timeout("timeout", ToxicDirection.UPSTREAM, 5000)),
+    SLICER(
+        (proxy) -> proxy.toxics().slicer("slicer", ToxicDirection.DOWNSTREAM, 10, 10)),
+    SLOW_CLOSE(
+        (proxy) -> proxy.toxics().slowClose("slow_close", ToxicDirection.UPSTREAM, 5000)),
+    RESET_PEER(
+        (proxy) -> proxy.toxics().resetPeer("reset_peer", ToxicDirection.UPSTREAM, 5000)),
+    LIMIT_DATA(
+        (proxy) -> proxy.toxics().limitData("limit_data", ToxicDirection.UPSTREAM, 10)),
+    DISCONNECT(Proxy::disable);
+
+    private final ThrowingConsumer<Proxy> failureModeApplier;
+
+    FailureMode(ThrowingConsumer<Proxy> applier) {
+      this.failureModeApplier = applier;
+    }
+
+    public void apply(Proxy proxy) {
+      try {
+        this.failureModeApplier.accept(proxy);
+      } catch (Throwable t) {
+        throw new RuntimeException(t);
+      }
+    }
+  }
 }

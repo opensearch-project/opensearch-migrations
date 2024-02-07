@@ -42,8 +42,8 @@ import java.util.stream.Stream;
  */
 public class SimpleHttpClientForTesting implements AutoCloseable {
 
-    private final static Timeout DEFAULT_RESPONSE_TIMEOUT = Timeout.ofMilliseconds(100);
-    private final static Timeout DEFAULT_CONNECTION_TIMEOUT = Timeout.ofMilliseconds(100);
+    private final static Timeout DEFAULT_RESPONSE_TIMEOUT = Timeout.ofMilliseconds(1000);
+    private final static Timeout DEFAULT_CONNECTION_TIMEOUT = Timeout.ofMilliseconds(1000);
 
     private final CloseableHttpClient httpClient;
 

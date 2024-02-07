@@ -1,55 +1,58 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import com.github.dockerjava.api.command.InspectContainerResponse;
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.testutils.PortFinder;
 import org.testcontainers.containers.Container;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import org.testcontainers.containers.wait.strategy.WaitStrategyTarget;
 import org.testcontainers.lifecycle.Startable;
 
 @Slf4j
-public class ProxyCaptureContainer implements AutoCloseable, WaitStrategyTarget, Startable {
+public class CaptureProxyContainer
+    extends GenericContainer implements AutoCloseable, WaitStrategyTarget, Startable {
 
-  private final Container<?> destination;
+  private static final Duration TIMEOUT_DURATION = Duration.ofSeconds(30);
+  private final Supplier<String> destinationUriSupplier;
   private final Supplier<String> kafkaUriSupplier;
   private Integer listeningPort;
   private Thread serverThread;
-  private static final Duration TIMEOUT_DURATION = Duration.ofSeconds(5);
 
-  public ProxyCaptureContainer(Container<?> destination,
-      Supplier<String> kafkaUriSupplier) {
-    this.destination = destination;
+  public CaptureProxyContainer(final Supplier<String> destinationUriSupplier,
+      final Supplier<String> kafkaUriSupplier) {
+    this.destinationUriSupplier = destinationUriSupplier;
     this.kafkaUriSupplier = kafkaUriSupplier;
   }
 
-  public ProxyCaptureContainer(Container<?> destination,
-      String kafkaUri) {
-    this.destination = destination;
+  public CaptureProxyContainer(final String destinationUri, final String kafkaUri) {
+    this.destinationUriSupplier = () -> destinationUri;
     this.kafkaUriSupplier = () -> kafkaUri;
   }
 
-  public ProxyCaptureContainer(Container<?> destination,
-      KafkaContainer kafka) {
-    this(destination, () -> getKafkaUriFromContainer(kafka));
+  public CaptureProxyContainer(final Container<?> destination, final KafkaContainer kafka) {
+    this(() -> getUriFromContainer(destination), () -> getUriFromContainer(kafka));
+  }
+
+  public static String getUriFromContainer(final Container<?> container) {
+    return "http://" + container.getHost() + ":" + container.getFirstMappedPort();
   }
 
   @Override
   public void start() {
-    this.listeningPort = findOpenPort();
+    this.listeningPort = PortFinder.findOpenPort();
     serverThread = new Thread(() -> {
       try {
         String[] args = {
-            "--kafkaConnection",
-            kafkaUriSupplier.get(),
-            "--destinationUri", "http://" + destination.getHost() + ":" + destination.getFirstMappedPort(),
+            "--kafkaConnection", kafkaUriSupplier.get(),
+            "--destinationUri", destinationUriSupplier.get(),
             "--listenPort", String.valueOf(listeningPort),
             "--insecureDestination"
         };
@@ -61,25 +64,9 @@ public class ProxyCaptureContainer implements AutoCloseable, WaitStrategyTarget,
     });
 
     serverThread.start();
-    Wait.defaultWaitStrategy()
+    new HttpWaitStrategy().forPort(listeningPort)
         .withStartupTimeout(TIMEOUT_DURATION)
         .waitUntilReady(this);
-  }
-
-  public static String getKafkaUriFromContainer(KafkaContainer container) {
-    return "http://" + container.getHost() + ":" + container.getFirstMappedPort();
-  }
-
-
-  private static int findOpenPort() {
-    try (ServerSocket serverSocket = new ServerSocket(0)) {
-      int port = serverSocket.getLocalPort();
-      log.info("Open port found: " + port);
-      return port;
-    } catch (IOException e) {
-      log.error("Failed to find an open port: " + e.getMessage());
-      throw new RuntimeException(e);
-    }
   }
 
   @Override
@@ -110,12 +97,12 @@ public class ProxyCaptureContainer implements AutoCloseable, WaitStrategyTarget,
 
   @Override
   public String getHost() {
-    return "localhost"; // or the appropriate host
+    return "localhost";
   }
 
   @Override
   public Integer getMappedPort(int originalPort) {
-    if(getExposedPorts().contains(originalPort)) {
+    if (getExposedPorts().contains(originalPort)) {
       return listeningPort;
     }
     return null;
@@ -123,11 +110,23 @@ public class ProxyCaptureContainer implements AutoCloseable, WaitStrategyTarget,
 
   @Override
   public List<Integer> getExposedPorts() {
-    return destination.getExposedPorts();
+    // Internal and External ports are the same
+    return List.of(listeningPort);
   }
 
   @Override
   public InspectContainerResponse getContainerInfo() {
-    return destination.getContainerInfo();
+    return new InspectNonContainerResponse("captureProxy");
+  }
+
+  @AllArgsConstructor
+  static class InspectNonContainerResponse extends InspectContainerResponse {
+
+    private String name;
+
+    @Override
+    public String getName() {
+      return name;
+    }
   }
 }

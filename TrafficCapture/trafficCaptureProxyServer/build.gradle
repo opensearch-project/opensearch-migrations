@@ -44,6 +44,8 @@ dependencies {
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.4'
     testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.4'
     testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.4'
+    testImplementation group: 'org.testcontainers', name: 'toxiproxy', version: '1.19.4'
+    testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java', version: '2.1.7'
 }
 
 tasks.withType(Tar) {
