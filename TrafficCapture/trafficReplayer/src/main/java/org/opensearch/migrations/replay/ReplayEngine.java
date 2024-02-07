@@ -168,14 +168,6 @@ public class ReplayEngine {
         return networkSendOrchestrator.clientConnectionPool.closeConnectionsAndShutdown();
     }
 
-    public int getNumConnectionsCreated() {
-        return networkSendOrchestrator.clientConnectionPool.getNumConnectionsCreated();
-    }
-
-    public int getNumConnectionsClosed() {
-        return networkSendOrchestrator.clientConnectionPool.getNumConnectionsClosed();
-    }
-
     public void setFirstTimestamp(Instant firstPacketTimestamp) {
         timeShifter.setFirstTimestamp(firstPacketTimestamp);
     }

@@ -16,6 +16,7 @@ public abstract class IReplayContexts {
         private ActivityNames() {}
 
         public static final String CHANNEL = "channel";
+        public static final String TCP_CONNECTION = "tcpConnection";
         public static final String RECORD_LIFETIME = "recordLifetime";
         public static final String TRAFFIC_STREAM_LIFETIME = "trafficStreamLifetime";
         public static final String HTTP_TRANSACTION = "httpTransaction";
@@ -53,7 +54,10 @@ public abstract class IReplayContexts {
         public static final String TRANSFORM_CHUNKS_OUT = "transformChunksOut";
         public static final String NETTY_SCHEDULE_LAG = "scheduleLag";
         public static final String SOURCE_TO_TARGET_REQUEST_LAG = "lagBetweenSourceAndTargetRequests";
+        public static final String ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED = "activeReplayerChannels";
         public static final String ACTIVE_TARGET_CONNECTIONS = "activeTargetConnections";
+        public static final String CONNECTIONS_OPENED = "connectionsOpened";
+        public static final String CONNECTIONS_CLOSED = "connectionsClosedCount";
         public static final String BYTES_WRITTEN_TO_TARGET = "bytesWrittenToTarget";
         public static final String BYTES_READ_FROM_TARGET = "bytesReadFromTarget";
         public static final String TUPLE_COMPARISON = "tupleComparison";
@@ -83,6 +87,10 @@ public abstract class IReplayContexts {
         default String getNodeId() {
             return getChannelKey().getNodeId();
         }
+
+        void onSocketConnectionCreated();
+
+        void onSocketConnectionClosed();
     }
 
     public interface IKafkaRecordContext

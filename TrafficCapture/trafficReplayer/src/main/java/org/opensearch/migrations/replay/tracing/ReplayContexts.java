@@ -28,16 +28,50 @@ public abstract class ReplayContexts extends IReplayContexts {
     public static final String COUNT_UNIT_STR = "count";
     public static final String BYTES_UNIT_STR = "bytes";
 
+    public static class SocketContext
+            extends BaseNestedSpanContext<RootReplayerContext, ChannelKeyContext>
+            implements IScopedInstrumentationAttributes {
+
+        public static final String ACTIVITY_NAME = ActivityNames.TCP_CONNECTION;
+
+        protected SocketContext(RootReplayerContext rootScope, ChannelKeyContext enclosingScope) {
+            super(rootScope, enclosingScope);
+            initializeSpan();
+        }
+
+        @Override
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
+            }
+        }
+
+        public static MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
+        @Override
+        public CommonScopedMetricInstruments getMetrics() {
+            return getRootInstrumentationScope().socketInstruments;
+        }
+    }
+
     public static class ChannelKeyContext
             extends BaseNestedSpanContext<RootReplayerContext, IScopedInstrumentationAttributes>
             implements IReplayContexts.IChannelKeyContext {
         @Getter
         final ISourceTrafficChannelKey channelKey;
 
+        SocketContext socketContext;
+
         public ChannelKeyContext(RootReplayerContext rootScope,
-                                 IInstrumentationAttributes enclosingScope,
+                                 IScopedInstrumentationAttributes enclosingScope,
                                  ISourceTrafficChannelKey channelKey) {
-            super(rootScope, null);
+            super(rootScope, enclosingScope);
             this.channelKey = channelKey;
             initializeSpan();
             meterDeltaEvent(getMetrics().activeChannelCounter, 1);
@@ -45,11 +79,20 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongUpDownCounter activeChannelCounter;
+            final LongUpDownCounter activeSocketConnectionsCounter;
+            final LongCounter channelCreatedCounter;
+            final LongCounter channelClosedCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
                 activeChannelCounter = meter
+                        .upDownCounterBuilder(MetricNames.ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED).build();
+                activeSocketConnectionsCounter = meter
                         .upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
+                channelCreatedCounter = meter
+                        .counterBuilder(MetricNames.CONNECTIONS_OPENED).build();
+                channelClosedCounter = meter
+                        .counterBuilder(MetricNames.CONNECTIONS_CLOSED).build();
             }
         }
 
@@ -70,6 +113,23 @@ public abstract class ReplayContexts extends IReplayContexts {
         public void sendMeterEventsForEnd() {
             super.sendMeterEventsForEnd();
             meterDeltaEvent(getMetrics().activeChannelCounter, -1);
+        }
+
+        @Override
+        public void onSocketConnectionCreated() {
+            assert socketContext == null;
+            socketContext = new SocketContext(rootInstrumentationScope, this);
+            meterIncrementEvent(getMetrics().channelCreatedCounter);
+            meterDeltaEvent(getMetrics().activeSocketConnectionsCounter, 1);
+        }
+
+        @Override
+        public void onSocketConnectionClosed() {
+            assert socketContext != null;
+            socketContext.close();
+            socketContext = null;
+            meterIncrementEvent(getMetrics().channelClosedCounter);
+            meterDeltaEvent(getMetrics().activeSocketConnectionsCounter, -1);
         }
     }
 

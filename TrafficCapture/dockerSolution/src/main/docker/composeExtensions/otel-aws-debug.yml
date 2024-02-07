@@ -3,7 +3,7 @@ services:
 
   otel-collector:
     image: migrations/otel_collector:latest
-    command: ["--config=/etc/otel-config-aws.yaml", "${OTELCOL_ARGS}"]
+    command: ["--config=/etc/otel-config-aws-debug.yaml", "${OTELCOL_ARGS}"]
     networks:
       - migrations
     ports:

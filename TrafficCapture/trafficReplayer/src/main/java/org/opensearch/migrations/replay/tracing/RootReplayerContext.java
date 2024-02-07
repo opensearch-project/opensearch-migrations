@@ -34,6 +34,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final ReplayContexts.WaitingForHttpResponseContext.MetricInstruments waitingForHttpResponseInstruments;
     public final ReplayContexts.ReceivingHttpResponseContext.MetricInstruments receivingHttpInstruments;
     public final ReplayContexts.TupleHandlingContext.MetricInstruments tupleHandlingInstruments;
+    public final ReplayContexts.SocketContext.MetricInstruments socketInstruments;
 
     public RootReplayerContext(OpenTelemetry sdk) {
         super(SCOPE_NAME, sdk);
@@ -50,6 +51,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         waitForNextSignalInstruments = TrafficSourceContexts.WaitForNextSignal.makeMetrics(meter);
 
         channelKeyInstruments = ReplayContexts.ChannelKeyContext.makeMetrics(meter);
+        socketInstruments = ReplayContexts.SocketContext.makeMetrics(meter);
         kafkaRecordInstruments = ReplayContexts.KafkaRecordContext.makeMetrics(meter);
         trafficStreamLifecycleInstruments = ReplayContexts.TrafficStreamLifecycleContext.makeMetrics(meter);
         httpTransactionInstruments = ReplayContexts.HttpTransactionContext.makeMetrics(meter);

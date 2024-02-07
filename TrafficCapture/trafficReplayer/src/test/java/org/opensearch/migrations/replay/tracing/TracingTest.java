@@ -49,6 +49,8 @@ public class TracingTest {
                     }
                 }
             }
+            channelCtx.onSocketConnectionCreated();
+            channelCtx.onSocketConnectionClosed();
         }
 
         var recordedSpans = rootContext.inMemoryInstrumentationBundle.testSpanExporter.getFinishedSpanItems();

@@ -38,7 +38,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
 
     @Override
-    protected TestContext makeContext() {
+    protected TestContext makeInstrumentationContext() {
         return TestContext.withTracking(false, true);
     }
 

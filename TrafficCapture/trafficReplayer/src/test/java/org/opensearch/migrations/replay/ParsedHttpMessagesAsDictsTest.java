@@ -13,7 +13,7 @@ class ParsedHttpMessagesAsDictsTest extends InstrumentationTest {
     }
 
     @Override
-    protected TestContext makeContext() {
+    protected TestContext makeInstrumentationContext() {
         return TestContext.withTracking(false, true);
     }
 

@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
 
-    protected TestContext makeContext() { return TestContext.withAllTracking(); }
+    protected TestContext makeInstrumentationContext() { return TestContext.withAllTracking(); }
 
     @Test
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
@@ -125,6 +125,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
             byName.remove(k);
         };
         chk.accept(1,"channel");
+        chk.accept(1,"tcpConnection");
         chk.accept(1, "trafficStreamLifetime");
         chk.accept(numRequests, "httpTransaction");
         chk.accept(numRequests, "accumulatingRequest");

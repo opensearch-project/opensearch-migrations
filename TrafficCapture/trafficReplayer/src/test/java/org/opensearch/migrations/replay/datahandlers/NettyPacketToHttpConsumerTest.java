@@ -27,6 +27,7 @@ import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
@@ -75,8 +76,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @BeforeAll
     public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         testServers = Map.of(
-                false, SimpleHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeContext),
-                true, SimpleHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeContext));
+                false, SimpleHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeResponseContext),
+                true, SimpleHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeResponseContext));
     }
 
     @AfterAll
@@ -110,7 +111,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         "User-Agent", "UnitTest").entrySet().stream());
     }
 
-    private static SimpleHttpResponse makeContext(HttpFirstLine request) {
+    private static SimpleHttpResponse makeResponseContext(HttpFirstLine request) {
         var headers = Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
@@ -146,6 +147,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @ValueSource(booleans = {false, true})
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
             throws SSLException, ExecutionException, InterruptedException {
+        var trackingContext = TestContext.withTracking(false, true);
         var testServer = testServers.get(useTls);
         var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
@@ -159,7 +161,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 new TestFlowController(), timeShifter);
         for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {
-                var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
+                var ctx = trackingContext.getTestConnectionRequestContext("TEST_" + i, j);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(),
                         () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
@@ -178,8 +180,17 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         var stopFuture = sendingFactory.closeConnectionsAndShutdown();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
-        Assertions.assertEquals(2, sendingFactory.getNumConnectionsCreated());
-        Assertions.assertEquals(2, sendingFactory.getNumConnectionsClosed());
+        Thread.sleep(200); // let metrics settle down
+        var allMetricData = trackingContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
+        long tcpOpenConnectionCount = allMetricData.stream().filter(md->md.getName().startsWith("tcpConnectionCount"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        long connectionsOpenedCount = allMetricData.stream().filter(md->md.getName().startsWith("connectionsOpened"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        long connectionsClosedCount = allMetricData.stream().filter(md->md.getName().startsWith("connectionsClosed"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        Assertions.assertEquals(2, tcpOpenConnectionCount);
+        Assertions.assertEquals(2, connectionsOpenedCount);
+        Assertions.assertEquals(2, connectionsClosedCount);
     }
 
     private static String normalizeMessage(String s) {

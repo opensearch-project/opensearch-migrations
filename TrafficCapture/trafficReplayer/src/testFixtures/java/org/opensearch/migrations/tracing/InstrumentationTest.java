@@ -7,13 +7,13 @@ public class InstrumentationTest {
 
     protected TestContext rootContext;
 
-    protected TestContext makeContext() {
+    protected TestContext makeInstrumentationContext() {
         return TestContext.noOtelTracking();
     }
 
     @BeforeEach
     protected void initializeContext() {
-        rootContext = makeContext();
+        rootContext = makeInstrumentationContext();
     }
 
     @AfterEach
