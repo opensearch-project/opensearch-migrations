@@ -13,7 +13,7 @@ import logging
 import yaml
 
 import endpoint_utils
-import index_operations
+import index_management
 import utils
 from endpoint_info import EndpointInfo
 from index_diff import IndexDiff
@@ -55,16 +55,16 @@ def index_metadata_migration(source: EndpointInfo, target: EndpointInfo,
                              args: MetadataMigrationParams) -> MetadataMigrationResult:
     result = MetadataMigrationResult()
     # Fetch indices
-    source_indices = index_operations.fetch_all_indices(source)
+    source_indices = index_management.fetch_all_indices(source)
     # If source indices is empty, return immediately
     if len(source_indices.keys()) == 0:
         return result
-    target_indices = index_operations.fetch_all_indices(target)
+    target_indices = index_management.fetch_all_indices(target)
     # Compute index differences and create result object
     diff = IndexDiff(source_indices, target_indices)
     if diff.identical_indices:
         # Identical indices with zero documents on the target are eligible for migration
-        target_doc_count = index_operations.doc_count(diff.identical_indices, target)
+        target_doc_count = index_management.doc_count(diff.identical_indices, target)
         # doc_count only returns indices that have non-zero counts, so the difference in responses
         # gives us the set of identical, empty indices
         result.migration_indices = diff.identical_indices.difference(target_doc_count.index_doc_count_map.keys())
@@ -72,7 +72,7 @@ def index_metadata_migration(source: EndpointInfo, target: EndpointInfo,
     if diff.indices_to_create:
         result.migration_indices.update(diff.indices_to_create)
     if result.migration_indices:
-        doc_count_result = index_operations.doc_count(result.migration_indices, source)
+        doc_count_result = index_management.doc_count(result.migration_indices, source)
         result.target_doc_count = doc_count_result.total
     # Print report
     if args.report:
@@ -82,7 +82,7 @@ def index_metadata_migration(source: EndpointInfo, target: EndpointInfo,
         index_data = dict()
         for index_name in diff.indices_to_create:
             index_data[index_name] = source_indices[index_name]
-        failed_indices = index_operations.create_indices(index_data, target)
+        failed_indices = index_management.create_indices(index_data, target)
         fail_count = len(failed_indices)
         if fail_count > 0:
             logging.error(f"Failed to create {fail_count} of {len(index_data)} indices")
@@ -109,12 +109,12 @@ def __log_template_failures(failures: dict, target_count: int) -> bool:
 # Raises RuntimeError if component/index template migration fails
 def template_migration(source: EndpointInfo, target: EndpointInfo):
     # Fetch and migrate component templates first
-    templates = index_operations.fetch_all_component_templates(source)
-    failures = index_operations.create_component_templates(templates, target)
+    templates = index_management.fetch_all_component_templates(source)
+    failures = index_management.create_component_templates(templates, target)
     if not __log_template_failures(failures, len(templates)):
         # Only migrate index templates if component template migration had no failures
-        templates = index_operations.fetch_all_index_templates(source)
-        failures = index_operations.create_index_templates(templates, target)
+        templates = index_management.fetch_all_index_templates(source)
+        failures = index_management.create_index_templates(templates, target)
         if __log_template_failures(failures, len(templates)):
             raise RuntimeError("Failed to create some index templates")
     else:
