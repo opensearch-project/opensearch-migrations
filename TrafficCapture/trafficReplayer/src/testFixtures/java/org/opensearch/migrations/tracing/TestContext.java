@@ -18,6 +18,7 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
     public final ContextTracker contextTracker = new ContextTracker();
     public final ChannelContextManager channelContextManager = new ChannelContextManager(this);
+    private final Object channelContextManagerLock = new Object();
 
     public static TestContext withTracking(boolean tracing, boolean metrics) {
         return new TestContext(new InMemoryInstrumentationBundle(tracing, metrics));
@@ -48,7 +49,9 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     }
 
     public IReplayContexts.ITrafficStreamsLifecycleContext createTrafficStreamContextForTest(ITrafficStreamKey tsk) {
-        return createTrafficStreamContextForStreamSource(channelContextManager.retainOrCreateContext(tsk), tsk);
+        synchronized (channelContextManagerLock) {
+            return createTrafficStreamContextForStreamSource(channelContextManager.retainOrCreateContext(tsk), tsk);
+        }
     }
 
     @Override

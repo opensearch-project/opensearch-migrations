@@ -125,9 +125,11 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         @Override
         public void onSocketConnectionClosed() {
-            assert socketContext != null;
-            socketContext.close();
-            socketContext = null;
+            if (socketContext != null) {
+                try (var toClose = socketContext) {
+                    socketContext = null;
+                }
+            }
             meterIncrementEvent(getMetrics().channelClosedCounter);
             meterDeltaEvent(getMetrics().activeSocketConnectionsCounter, -1);
         }

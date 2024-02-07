@@ -71,8 +71,7 @@ public class TracingTest {
             try {
                 return f.get(null);
             } catch (Exception e) {
-                Lombok.sneakyThrow(e);
-                return null;
+                throw Lombok.sneakyThrow(e);
             }
         }).toArray(String[]::new);
         Stream.of(keys).forEach(spanName -> {
