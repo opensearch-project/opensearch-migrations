@@ -5,12 +5,19 @@ import argparse
 from datetime import datetime
 
 # url_base="http://test.elb.us-west-2.amazonaws.com:9200"
-username='admin'
-password='admin'
+username = 'admin'
+password = 'admin'
+
+session = requests.Session()
+keep_alive_headers = {
+    'Connection': 'keep-alive'
+}
+
 
 # Function to get current date in a specific format for indexing
 def get_current_date_index():
     return datetime.now().strftime("%Y-%m-%d")
+
 
 # Function to send a request
 def send_request(index, counter, url_base):
@@ -24,8 +31,9 @@ def send_request(index, counter, url_base):
     }
 
     try:
+        # a new connection for every request
         #response = requests.put(url, json=payload, auth=auth)
-        response = requests.put(url, auth=auth, json=payload, verify=False)
+        response = session.put(url, json=payload, auth=auth, headers=keep_alive_headers, verify=False)
         print(response.text)
         print(f"Request sent at {timestamp}: {response.status_code}")
         return response.status_code
@@ -33,10 +41,12 @@ def send_request(index, counter, url_base):
         print(f"Error sending request: {e}")
         return None
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--endpoint", help="Source cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
     return parser.parse_args()
+
 
 args = parse_args()
 # Main loop
@@ -58,6 +68,7 @@ while True:
             total5xxCount += 1
     else:
         totalErrorCount += 1
-    print(f"Summary: 2xx responses = {total2xxCount}, 4xx responses = {total4xxCount}, 5xx responses = {total5xxCount}, Error requests = {totalErrorCount}")
+    print(f"Summary: 2xx responses = {total2xxCount}, 4xx responses = {total4xxCount}, "
+          f"5xx responses = {total5xxCount}, Error requests = {totalErrorCount}")
     counter += 1
     time.sleep(0.1)

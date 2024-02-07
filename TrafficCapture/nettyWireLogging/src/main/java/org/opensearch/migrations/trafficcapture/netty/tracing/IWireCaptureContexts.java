@@ -7,6 +7,7 @@ import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 public abstract class IWireCaptureContexts {
 
     public static class ActivityNames {
+        private ActivityNames() {}
         public static final String BLOCKED = "blocked";
         public static final String GATHERING_REQUEST = "gatheringRequest";
         public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
@@ -14,6 +15,7 @@ public abstract class IWireCaptureContexts {
     }
 
     public static class MetricNames {
+        private MetricNames() {}
         public static final String UNREGISTERED = "unregistered";
         public static final String REMOVED = "removed";
 

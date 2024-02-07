@@ -30,6 +30,7 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -40,7 +41,7 @@ import java.util.stream.Collectors;
 // to the test server, a shutdown will stop those work threads without letting them flush through all of their work
 // (since that could take a very long time) and some of the work might have been followed by resource releases.
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
-public class FullTrafficReplayerTest extends InstrumentationTest {
+public class FullTrafficReplayerTest {
 
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_NODE_ID = "TestNodeId";
@@ -77,16 +78,19 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
                 response -> TestHttpServerContext.makeResponse(random, response));
-        var streamAndConsumer =
-                TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(rootContext, testSize, randomize);
-        var numExpectedRequests = streamAndConsumer.numHttpTransactions;
-        var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
+        var streamAndSizes = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(),
+                testSize, randomize);
+        var numExpectedRequests = streamAndSizes.numHttpTransactions;
+        var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());
         log.atInfo().setMessage(() -> trafficStreams.stream().map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
                 .collect(Collectors.joining("\n"))).log();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(rootContext, trafficStreams);
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(rootContext, numExpectedRequests,
-                httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(), trafficSourceSupplier);
-        Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(), trafficSourceSupplier.nextReadCursor.get());
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(
+                numExpectedRequests, httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(),
+                () -> TestContext.noOtelTracking(),
+                trafficSourceSupplier);
+        Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(),
+                trafficSourceSupplier.nextReadCursor.get());
         log.info("done");
     }
 
@@ -115,17 +119,15 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         }
     }
 
-    protected static class ArrayCursorTrafficSourceFactory implements Supplier<ISimpleTrafficCaptureSource> {
-        private final TestContext rootContext;
+    protected static class ArrayCursorTrafficSourceFactory implements Function<TestContext, ISimpleTrafficCaptureSource> {
         List<TrafficStream> trafficStreamsList;
         AtomicInteger nextReadCursor = new AtomicInteger();
 
-        public ArrayCursorTrafficSourceFactory(TestContext rootContext, List<TrafficStream> trafficStreamsList) {
-            this.rootContext = rootContext;
+        public ArrayCursorTrafficSourceFactory(List<TrafficStream> trafficStreamsList) {
             this.trafficStreamsList = trafficStreamsList;
         }
 
-        public ISimpleTrafficCaptureSource get() {
+        public ISimpleTrafficCaptureSource apply(TestContext rootContext) {
             var rval = new ArrayCursorTrafficCaptureSource(rootContext, this);
             log.info("trafficSource="+rval+" readCursor="+rval.readCursor.get()+" nextReadCursor="+ nextReadCursor.get());
             return rval;

@@ -35,8 +35,6 @@ import java.util.stream.Collectors;
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
 
-    protected TestContext makeInstrumentationContext() { return TestContext.withAllTracking(); }
-
     @Test
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
         var random = new Random(1);
@@ -48,10 +46,11 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 .addSubStream(TrafficObservation.newBuilder()
                         .setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-        var trafficSourceSupplier = new FullTrafficReplayerTest.ArrayCursorTrafficSourceFactory(rootContext,
-                List.of(trafficStreamWithJustClose));
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(rootContext, 0,
-                httpServer.localhostEndpoint(), new FullTrafficReplayerTest.IndexWatchingListenerFactory(), trafficSourceSupplier);
+        var trafficSourceSupplier = new FullTrafficReplayerTest.ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
+                httpServer.localhostEndpoint(), new FullTrafficReplayerTest.IndexWatchingListenerFactory(),
+                () -> TestContext.noOtelTracking(),
+                trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
         log.info("done");
     }
@@ -59,6 +58,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     @ParameterizedTest
     @ValueSource(ints = {1,2})
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
+        var rootContext = TestContext.withAllTracking();
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response->TestHttpServerContext.makeResponse(random, response));
@@ -91,7 +91,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 .build();
         var trafficSource =
                 new ArrayCursorTrafficCaptureSource(rootContext,
-                        new ArrayCursorTrafficSourceFactory(rootContext, List.of(trafficStream)));
+                        new ArrayCursorTrafficSourceFactory(List.of(trafficStream)));
         var tr = new TrafficReplayer(rootContext, httpServer.localhostEndpoint(), null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10 * 1024);

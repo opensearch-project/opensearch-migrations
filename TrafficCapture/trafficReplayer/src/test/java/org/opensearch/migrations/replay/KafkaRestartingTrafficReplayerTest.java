@@ -89,16 +89,17 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response->TestHttpServerContext.makeResponse(random, response));
         var streamAndConsumer =
-                TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(rootContext, testSize, randomize);
+                TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(), testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
                 .collect(Collectors.joining("\n"))).log();
 
         loadStreamsToKafka(buildKafkaConsumer(),
                 Streams.concat(trafficStreams.stream(), Stream.of(SENTINEL_TRAFFIC_STREAM)));
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(rootContext, streamAndConsumer.numHttpTransactions,
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
-                () -> new SentinelSensingTrafficSource(
+                () -> TestContext.noOtelTracking(),
+                rootContext -> new SentinelSensingTrafficSource(
                         new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(), TEST_TOPIC_NAME,
                                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
         log.info("done");

@@ -21,6 +21,7 @@ import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -35,9 +36,10 @@ public class TrafficReplayerRunner {
 
     private TrafficReplayerRunner() {}
 
-    static void runReplayerUntilSourceWasExhausted(TestContext rootContext, int numExpectedRequests, URI endpoint,
+    static void runReplayerUntilSourceWasExhausted(int numExpectedRequests, URI endpoint,
                                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
-                                                   Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier)
+                                                   Supplier<TestContext> rootContextSupplier,
+                                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
             throws Throwable {
         AtomicInteger runNumberRef = new AtomicInteger();
         var totalUniqueEverReceived = new AtomicInteger();
@@ -51,7 +53,8 @@ public class TrafficReplayerRunner {
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
             try {
-                runTrafficReplayer(rootContext, trafficSourceSupplier, endpoint, (t) -> {
+                var rootContext = rootContextSupplier.get();
+                runTrafficReplayer(rootContext, ()->trafficSourceFactory.apply(rootContext), endpoint, (t) -> {
                     if (runNumber != runNumberRef.get()) {
                         // for an old replayer.  I'm not sure why shutdown isn't blocking until all threads are dead,
                         // but that behavior only impacts this test as far as I can tell.

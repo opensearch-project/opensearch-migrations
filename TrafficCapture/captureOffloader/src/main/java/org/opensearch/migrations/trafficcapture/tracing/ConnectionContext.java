@@ -51,6 +51,7 @@ public class ConnectionContext extends BaseSpanContext<IRootOffloaderContext>
 
     @Override
     public void sendMeterEventsForEnd() {
+        super.sendMeterEventsForEnd();
         meterDeltaEvent(getMetrics().activeConnectionsCounter, -1);
     }
 }
