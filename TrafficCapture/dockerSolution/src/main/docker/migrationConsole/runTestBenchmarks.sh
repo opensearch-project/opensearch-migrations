@@ -7,6 +7,23 @@ auth_pass="admin"
 no_auth=false
 no_ssl=false
 
+usage() {
+  echo ""
+  echo "Script to run a series of OpenSearch Benchmark workloads in test-mode for quick simulation of incoming traffic."
+  echo ""
+  echo "Usage: "
+  echo "  ./runTestBenchmarks.sh <>"
+  echo ""
+  echo "Options:"
+  echo "  --endpoint                            The endpoint to send OSB workloads to."
+  echo "  --auth-user                           The basic auth user to use for OSB requests."
+  echo "  --auth-pass                           The basic auth password to use for OSB requests."
+  echo "  --no-auth                             Use no auth when making OSB requests."
+  echo "  --no-ssl                              Disable SSL when making OSB requests."
+  echo ""
+  exit 1
+}
+
 # Override default values with optional command-line arguments
 while [[ $# -gt 0 ]]; do
     key="$1"
@@ -16,12 +33,12 @@ while [[ $# -gt 0 ]]; do
             shift
             shift
             ;;
-        --auth_user)
+        --auth-user)
             auth_user="$2"
             shift
             shift
             ;;
-        --auth_pass)
+        --auth-pass)
             auth_pass="$2"
             shift
             shift
@@ -34,9 +51,16 @@ while [[ $# -gt 0 ]]; do
             no_ssl=true
             shift
             ;;
+        -h|--h|--help)
+          usage
+          ;;
+        -*)
+          echo "Unknown option $1"
+          usage
+          ;;
         *)
-            shift
-            ;;
+          shift
+          ;;
     esac
 done
 
