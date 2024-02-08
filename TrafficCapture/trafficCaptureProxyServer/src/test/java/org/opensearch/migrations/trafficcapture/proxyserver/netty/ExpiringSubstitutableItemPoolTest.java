@@ -20,8 +20,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 
 @Slf4j
+// Encountered intermittent failures when running parallel with all other tests
+// TODO: Investigate concurrency with test suite
+@Execution(ExecutionMode.SAME_THREAD)
 class ExpiringSubstitutableItemPoolTest {
 
     public static final int NUM_POOLED_ITEMS = 5;

@@ -12,6 +12,8 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.MockMetricsBuilder;
@@ -32,6 +34,9 @@ import java.util.function.BiConsumer;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
+// Encountered intermittent failures when running parallel with all other tests
+// TODO: Investigate concurrency with test suite including testOutputterForGet
+@Execution(ExecutionMode.SAME_THREAD)
 class ResultsToLogsConsumerTest {
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -65,6 +70,7 @@ class ResultsToLogsConsumerTest {
     }
 
     @Test
+    @Execution(ExecutionMode.SAME_THREAD)
     public void testTupleNewWithNullKeyThrows() {
         try (var closeableLogSetup = new CloseableLogSetup()) {
             Assertions.assertThrows(Exception.class,
@@ -75,6 +81,7 @@ class ResultsToLogsConsumerTest {
     }
 
     @Test
+    @Execution(ExecutionMode.SAME_THREAD)
     public void testOutputterWithNulls() throws IOException {
         var emptyTuple = new SourceTargetCaptureTuple(
                 new UniqueReplayerRequestKey(new PojoTrafficStreamKey(NODE_ID,"c",0), 0, 0),
@@ -90,6 +97,7 @@ class ResultsToLogsConsumerTest {
     }
 
     @Test
+    @Execution(ExecutionMode.SAME_THREAD)
     public void testOutputterWithException() throws IOException {
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(
@@ -114,6 +122,7 @@ class ResultsToLogsConsumerTest {
     }
 
     @Test
+    @Execution(ExecutionMode.SAME_THREAD)
     public void testOutputterForGet() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT =
                 "" +
@@ -172,6 +181,7 @@ class ResultsToLogsConsumerTest {
     }
 
     @Test
+    @Execution(ExecutionMode.SAME_THREAD)
     public void testOutputterForPost() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT = "" +
                 "{\n" +
@@ -226,7 +236,6 @@ class ResultsToLogsConsumerTest {
         testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT);
     }
 
-    @Test
     private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
         var trafficStreamKey = new PojoTrafficStreamKey(NODE_ID,"c",0);
         var sourcePair = new RequestResponsePacketPair(trafficStreamKey);

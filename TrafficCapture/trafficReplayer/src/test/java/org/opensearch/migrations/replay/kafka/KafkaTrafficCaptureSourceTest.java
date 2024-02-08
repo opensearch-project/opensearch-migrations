@@ -10,6 +10,8 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -32,9 +34,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 @Slf4j
+// Encountered intermittent failures when running parallel with all other tests
+// TODO: Investigate concurrency with test
+@Execution(ExecutionMode.SAME_THREAD)
 class KafkaTrafficCaptureSourceTest {
     public static final int NUM_READ_ITEMS_BOUND = 1000;
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
+
+    private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
 
     @Test
     public void testRecordToString() {
@@ -69,7 +76,7 @@ class KafkaTrafficCaptureSourceTest {
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
         var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
             while (tsCount.get() < numTrafficStreams) {
                 protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
                     tsCount.incrementAndGet();
@@ -120,7 +127,7 @@ class KafkaTrafficCaptureSourceTest {
 
 
         var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
             while (tsCount.get() < numTrafficStreams) {
                 protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
                     tsCount.incrementAndGet();

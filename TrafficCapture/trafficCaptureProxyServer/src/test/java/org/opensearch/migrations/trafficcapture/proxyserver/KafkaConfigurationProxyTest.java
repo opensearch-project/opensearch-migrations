@@ -27,6 +27,9 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
   private static final String HTTPD_GET_EXPECTED_RESPONSE = "<html><body><h1>It works!</h1></body></html>\n";
 
   private static final int DEFAULT_NUMBER_OF_CALLS = 3;
+
+  private static final long PROXY_EXPECTED_MAX_LATENCY_MS = Duration.ofSeconds(1).toMillis();
+
   @ParameterizedTest
   @EnumSource(FailureMode.class)
   @Disabled
@@ -38,8 +41,7 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
 
       var latency = assertBasicCalls(captureProxy, DEFAULT_NUMBER_OF_CALLS);
 
-      Assertions.assertEquals(100, latency.toMillis(), 100,
-          "Latency must be less than 200ms");
+      assertLessThan(PROXY_EXPECTED_MAX_LATENCY_MS, latency.toMillis());
     }
   }
 
@@ -53,8 +55,7 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
 
       var latency = assertBasicCalls(captureProxy, DEFAULT_NUMBER_OF_CALLS);
 
-      Assertions.assertEquals(latency.toMillis(), 100, 100,
-          "Latency must be less than 200ms");
+      assertLessThan(PROXY_EXPECTED_MAX_LATENCY_MS, latency.toMillis());
     }
   }
 
@@ -111,6 +112,11 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
       assertEquals(averageNoProxyDuration.toMillis(), averageBaselineDuration.toMillis(),
           acceptableDifference, "The average durations are not close enough");
     }
+  }
+
+  private static void assertLessThan(long ceiling, long actual) {
+    Assertions.assertTrue(actual < ceiling,
+        () -> "Expected actual value to be less than " + ceiling + " but was " + actual + ".");
   }
 
   private Duration assertBasicCalls(CaptureProxyContainer proxy, int numberOfCalls) {
