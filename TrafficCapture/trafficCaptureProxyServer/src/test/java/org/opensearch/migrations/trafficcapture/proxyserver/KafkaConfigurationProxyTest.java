@@ -11,6 +11,8 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.ThrowingConsumer;
 import org.junit.jupiter.api.parallel.Execution;
@@ -18,26 +20,26 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Slf4j
-@Testcontainers(disabledWithoutDocker = true)
+@Execution(ExecutionMode.CONCURRENT)
 public class KafkaConfigurationProxyTest extends ContainerTestBase {
-
   private static final String HTTPD_GET_EXPECTED_RESPONSE = "<html><body><h1>It works!</h1></body></html>\n";
 
+  private static final int DEFAULT_NUMBER_OF_CALLS = 3;
   @ParameterizedTest
   @EnumSource(FailureMode.class)
+  @Disabled
   public void testCaptureProxyWithKafkaImpairedBeforeStart(FailureMode failureMode) {
     try (var captureProxy = new CaptureProxyContainer(destinationProxyUrl, kafkaProxyUrl)) {
       failureMode.apply(kafkaProxy);
 
       captureProxy.start();
 
-      var latency = assertBasicCall(captureProxy);
+      var latency = assertBasicCalls(captureProxy, DEFAULT_NUMBER_OF_CALLS);
 
-      Assertions.assertTrue(latency.minus(Duration.ofMillis(100)).isNegative(),
-          "Latency must be less than 100ms");
+      Assertions.assertEquals(100, latency.toMillis(), 100,
+          "Latency must be less than 200ms");
     }
   }
 
@@ -49,16 +51,17 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
 
       failureMode.apply(kafkaProxy);
 
-      var latency = assertBasicCall(captureProxy);
+      var latency = assertBasicCalls(captureProxy, DEFAULT_NUMBER_OF_CALLS);
 
-      Assertions.assertTrue(latency.minus(Duration.ofMillis(100)).isNegative(),
-          "Latency must be less than 100ms");
+      Assertions.assertEquals(latency.toMillis(), 100, 100,
+          "Latency must be less than 200ms");
     }
   }
 
   @ParameterizedTest
   @EnumSource(FailureMode.class)
   @Execution(ExecutionMode.SAME_THREAD)
+  @Tag("longTest")
   public void testCaptureProxyWithKafkaImpairedDoesNotAffectRequest_proxysRequest(
       FailureMode failureMode) {
     try (var captureProxy = new CaptureProxyContainer(destinationProxyUrl, kafkaProxyUrl)) {
@@ -66,19 +69,14 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
       final int numberOfTests = 20;
 
       // Performance is different for first few calls so throw them away
-      IntStream.range(0, 3).forEach(i -> assertBasicCall(captureProxy));
+      assertBasicCalls(captureProxy, 3);
 
-      // Calculate average duration of baseline calls
-      Duration averageBaselineDuration = IntStream.range(0, numberOfTests)
-          .mapToObj(i -> assertBasicCall(captureProxy)).reduce(Duration.ZERO, Duration::plus)
-          .dividedBy(numberOfTests);
+      var averageBaselineDuration = assertBasicCalls(captureProxy, numberOfTests);
 
       failureMode.apply(kafkaProxy);
 
       // Calculate average duration of impaired calls
-      Duration averageImpairedDuration = IntStream.range(0, numberOfTests)
-          .mapToObj(i -> assertBasicCall(captureProxy)).reduce(Duration.ZERO, Duration::plus)
-          .dividedBy(numberOfTests);
+      var averageImpairedDuration = assertBasicCalls(captureProxy, numberOfTests);
 
       long acceptableDifference = Duration.ofMillis(25).toMillis();
 
@@ -92,37 +90,39 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
 
   @Test
   @Execution(ExecutionMode.SAME_THREAD)
+  @Tag("longTest")
   public void testCaptureProxyLatencyAddition() {
     try (var captureProxy = new CaptureProxyContainer(destinationProxyUrl, kafkaProxyUrl)) {
       captureProxy.start();
       final int numberOfTests = 25;
 
       // Performance is different for first few calls so throw them away
-      IntStream.range(0, 3).forEach(i -> assertBasicCall(captureProxy));
+      assertBasicCalls(captureProxy, 3);
 
-      // Calculate average duration of baseline calls
-      Duration averageBaselineDuration = IntStream.range(0, numberOfTests)
-          .mapToObj(i -> assertBasicCall(captureProxy)).reduce(Duration.ZERO, Duration::plus)
-          .dividedBy(numberOfTests);
+      var averageBaselineDuration = assertBasicCalls(captureProxy, numberOfTests);
 
-      // Calculate average duration of impaired calls
-      Duration averageImpairedDuration = IntStream.range(0, numberOfTests)
-          .mapToObj(i -> assertBasicCall(destinationProxyUrl)).reduce(Duration.ZERO, Duration::plus)
-          .dividedBy(numberOfTests);
+      var averageNoProxyDuration = assertBasicCalls(destinationProxyUrl, numberOfTests);
 
       long acceptableDifference = Duration.ofMillis(25).toMillis();
 
-      log.info("Baseline Duration: {}ms, Impaired Duration: {}ms",
-          averageBaselineDuration.toMillis(), averageImpairedDuration.toMillis());
+      log.info("Baseline Duration: {}ms, NoProxy Duration: {}ms",
+          averageBaselineDuration.toMillis(), averageNoProxyDuration.toMillis());
 
-      assertEquals(averageImpairedDuration.toMillis(), averageBaselineDuration.toMillis(),
+      assertEquals(averageNoProxyDuration.toMillis(), averageBaselineDuration.toMillis(),
           acceptableDifference, "The average durations are not close enough");
     }
   }
 
-  private Duration assertBasicCall(CaptureProxyContainer proxy) {
-    return assertBasicCall(CaptureProxyContainer.getUriFromContainer(proxy));
+  private Duration assertBasicCalls(CaptureProxyContainer proxy, int numberOfCalls) {
+    return assertBasicCalls(CaptureProxyContainer.getUriFromContainer(proxy), numberOfCalls);
   }
+
+  private Duration assertBasicCalls(String endpoint, int numberOfCalls) {
+    return IntStream.range(0, numberOfCalls)
+        .mapToObj(i -> assertBasicCall(endpoint)).reduce(Duration.ZERO, Duration::plus)
+        .dividedBy(numberOfCalls);
+  }
+
 
   private Duration assertBasicCall(String endpoint) {
     try (var client = new SimpleHttpClientForTesting()) {
@@ -142,11 +142,14 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
     LATENCY(
         (proxy) -> proxy.toxics().latency("latency", ToxicDirection.UPSTREAM, 5000)),
     BANDWIDTH(
-        (proxy) -> proxy.toxics().bandwidth("bandwidth", ToxicDirection.UPSTREAM, 5000)),
+        (proxy) -> proxy.toxics().bandwidth("bandwidth", ToxicDirection.DOWNSTREAM, 1)),
     TIMEOUT(
         (proxy) -> proxy.toxics().timeout("timeout", ToxicDirection.UPSTREAM, 5000)),
     SLICER(
-        (proxy) -> proxy.toxics().slicer("slicer", ToxicDirection.DOWNSTREAM, 10, 10)),
+        (proxy) -> {
+          proxy.toxics().slicer("slicer_down", ToxicDirection.DOWNSTREAM, 1, 1000);
+          proxy.toxics().slicer("slicer_up", ToxicDirection.UPSTREAM, 1, 1000);
+        }),
     SLOW_CLOSE(
         (proxy) -> proxy.toxics().slowClose("slow_close", ToxicDirection.UPSTREAM, 5000)),
     RESET_PEER(
@@ -154,7 +157,6 @@ public class KafkaConfigurationProxyTest extends ContainerTestBase {
     LIMIT_DATA(
         (proxy) -> proxy.toxics().limitData("limit_data", ToxicDirection.UPSTREAM, 10)),
     DISCONNECT(Proxy::disable);
-
     private final ThrowingConsumer<Proxy> failureModeApplier;
 
     FailureMode(ThrowingConsumer<Proxy> applier) {

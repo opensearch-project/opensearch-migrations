@@ -1,6 +1,8 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -78,6 +80,7 @@ public class CaptureProxyContainer
   public void stop() {
     if (serverThread != null) {
       serverThread.interrupt();
+      this.serverThread = null;
     }
     this.listeningPort = null;
     close();

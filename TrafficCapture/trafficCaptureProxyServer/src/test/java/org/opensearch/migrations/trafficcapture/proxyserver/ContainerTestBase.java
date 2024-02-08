@@ -8,9 +8,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.ToxiproxyContainer;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerImageName;
 
+@Testcontainers(disabledWithoutDocker = true)
 public class ContainerTestBase {
 
   private final ToxiproxyContainer toxiproxy = new ToxiproxyContainer(
@@ -55,11 +57,15 @@ public class ContainerTestBase {
   @AfterEach
   public void tearDown() throws IOException {
     if (kafkaProxy != null) {
-      kafkaProxy.delete();
+      try {
+        kafkaProxy.delete();
+      } catch (IOException ignored) {}
       kafkaProxy = null;
     }
     if (destinationProxy != null) {
-      destinationProxy.delete();
+      try {
+        destinationProxy.delete();
+      } catch (IOException ignored) {}
       destinationProxy = null;
     }
   }
