@@ -41,11 +41,11 @@ public class TimeShifter {
     }
 
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
-        // realtime = systemTimeStart + rateMultiplier * (sourceTime-sourceTimeStart)
-        if (sourceTimeStart.get() == null) {
-            throw new IllegalStateException("setFirstTimestamp has not yet been called");
-        }
-        return systemTimeStart.get()
+      if (sourceTimeStart.get() == null) {
+          throw new IllegalStateException("setFirstTimestamp has not yet been called");
+      }
+      // realtime = systemTimeStart + ((sourceTime-sourceTimeStart) / rateMultiplier)
+      return systemTimeStart.get()
                 .plus(Duration.ofMillis((long)
                         (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)));
     }
@@ -53,8 +53,7 @@ public class TimeShifter {
     Optional<Instant> transformRealTimeToSourceTime(Instant realTime) {
         return Optional.ofNullable(sourceTimeStart.get())
                 .map(start ->
-                    // sourceTime = realTime - systemTimeStart + sourceTimeStart
-                    // sourceTime = sourceTimeStart + (realTime-systemTimeStart) / rateMultiplier
+                    // sourceTime = sourceTimeStart + (realTime-systemTimeStart) * rateMultiplier
                     start.plus(Duration.ofMillis((long)
                             (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier))));
     }
