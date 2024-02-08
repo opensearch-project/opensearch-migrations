@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 // to the test server, a shutdown will stop those work threads without letting them flush through all of their work
 // (since that could take a very long time) and some of the work might have been followed by resource releases.
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
-public class FullTrafficReplayerTest {
+public class FullTrafficReplayerTest extends InstrumentationTest {
 
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_NODE_ID = "TestNodeId";

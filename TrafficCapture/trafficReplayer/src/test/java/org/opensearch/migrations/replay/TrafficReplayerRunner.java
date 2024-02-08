@@ -52,8 +52,7 @@ public class TrafficReplayerRunner {
             int runNumber = runNumberRef.get();
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
-            try {
-                var rootContext = rootContextSupplier.get();
+            try (var rootContext = rootContextSupplier.get()) {
                 runTrafficReplayer(rootContext, ()->trafficSourceFactory.apply(rootContext), endpoint, (t) -> {
                     if (runNumber != runNumberRef.get()) {
                         // for an old replayer.  I'm not sure why shutdown isn't blocking until all threads are dead,

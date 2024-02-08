@@ -35,6 +35,11 @@ import java.util.stream.Collectors;
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
 
+    @Override
+    protected TestContext makeInstrumentationContext() {
+        return TestContext.withAllTracking();
+    }
+
     @Test
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
         var random = new Random(1);
@@ -49,7 +54,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         var trafficSourceSupplier = new FullTrafficReplayerTest.ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
                 httpServer.localhostEndpoint(), new FullTrafficReplayerTest.IndexWatchingListenerFactory(),
-                () -> TestContext.noOtelTracking(),
+                () -> TestContext.withAllTracking(),
                 trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
         log.info("done");
@@ -58,7 +63,6 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     @ParameterizedTest
     @ValueSource(ints = {1,2})
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
-        var rootContext = TestContext.withAllTracking();
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response->TestHttpServerContext.makeResponse(random, response));

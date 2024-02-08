@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
 import java.time.Duration;
@@ -17,10 +18,15 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class TracingTest {
+public class TracingTest extends InstrumentationTest {
+
+    @Override
+    protected TestContext makeInstrumentationContext() {
+        return TestContext.withAllTracking();
+    }
+
     @Test
     public void tracingWorks() {
-        TestContext rootContext = TestContext.withAllTracking();
         var tssk = new ISourceTrafficChannelKey.PojoImpl("n", "c");
         try (var channelCtx = rootContext.createChannelContext(tssk);
              var kafkaRecordCtx =

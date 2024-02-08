@@ -91,6 +91,11 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         });
     }
 
+    @Override
+    protected TestContext makeInstrumentationContext() {
+        return TestContext.withTracking(false, true);
+    }
+
     @Test
     public void testThatTestSetupIsCorrect()
             throws IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException
@@ -147,7 +152,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @ValueSource(booleans = {false, true})
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
             throws SSLException, ExecutionException, InterruptedException {
-        var trackingContext = TestContext.withTracking(false, true);
         var testServer = testServers.get(useTls);
         var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
@@ -161,7 +165,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 new TestFlowController(), timeShifter);
         for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {
-                var ctx = trackingContext.getTestConnectionRequestContext("TEST_" + i, j);
+                var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(),
                         () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
@@ -181,7 +185,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
         Thread.sleep(200); // let metrics settle down
-        var allMetricData = trackingContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
+        var allMetricData = rootContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
         long tcpOpenConnectionCount = allMetricData.stream().filter(md->md.getName().startsWith("tcpConnectionCount"))
                 .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
         long connectionsOpenedCount = allMetricData.stream().filter(md->md.getName().startsWith("connectionsOpened"))

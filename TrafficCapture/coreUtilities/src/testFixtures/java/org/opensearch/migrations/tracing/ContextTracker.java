@@ -8,7 +8,7 @@ import java.util.WeakHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class ContextTracker {
+public class ContextTracker implements AutoCloseable {
     private static class ExceptionForStackTracingOnly extends Exception {
     }
 
@@ -55,6 +55,12 @@ public class ContextTracker {
                     .filter(kvp -> kvp.getValue().closeStackException == null)
                     // make a copy since we're in a synchronized block
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        }
+    }
+
+    public void close() {
+        synchronized (lockObject) {
+            scopedContextToCallDetails.clear();
         }
     }
 }

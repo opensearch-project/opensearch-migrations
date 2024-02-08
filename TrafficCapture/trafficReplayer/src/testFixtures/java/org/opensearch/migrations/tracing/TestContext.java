@@ -55,6 +55,7 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
 
     @Override
     public void close() {
+        contextTracker.close();
         inMemoryInstrumentationBundle.close();
 //        Assertions.assertEquals("", contextTracker.getAllRemainingActiveScopes().entrySet().stream()
 //                .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()));
