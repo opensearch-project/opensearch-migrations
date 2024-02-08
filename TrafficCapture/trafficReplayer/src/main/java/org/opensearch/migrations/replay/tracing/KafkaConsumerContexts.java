@@ -151,7 +151,7 @@ public class KafkaConsumerContexts {
         }
 
         public CommitScopeContext(@NonNull RootReplayerContext rootScope,
-                                  @NonNull IScopedInstrumentationAttributes enclosingScope) {
+                                  IScopedInstrumentationAttributes enclosingScope) {
             super(rootScope, enclosingScope);
             initializeSpan();
         }

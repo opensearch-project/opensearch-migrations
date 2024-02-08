@@ -17,8 +17,7 @@ public class TestRootKafkaOffloaderContext extends RootOtelContext implements IR
     private final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
 
     public static TestRootKafkaOffloaderContext withTracking() {
-        return new TestRootKafkaOffloaderContext(new InMemoryInstrumentationBundle(InMemorySpanExporter.create(),
-                InMemoryMetricExporter.create()));
+        return new TestRootKafkaOffloaderContext(new InMemoryInstrumentationBundle(true, true));
     }
 
     public static TestRootKafkaOffloaderContext noTracking() {

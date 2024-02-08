@@ -159,11 +159,11 @@ public class ClientConnectionPool {
                 new StringTrackableCompletableFuture<Channel>(new CompletableFuture<>(),
                         ()->"Waiting for closeFuture() on channel");
 
-        channelAndFutureWork.getSocketContext().close();
         channelAndFutureWork.getChannelFutureFuture().map(cff->cff
                         .thenAccept(cf-> {
                             cf.channel().close()
                                     .addListener(closeFuture -> {
+                                        channelAndFutureWork.getSocketContext().close();
                                         if (closeFuture.isSuccess()) {
                                             channelClosedFuture.future.complete(channelAndFutureWork.getInnerChannelFuture().channel());
                                         } else {

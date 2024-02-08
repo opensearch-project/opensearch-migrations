@@ -25,8 +25,7 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     }
 
     public static TestContext withAllTracking() {
-        return new TestContext(new InMemoryInstrumentationBundle(InMemorySpanExporter.create(),
-                InMemoryMetricExporter.create()));
+        return withTracking(true, true);
     }
 
     public static TestContext noOtelTracking() {
@@ -56,6 +55,7 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
 
     @Override
     public void close() {
+        inMemoryInstrumentationBundle.close();
 //        Assertions.assertEquals("", contextTracker.getAllRemainingActiveScopes().entrySet().stream()
 //                .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()));
     }
