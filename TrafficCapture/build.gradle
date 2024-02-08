@@ -31,18 +31,19 @@ allprojects {
         systemProperty 'disableMemoryLeakTests', 'true'
         useJUnitPlatform {
             excludeTags 'longTest'
-            systemProperties["junit.jupiter.execution.parallel.enabled"] = "true"
-            systemProperties["junit.jupiter.execution.parallel.mode.default"] = "concurrent"
-            systemProperties["junit.jupiter.execution.parallel.mode.classes.default"] = "concurrent"
-            systemProperties["junit.jupiter.execution.parallel.config.strategy"] = "dynamic"
-            systemProperties["junit.jupiter.execution.parallel.thread-count.factor"] = "0.25"
+            systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
+            systemProperty 'junit.jupiter.execution.parallel.mode.default', "same_thread"
+            systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
+            systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
+            systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.25'
         }
         jvmArgs '-ea'
 
         jacoco {
             enabled = false
         }
-        maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
+        maxParallelForks = Runtime.runtime.availableProcessors().intdiv(8) ?: 1
+        forkEvery 1
     }
 
     task slowTest(type: Test) {
@@ -56,7 +57,7 @@ allprojects {
         useJUnitPlatform {
             includeTags 'longTest'
             systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
-            systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
+            systemProperty 'junit.jupiter.execution.parallel.mode.default', "same_thread"
             systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
             systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
             systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.25'
