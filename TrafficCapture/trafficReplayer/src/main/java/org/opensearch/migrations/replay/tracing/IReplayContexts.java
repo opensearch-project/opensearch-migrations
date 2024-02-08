@@ -88,9 +88,16 @@ public abstract class IReplayContexts {
             return getChannelKey().getNodeId();
         }
 
-        void onSocketConnectionCreated();
+        ISocketContext createSocketContext();
+    }
 
-        void onSocketConnectionClosed();
+    public interface ISocketContext extends IAccumulationScope, IWithTypedEnclosingScope<IChannelKeyContext> {
+        public static final String ACTIVITY_NAME = ActivityNames.TCP_CONNECTION;
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
     }
 
     public interface IKafkaRecordContext

@@ -3,7 +3,7 @@ package org.opensearch.migrations.replay.tracing;
 import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 public class ChannelContextManager implements Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> {
@@ -40,7 +40,7 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
         }
     }
 
-    HashMap<String, RefCountedContext> connectionToChannelContextMap = new HashMap<>();
+    ConcurrentHashMap<String, RefCountedContext> connectionToChannelContextMap = new ConcurrentHashMap<>();
 
     public IReplayContexts.IChannelKeyContext apply(ITrafficStreamKey tsk) {
         return retainOrCreateContext(tsk);

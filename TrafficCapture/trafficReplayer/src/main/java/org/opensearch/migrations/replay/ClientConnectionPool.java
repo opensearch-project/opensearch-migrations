@@ -38,13 +38,12 @@ public class ClientConnectionPool {
             throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
         }
         log.trace("creating connection session");
-        channelKeyCtx.onSocketConnectionCreated();
         // arguably the most only thing that matters here is associating this item with an
         // EventLoop (thread).  As the channel needs to be recycled, we'll come back to the
         // event loop that was tied to the original channel to bind all future channels to
         // the same event loop.  That means that we don't have to worry about concurrent
         // accesses/changes to the OTHER value that we're storing within the cache.
-        return new ConnectionReplaySession(eventLoopGroup.next());
+        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx);
     }
 
     public ClientConnectionPool(URI serverUri, SslContext sslContext, int numThreads) {
@@ -149,9 +148,6 @@ public class ClientConnectionPool {
         var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKeyCtx.getConnectionId()) :
                 connectionId2ChannelCache.get(channelKeyCtx.getConnectionId(),
                         () -> buildConnectionReplaySession(channelKeyCtx));
-        if (crs != null) {
-            crs.setChannelContext(channelKeyCtx);
-        }
         log.atTrace().setMessage(()->"returning ReplaySession=" + crs + " for " + channelKeyCtx.getConnectionId() +
                 " from " + channelKeyCtx).log();
         return crs;
@@ -163,7 +159,7 @@ public class ClientConnectionPool {
                 new StringTrackableCompletableFuture<Channel>(new CompletableFuture<>(),
                         ()->"Waiting for closeFuture() on channel");
 
-        channelAndFutureWork.getChannelContext().onSocketConnectionClosed();
+        channelAndFutureWork.getSocketContext().close();
         channelAndFutureWork.getChannelFutureFuture().map(cff->cff
                         .thenAccept(cf-> {
                             cf.channel().close()
@@ -177,7 +173,7 @@ public class ClientConnectionPool {
                             if (channelAndFutureWork.hasWorkRemaining()) {
                                 log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
                                         "(last associated with connection=" +
-                                        channelAndFutureWork.getChannelContext() +
+                                        channelAndFutureWork.getSocketContext() +
                                         ").  " + channelAndFutureWork.calculateSizeSlowly() +
                                         " requests that were enqueued won't be run").log();
                             }

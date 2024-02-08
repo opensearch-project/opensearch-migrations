@@ -10,44 +10,57 @@ import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
+@Slf4j
 public abstract class ReplayContexts extends IReplayContexts {
 
     public static final String COUNT_UNIT_STR = "count";
     public static final String BYTES_UNIT_STR = "bytes";
 
     public static class SocketContext
-            extends BaseNestedSpanContext<RootReplayerContext, ChannelKeyContext>
-            implements IScopedInstrumentationAttributes {
+            extends DirectNestedSpanContext<RootReplayerContext, ChannelKeyContext, IChannelKeyContext>
+            implements ISocketContext {
 
-        public static final String ACTIVITY_NAME = ActivityNames.TCP_CONNECTION;
-
-        protected SocketContext(RootReplayerContext rootScope, ChannelKeyContext enclosingScope) {
-            super(rootScope, enclosingScope);
+        protected SocketContext(ChannelKeyContext enclosingScope) {
+            super(enclosingScope);
             initializeSpan();
-        }
-
-        @Override
-        public String getActivityName() {
-            return ACTIVITY_NAME;
+            meterIncrementEvent(getMetrics().channelCreatedCounter);
+            meterDeltaEvent(getMetrics().activeSocketConnectionsCounter, 1);
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
+            final LongUpDownCounter activeSocketConnectionsCounter;
+            final LongCounter channelCreatedCounter;
+            final LongCounter channelClosedCounter;
+
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
+                activeSocketConnectionsCounter = meter
+                        .upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
+                channelCreatedCounter = meter
+                        .counterBuilder(MetricNames.CONNECTIONS_OPENED).build();
+                channelClosedCounter = meter
+                        .counterBuilder(MetricNames.CONNECTIONS_CLOSED).build();
             }
+        }
+
+        @Override
+        public void sendMeterEventsForEnd() {
+            super.sendMeterEventsForEnd();
+            meterIncrementEvent(getMetrics().channelClosedCounter);
+            meterDeltaEvent(getMetrics().activeSocketConnectionsCounter, -1);
         }
 
         public static MetricInstruments makeMetrics(Meter meter) {
@@ -55,7 +68,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         @Override
-        public CommonScopedMetricInstruments getMetrics() {
+        public MetricInstruments getMetrics() {
             return getRootInstrumentationScope().socketInstruments;
         }
     }
@@ -77,22 +90,18 @@ public abstract class ReplayContexts extends IReplayContexts {
             meterDeltaEvent(getMetrics().activeChannelCounter, 1);
         }
 
+        @Override
+        public ISocketContext createSocketContext() {
+            return new SocketContext(this);
+        }
+
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongUpDownCounter activeChannelCounter;
-            final LongUpDownCounter activeSocketConnectionsCounter;
-            final LongCounter channelCreatedCounter;
-            final LongCounter channelClosedCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
                 activeChannelCounter = meter
                         .upDownCounterBuilder(MetricNames.ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED).build();
-                activeSocketConnectionsCounter = meter
-                        .upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS).build();
-                channelCreatedCounter = meter
-                        .counterBuilder(MetricNames.CONNECTIONS_OPENED).build();
-                channelClosedCounter = meter
-                        .counterBuilder(MetricNames.CONNECTIONS_CLOSED).build();
             }
         }
 
@@ -113,25 +122,6 @@ public abstract class ReplayContexts extends IReplayContexts {
         public void sendMeterEventsForEnd() {
             super.sendMeterEventsForEnd();
             meterDeltaEvent(getMetrics().activeChannelCounter, -1);
-        }
-
-        @Override
-        public void onSocketConnectionCreated() {
-            assert socketContext == null;
-            socketContext = new SocketContext(rootInstrumentationScope, this);
-            meterIncrementEvent(getMetrics().channelCreatedCounter);
-            meterDeltaEvent(getMetrics().activeSocketConnectionsCounter, 1);
-        }
-
-        @Override
-        public void onSocketConnectionClosed() {
-            if (socketContext != null) {
-                try (var toClose = socketContext) {
-                    socketContext = null;
-                }
-            }
-            meterIncrementEvent(getMetrics().channelClosedCounter);
-            meterDeltaEvent(getMetrics().activeSocketConnectionsCounter, -1);
         }
     }
 

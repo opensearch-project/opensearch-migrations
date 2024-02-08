@@ -35,12 +35,13 @@ public class ConnectionReplaySession {
 
     @Getter
     @Setter
-    private IReplayContexts.IChannelKeyContext channelContext;
+    private final IReplayContexts.ISocketContext socketContext;
 
-    public ConnectionReplaySession(EventLoop eventLoop) {
+    public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext) {
         this.eventLoop = eventLoop;
         this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
+        this.socketContext = channelKeyContext.createSocketContext();
     }
 
     @SneakyThrows
