@@ -16,6 +16,7 @@ import endpoint_utils
 import index_management
 import utils
 from endpoint_info import EndpointInfo
+from exceptions import MetadataMigrationError
 from index_diff import IndexDiff
 from metadata_migration_params import MetadataMigrationParams
 from metadata_migration_result import MetadataMigrationResult
@@ -88,7 +89,7 @@ def index_metadata_migration(source: EndpointInfo, target: EndpointInfo,
             logging.error(f"Failed to create {fail_count} of {len(index_data)} indices")
             for failed_index_name, error in failed_indices.items():
                 logging.error(f"Index name {failed_index_name} failed: {error!s}")
-            raise RuntimeError("Metadata migration failed, index creation unsuccessful")
+            raise MetadataMigrationError("Metadata migration failed, index creation unsuccessful")
     return result
 
 
@@ -116,9 +117,9 @@ def template_migration(source: EndpointInfo, target: EndpointInfo):
         templates = index_management.fetch_all_index_templates(source)
         failures = index_management.create_index_templates(templates, target)
         if __log_template_failures(failures, len(templates)):
-            raise RuntimeError("Failed to create some index templates")
+            raise MetadataMigrationError("Failed to create some index templates")
     else:
-        raise RuntimeError("Failed to create some component templates, aborting index template creation")
+        raise MetadataMigrationError("Failed to create some component templates, aborting index template creation")
 
 
 def run(args: MetadataMigrationParams) -> MetadataMigrationResult:

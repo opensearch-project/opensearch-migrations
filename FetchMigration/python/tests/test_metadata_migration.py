@@ -17,6 +17,7 @@ import requests
 
 import metadata_migration
 from endpoint_info import EndpointInfo
+from exceptions import MetadataMigrationError
 from index_doc_count import IndexDocCount
 from metadata_migration_params import MetadataMigrationParams
 from tests import test_constants
@@ -179,7 +180,7 @@ class TestMetadataMigration(unittest.TestCase):
         # Fetch indices is called first for source, then for target
         mock_fetch_indices.side_effect = [test_constants.BASE_INDICES_DATA, {}]
         test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, "dummy")
-        self.assertRaises(RuntimeError, metadata_migration.run, test_input)
+        self.assertRaises(MetadataMigrationError, metadata_migration.run, test_input)
         mock_create_indices.assert_called_once_with(test_constants.BASE_INDICES_DATA, ANY)
         mock_template_migration.assert_not_called()
 
@@ -215,7 +216,7 @@ class TestMetadataMigration(unittest.TestCase):
         # Create component index call returns a failure
         create_component.return_value = {"test-template": requests.Timeout()}
         # Expect the migration to throw RuntimeError
-        self.assertRaises(RuntimeError, metadata_migration.template_migration, source, target)
+        self.assertRaises(MetadataMigrationError, metadata_migration.template_migration, source, target)
         fetch_component.assert_called_once_with(source)
         create_component.assert_called_once_with(ANY, target)
         # Index migration should never occur
@@ -234,7 +235,7 @@ class TestMetadataMigration(unittest.TestCase):
         # Create component index call returns a failure
         create_index.return_value = {"test-template": requests.Timeout()}
         # Expect the migration to throw RuntimeError
-        self.assertRaises(RuntimeError, metadata_migration.template_migration, source, target)
+        self.assertRaises(MetadataMigrationError, metadata_migration.template_migration, source, target)
         # All mocks should be invoked
         fetch_component.assert_called_once_with(source)
         fetch_index.assert_called_once_with(source)

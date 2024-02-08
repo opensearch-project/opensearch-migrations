@@ -17,6 +17,7 @@ from responses import matchers
 import index_management
 from component_template_info import ComponentTemplateInfo
 from endpoint_info import EndpointInfo
+from exceptions import IndexManagementError, RequestError
 from index_template_info import IndexTemplateInfo
 from tests import test_constants
 
@@ -122,19 +123,28 @@ class TestIndexManagement(unittest.TestCase):
         test_indices = {test_constants.INDEX1_NAME, test_constants.INDEX2_NAME}
         expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search"
         responses.get(expected_count_endpoint, body=requests.Timeout())
-        self.assertRaises(RuntimeError, index_management.doc_count, test_indices,
-                          EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        try:
+            index_management.doc_count(test_indices, EndpointInfo(test_constants.SOURCE_ENDPOINT))
+            # test should not reach this line
+            self.fail("Expected exception not thrown")
+        except IndexManagementError as e:
+            self.assertIsNotNone(e.__cause__)
+            self.assertTrue(isinstance(e.__cause__, RequestError))
 
     @responses.activate
     def test_get_request_errors(self):
         # Set up list of error types to test
         test_errors = [requests.ConnectionError(), requests.HTTPError(), requests.Timeout(),
                        requests.exceptions.MissingSchema()]
-        # Verify that each error is wrapped in a RuntimeError
+        # Verify that each error is wrapped in a IndexManagementError, then a RequestError
         for e in test_errors:
             responses.get(test_constants.SOURCE_ENDPOINT + "*", body=e)
-            self.assertRaises(RuntimeError, index_management.fetch_all_indices,
-                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
+            try:
+                index_management.fetch_all_indices(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+            except IndexManagementError as ime:
+                self.assertIsNotNone(ime.__cause__)
+                self.assertTrue(isinstance(ime.__cause__, RequestError))
+                self.assertIsNotNone(ime.__cause__.__cause__)
 
     @responses.activate
     def test_fetch_all_component_templates_empty(self):
@@ -213,14 +223,12 @@ class TestIndexManagement(unittest.TestCase):
         responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", body=requests.Timeout())
         responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", body=requests.HTTPError())
         try:
-            self.assertRaises(RuntimeError, index_management.fetch_all_component_templates,
-                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
-        except RuntimeError as e:
+            index_management.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except IndexManagementError as e:
             self.assertIsNotNone(e.__cause__)
         try:
-            self.assertRaises(RuntimeError, index_management.fetch_all_index_templates,
-                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
-        except RuntimeError as e:
+            index_management.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except IndexManagementError as e:
             self.assertIsNotNone(e.__cause__)
 
     @responses.activate
