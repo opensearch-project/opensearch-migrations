@@ -22,11 +22,11 @@ jobs:
 
 
       - name: Run Gradle Build
-        run: ./gradlew build -x test --no-daemon
+        run: ./gradlew build -x test --no-daemon --max-workers=2
         working-directory: TrafficCapture
 
       - name: Run Tests with Coverage
-        run: ./gradlew jacocoTestReport --info --no-daemon
+        run: ./gradlew jacocoTestReport --info --max-workers=2 --no-daemon
         working-directory: TrafficCapture
 
       - name: Upload to Codecov
