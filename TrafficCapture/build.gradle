@@ -59,7 +59,7 @@ allprojects {
             systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
             systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
             systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
-            systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.5'
+            systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.25'
         }
         jvmArgs '-ea'
 
@@ -67,6 +67,7 @@ allprojects {
             enabled = true
         }
         maxParallelForks = Runtime.runtime.availableProcessors().intdiv(8) ?: 1
+        forkEvery 1
     }
 
     // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
