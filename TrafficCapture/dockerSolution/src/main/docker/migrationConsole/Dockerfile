@@ -9,9 +9,9 @@ RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 
 # Add Traffic Replayer jars for running KafkaPrinter from this container
-COPY build/jars /root/jars
-RUN printf "#!/bin/sh\njava -cp `echo /root/jars/*.jar | tr \   :` \"\$@\" " > /root/runJavaWithClasspath.sh
-RUN chmod +x /root/runJavaWithClasspath.sh
+COPY build/jars /root/kafka-tools/replayer-jars
+RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
+RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 
 COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
@@ -20,12 +20,12 @@ COPY showFetchMigrationCommand.sh /root/
 COPY setupIntegTests.sh /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
-COPY kafkaExport.sh /root/
+COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/runTestBenchmarks.sh
 RUN chmod ug+x /root/humanReadableLogs.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
-RUN chmod ug+x /root/kafkaExport.sh
+RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
 RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz

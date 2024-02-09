@@ -9,23 +9,29 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Properties;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -44,29 +50,6 @@ public class KafkaPrinter {
     private static final Logger log = LoggerFactory.getLogger(KafkaPrinter.class);
     public static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
 
-    static class Partition {
-        String topic;
-        int partitionId;
-        Partition(String topic, int partitionId) {
-            this.topic = topic;
-            this.partitionId = partitionId;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(topic, partitionId);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (obj == null || getClass() != obj.getClass())
-                return false;
-            Partition partition = (Partition) obj;
-            return partitionId == partition.partitionId && topic.equals(partition.topic);
-        }
-    }
     static class PartitionTracker {
         long currentRecordCount;
         long recordLimit;
@@ -80,7 +63,7 @@ public class KafkaPrinter {
         @Parameter(required = true,
             names = {"--kafka-traffic-brokers"},
             arity=1,
-            description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers to bootstrap with i.e. 'localhost:9092,localhost2:9092'")
+            description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers to bootstrap with e.g. 'localhost:9092,localhost2:9092'")
         String kafkaTrafficBrokers;
         @Parameter(required = true,
             names = {"--kafka-traffic-topic"},
@@ -103,15 +86,26 @@ public class KafkaPrinter {
             description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
         String kafkaTrafficPropertyFile;
         @Parameter(required = false,
-            names = {"--partition-limit"},
-            description = "Partition limit option will only print records for a given partition up to the given limit " +
-                "and will terminate the printer when all limits have been met. Can be used multiple times, and may be comma-separated. topic:partition:num_records")
+            names = {"--partition-limits"},
+            description = "Partition limit option will only print records for the provided partitions and up to the given limit " +
+                "specified. It will terminate the printer when all limits have been met. Argument can be used multiple " +
+                "times, and may be comma-separated, e.g. 'test-topic:0:10, test-topic:1:32' ")
         List<String> partitionLimits = new ArrayList<>();
         @Parameter(required = false,
             names = {"--timeout-seconds"},
             arity=1,
-            description = "Timeout option.")
+            description = "Timeout option for how long KafkaPrinter will continue to read from Kafka before terminating.")
         long timeoutSeconds = 0;
+        @Parameter(required = false,
+            names = {"--output-directory"},
+            arity=1,
+            description = "If provided will place output inside file(s) within this directory. Otherwise, output will be sent to STDOUT")
+        String outputDirectoryPath;
+        @Parameter(required = false,
+            names = {"--combine-partition-output"},
+            arity=0,
+            description = "Creates a single output file with output from all partitions combined. Requires '--output-directory' to be specified.")
+        boolean combinePartitionOutput;
 
     }
 
@@ -129,12 +123,16 @@ public class KafkaPrinter {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws FileNotFoundException {
         Parameters params;
         try {
             params = parseArgs(args);
         } catch (ParameterException e) {
             return;
+        }
+
+        if (params.combinePartitionOutput && params.outputDirectoryPath == null) {
+            throw new ParameterException("The '--output-directory' parameter is required for using '--combine-partition-output'.");
         }
 
         String bootstrapServers = params.kafkaTrafficBrokers;
@@ -164,14 +162,14 @@ public class KafkaPrinter {
         properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
 
-        Map<Partition, PartitionTracker> capturedRecords = new HashMap<>();
+        Map<TopicPartition, PartitionTracker> capturedRecords = new HashMap<>();
         if (!params.partitionLimits.isEmpty()) {
             for (String partitionLimit : params.partitionLimits) {
                 String[] partitionElements = partitionLimit.split(":");
                 if (partitionElements.length != 3) {
                     throw new ParameterException("Partition limit provided does not match the expected format: topic_name:partition_id:num_records, actual value: " + partitionLimit);
                 }
-                Partition partition = new Partition(partitionElements[0], Integer.parseInt(partitionElements[1]));
+                TopicPartition partition = new TopicPartition(partitionElements[0], Integer.parseInt(partitionElements[1]));
                 if (capturedRecords.containsKey(partition)) {
                     throw new ParameterException("Duplicate parameter limit detected for the partition: " + partition);
                 }
@@ -179,9 +177,34 @@ public class KafkaPrinter {
             }
         }
 
+        String baseOutputPath = params.outputDirectoryPath == null ? "./" : params.outputDirectoryPath;
+        baseOutputPath = !baseOutputPath.endsWith("/") ? baseOutputPath + "/" : baseOutputPath;
+        String uuid = UUID.randomUUID().toString();
+        boolean separatePartitionOutputs = false;
+        Map<Integer, CodedOutputStream> partitionOutputStreams = new HashMap<>();
+        // Grab all partition records
+        if (capturedRecords.isEmpty()) {
+            OutputStream os = params.outputDirectoryPath == null ? System.out : new FileOutputStream(String.format("%s%s_%s_%s.proto", baseOutputPath, params.kafkaTrafficTopic, "all", uuid));
+            partitionOutputStreams.put(0, CodedOutputStream.newInstance(os));
+        }
+        // Only grab specific partition records based on limits
+        else {
+            if (params.combinePartitionOutput || params.outputDirectoryPath == null) {
+                OutputStream os = params.outputDirectoryPath == null ? System.out : new FileOutputStream(String.format("%s%s_%s_%s.proto", baseOutputPath, params.kafkaTrafficTopic, "all", uuid));
+                partitionOutputStreams.put(0, CodedOutputStream.newInstance(os));
+            }
+            else {
+                for (TopicPartition partition : capturedRecords.keySet()) {
+                    separatePartitionOutputs = true;
+                    FileOutputStream fos = new FileOutputStream(String.format("%s%s_%d_%s.proto", baseOutputPath, partition.topic(), partition.partition(), uuid));
+                    partitionOutputStreams.put(partition.partition(), CodedOutputStream.newInstance(fos));
+                }
+            }
+        }
+
         try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties)) {
             consumer.subscribe(Collections.singleton(topic));
-            pipeRecordsToProtoBufDelimited(consumer, getDelimitedProtoBufOutputter(System.out, capturedRecords),
+            pipeRecordsToProtoBufDelimited(consumer, getDelimitedProtoBufOutputter(capturedRecords, partitionOutputStreams, separatePartitionOutputs),
                 params.timeoutSeconds, capturedRecords);
         } catch (WakeupException e) {
             log.info("Wake up exception!");
@@ -203,7 +226,7 @@ public class KafkaPrinter {
 
     static void pipeRecordsToProtoBufDelimited(
         Consumer<String, byte[]> kafkaConsumer, java.util.function.Consumer<Stream<ConsumerRecord<String, byte[]>>> binaryReceiver,
-        long timeoutSeconds, Map<Partition, PartitionTracker> capturedRecords) {
+        long timeoutSeconds, Map<TopicPartition, PartitionTracker> capturedRecords) {
 
         long endTime = System.currentTimeMillis() + (timeoutSeconds * 1000);
         boolean continueCapture = true;
@@ -230,31 +253,47 @@ public class KafkaPrinter {
         binaryReceiver.accept(StreamSupport.stream(records.spliterator(), false));
     }
 
-    static java.util.function.Consumer<Stream<ConsumerRecord<String, byte[]>>> getDelimitedProtoBufOutputter(OutputStream outputStream, Map<Partition, PartitionTracker> capturedRecords) {
-        CodedOutputStream codedOutputStream = CodedOutputStream.newInstance(outputStream);
+    static java.util.function.Consumer<Stream<ConsumerRecord<String, byte[]>>> getDelimitedProtoBufOutputter(Map<TopicPartition, PartitionTracker> capturedRecords,
+        Map<Integer, CodedOutputStream> partitionOutputStreams, boolean separatePartitionOutputs) {
+
+        Set<CodedOutputStream> usedCodedOutputStreams = new HashSet<>();
 
         return consumerRecordStream -> {
             consumerRecordStream.forEach(consumerRecord -> {
                 try {
-                    Partition partition = new Partition(consumerRecord.topic(), consumerRecord.partition());
-                    log.debug("Incoming record for topic:{} and partition:{}", partition.topic, partition.partitionId);
-                    PartitionTracker tracker = capturedRecords.get(partition);
-                    if (tracker != null) {
-                        // Skip records past our limit
-                        if (tracker.currentRecordCount >= tracker.recordLimit) {
-                            return;
-                        }
-                        tracker.currentRecordCount++;
+                    // No partition limits case, output everything
+                    if (capturedRecords.isEmpty()) {
+                        CodedOutputStream codedOutputStream = partitionOutputStreams.get(0);
+                        usedCodedOutputStreams.add(codedOutputStream);
+                        byte[] buffer = consumerRecord.value();
+                        codedOutputStream.writeUInt32NoTag(buffer.length);
+                        codedOutputStream.writeRawBytes(buffer);
                     }
-                    byte[] buffer = consumerRecord.value();
-                    codedOutputStream.writeUInt32NoTag(buffer.length);
-                    codedOutputStream.writeRawBytes(buffer);
+                    else {
+                        TopicPartition partition = new TopicPartition(consumerRecord.topic(), consumerRecord.partition());
+                        log.debug("Incoming record for topic:{} and partition:{}", partition.topic(), partition.partition());
+                        PartitionTracker tracker = capturedRecords.get(partition);
+                        boolean outputNeeded = false;
+                        if (tracker != null && tracker.currentRecordCount < tracker.recordLimit) {
+                            tracker.currentRecordCount++;
+                            outputNeeded = true;
+                        }
+                        if (outputNeeded) {
+                            CodedOutputStream codedOutputStream = separatePartitionOutputs ? partitionOutputStreams.get(partition.partition()) : partitionOutputStreams.get(0);
+                            usedCodedOutputStreams.add(codedOutputStream);
+                            byte[] buffer = consumerRecord.value();
+                            codedOutputStream.writeUInt32NoTag(buffer.length);
+                            codedOutputStream.writeRawBytes(buffer);
+                        }
+                    }
                 } catch (IOException e) {
                     throw Lombok.sneakyThrow(e);
                 }
             });
             try {
-                codedOutputStream.flush();
+                for (CodedOutputStream cos : usedCodedOutputStreams) {
+                    cos.flush();
+                }
             } catch (IOException e) {
                 throw Lombok.sneakyThrow(e);
             }

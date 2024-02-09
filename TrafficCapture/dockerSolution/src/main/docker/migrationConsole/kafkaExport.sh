@@ -4,7 +4,7 @@ broker_endpoints="${MIGRATION_KAFKA_BROKER_ENDPOINTS}"
 msk_auth_settings=""
 kafka_command_settings=""
 s3_bucket_name=""
-if [ -n "$AWS_REGION" ]; then
+if [ -n "$ECS_AGENT_URI" ]; then
     msk_auth_settings="--kafka-traffic-enable-msk-auth"
     kafka_command_settings="--command-config kafka-tools/aws/msk-iam-auth.properties"
     s3_bucket_name="migration-artifacts-$MIGRATION_STAGE-$AWS_REGION"
@@ -55,25 +55,29 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-partition_offsets=$(./kafka-tools/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
+partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
 comma_sep_partition_offsets=$(echo $partition_offsets | sed 's/ /,/g')
 echo "Collected offsets from current Kafka topic: "
 echo $comma_sep_partition_offsets
 
 epoch_ts=$(date +%s)
-file_name="kafka_export_$epoch_ts.proto"
-archive_name="$file_name.tar.gz"
-group="export_$epoch_ts"
+dir_name="kafka_export_$epoch_ts"
+mkdir -p $dir_name
+archive_name="kafka_export_from_migration_console_$epoch_ts.tar.gz"
+group="exportFromMigrationConsole_$(hostname -s)_$$_$epoch_ts"
+echo "Group name: $group"
 
 set -o xtrace
-./runJavaWithClasspath.sh org.opensearch.migrations.replay.KafkaPrinter --kafka-traffic-brokers "$broker_endpoints" --kafka-traffic-topic "$topic" --kafka-traffic-group-id "$group" $(echo "$msk_auth_settings") --timeout-seconds "$timeout_seconds" --partition-limit "$comma_sep_partition_offsets" >> "$file_name"
+./runJavaWithClasspath.sh org.opensearch.migrations.replay.KafkaPrinter --kafka-traffic-brokers "$broker_endpoints" --kafka-traffic-topic "$topic" --kafka-traffic-group-id "$group" $(echo "$msk_auth_settings") --timeout-seconds "$timeout_seconds" --partition-limits "$comma_sep_partition_offsets" --output-directory "./$dir_name"
 set +o xtrace
 
-tar -czvf "$archive_name" "$file_name" && rm "$file_name"
+cd $dir_name
+tar -czvf "$archive_name" *.proto && rm *.proto
+cd ..
 
 # Remove created consumer group
-./kafka-tools/kafka/bin/kafka-consumer-groups.sh --bootstrap-server "$broker_endpoints" --timeout 100000 --delete --group "$group" $(echo "$kafka_command_settings")
+./kafka/bin/kafka-consumer-groups.sh --bootstrap-server "$broker_endpoints" --timeout 100000 --delete --group "$group" $(echo "$kafka_command_settings")
 
 if [ "$enable_s3" = true ]; then
-  aws s3 mv "$archive_name" "s3://$s3_bucket_name" && echo "Export has been created: s3://$s3_bucket_name/$archive_name"
+  aws s3 mv "$dir_name/$archive_name" "s3://$s3_bucket_name" && echo "Export has been created: s3://$s3_bucket_name/$archive_name"
 fi

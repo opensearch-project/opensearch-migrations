@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -77,7 +78,7 @@ class KafkaPrinterTest {
         Random random = new Random(2);
         var numTrafficStreams = 10;
         var kafkaConsumer = makeKafkaConsumer(Map.of(0, numTrafficStreams), () -> random.nextInt(NUM_READ_ITEMS_BOUND));
-        var emptyPartitionLimits = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
+        var emptyPartitionLimits = new HashMap<TopicPartition, KafkaPrinter.PartitionTracker>();
         var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, numTrafficStreams, emptyPartitionLimits);
         validateNumberOfTrafficStreamsEmitted(NUM_PROTOBUF_OBJECTS, delimitedOutputBytes);
     }
@@ -89,8 +90,8 @@ class KafkaPrinterTest {
         var numTrafficStreams = 20;
         var recordLimit = 10;
         var kafkaConsumer = makeKafkaConsumer(Map.of(0, numTrafficStreams), () -> random.nextInt(NUM_READ_ITEMS_BOUND));
-        var partitionLimits = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
-        KafkaPrinter.Partition partition0 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 0);
+        var partitionLimits = new HashMap<TopicPartition, KafkaPrinter.PartitionTracker>();
+        TopicPartition partition0 = new TopicPartition(TEST_TOPIC_NAME, 0);
         partitionLimits.put(partition0, new KafkaPrinter.PartitionTracker(0, recordLimit));
         var delimitedOutputBytes = getOutputFromConsumer(kafkaConsumer, numTrafficStreams, partitionLimits);
         Assertions.assertEquals(recordLimit, partitionLimits.get(partition0).currentRecordCount);
@@ -111,10 +112,10 @@ class KafkaPrinterTest {
         var totalLimitTrafficStreams = recordLimitPartition0 + recordLimitPartition1 + recordLimitPartition2;
 
         var kafkaConsumer = makeKafkaConsumer(Map.of(0, numTrafficStreamsPartition0, 1, numTrafficStreamsPartition1, 2, numTrafficStreamsPartition2), () -> random.nextInt(NUM_READ_ITEMS_BOUND));
-        var partitionLimits = new HashMap<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker>();
-        KafkaPrinter.Partition partition0 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 0);
-        KafkaPrinter.Partition partition1 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 1);
-        KafkaPrinter.Partition partition2 = new KafkaPrinter.Partition(TEST_TOPIC_NAME, 2);
+        var partitionLimits = new HashMap<TopicPartition, KafkaPrinter.PartitionTracker>();
+        TopicPartition partition0 = new TopicPartition(TEST_TOPIC_NAME, 0);
+        TopicPartition partition1 = new TopicPartition(TEST_TOPIC_NAME, 1);
+        TopicPartition partition2 = new TopicPartition(TEST_TOPIC_NAME, 2);
         partitionLimits.put(partition0, new KafkaPrinter.PartitionTracker(0, recordLimitPartition0));
         partitionLimits.put(partition1, new KafkaPrinter.PartitionTracker(0, recordLimitPartition1));
         partitionLimits.put(partition2, new KafkaPrinter.PartitionTracker(0, recordLimitPartition2));
@@ -126,11 +127,12 @@ class KafkaPrinterTest {
     }
 
     private byte[] getOutputFromConsumer(org.apache.kafka.clients.consumer.Consumer<String,byte[]> kafkaConsumer,
-                                         int expectedMessageCount, Map<KafkaPrinter.Partition, KafkaPrinter.PartitionTracker> capturedRecords)
+                                         int expectedMessageCount, Map<TopicPartition, KafkaPrinter.PartitionTracker> capturedRecords)
             throws Exception
     {
         try (var baos = new ByteArrayOutputStream()) {
-            var wrappedConsumer = new CountingConsumer(KafkaPrinter.getDelimitedProtoBufOutputter(baos, capturedRecords));
+            var wrappedConsumer = new CountingConsumer(KafkaPrinter.getDelimitedProtoBufOutputter(capturedRecords, Map.of(0,
+                CodedOutputStream.newInstance(baos)), false));
             while (wrappedConsumer.count < expectedMessageCount) {
                 KafkaPrinter.processNextChunkOfKafkaEvents(kafkaConsumer, wrappedConsumer);
             }
