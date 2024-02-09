@@ -17,6 +17,11 @@ jobs:
           java-version: '11'
           distribution: 'adopt'
 
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-home-cache-cleanup: true
+
       - name: Run Gradle Build
         run: ./gradlew build -x test
         working-directory: TrafficCapture
