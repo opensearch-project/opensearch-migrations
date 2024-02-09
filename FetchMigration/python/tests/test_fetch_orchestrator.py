@@ -39,7 +39,7 @@ class TestFetchOrchestrator(unittest.TestCase):
     def test_orchestrator_run(self, mock_metadata_migration: MagicMock, mock_subprocess: MagicMock,
                               mock_monitor: MagicMock):
         fetch_params = FetchOrchestratorParams("test_dp_path", "test_pipeline_file")
-        # Setup mock pre-migration
+        # Setup mock metadata migration
         expected_metadata_migration_input = \
             MetadataMigrationParams(fetch_params.pipeline_file_path,
                                     fetch_params.data_prepper_path + "/pipelines/pipeline.yaml",
@@ -63,13 +63,15 @@ class TestFetchOrchestrator(unittest.TestCase):
     @mock.patch.dict(os.environ, {}, clear=True)
     def test_orchestrator_no_migration(self, mock_metadata_migration: MagicMock, mock_subprocess: MagicMock,
                                        mock_monitor: MagicMock):
-        # Setup empty result from pre-migration
+        # Setup empty result from metadata migration
         mock_metadata_migration.return_value = MetadataMigrationResult()
-        orchestrator.run(FetchOrchestratorParams("test", "test"))
+        result = orchestrator.run(FetchOrchestratorParams("test", "test"))
         mock_metadata_migration.assert_called_once_with(ANY)
         # Subsequent steps should not be called
         mock_subprocess.assert_not_called()
         mock_monitor.assert_not_called()
+        # Expect successful exit code
+        self.assertEqual(0, result)
 
     @patch('migration_monitor.run')
     @patch('subprocess.Popen')
@@ -79,7 +81,7 @@ class TestFetchOrchestrator(unittest.TestCase):
     def test_orchestrator_run_create_only(self, mock_metadata_migration: MagicMock, mock_subprocess: MagicMock,
                                           mock_monitor: MagicMock):
         fetch_params = FetchOrchestratorParams("test_dp_path", "test_pipeline_file", create_only=True)
-        # Setup mock pre-migration
+        # Setup mock metadata migration
         expected_metadata_migration_input = \
             MetadataMigrationParams(fetch_params.pipeline_file_path,
                                     fetch_params.data_prepper_path + "/pipelines/pipeline.yaml",
@@ -87,10 +89,12 @@ class TestFetchOrchestrator(unittest.TestCase):
         test_result = MetadataMigrationResult(10, {"index1", "index2"})
         mock_metadata_migration.return_value = test_result
         # Run test
-        orchestrator.run(fetch_params)
+        result = orchestrator.run(fetch_params)
         mock_metadata_migration.assert_called_once_with(expected_metadata_migration_input)
         mock_subprocess.assert_not_called()
         mock_monitor.assert_not_called()
+        # Expect successful exit code
+        self.assertEqual(0, result)
 
     @patch('migration_monitor.run')
     @patch('subprocess.Popen')
@@ -100,7 +104,7 @@ class TestFetchOrchestrator(unittest.TestCase):
     def test_orchestrator_dryrun(self, mock_metadata_migration: MagicMock, mock_subprocess: MagicMock,
                                  mock_monitor: MagicMock):
         fetch_params = FetchOrchestratorParams("test_dp_path", "test_pipeline_file", dryrun=True)
-        # Setup mock pre-migration
+        # Setup mock metadata migration
         expected_metadata_migration_input = \
             MetadataMigrationParams(fetch_params.pipeline_file_path,
                                     fetch_params.data_prepper_path + "/pipelines/pipeline.yaml",
@@ -108,10 +112,44 @@ class TestFetchOrchestrator(unittest.TestCase):
         test_result = MetadataMigrationResult(10, {"index1", "index2"})
         mock_metadata_migration.return_value = test_result
         # Run test
-        orchestrator.run(fetch_params)
+        result = orchestrator.run(fetch_params)
         mock_metadata_migration.assert_called_once_with(expected_metadata_migration_input)
         mock_subprocess.assert_not_called()
         mock_monitor.assert_not_called()
+        # Expect successful exit code
+        self.assertEqual(0, result)
+
+    @patch('migration_monitor.run')
+    @patch('subprocess.Popen')
+    @patch('metadata_migration.run')
+    # Note that mock objects are passed bottom-up from the patch order above
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_orchestrator_suppressed_exit_code(self, mock_metadata_migration: MagicMock, mock_subprocess: MagicMock,
+                                               mock_monitor: MagicMock):
+        # Setup mock metadata migration
+        test_result = MetadataMigrationResult(10, {"index1", "index2"})
+        mock_metadata_migration.return_value = test_result
+        # Set up graceful termination exit code
+        mock_monitor.return_value = 143
+        result = orchestrator.run(FetchOrchestratorParams("test_dp_path", "test_pipeline_file"))
+        # Expect non-zero exit code to be suppressed
+        self.assertEqual(0, result)
+
+    @patch('migration_monitor.run')
+    @patch('subprocess.Popen')
+    @patch('metadata_migration.run')
+    # Note that mock objects are passed bottom-up from the patch order above
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_orchestrator_nonzero_exit_code(self, mock_metadata_migration: MagicMock, mock_subprocess: MagicMock,
+                                            mock_monitor: MagicMock):
+        # Setup mock metadata migration
+        test_result = MetadataMigrationResult(10, {"index1", "index2"})
+        mock_metadata_migration.return_value = test_result
+        sigkill_exit_code: int = 137
+        mock_monitor.return_value = sigkill_exit_code
+        result = orchestrator.run(FetchOrchestratorParams("test_dp_path", "test_pipeline_file"))
+        # Expect non-zero exit code to be returned
+        self.assertEqual(sigkill_exit_code, result)
 
     @patch('fetch_orchestrator.write_inline_target_host')
     @patch('metadata_migration.run')

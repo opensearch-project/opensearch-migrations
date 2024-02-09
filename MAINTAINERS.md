@@ -13,3 +13,4 @@ This document contains a list of maintainers in this repo. See [opensearch-proje
 | Mikayla Thompson   | [mikaylathompson](https://github.com/mikaylathompson)   | Amazon      |
 | Omar Khasawneh     | [okhasawn](https://github.com/okhasawn)                 | Amazon      |
 | Brian Presley      | [sumobrian](https://github.com/sumobrian)               | Amazon      |
+| Andre Kurait       | [andrekurait](https://github.com/andrekurait)           | Amazon      |

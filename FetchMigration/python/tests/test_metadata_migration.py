@@ -16,6 +16,7 @@ from unittest.mock import patch, MagicMock, ANY
 import requests
 
 import metadata_migration
+from endpoint_info import EndpointInfo
 from index_doc_count import IndexDocCount
 from metadata_migration_params import MetadataMigrationParams
 from tests import test_constants
@@ -31,6 +32,7 @@ class TestMetadataMigration(unittest.TestCase):
     def tearDown(self) -> None:
         logging.disable(logging.NOTSET)
 
+    @patch('metadata_migration.template_migration')
     @patch('index_operations.doc_count')
     @patch('metadata_migration.write_output')
     @patch('metadata_migration.print_report')
@@ -38,7 +40,8 @@ class TestMetadataMigration(unittest.TestCase):
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_run_report(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock,
-                        mock_print_report: MagicMock, mock_write_output: MagicMock, mock_doc_count: MagicMock):
+                        mock_print_report: MagicMock, mock_write_output: MagicMock, mock_doc_count: MagicMock,
+                        mock_template_migration: MagicMock):
         mock_doc_count.return_value = IndexDocCount(1, dict())
         index_to_create = test_constants.INDEX3_NAME
         index_with_conflict = test_constants.INDEX2_NAME
@@ -58,6 +61,7 @@ class TestMetadataMigration(unittest.TestCase):
         mock_doc_count.assert_called()
         mock_print_report.assert_called_once_with(ANY, 1)
         mock_write_output.assert_not_called()
+        mock_template_migration.assert_called_once()
 
     @patch('index_operations.doc_count')
     @patch('metadata_migration.print_report')
@@ -142,23 +146,28 @@ class TestMetadataMigration(unittest.TestCase):
         test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH)
         self.assertRaises(ValueError, metadata_migration.run, test_input)
 
+    @patch('metadata_migration.template_migration')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
-    def test_no_indices_in_source(self, mock_fetch_indices: MagicMock):
+    def test_no_indices_in_source(self, mock_fetch_indices: MagicMock, mock_template_migration: MagicMock):
         mock_fetch_indices.return_value = {}
         test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, "dummy")
         test_result = metadata_migration.run(test_input)
         mock_fetch_indices.assert_called_once()
         self.assertEqual(0, test_result.target_doc_count)
         self.assertEqual(0, len(test_result.migration_indices))
+        # Templates are still migrated
+        mock_template_migration.assert_called_once()
 
     @patch('metadata_migration.write_output')
+    @patch('metadata_migration.template_migration')
     @patch('index_operations.doc_count')
     @patch('index_operations.create_indices')
     @patch('index_operations.fetch_all_indices')
     # Note that mock objects are passed bottom-up from the patch order above
     def test_failed_indices(self, mock_fetch_indices: MagicMock, mock_create_indices: MagicMock,
-                            mock_doc_count: MagicMock, mock_write_output: MagicMock):
+                            mock_doc_count: MagicMock, mock_template_migration: MagicMock,
+                            mock_write_output: MagicMock):
         mock_doc_count.return_value = IndexDocCount(1, dict())
         # Setup failed indices
         test_failed_indices_result = {
@@ -172,6 +181,65 @@ class TestMetadataMigration(unittest.TestCase):
         test_input = MetadataMigrationParams(test_constants.PIPELINE_CONFIG_RAW_FILE_PATH, "dummy")
         self.assertRaises(RuntimeError, metadata_migration.run, test_input)
         mock_create_indices.assert_called_once_with(test_constants.BASE_INDICES_DATA, ANY)
+        mock_template_migration.assert_not_called()
+
+    @patch('index_operations.create_index_templates')
+    @patch('index_operations.fetch_all_index_templates')
+    @patch('index_operations.create_component_templates')
+    @patch('index_operations.fetch_all_component_templates')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_template_migration(self, fetch_component: MagicMock, create_component: MagicMock, fetch_index: MagicMock,
+                                create_index: MagicMock):
+        source = EndpointInfo(test_constants.SOURCE_ENDPOINT)
+        target = EndpointInfo(test_constants.TARGET_ENDPOINT)
+        # Base, successful case, so no failures
+        create_component.return_value = dict()
+        create_index.return_value = dict()
+        # Run test migration
+        metadata_migration.template_migration(source, target)
+        # Verify that mocks were invoked as expected
+        fetch_component.assert_called_once_with(source)
+        fetch_index.assert_called_once_with(source)
+        create_component.assert_called_once_with(ANY, target)
+        create_index.assert_called_once_with(ANY, target)
+
+    @patch('index_operations.create_index_templates')
+    @patch('index_operations.fetch_all_index_templates')
+    @patch('index_operations.create_component_templates')
+    @patch('index_operations.fetch_all_component_templates')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_component_template_migration_failed(self, fetch_component: MagicMock, create_component: MagicMock,
+                                                 fetch_index: MagicMock, create_index: MagicMock):
+        source = EndpointInfo(test_constants.SOURCE_ENDPOINT)
+        target = EndpointInfo(test_constants.TARGET_ENDPOINT)
+        # Create component index call returns a failure
+        create_component.return_value = {"test-template": requests.Timeout()}
+        # Expect the migration to throw RuntimeError
+        self.assertRaises(RuntimeError, metadata_migration.template_migration, source, target)
+        fetch_component.assert_called_once_with(source)
+        create_component.assert_called_once_with(ANY, target)
+        # Index migration should never occur
+        fetch_index.assert_not_called()
+        create_index.assert_not_called()
+
+    @patch('index_operations.create_index_templates')
+    @patch('index_operations.fetch_all_index_templates')
+    @patch('index_operations.create_component_templates')
+    @patch('index_operations.fetch_all_component_templates')
+    # Note that mock objects are passed bottom-up from the patch order above
+    def test_index_template_migration_failed(self, fetch_component: MagicMock, create_component: MagicMock,
+                                             fetch_index: MagicMock, create_index: MagicMock):
+        source = EndpointInfo(test_constants.SOURCE_ENDPOINT)
+        target = EndpointInfo(test_constants.TARGET_ENDPOINT)
+        # Create component index call returns a failure
+        create_index.return_value = {"test-template": requests.Timeout()}
+        # Expect the migration to throw RuntimeError
+        self.assertRaises(RuntimeError, metadata_migration.template_migration, source, target)
+        # All mocks should be invoked
+        fetch_component.assert_called_once_with(source)
+        fetch_index.assert_called_once_with(source)
+        create_component.assert_called_once_with(ANY, target)
+        create_index.assert_called_once_with(ANY, target)
 
 
 if __name__ == '__main__':
