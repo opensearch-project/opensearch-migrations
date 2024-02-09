@@ -6,7 +6,7 @@ kafka_command_settings=""
 s3_bucket_name=""
 if [ -n "$ECS_AGENT_URI" ]; then
     msk_auth_settings="--kafka-traffic-enable-msk-auth"
-    kafka_command_settings="--command-config kafka-tools/aws/msk-iam-auth.properties"
+    kafka_command_settings="--command-config aws/msk-iam-auth.properties"
     s3_bucket_name="migration-artifacts-$MIGRATION_STAGE-$AWS_REGION"
 fi
 topic="logging-traffic-topic"
@@ -46,7 +46,11 @@ while [[ $# -gt 0 ]]; do
             shift
             shift
             ;;
-        -h|--help)
+        -h|--h|--help)
+            usage
+            ;;
+        -*)
+            echo "Unknown option $1"
             usage
             ;;
         *)

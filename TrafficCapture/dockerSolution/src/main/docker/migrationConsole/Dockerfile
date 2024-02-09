@@ -8,6 +8,12 @@ RUN apt-get update && \
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 
+WORKDIR /root/kafka-tools
+# Get kafka distribution and unpack to 'kafka'
+RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
+RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v1.1.9/aws-msk-iam-auth-1.1.9-all.jar
+WORKDIR /root
+
 # Add Traffic Replayer jars for running KafkaPrinter from this container
 COPY build/jars /root/kafka-tools/replayer-jars
 RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
@@ -26,10 +32,5 @@ RUN chmod ug+x /root/humanReadableLogs.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
-WORKDIR /root/kafka-tools
-# Get kafka distribution and unpack to 'kafka'
-RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
-RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v1.1.9/aws-msk-iam-auth-1.1.9-all.jar
-WORKDIR /root
 
 CMD tail -f /dev/null
