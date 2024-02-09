@@ -28,7 +28,7 @@ jobs:
           gradle-home-cache-cleanup: true
 
       - name: Run build with Gradle wrapper
-        run: ./gradlew dockerSolution:ComposeUp
+        run: ./gradlew dockerSolution:ComposeUp -x test
         working-directory: TrafficCapture
 
       - name: Set up Python

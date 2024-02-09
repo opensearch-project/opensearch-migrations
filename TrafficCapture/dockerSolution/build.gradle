@@ -1,13 +1,11 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id "com.avast.gradle.docker-compose" version "0.17.4"
+    id "com.avast.gradle.docker-compose" version "0.17.6"
     id 'com.bmuschko.docker-remote-api'
 }
 
 import org.opensearch.migrations.common.CommonUtils
-import java.security.MessageDigest
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-import org.apache.tools.ant.taskdefs.condition.Os
 
 def calculateDockerHash = { projectName ->
     CommonUtils.calculateDockerHash(projectName, project)
@@ -27,8 +25,8 @@ def dockerFilesForExternalServices = [
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
     task("buildDockerImage_${projectName}", type: DockerBuildImage) {
         def hash = calculateDockerHash(projectName)
-        images.add("migrations/${dockerImageName}:$hash")
-        images.add("migrations/${dockerImageName}:latest")
+        images.add("migrations/${dockerImageName}:$hash".toString())
+        images.add("migrations/${dockerImageName}:latest".toString())
         inputDir = project.file("src/main/docker/${projectName}")
     }
 }
@@ -53,8 +51,8 @@ javaContainerServices.forEach { projectName, dockerImageName ->
     task "buildDockerImage_${projectName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${projectName}"
         inputDir = project.file("${dockerBuildDir}")
-        images.add("migrations/${dockerImageName}:${version}")
-        images.add("migrations/${dockerImageName}:latest")
+        images.add("migrations/${dockerImageName}:${version}".toString())
+        images.add("migrations/${dockerImageName}:latest".toString())
     }
 }
 
