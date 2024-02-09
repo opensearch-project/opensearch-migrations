@@ -31,7 +31,7 @@ allprojects {
         systemProperty 'disableMemoryLeakTests', 'true'
         useJUnitPlatform {
             excludeTags 'longTest'
-            systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
+            systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
             systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
             systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
             systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
@@ -55,7 +55,7 @@ allprojects {
         systemProperty 'disableMemoryLeakTests', 'false'
         useJUnitPlatform {
             includeTags 'longTest'
-            systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
+            systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
             systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
             systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
             systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
