@@ -3,8 +3,10 @@ plugins {
     id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
-repositories {
-    mavenCentral()
+allprojects {
+    repositories {
+        mavenCentral()
+    }
 }
 
 allprojects {
