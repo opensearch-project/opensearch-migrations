@@ -5,9 +5,28 @@ import datetime
 import subprocess
 import os
 
+def pretty_request(request):
+    headers = ''
+    for header, value in request.META.items():
+        if not header.startswith('HTTP'):
+            continue
+        header = '-'.join([h.capitalize() for h in header[5:].lower().split('_')])
+        headers += '{}: {}\n'.format(header, value)
+
+    return (
+        '{method} HTTP/1.1\n'
+        '{headers}\n'
+        '{body}'
+    ).format(
+        method=request.method,
+        headers=headers,
+        body=request.body,
+    )
+
 @api_view(['GET'])
 def migration_status(request):
 
+    print(pretty_request(request))
     data = {
         'status': 'Completed',
         'details': 'Migration completed successfully.',
@@ -21,9 +40,17 @@ def migration_status(request):
     return Response(serializer.data)
 
 
-# TODO: Switch to POST 
-@api_view(['GET'])
+@api_view(['POST'])
 def start_migration(request):
+
+    # TODO remove temporary mocking
+    print(pretty_request(request))
+    data = {
+        'status': 'Started',
+        'details': 'Migration started.',
+        'timestamp': datetime.datetime.now(datetime.timezone.utc)
+    }
+    return Response(data, status=200)
 
     # Use subprocess.Popen to run the command
     #process = subprocess.Popen(['/root/catIndices.sh'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -48,4 +75,11 @@ def start_migration(request):
 
 @api_view(['POST'])
 def stop_migration(request):
-    pass
+    # TODO remove temporary mocking
+    print(pretty_request(request))
+    data = {
+        'status': 'Stopped',
+        'details': 'Migration stopped.',
+        'timestamp': datetime.datetime.now(datetime.timezone.utc)
+    }
+    return Response(data, status=200)
