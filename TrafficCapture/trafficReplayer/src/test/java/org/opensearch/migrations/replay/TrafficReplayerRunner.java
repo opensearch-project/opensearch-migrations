@@ -5,10 +5,9 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
 import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
@@ -18,11 +17,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Optional;
-import java.util.Random;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -39,7 +38,8 @@ public class TrafficReplayerRunner {
 
     static void runReplayerUntilSourceWasExhausted(int numExpectedRequests, URI endpoint,
                                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
-                                                   Supplier<ISimpleTrafficCaptureSource> trafficSourceSupplier)
+                                                   Supplier<TestContext> rootContextSupplier,
+                                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
             throws Throwable {
         AtomicInteger runNumberRef = new AtomicInteger();
         var totalUniqueEverReceived = new AtomicInteger();
@@ -52,15 +52,15 @@ public class TrafficReplayerRunner {
             int runNumber = runNumberRef.get();
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
-            try {
-                runTrafficReplayer(trafficSourceSupplier, endpoint, (t) -> {
+            try (var rootContext = rootContextSupplier.get()) {
+                runTrafficReplayer(rootContext, ()->trafficSourceFactory.apply(rootContext), endpoint, (t) -> {
                     if (runNumber != runNumberRef.get()) {
                         // for an old replayer.  I'm not sure why shutdown isn't blocking until all threads are dead,
                         // but that behavior only impacts this test as far as I can tell.
                         return;
                     }
                     Assertions.assertEquals(runNumber, runNumberRef.get());
-                    var key = t.uniqueRequestKey;
+                    var key = t.getRequestKey();
                     ISourceTrafficChannelKey tsk = key.getTrafficStreamKey();
                     var keyString = tsk.getConnectionId() + "_" + key.getSourceRequestIndex();
                     var prevKeyString = tsk.getConnectionId() + "_" + (key.getSourceRequestIndex()-1);
@@ -136,11 +136,12 @@ public class TrafficReplayerRunner {
         Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
     }
 
-    private static void runTrafficReplayer(Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
+    private static void runTrafficReplayer(TestContext rootContext,
+                                           Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
                                            URI endpoint,
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
         log.info("Starting a new replayer and running it");
-        var tr = new TrafficReplayer(endpoint, null,
+        var tr = new TrafficReplayer(rootContext, endpoint, null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10*1024);
 

@@ -1,13 +1,12 @@
 package org.opensearch.migrations.replay;
 
-import lombok.AllArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
+import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
@@ -15,25 +14,22 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.Random;
 import java.util.StringJoiner;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 @Slf4j
-public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
+public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest extends InstrumentationTest {
 
     public static Arguments[] generateAllTestsAndConfirmComplete(IntStream seedStream) {
+        var rootContext = TestContext.noOtelTracking();
         var possibilitiesLeftToTest = TrafficStreamGenerator.getPossibleTests();
         var numTries = new AtomicInteger();
         StringJoiner seedsThatOfferUniqueTestCases = new StringJoiner(",");
-        var argsArray = TrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(seedStream)
+        var argsArray = TrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(rootContext, seedStream)
                 .takeWhile(c->!possibilitiesLeftToTest.isEmpty())
                 .filter(c->TrafficStreamGenerator.classifyTrafficStream(possibilitiesLeftToTest, c.trafficStreams) > 0)
                 .flatMap(c-> {
@@ -91,13 +87,13 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
         // in the first pass.
         //
         // Notice that this may cause duplicates.  That's by design.  The system has an at-least-once guarantee.
-        var indicesProcessedPass1 =
-                SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(
+        var indicesProcessedPass1 = SimpleCapturedTrafficToHttpTransactionAccumulatorTest
+                .accumulateTrafficStreamsWithNewAccumulator(rootContext,
                         Arrays.stream(trafficStreams).limit(cutPoint), reconstructedTransactions, requestsReceived);
         cutPoint = indicesProcessedPass1.isEmpty() ? 0 : indicesProcessedPass1.last();
-        var indicesProcessedPass2 =
-            SimpleCapturedTrafficToHttpTransactionAccumulatorTest.accumulateTrafficStreamsWithNewAccumulator(
-                    Arrays.stream(trafficStreams).skip(cutPoint), reconstructedTransactions, requestsReceived);
+        var indicesProcessedPass2 = SimpleCapturedTrafficToHttpTransactionAccumulatorTest
+                .accumulateTrafficStreamsWithNewAccumulator(rootContext,
+                        Arrays.stream(trafficStreams).skip(cutPoint), reconstructedTransactions, requestsReceived);
 
         // three checks to do w/ the indicesProcessed sets.
         // Count their sum, confirm that there were not duplicates, confirm all match the input indices
@@ -112,5 +108,4 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest {
         SimpleCapturedTrafficToHttpTransactionAccumulatorTest.assertReconstructedTransactionsMatchExpectations(
                 reconstructedTransactions, expectedRequestSizes, expectedResponseSizes);
     }
-
 }

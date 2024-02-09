@@ -1,9 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.NonNull;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.time.Instant;
@@ -22,7 +20,7 @@ public class Accumulation {
         ACCUMULATING_WRITES
     }
 
-    public final ISourceTrafficChannelKey trafficChannelKey;
+    public final ITrafficStreamKey trafficChannelKey;
     private RequestResponsePacketPair rrPair;
     AtomicLong newestPacketTimestampInMillis;
     State state;
@@ -48,17 +46,15 @@ public class Accumulation {
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
     }
 
-    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey) {
+    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey,
+                                                                Instant originTimestamp) {
         if (rrPair != null) {
             return rrPair;
         }
-        rrPair = new RequestResponsePacketPair(forTrafficStreamKey);
-        return rrPair;
-    }
-
-    public UniqueReplayerRequestKey getRequestKey() {
-        return new UniqueReplayerRequestKey(getRrPair().getBeginningTrafficStreamKey(),
+        this.rrPair = new RequestResponsePacketPair(forTrafficStreamKey, originTimestamp,
                 startingSourceRequestIndex, getIndexOfCurrentRequest());
+        //this.rrPair.getRequestContext()
+        return rrPair;
     }
 
     public boolean hasSignaledRequests() {
