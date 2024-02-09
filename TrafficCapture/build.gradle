@@ -35,14 +35,14 @@ allprojects {
             systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
             systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
             systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
-            systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.25'
+            systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.50'
         }
         jvmArgs '-ea'
 
         jacoco {
             enabled = false
         }
-        maxParallelForks = Runtime.runtime.availableProcessors().intdiv(4) ?: 1
+        maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
     }
 
     task slowTest(type: Test) {
@@ -59,14 +59,14 @@ allprojects {
             systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
             systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
             systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
-            systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.25'
+            systemProperty 'junit.jupiter.execution.parallel.thread-count.factor', '0.50'
         }
         jvmArgs '-ea'
 
         jacoco {
             enabled = true
         }
-        maxParallelForks = Runtime.runtime.availableProcessors().intdiv(4) ?: 1
+        maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
     }
 
     // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning

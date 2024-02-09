@@ -117,3 +117,11 @@ jar {
         attributes 'Main-Class': application.mainClass
     }
 }
+
+// TODO: Remove serial override after tests support running in parallel
+test {
+    useJUnitPlatform {
+        excludeTags 'longTest'
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    }
+}
