@@ -69,7 +69,6 @@ class ExpiringSubstitutableItemPoolTest {
                     return rval;
                 },
                 item->{
-                    expireCountdownLatch.countDown();
                     log.info("Expiring item: "+item);
                     try {
                         expiredItems.add(item.get());
@@ -79,6 +78,7 @@ class ExpiringSubstitutableItemPoolTest {
                     } catch (ExecutionException e) {
                         throw Lombok.sneakyThrow(e);
                     }
+                    expireCountdownLatch.countDown();
                 });
         for (int i = 0; i<NUM_POOLED_ITEMS; ++i) {
             Thread.sleep(TIME_BETWEEN_INITIAL_ITEMS.toMillis());

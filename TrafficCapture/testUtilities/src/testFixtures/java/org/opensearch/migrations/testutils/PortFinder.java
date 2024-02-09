@@ -34,7 +34,7 @@ public class PortFinder {
                 r.accept(Integer.valueOf(port));
                 return port;
             } catch (Exception e) {
-                if (++numTries <= MAX_PORT_TRIES) {
+                if (++numTries >= MAX_PORT_TRIES) {
                     log.atError().setCause(e).setMessage(()->"Exceeded max tries {} giving up")
                             .addArgument(MAX_PORT_TRIES).log();
                     throw new ExceededMaxPortAssigmentAttemptException(e);

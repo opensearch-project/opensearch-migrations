@@ -62,7 +62,7 @@ class BlockingTrafficSourceTest {
         Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate-SHIFT)), lastTime);
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
         var exception = Assertions.assertThrows(ExecutionException.class,
-                ()->blockingSource.readNextTrafficStreamChunk().get(10, TimeUnit.MILLISECONDS));
+                ()->blockingSource.readNextTrafficStreamChunk().get(10000, TimeUnit.MILLISECONDS));
         Assertions.assertInstanceOf(EOFException.class, exception.getCause());
     }
 
