@@ -25,9 +25,13 @@ public class ContextTracker implements AutoCloseable {
     private final Map<IScopedInstrumentationAttributes, CallDetails> scopedContextToCallDetails =
             new WeakHashMap<>();
     private final Object lockObject = new Object();
+    private boolean isClosed;
 
     public void onCreated(IScopedInstrumentationAttributes ctx) {
         synchronized (lockObject) {
+            if (isClosed) {
+                return;
+            }
             var oldItem = scopedContextToCallDetails.putIfAbsent(ctx, new CallDetails());
             assert oldItem == null;
         }
@@ -35,6 +39,9 @@ public class ContextTracker implements AutoCloseable {
 
     public void onClosed(IScopedInstrumentationAttributes ctx) {
         synchronized (lockObject) {
+            if (isClosed) {
+                return;
+            }
             var newExceptionStack = new ExceptionForStackTracingOnly();
             var oldCallDetails = scopedContextToCallDetails.get(ctx);
             assert oldCallDetails != null;
@@ -61,6 +68,7 @@ public class ContextTracker implements AutoCloseable {
     public void close() {
         synchronized (lockObject) {
             scopedContextToCallDetails.clear();
+            isClosed = true;
         }
     }
 }

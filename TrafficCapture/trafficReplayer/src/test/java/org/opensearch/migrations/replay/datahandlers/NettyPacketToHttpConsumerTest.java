@@ -184,6 +184,13 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         var stopFuture = sendingFactory.closeConnectionsAndShutdown();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @WrapWithNettyLeakDetection(repetitions = 1)
+    public void testMetricCountsFor_testThatConnectionsAreKeptAliveAndShared(boolean useTls) throws Exception {
+        testThatConnectionsAreKeptAliveAndShared(useTls);
         Thread.sleep(200); // let metrics settle down
         var allMetricData = rootContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
         long tcpOpenConnectionCount = allMetricData.stream().filter(md->md.getName().startsWith("tcpConnectionCount"))

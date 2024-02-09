@@ -41,7 +41,7 @@ public class TracingTest extends InstrumentationTest {
                     }
                     try (var ctx = httpCtx.createTransformationContext()) {
                     }
-                    try (var ctx = httpCtx.createScheduledContext(Instant.now().plus(Duration.ofSeconds(1)))) {
+                    try (var ctx = httpCtx.createScheduledContext(Instant.now())) {
                     }
                     try (var targetRequestCtx = httpCtx.createTargetRequestContext()) {
                         try (var ctx = targetRequestCtx.createHttpSendingContext()) {

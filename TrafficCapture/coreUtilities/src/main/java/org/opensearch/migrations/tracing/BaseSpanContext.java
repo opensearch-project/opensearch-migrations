@@ -23,6 +23,7 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
     public BaseSpanContext(S rootScope) {
         this.startNanoTime = System.nanoTime();
         this.rootInstrumentationScope = rootScope;
+        rootScope.onContextCreated(this);
     }
 
     protected static <T> AttributesBuilder addAttributeIfPresent(AttributesBuilder attributesBuilder,

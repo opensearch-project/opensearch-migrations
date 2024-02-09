@@ -299,7 +299,8 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         @Override
         public IReplayContexts.IScheduledContext createScheduledContext(Instant timestamp) {
-            return new ReplayContexts.ScheduledContext(this, timestamp);
+            return new ReplayContexts.ScheduledContext(this,
+                    Duration.between(Instant.now(), timestamp).toNanos());
         }
 
         @Override
@@ -516,11 +517,11 @@ public abstract class ReplayContexts extends IReplayContexts {
             extends DirectNestedSpanContext<RootReplayerContext, HttpTransactionContext,
                                             IReplayContexts.IReplayerHttpTransactionContext>
             implements IReplayContexts.IScheduledContext {
-        private final Instant scheduledFor;
+        private final long scheduledForNanoTime;
 
-        public ScheduledContext(HttpTransactionContext enclosingScope, Instant scheduledFor) {
+        public ScheduledContext(HttpTransactionContext enclosingScope, long scheduledForNanoTime) {
             super(enclosingScope);
-            this.scheduledFor = scheduledFor;
+            this.scheduledForNanoTime = scheduledForNanoTime;
             initializeSpan();
         }
 
@@ -544,7 +545,8 @@ public abstract class ReplayContexts extends IReplayContexts {
         @Override
         public void sendMeterEventsForEnd() {
             super.sendMeterEventsForEnd();
-            meterHistogramMillis(getMetrics().lag, Duration.between(scheduledFor, Instant.now()));
+            meterHistogramMillis(getMetrics().lag,
+                    Duration.ofNanos(Math.max(0, System.nanoTime() - scheduledForNanoTime)));
         }
     }
 

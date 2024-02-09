@@ -11,12 +11,13 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 public abstract class BaseNestedSpanContext
-        <S extends IInstrumentConstructor, T extends IScopedInstrumentationAttributes> extends BaseSpanContext<S> {
+        <S extends IInstrumentConstructor, T extends IScopedInstrumentationAttributes>
+        extends BaseSpanContext<S>
+{
     final T enclosingScope;
 
     protected BaseNestedSpanContext(S rootScope, T enclosingScope) {
         super(rootScope);
-        rootScope.onContextCreated(this);
         this.enclosingScope = enclosingScope;
     }
 
