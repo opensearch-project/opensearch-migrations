@@ -4,6 +4,7 @@ from .serializers import MigrationStatusSerializer
 import datetime
 import subprocess
 import os
+import sys
 
 def pretty_request(request):
     headers = ''
@@ -16,7 +17,7 @@ def pretty_request(request):
     return (
         '{method} HTTP/1.1\n'
         '{headers}\n'
-        '{body}'
+        '{body}\n'
     ).format(
         method=request.method,
         headers=headers,
@@ -26,7 +27,7 @@ def pretty_request(request):
 @api_view(['GET'])
 def migration_status(request):
 
-    print(pretty_request(request))
+    sys.stderr.write(pretty_request(request))
     data = {
         'status': 'Completed',
         'details': 'Migration completed successfully.',
@@ -44,7 +45,7 @@ def migration_status(request):
 def start_migration(request):
 
     # TODO remove temporary mocking
-    print(pretty_request(request))
+    sys.stderr.write(pretty_request(request))
     data = {
         'status': 'Started',
         'details': 'Migration started.',
@@ -76,7 +77,7 @@ def start_migration(request):
 @api_view(['POST'])
 def stop_migration(request):
     # TODO remove temporary mocking
-    print(pretty_request(request))
+    sys.stderr.write(pretty_request(request))
     data = {
         'status': 'Stopped',
         'details': 'Migration stopped.',
