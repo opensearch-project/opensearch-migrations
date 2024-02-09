@@ -40,7 +40,7 @@ allprojects {
         jvmArgs '-ea'
 
         jacoco {
-            enabled = false
+            enabled = true
         }
         maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
     }
