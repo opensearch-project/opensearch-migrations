@@ -61,6 +61,7 @@ exporters:
   awsemf:
     namespace: 'TrafficCaptureReplay'
   awsxray:
+    index_all_attributes: true
   prometheus:
     endpoint: "0.0.0.0:8889"
     send_timestamps: true

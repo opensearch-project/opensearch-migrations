@@ -45,6 +45,7 @@ exporters:
   awsemf:
     namespace: 'TrafficCaptureReplay'
   awsxray:
+    index_all_attributes: true
 service:
   extensions: [health_check]
   pipelines:

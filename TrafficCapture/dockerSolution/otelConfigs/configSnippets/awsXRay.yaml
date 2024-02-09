@@ -1,5 +1,6 @@
 exporters:
   awsxray:
+    index_all_attributes: true
 
 service:
   pipelines:
