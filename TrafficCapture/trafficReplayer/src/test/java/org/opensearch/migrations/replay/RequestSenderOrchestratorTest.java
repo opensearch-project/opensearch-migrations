@@ -25,7 +25,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
-@Execution(ExecutionMode.SAME_THREAD)
 class RequestSenderOrchestratorTest extends InstrumentationTest {
 
     public static final int NUM_REQUESTS_TO_SCHEDULE = 20;

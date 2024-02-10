@@ -6,6 +6,8 @@ import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -41,6 +43,7 @@ import java.util.stream.Collectors;
 // to the test server, a shutdown will stop those work threads without letting them flush through all of their work
 // (since that could take a very long time) and some of the work might have been followed by resource releases.
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
+@Execution(ExecutionMode.SAME_THREAD)
 public class FullTrafficReplayerTest extends InstrumentationTest {
 
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
@@ -74,6 +77,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             "-1,true",
     })
     @Tag("longTest")
+    @Execution(ExecutionMode.SAME_THREAD)
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
@@ -91,7 +95,6 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(),
                 trafficSourceSupplier.nextReadCursor.get());
-        httpServer.close();
         log.info("done");
     }
 

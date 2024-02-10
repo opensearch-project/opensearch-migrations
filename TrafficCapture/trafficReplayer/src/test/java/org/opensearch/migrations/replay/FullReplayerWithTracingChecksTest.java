@@ -34,8 +34,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
-@WrapWithNettyLeakDetection(disableLeakChecks = true, repetitions = 1)
-@Execution(ExecutionMode.SAME_THREAD)
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
 
     @Override

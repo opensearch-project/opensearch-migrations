@@ -49,7 +49,6 @@ import java.util.stream.Stream;
 
 @Slf4j
 @WrapWithNettyLeakDetection
-@Execution(ExecutionMode.SAME_THREAD)
 public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";

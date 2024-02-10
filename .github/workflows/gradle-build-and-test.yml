@@ -22,14 +22,13 @@ jobs:
         with:
           gradle-version: 8.6
           gradle-home-cache-cleanup: true
-          cache-read-only: false
 
       - name: Run Gradle Build
-        run: ./gradlew build -x test
+        run: ./gradlew build -x test --scan --info
         working-directory: TrafficCapture
 
       - name: Run Tests with Coverage
-        run: ./gradlew jacocoTestReport --max-workers=1 --info --scan
+        run: ./gradlew jacocoTestReport --scan --info
         working-directory: TrafficCapture
 
       - name: Upload to Codecov

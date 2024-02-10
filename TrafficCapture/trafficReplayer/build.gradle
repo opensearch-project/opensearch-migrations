@@ -120,14 +120,13 @@ jar {
     }
 }
 
-// TODO: Fix and Enable Parallel Execution for junit trafficReplayer tests
+// TODO: Fix Parallel Execution for junit trafficReplayer tests to eliminate forkEvery
 test {
-    useJUnitPlatform {
-        systemProperty 'junit.jupiter.execution.parallel.mode.default', "same_thread"
-        systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
-    }
+    forkEvery(1)
 }
 
 slowTest {
     forkEvery(1)
+    maxHeapSize = "1024m"
+    jvmArgs '-Xmx1024m', '-Xms256m'
 }
