@@ -102,6 +102,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
                 rootContext -> new SentinelSensingTrafficSource(
                         new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(), TEST_TOPIC_NAME,
                                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
+        httpServer.close();
         log.info("done");
     }
 

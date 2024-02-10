@@ -2,6 +2,8 @@ package org.opensearch.migrations.tracing;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 
 public class InstrumentationTest {
 

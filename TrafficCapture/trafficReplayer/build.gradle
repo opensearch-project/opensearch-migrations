@@ -123,12 +123,11 @@ jar {
 // TODO: Fix and Enable Parallel Execution for junit trafficReplayer tests
 test {
     useJUnitPlatform {
-        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        systemProperty 'junit.jupiter.execution.parallel.mode.default', "same_thread"
+        systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
     }
 }
 
 slowTest {
-    useJUnitPlatform {
-        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
-    }
+    forkEvery(1)
 }

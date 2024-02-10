@@ -15,19 +15,21 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: '11'
-          distribution: 'adopt'
+          distribution: 'corretto'
 
       - name: Setup Gradle
-        uses: gradle/gradle-build-action@v3
+        uses: gradle/actions/setup-gradle@v3
         with:
+          gradle-version: 8.6
           gradle-home-cache-cleanup: true
+          cache-read-only: false
 
       - name: Run Gradle Build
         run: ./gradlew build -x test
         working-directory: TrafficCapture
 
       - name: Run Tests with Coverage
-        run: ./gradlew jacocoTestReport --info
+        run: ./gradlew jacocoTestReport --max-workers=1 --info --scan
         working-directory: TrafficCapture
 
       - name: Upload to Codecov

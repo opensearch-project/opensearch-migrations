@@ -10,8 +10,11 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.internal.matchers.Same;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
@@ -46,6 +49,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 @WrapWithNettyLeakDetection
+@Execution(ExecutionMode.SAME_THREAD)
 public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";

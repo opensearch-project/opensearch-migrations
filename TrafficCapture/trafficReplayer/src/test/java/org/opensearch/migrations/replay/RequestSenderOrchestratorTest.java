@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -23,6 +25,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
+@Execution(ExecutionMode.SAME_THREAD)
 class RequestSenderOrchestratorTest extends InstrumentationTest {
 
     public static final int NUM_REQUESTS_TO_SCHEDULE = 20;
@@ -30,6 +33,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
 
     @Test
     @Tag("longTest")
+    @Execution(ExecutionMode.SAME_THREAD)
     public void testThatSchedulingWorks() throws Exception {
         var httpServer = SimpleHttpServer.makeServer(false,
                 r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)));
@@ -77,6 +81,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             }
         }
         closeFuture.get();
+        httpServer.close();
     }
 
     private List<ByteBuf> makeRequest(int i) {

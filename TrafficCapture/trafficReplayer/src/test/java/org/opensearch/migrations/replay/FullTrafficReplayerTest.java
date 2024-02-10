@@ -91,6 +91,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(),
                 trafficSourceSupplier.nextReadCursor.get());
+        httpServer.close();
         log.info("done");
     }
 
