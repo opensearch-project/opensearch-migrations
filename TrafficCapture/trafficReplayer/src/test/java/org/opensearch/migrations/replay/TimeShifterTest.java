@@ -8,8 +8,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 class TimeShifterTest {
 

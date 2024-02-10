@@ -4,10 +4,10 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
-import org.opensearch.migrations.replay.TestRequestKey;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.Map;
 
 @WrapWithNettyLeakDetection
-class HttpJsonTransformingConsumerTest {
+class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     @Test
     public void testPassThroughSinglePacketPost() throws Exception {
         final var dummyAggregatedResponse =
@@ -27,8 +27,8 @@ class HttpJsonTransformingConsumerTest {
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(new TransformationLoader()
                         .getTransformerFactoryLoader(null),
-                        null, testPacketCapture, "TEST",
-                        TestRequestKey.getTestConnectionRequestId(0));
+                        null, testPacketCapture,
+                        rootContext.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -48,8 +48,8 @@ class HttpJsonTransformingConsumerTest {
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(
                         new TransformationLoader().getTransformerFactoryLoader("test.domain"),
-                        null, testPacketCapture, "TEST",
-                        TestRequestKey.getTestConnectionRequestId(0));
+                        null, testPacketCapture,
+                        rootContext.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -73,9 +73,8 @@ class HttpJsonTransformingConsumerTest {
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(
                         new TransformationLoader().getTransformerFactoryLoader("test.domain"),
-                        RemovingAuthTransformerFactory.instance,
-                        testPacketCapture, "TEST",
-                        TestRequestKey.getTestConnectionRequestId(0));
+                        RemovingAuthTransformerFactory.instance, testPacketCapture,
+                        rootContext.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/get_withAuthHeader.txt")) {
@@ -114,7 +113,7 @@ class HttpJsonTransformingConsumerTest {
         });
         var transformingHandler =
                 new HttpJsonTransformingConsumer<AggregatedRawResponse>(complexTransformer, null,
-                        testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestId(0));
+                        testPacketCapture, rootContext.getTestConnectionRequestContext(0));
         byte[] testBytes;
         try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
                 "/requests/raw/post_formUrlEncoded_withFixedLength.txt")) {
@@ -131,6 +130,4 @@ class HttpJsonTransformingConsumerTest {
         Assertions.assertInstanceOf(NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException.class,
                 returnedResponse.error);
     }
-
-
 }

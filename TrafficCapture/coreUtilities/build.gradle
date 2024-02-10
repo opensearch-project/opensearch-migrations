@@ -22,6 +22,7 @@ plugins {
 //    id 'checkstyle'
     id "io.freefair.lombok" version "8.0.1"
     id 'java'
+    id 'java-test-fixtures'
 }
 
 //spotbugs {
@@ -40,6 +41,8 @@ repositories {
 }
 
 dependencies {
+    api platform("io.opentelemetry:opentelemetry-bom:1.34.1")
+
     implementation project(':captureProtobufs')
 
     implementation "com.google.protobuf:protobuf-java:3.22.2"
@@ -51,17 +54,27 @@ dependencies {
 
     // Log4j
     implementation(platform("org.apache.logging.log4j:log4j-bom:2.21.1"))
-    implementation("org.apache.logging.log4j:log4j-api")
-    implementation("org.apache.logging.log4j:log4j-core")
-    implementation("org.apache.logging.log4j:log4j-slf4j2-impl:2.20.0")
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
 
     // OpenTelemetry core
-    implementation("io.opentelemetry:opentelemetry-sdk:1.30.0")
-    implementation("io.opentelemetry:opentelemetry-exporter-otlp:1.30.0")
-    implementation("io.opentelemetry:opentelemetry-semconv:1.30.1-alpha")
+    api group: 'io.opentelemetry', name: 'opentelemetry-api'
+    api group: 'io.opentelemetry', name: 'opentelemetry-sdk'
+    implementation group: 'io.opentelemetry', name: 'opentelemetry-exporter-otlp'
+    implementation group: 'io.opentelemetry.instrumentation', name: 'opentelemetry-log4j-appender-2.17', version: '1.30.0-alpha'
+    implementation group: 'io.opentelemetry.semconv', name: 'opentelemetry-semconv', version: '1.23.1-alpha'
 
     // OpenTelemetry log4j appender
     implementation("io.opentelemetry.instrumentation:opentelemetry-log4j-appender-2.17:1.30.0-alpha")
+
+    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-api'
+    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk'
+    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
+    testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
+    testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-api'
+    testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
+    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 }
 
 configurations.all {

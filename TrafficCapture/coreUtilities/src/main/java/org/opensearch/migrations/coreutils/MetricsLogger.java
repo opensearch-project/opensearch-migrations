@@ -1,15 +1,8 @@
 package org.opensearch.migrations.coreutils;
 
-import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.exporter.otlp.logs.OtlpGrpcLogRecordExporter;
-import io.opentelemetry.instrumentation.log4j.appender.v2_17.OpenTelemetryAppender;
-import io.opentelemetry.sdk.OpenTelemetrySdk;
-import io.opentelemetry.sdk.logs.SdkLoggerProvider;
-import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor;
-import io.opentelemetry.sdk.resources.Resource;
-import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
-import org.slf4j.Logger;
+
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Slf4j
@@ -27,31 +20,6 @@ class MetricsLogger {
     public MetricsLogger(String source) {
         logger = LoggerFactory.getLogger(String.format("MetricsLogger.%s", source));
     }
-
-    public static void initializeOpenTelemetry(String serviceName, String collectorEndpoint) {
-        OpenTelemetrySdk sdk =
-                OpenTelemetrySdk.builder()
-                        .setLoggerProvider(
-                                SdkLoggerProvider.builder()
-                                        .setResource(
-                                                Resource.getDefault().toBuilder()
-                                                        .put(ResourceAttributes.SERVICE_NAME, serviceName)
-                                                        .build())
-                                        .addLogRecordProcessor(
-                                                BatchLogRecordProcessor.builder(
-                                                                OtlpGrpcLogRecordExporter.builder()
-                                                                        .setEndpoint(collectorEndpoint)
-                                                                        .build())
-                                                        .build())
-                                        .build())
-                        .build();
-        GlobalOpenTelemetry.set(sdk);
-
-        // Add hook to close SDK, which flushes logs
-        Runtime.getRuntime().addShutdownHook(new Thread(sdk::close));
-        OpenTelemetryAppender.install(GlobalOpenTelemetry.get());
-    }
-
 
     /**
      * To indicate a successful event (e.g. data received or data sent) that may be a helpful
@@ -84,6 +52,7 @@ class MetricsLogger {
      * there is a failure that isn't indicated by an Exception being thrown.
      */
     public MetricsLogBuilder atError(MetricsEvent event) {
+
         return new MetricsLogBuilder(logger).atError(event);
     }
 

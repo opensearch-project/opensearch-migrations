@@ -11,30 +11,40 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
+import io.opentelemetry.context.ContextKey;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class ClientConnectionPool {
-
     public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
     private final URI serverUri;
     private final SslContext sslContext;
     public final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<String, ConnectionReplaySession> connectionId2ChannelCache;
 
-    private final AtomicInteger numConnectionsCreated = new AtomicInteger(0);
-    private final AtomicInteger numConnectionsClosed = new AtomicInteger(0);
+    public ConnectionReplaySession buildConnectionReplaySession(final IReplayContexts.IChannelKeyContext channelKeyCtx) {
+        if (eventLoopGroup.isShuttingDown()) {
+            throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
+        }
+        log.trace("creating connection session");
+        // arguably the most only thing that matters here is associating this item with an
+        // EventLoop (thread).  As the channel needs to be recycled, we'll come back to the
+        // event loop that was tied to the original channel to bind all future channels to
+        // the same event loop.  That means that we don't have to worry about concurrent
+        // accesses/changes to the OTHER value that we're storing within the cache.
+        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx);
+    }
 
     public ClientConnectionPool(URI serverUri, SslContext sslContext, int numThreads) {
         this.serverUri = serverUri;
@@ -42,36 +52,23 @@ public class ClientConnectionPool {
         this.eventLoopGroup =
                 new NioEventLoopGroup(numThreads, new DefaultThreadFactory(TARGET_CONNECTION_POOL_NAME));
 
-        connectionId2ChannelCache = CacheBuilder.newBuilder().build(new CacheLoader<>() {
-            @Override
-            public ConnectionReplaySession load(final String s) {
-                if (eventLoopGroup.isShuttingDown()) {
-                    throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
-                }
-                numConnectionsCreated.incrementAndGet();
-                log.trace("creating connection session");
-                // arguably the most only thing that matters here is associating this item with an
-                // EventLoop (thread).  As the channel needs to be recycled, we'll come back to the
-                // event loop that was tied to the original channel to bind all future channels to
-                // the same event loop.  That means that we don't have to worry about concurrent
-                // accesses/changes to the OTHER value that we're storing within the cache.
-                return new ConnectionReplaySession(eventLoopGroup.next());
-            }
-        });
+        connectionId2ChannelCache = CacheBuilder.newBuilder().build(CacheLoader.from(key -> {
+            throw new UnsupportedOperationException("Use Cache.get(key, callable) instead");
+        }));
     }
 
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getResilientClientChannelProducer(EventLoop eventLoop, String diagnosticLabel) {
+    getResilientClientChannelProducer(EventLoop eventLoop, IReplayContexts.IChannelKeyContext connectionContext) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var clientConnectionChannelCreatedFuture =
                             new StringTrackableCompletableFuture<ChannelFuture>(new CompletableFuture<>(),
                                     () -> "waiting for createClientConnection to finish");
                     var channelFuture = NettyPacketToHttpConsumer.createClientConnection(eventLoop,
-                            sslContext, serverUri, diagnosticLabel);
+                            sslContext, serverUri, connectionContext);
                     channelFuture.addListener(f -> {
                         log.atInfo().setMessage(()->
-                                "New network connection result for " + diagnosticLabel + "=" + f.isSuccess()).log();
+                                "New network connection result for " + connectionContext + "=" + f.isSuccess()).log();
                         if (f.isSuccess()) {
                             clientConnectionChannelCreatedFuture.future.complete(channelFuture);
                         } else {
@@ -80,14 +77,6 @@ public class ClientConnectionPool {
                     });
                     return clientConnectionChannelCreatedFuture;
                 });
-    }
-
-    public int getNumConnectionsCreated() {
-        return numConnectionsCreated.get();
-    }
-
-    public int getNumConnectionsClosed() {
-        return numConnectionsClosed.get();
     }
 
     public Future shutdownNow() {
@@ -125,7 +114,8 @@ public class ClientConnectionPool {
                 () -> "Final shutdown for " + this.getClass().getSimpleName());
     }
 
-    public void closeConnection(String connId) {
+    public void closeConnection(IReplayContexts.IChannelKeyContext ctx) {
+        var connId = ctx.getConnectionId();
         log.atInfo().setMessage(() -> "closing connection for " + connId).log();
         var channelsFuture = connectionId2ChannelCache.getIfPresent(connId);
         if (channelsFuture != null) {
@@ -135,9 +125,8 @@ public class ClientConnectionPool {
     }
 
     public Future<ConnectionReplaySession>
-    submitEventualSessionGet(ISourceTrafficChannelKey channelKey, boolean ignoreIfNotPresent) {
-        ConnectionReplaySession channelFutureAndSchedule =
-                getCachedSession(channelKey, ignoreIfNotPresent);
+    submitEventualSessionGet(IReplayContexts.IChannelKeyContext ctx, boolean ignoreIfNotPresent) {
+        ConnectionReplaySession channelFutureAndSchedule = getCachedSession(ctx, ignoreIfNotPresent);
         if (channelFutureAndSchedule == null) {
             var rval = new DefaultPromise<ConnectionReplaySession>(eventLoopGroup.next());
             rval.setSuccess(null);
@@ -146,20 +135,21 @@ public class ClientConnectionPool {
         return channelFutureAndSchedule.eventLoop.submit(() -> {
             if (channelFutureAndSchedule.getChannelFutureFuture() == null) {
                 channelFutureAndSchedule.setChannelFutureFuture(
-                        getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop,
-                                channelKey.getConnectionId()));
+                        getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop, ctx));
             }
             return channelFutureAndSchedule;
         });
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(ISourceTrafficChannelKey channelKey, boolean dontCreate) {
-        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKey.getConnectionId()) :
-                connectionId2ChannelCache.get(channelKey.getConnectionId());
-        if (crs != null) {
-            crs.setChannelId(channelKey);
-        }
+    public ConnectionReplaySession getCachedSession(IReplayContexts.IChannelKeyContext channelKeyCtx,
+                                                    boolean dontCreate) {
+
+        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKeyCtx.getConnectionId()) :
+                connectionId2ChannelCache.get(channelKeyCtx.getConnectionId(),
+                        () -> buildConnectionReplaySession(channelKeyCtx));
+        log.atTrace().setMessage(()->"returning ReplaySession=" + crs + " for " + channelKeyCtx.getConnectionId() +
+                " from " + channelKeyCtx).log();
         return crs;
     }
 
@@ -169,11 +159,11 @@ public class ClientConnectionPool {
                 new StringTrackableCompletableFuture<Channel>(new CompletableFuture<>(),
                         ()->"Waiting for closeFuture() on channel");
 
-        numConnectionsClosed.incrementAndGet();
         channelAndFutureWork.getChannelFutureFuture().map(cff->cff
                         .thenAccept(cf-> {
                             cf.channel().close()
                                     .addListener(closeFuture -> {
+                                        channelAndFutureWork.getSocketContext().close();
                                         if (closeFuture.isSuccess()) {
                                             channelClosedFuture.future.complete(channelAndFutureWork.getInnerChannelFuture().channel());
                                         } else {
@@ -183,7 +173,7 @@ public class ClientConnectionPool {
                             if (channelAndFutureWork.hasWorkRemaining()) {
                                 log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
                                         "(last associated with connection=" +
-                                        channelAndFutureWork.getChannelId() +
+                                        channelAndFutureWork.getSocketContext() +
                                         ").  " + channelAndFutureWork.calculateSizeSlowly() +
                                         " requests that were enqueued won't be run").log();
                             }

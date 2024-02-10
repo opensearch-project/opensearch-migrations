@@ -1,9 +1,12 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import com.google.protobuf.Timestamp;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.slf4j.event.Level;
 
@@ -17,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * The BlockingTrafficSource class implements ITrafficCaptureSource and wraps another instance.
@@ -41,11 +45,10 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * Limit the number of readers to one at a time and only if we haven't yet maxed out our time buffer
      */
     private final Semaphore readGate;
+    @Getter
     private final Duration bufferTimeWindow;
 
-
-    public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying,
-                                 Duration bufferTimeWindow) {
+    public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying, Duration bufferTimeWindow) {
         this.underlyingSource = underlying;
         this.stopReadingAtRef = new AtomicReference<>(Instant.EPOCH);
         this.lastTimestampSecondsRef = new AtomicReference<>(Instant.EPOCH);
@@ -77,47 +80,47 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         }
     }
 
-    public Duration getBufferTimeWindow() {
-        return bufferTimeWindow;
-    }
-
     /**
      * Reads the next chunk that is available before the current stopReading barrier.  However,
      * that barrier isn't meant to be a tight barrier with immediate effect.
-     *
-     * @return
      */
-    @Override
     public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk() {
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier) {
+        var readContext = readChunkContextSupplier.get();
         log.info("BlockingTrafficSource::readNext");
         var trafficStreamListFuture = CompletableFuture
-                .supplyAsync(this::blockIfNeeded, task -> new Thread(task).start())
-                .thenCompose(v->{
+                .supplyAsync(() -> blockIfNeeded(readContext), task -> new Thread(task).start())
+                .thenCompose(v -> {
                     log.info("BlockingTrafficSource::composing");
-                    return underlyingSource.readNextTrafficStreamChunk();
-                });
-        return trafficStreamListFuture.whenComplete((v,t)->{
+                    return underlyingSource.readNextTrafficStreamChunk(()->readContext);
+                })
+                .whenComplete((v,t)->readContext.close());
+        return trafficStreamListFuture.whenComplete((v, t) -> {
             if (t != null) {
                 return;
             }
-            var maxLocallyObservedTimestamp = v.stream().flatMap(tswk->tswk.getStream().getSubStreamList().stream())
-                    .map(tso->tso.getTs())
+            var maxLocallyObservedTimestamp = v.stream()
+                    .flatMap(tswk -> tswk.getStream().getSubStreamList().stream())
+                    .map(TrafficObservation::getTs)
                     .max(Comparator.comparingLong(Timestamp::getSeconds)
                             .thenComparingInt(Timestamp::getNanos))
                     .map(TrafficStreamUtils::instantFromProtoTimestamp)
                     .orElse(Instant.EPOCH);
             Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObservedTimestamp);
-            log.atTrace().setMessage(()->"end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
-                    +lastTimestampSecondsRef.get()).log();
+            log.atTrace().setMessage(() -> "end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
+                    + lastTimestampSecondsRef.get()).log();
         });
     }
 
-    private Void blockIfNeeded() {
+    private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext readContext) {
         if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
-        log.atInfo().setMessage(()->"stopReadingAtRef="+stopReadingAtRef+
-                " lastTimestampSecondsRef="+lastTimestampSecondsRef).log();
+        log.atInfo().setMessage(() -> "stopReadingAtRef=" + stopReadingAtRef +
+                " lastTimestampSecondsRef=" + lastTimestampSecondsRef).log();
+        ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
+            if (blockContext == null) {
+                blockContext = readContext.createBackPressureContext();
+            }
             try {
                 log.atInfo().setMessage("blocking until signaled to read the next chunk last={} stop={}")
                         .addArgument(lastTimestampSecondsRef.get())
@@ -125,21 +128,25 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                         .log();
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
-                    log.trace("acquring readGate semaphore (w/out timeout)");
-                    readGate.acquire();
+                    log.trace("acquiring readGate semaphore (w/out timeout)");
+                    try (var waitContext = blockContext.createWaitForSignalContext()) {
+                        readGate.acquire();
+                    }
                 } else {
                     var nextInstant = nextTouchOp.get();
                     final var nowTime = Instant.now();
                     var waitIntervalMs = Duration.between(nowTime, nextInstant).toMillis();
-                    log.atDebug().setMessage(()->"Next touch at " + nextInstant +
-                            " ... in " + waitIntervalMs + "ms (now="+nowTime+")").log();
+                    log.atDebug().setMessage(() -> "Next touch at " + nextInstant +
+                            " ... in " + waitIntervalMs + "ms (now=" + nowTime + ")").log();
                     if (waitIntervalMs <= 0) {
-                        underlyingSource.touch();
+                        underlyingSource.touch(blockContext);
                     } else {
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
-                        log.atTrace().setMessage(()->"acquring readGate semaphore with timeout="+waitIntervalMs).log();
-                        readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
+                        log.atTrace().setMessage(() -> "acquring readGate semaphore with timeout=" + waitIntervalMs).log();
+                        try (var waitContext = blockContext.createWaitForSignalContext()) {
+                            readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
+                        }
                     }
                 }
             } catch (InterruptedException e) {
@@ -148,12 +155,20 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 break;
             }
         }
+        if (blockContext != null) {
+            blockContext.close();
+        }
         return null;
     }
 
     @Override
-    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
-        underlyingSource.commitTrafficStream(trafficStreamKey);
+    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
+        var commitResult = underlyingSource.commitTrafficStream(trafficStreamKey);
+        if (commitResult == CommitResult.AfterNextRead) {
+            readGate.drainPermits();
+            readGate.release();
+        }
+        return commitResult;
     }
 
     @Override

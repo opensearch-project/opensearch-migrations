@@ -11,9 +11,11 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -79,7 +81,7 @@ public class TestUtils {
                                           List<String> stringParts,
                                           StringBuilder referenceStringAccumulator,
                                           IntFunction<String> headersGenerator) {
-        var contentLength = stringParts.stream().mapToInt(s->s.length()).sum();
+        var contentLength = stringParts.stream().mapToInt(String::length).sum();
         String headers = headersGenerator.apply(contentLength) + "\r\n";
         referenceStringAccumulator.append(headers);
         return chainedWriteHeadersAndDualWritePayloadParts(packetConsumer, stringParts, referenceStringAccumulator, headers);
@@ -117,20 +119,22 @@ public class TestUtils {
         try (var baos = new ByteArrayOutputStream()) {
             var bb = fullRequest.content();
             bb.readBytes(baos, bb.readableBytes());
-            return new String(baos.toByteArray(), StandardCharsets.UTF_8);
+            return baos.toString(StandardCharsets.UTF_8);
         }
     }
-    static void runPipelineAndValidate(IAuthTransformerFactory authTransformer,
+    static void runPipelineAndValidate(TestContext rootContext,
+                                       IAuthTransformerFactory authTransformer,
                                        String extraHeaders,
                                        List<String> stringParts,
                                        DefaultHttpHeaders expectedRequestHeaders,
                                        Function<StringBuilder, String> expectedOutputGenerator)
             throws IOException, ExecutionException, InterruptedException {
-        runPipelineAndValidate(x -> x,
+        runPipelineAndValidate(rootContext, x -> x,
                 authTransformer, extraHeaders, stringParts, expectedRequestHeaders, expectedOutputGenerator);
     }
 
-    static void runPipelineAndValidate(IJsonTransformer transformer,
+    static void runPipelineAndValidate(TestContext rootContext,
+                                       IJsonTransformer transformer,
                                        IAuthTransformerFactory authTransformer,
                                        String extraHeaders,
                                        List<String> stringParts,
@@ -141,7 +145,7 @@ public class TestUtils {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
                 new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null));
         var transformingHandler = new HttpJsonTransformingConsumer<>(transformer, authTransformer, testPacketCapture,
-                "TEST", TestRequestKey.getTestConnectionRequestId(0));
+                rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0));
 
         var contentLength = stringParts.stream().mapToInt(String::length).sum();
         var headerString = "GET / HTTP/1.1\r\n" +

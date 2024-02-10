@@ -16,12 +16,9 @@ import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
-import org.opensearch.migrations.replay.TestRequestKey;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TransformationLoader;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
@@ -29,6 +26,8 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
@@ -47,7 +46,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 @WrapWithNettyLeakDetection
-public class NettyPacketToHttpConsumerTest {
+public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
 
@@ -77,8 +76,8 @@ public class NettyPacketToHttpConsumerTest {
     @BeforeAll
     public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         testServers = Map.of(
-                false, SimpleHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeContext),
-                true, SimpleHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeContext));
+                false, SimpleHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeResponseContext),
+                true, SimpleHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeResponseContext));
     }
 
     @AfterAll
@@ -90,6 +89,11 @@ public class NettyPacketToHttpConsumerTest {
                 throw Lombok.sneakyThrow(e);
             }
         });
+    }
+
+    @Override
+    protected TestContext makeInstrumentationContext() {
+        return TestContext.withTracking(false, true);
     }
 
     @Test
@@ -112,7 +116,7 @@ public class NettyPacketToHttpConsumerTest {
         "User-Agent", "UnitTest").entrySet().stream());
     }
 
-    private static SimpleHttpResponse makeContext(HttpFirstLine request) {
+    private static SimpleHttpResponse makeResponseContext(HttpFirstLine request) {
         var headers = Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
@@ -128,9 +132,11 @@ public class NettyPacketToHttpConsumerTest {
             var testServer = testServers.get(useTls);
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-            var nphc = new NettyPacketToHttpConsumer(new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
-                    testServer.localhostEndpoint(), sslContext, "unitTest"+i,
-                    TestRequestKey.getTestConnectionRequestId(0));
+            var nphc = new NettyPacketToHttpConsumer(
+                    new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
+                    testServer.localhostEndpoint(),
+                    sslContext,
+                    rootContext.getTestConnectionRequestContext(0));
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -145,10 +151,9 @@ public class NettyPacketToHttpConsumerTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
-            throws SSLException, ExecutionException, InterruptedException
-    {
+            throws SSLException, ExecutionException, InterruptedException {
         var testServer = testServers.get(useTls);
-        var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
+        var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
         var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
                 new TransformationLoader().getTransformerFactoryLoader(null), null);
@@ -158,15 +163,13 @@ public class NettyPacketToHttpConsumerTest {
                 new RequestSenderOrchestrator(
                         new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
                 new TestFlowController(), timeShifter);
-        for (int j=0; j<2; ++j) {
+        for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {
-                String connId = "TEST_" + j;
-                var trafficStreamKey = new PojoTrafficStreamKey("testNodeId", connId, 0);
+                var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
                 var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
-                        sendingFactory, Instant.now(), Instant.now(),
-                        new UniqueReplayerRequestKey(trafficStreamKey, 0, i),
-                        ()->Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-                log.info("requestFinishFuture="+requestFinishFuture);
+                        sendingFactory, ctx, Instant.now(), Instant.now(),
+                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                log.info("requestFinishFuture=" + requestFinishFuture);
                 var aggregatedResponse = requestFinishFuture.get();
                 log.debug("Got aggregated response=" + aggregatedResponse);
                 Assertions.assertNull(aggregatedResponse.getError());
@@ -181,8 +184,24 @@ public class NettyPacketToHttpConsumerTest {
         var stopFuture = sendingFactory.closeConnectionsAndShutdown();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
-        Assertions.assertEquals(2, sendingFactory.getNumConnectionsCreated());
-        Assertions.assertEquals(2, sendingFactory.getNumConnectionsClosed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @WrapWithNettyLeakDetection(repetitions = 1)
+    public void testMetricCountsFor_testThatConnectionsAreKeptAliveAndShared(boolean useTls) throws Exception {
+        testThatConnectionsAreKeptAliveAndShared(useTls);
+        Thread.sleep(200); // let metrics settle down
+        var allMetricData = rootContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
+        long tcpOpenConnectionCount = allMetricData.stream().filter(md->md.getName().startsWith("tcpConnectionCount"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        long connectionsOpenedCount = allMetricData.stream().filter(md->md.getName().startsWith("connectionsOpened"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        long connectionsClosedCount = allMetricData.stream().filter(md->md.getName().startsWith("connectionsClosed"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        Assertions.assertEquals(2, tcpOpenConnectionCount);
+        Assertions.assertEquals(2, connectionsOpenedCount);
+        Assertions.assertEquals(2, connectionsClosedCount);
     }
 
     private static String normalizeMessage(String s) {

@@ -1,20 +1,26 @@
 package org.opensearch.migrations.replay.traffic.source;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 public interface ITrafficCaptureSource extends Closeable {
 
-    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk();
+    enum CommitResult {
+        Immediate, AfterNextRead, BlockedByOtherCommits, Ignored
+    }
 
-    default void commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {}
+    CompletableFuture<List<ITrafficStreamWithKey>>
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier);
+
+    CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
 
     default void close() throws IOException {}
 
@@ -22,7 +28,7 @@ public interface ITrafficCaptureSource extends Closeable {
      * Keep-alive call to be used by the BlockingTrafficSource to keep this connection alive if
      * this is required.
      */
-    default void touch() {}
+    default void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {}
 
     /**
      * @return The time that the next call to touch() must be completed for this source to stay

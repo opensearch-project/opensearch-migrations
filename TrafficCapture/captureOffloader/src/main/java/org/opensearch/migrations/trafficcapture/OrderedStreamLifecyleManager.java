@@ -11,5 +11,5 @@ public abstract class OrderedStreamLifecyleManager<T> implements StreamLifecycle
     }
 
     protected abstract CompletableFuture<T> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder,
-                                                                    int index);
+                                                               int index);
 }
