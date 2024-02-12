@@ -41,6 +41,11 @@ dependencies {
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':captureOffloader'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java', version: '2.1.7'
+    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.0'
+    testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.0'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.0'
+    testImplementation group: 'org.testcontainers', name: 'toxiproxy', version: '1.19.0'
 }
 
 tasks.withType(Tar){
