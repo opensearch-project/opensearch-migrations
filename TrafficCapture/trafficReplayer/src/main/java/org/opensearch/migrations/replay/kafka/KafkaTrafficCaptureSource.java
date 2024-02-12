@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +12,11 @@ import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamWithKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -31,9 +36,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 /**
  * Adapt a Kafka stream into a TrafficCaptureSource.
@@ -63,7 +67,6 @@ import java.util.stream.StreamSupport;
  */
 @Slf4j
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
-
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
     // see https://stackoverflow.com/questions/39730126/difference-between-session-timeout-ms-and-max-poll-interval-ms-for-kafka-0-10
     public static final String DEFAULT_POLL_INTERVAL_MS = "60000";
@@ -74,38 +77,55 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final ExecutorService kafkaExecutor;
     private final AtomicLong trafficStreamsRead;
     private final KafkaBehavioralPolicy behavioralPolicy;
+    private final ChannelContextManager channelContextManager;
 
-    public KafkaTrafficCaptureSource(Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
-        this(kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
+    public KafkaTrafficCaptureSource(@NonNull RootReplayerContext globalContext,
+                                     Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
+        this(globalContext, kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
     }
 
-    public KafkaTrafficCaptureSource(Consumer<String, byte[]> kafkaConsumer,
+    public KafkaTrafficCaptureSource(@NonNull RootReplayerContext globalContext,
+                                     Consumer<String, byte[]> kafkaConsumer,
                                      @NonNull String topic,
                                      Duration keepAliveInterval,
                                      Clock clock,
                                      @NonNull KafkaBehavioralPolicy behavioralPolicy)
     {
-        trackingKafkaConsumer = new TrackingKafkaConsumer(kafkaConsumer, topic, keepAliveInterval, clock);
+        this.channelContextManager = new ChannelContextManager(globalContext);
+        trackingKafkaConsumer = new TrackingKafkaConsumer(globalContext, kafkaConsumer, topic, keepAliveInterval, clock,
+                this::onKeyFinishedCommitting);
         trafficStreamsRead = new AtomicLong();
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
-        kafkaExecutor = Executors.newSingleThreadExecutor();
+        kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
     }
 
-    public static KafkaTrafficCaptureSource buildKafkaConsumer(@NonNull String brokers,
-                                                               @NonNull String topic,
-                                                               @NonNull String groupId,
-                                                               boolean enableMSKAuth,
-                                                               String propertyFilePath,
-                                                               @NonNull Clock clock,
-                                                               @NonNull KafkaBehavioralPolicy behavioralPolicy)
+    private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
+        var looseParentScope = trafficStreamKey.getTrafficStreamsContext().getEnclosingScope();
+        if (!(looseParentScope instanceof ReplayContexts.KafkaRecordContext)) {
+            throw new IllegalArgumentException("Expected parent context of type " + ReplayContexts.KafkaRecordContext.class +
+                    " instead of " + looseParentScope + " (of type=" + looseParentScope.getClass() + ")");
+        }
+        var kafkaCtx = (ReplayContexts.KafkaRecordContext) looseParentScope;
+        kafkaCtx.close();
+        channelContextManager.releaseContextFor(kafkaCtx.getImmediateEnclosingScope());
+    }
+
+    public static KafkaTrafficCaptureSource buildKafkaSource(@NonNull RootReplayerContext globalContext,
+                                                             @NonNull String brokers,
+                                                             @NonNull String topic,
+                                                             @NonNull String groupId,
+                                                             boolean enableMSKAuth,
+                                                             String propertyFilePath,
+                                                             @NonNull Clock clock,
+                                                             @NonNull KafkaBehavioralPolicy behavioralPolicy)
             throws IOException
     {
         var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
         kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, DEFAULT_POLL_INTERVAL_MS);
         var pollPeriod = Duration.ofMillis(Long.valueOf((String)kafkaProps.get(MAX_POLL_INTERVAL_KEY)));
         var keepAlivePeriod = getKeepAlivePeriodFromPollPeriod(pollPeriod);
-        return new KafkaTrafficCaptureSource(new KafkaConsumer<>(kafkaProps),
+        return new KafkaTrafficCaptureSource(globalContext, new KafkaConsumer<>(kafkaProps),
                 topic, keepAlivePeriod, clock, behavioralPolicy);
     }
 
@@ -151,8 +171,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     @SneakyThrows
-    public void touch() {
-        CompletableFuture.runAsync(()->trackingKafkaConsumer.touch(), kafkaExecutor).get();
+    public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
+        CompletableFuture.runAsync(()->trackingKafkaConsumer.touch(context), kafkaExecutor).get();
     }
 
     /**
@@ -167,18 +187,20 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     @SuppressWarnings("unchecked")
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk() {
+    public CompletableFuture<List<ITrafficStreamWithKey>>
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
         log.atTrace().setMessage("readNextTrafficStreamChunk()").log();
         return CompletableFuture.supplyAsync(() -> {
             log.atTrace().setMessage("async...readNextTrafficStreamChunk()").log();
-            return readNextTrafficStreamSynchronously();
+            return readNextTrafficStreamSynchronously(contextSupplier.get());
         }, kafkaExecutor);
     }
 
-    public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously() {
+    public List<ITrafficStreamWithKey>
+    readNextTrafficStreamSynchronously(ITrafficSourceContexts.IReadChunkContext context) {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
         try {
-            return trackingKafkaConsumer.getNextBatchOfRecords((offsetData,kafkaRecord) -> {
+            return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData,kafkaRecord) -> {
                         try {
                             TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
                             // Ensure we increment trafficStreamsRead even at a higher log level
@@ -190,8 +212,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
                             log.atTrace().setMessage(()->"Parsed traffic stream #" + trafficStreamsSoFar +
                                             ": " + offsetData + " " + ts).log();
-                            var key = new TrafficStreamKeyWithKafkaRecordId(ts, offsetData);
-                            return (ITrafficStreamWithKey) new PojoTrafficStreamWithKey(ts, key);
+                            var key = new TrafficStreamKeyWithKafkaRecordId(
+                                    tsk -> {
+                                        var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);
+                                        return channelContextManager.getGlobalContext()
+                                                .createTrafficStreamContextForKafkaSource(channelKeyCtx, kafkaRecord.key(),
+                                                kafkaRecord.serializedKeySize() + kafkaRecord.serializedValueSize());
+                                    },
+                                    ts, offsetData);
+                            return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key);
                         } catch (InvalidProtocolBufferException e) {
                             RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);
                             metricsLogger.atError(MetricsEvent.PARSING_TRAFFIC_STREAM_FROM_KAFKA_FAILED, recordError)
@@ -209,12 +238,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         if (!(trafficStreamKey instanceof TrafficStreamKeyWithKafkaRecordId)) {
             throw new IllegalArgumentException("Expected key of type "+TrafficStreamKeyWithKafkaRecordId.class+
                     " but received "+trafficStreamKey+" (of type="+trafficStreamKey.getClass()+")");
         }
-        trackingKafkaConsumer.commitKafkaKey((TrafficStreamKeyWithKafkaRecordId) trafficStreamKey);
+        return trackingKafkaConsumer.commitKafkaKey(trafficStreamKey, (TrafficStreamKeyWithKafkaRecordId) trafficStreamKey);
     }
 
     @Override

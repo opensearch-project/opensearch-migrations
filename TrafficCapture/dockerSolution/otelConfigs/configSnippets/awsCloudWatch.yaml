@@ -1,0 +1,8 @@
+exporters:
+  awsemf:
+    namespace: 'TrafficCaptureReplay'
+
+service:
+  pipelines:
+    metrics:
+      exporters: [ awsemf ]

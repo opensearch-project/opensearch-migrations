@@ -10,7 +10,9 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Tag;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -78,16 +80,18 @@ public class KafkaTestUtils {
 
     @SneakyThrows
     public static void writeTrafficStreamRecord(Producer<String, byte[]> kafkaProducer,
-                                                ITrafficStreamWithKey trafficStreamAndKey,
+                                                TrafficStream trafficStream,
                                                 String TEST_TOPIC_NAME,
                                                 String recordId) {
         while (true) {
             try {
-                var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStreamAndKey.getStream().toByteArray());
-                log.info("sending record with trafficStream=" + trafficStreamAndKey.getKey());
+                var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStream.toByteArray());
+                var tsKeyStr = TrafficChannelKeyFormatter.format(trafficStream.getNodeId(),
+                        trafficStream.getConnectionId());
+                log.info("sending record with trafficStream=" + tsKeyStr);
                 var sendFuture = kafkaProducer.send(record, (metadata, exception) -> {
                     log.atInfo().setCause(exception).setMessage(() -> "completed send of TrafficStream with key=" +
-                            trafficStreamAndKey.getKey() + " metadata=" + metadata).log();
+                            tsKeyStr + " metadata=" + metadata).log();
                 });
                 var recordMetadata = sendFuture.get();
                 log.info("finished publishing record... metadata=" + recordMetadata);

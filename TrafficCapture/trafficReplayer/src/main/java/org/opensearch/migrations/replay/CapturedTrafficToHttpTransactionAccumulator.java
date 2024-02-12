@@ -1,11 +1,14 @@
 package org.opensearch.migrations.replay;
 
+import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -52,7 +55,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
     private final ExpiringTrafficStreamMap liveStreams;
-    private final AccumulationCallbacks listener;
+    private final SpanWrappingAccumulationCallbacks listener;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -93,8 +96,44 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                 RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY);
                     }
                 });
-        this.listener = accumulationCallbacks;
+        this.listener = new SpanWrappingAccumulationCallbacks(accumulationCallbacks);
     }
+
+    @AllArgsConstructor
+    private static class SpanWrappingAccumulationCallbacks {
+        private final AccumulationCallbacks underlying;
+        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
+                                      @NonNull HttpMessageAndTimestamp request) {
+            requestCtx.close();
+            underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
+        }
+
+        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
+                                       @NonNull RequestResponsePacketPair rrpp) {
+            rrpp.getResponseContext().close();
+            underlying.onFullDataReceived(rrpp.getHttpTransactionContext(), rrpp);
+        }
+
+        public void onConnectionClose(@NonNull Accumulation accum,
+                                      RequestResponsePacketPair.ReconstructionStatus status,
+                                      @NonNull Instant when,
+                                      @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+            var tsCtx = accum.trafficChannelKey.getTrafficStreamsContext();
+            underlying.onConnectionClose(accum.numberOfResets.get(), tsCtx.getLogicalEnclosingScope(),
+                    status, when, trafficStreamKeysBeingHeld);
+        }
+
+        public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
+                                            IReplayContexts.ITrafficStreamsLifecycleContext tsCtx,
+                                            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+            underlying.onTrafficStreamsExpired(status, tsCtx.getLogicalEnclosingScope(), trafficStreamKeysBeingHeld);
+        }
+
+        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
+            var tsCtx = tsk.getTrafficStreamsContext();
+            underlying.onTrafficStreamIgnored(tsk.getTrafficStreamsContext());
+        }
+    };
 
     public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
     public int numberOfRequestsOnReusedConnections() { return reusedKeepAliveCounter.get(); }
@@ -123,17 +162,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
         var yetToBeSequencedTrafficStream = trafficStreamAndKey.getStream();
-        log.atTrace().setMessage(()->"Got trafficStream: "+summarizeTrafficStream(yetToBeSequencedTrafficStream)).log();
+        log.atTrace().setMessage(() -> "Got trafficStream: " + summarizeTrafficStream(yetToBeSequencedTrafficStream)).log();
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
         var tsk = trafficStreamAndKey.getKey();
-        var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k->createInitialAccumulation(trafficStreamAndKey));
+        var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k -> createInitialAccumulation(trafficStreamAndKey));
         var trafficStream = trafficStreamAndKey.getStream();
-        for (int i=0; i<trafficStream.getSubStreamCount(); ++i) {
+        for (int i = 0; i < trafficStream.getSubStreamCount(); ++i) {
             var o = trafficStream.getSubStreamList().get(i);
             var connectionStatus = addObservationToAccumulation(accum, tsk, o);
             if (CONNECTION_STATUS.CLOSED == connectionStatus) {
-                log.atInfo().setMessage(()->"Connection terminated: removing " + partitionId + ":" + connectionId +
+                log.atInfo().setMessage(() -> "Connection terminated: removing " + partitionId + ":" + connectionId +
                         " from liveStreams map").log();
                 liveStreams.remove(partitionId, connectionId);
                 break;
@@ -219,15 +258,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                                TrafficObservation observation,
                                                @NonNull ITrafficStreamKey trafficStreamKey,
                                                Instant timestamp) {
+        var originTimestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         if (observation.hasClose()) {
-            accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
-            rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
+            accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp)
+                    .holdTrafficStream(trafficStreamKey);
+            var heldTrafficStreams = getTrafficStreamsHeldByAccum(accum);
+            if (rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum)) {
+                heldTrafficStreams = List.of();
+            }
             closedConnectionCounter.incrementAndGet();
-            listener.onConnectionClose(accum.trafficChannelKey, accum.getIndexOfCurrentRequest(),
-                    RequestResponsePacketPair.ReconstructionStatus.COMPLETE, timestamp, getTrafficStreamsHeldByAccum(accum));
+            listener.onConnectionClose(accum, RequestResponsePacketPair.ReconstructionStatus.COMPLETE,
+                    timestamp, heldTrafficStreams);
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
-            accum.getOrCreateTransactionPair(trafficStreamKey).holdTrafficStream(trafficStreamKey);
+            accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp).holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             exceptionConnectionCounter.incrementAndGet();
             accum.resetForNextRequest();
@@ -248,11 +292,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         var connectionId = trafficStreamKey.getConnectionId();
+        var originTimestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         if (observation.hasRead()) {
             if (!accum.hasRrPair()) {
                 requestCounter.incrementAndGet();
             }
-            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey);
+            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
             log.atTrace().setMessage(() -> "Adding request data for accum[" + connectionId + "]=" + accum).log();
             rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             log.atTrace().setMessage(() -> "Added request data for accum[" + connectionId + "]=" + accum).log();
@@ -261,11 +306,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             handleEndOfRequest(accum);
         } else if (observation.hasReadSegment()) {
             log.atTrace().setMessage(()->"Adding request segment for accum[" + connectionId + "]=" + accum).log();
-            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey);
+            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
             if (rrPair.requestData == null) {
                 rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
                 requestCounter.incrementAndGet();
             }
+            rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
             log.atTrace().setMessage(()->"Added request segment for accum[" + connectionId + "]=" + accum).log();
         } else if (observation.hasSegmentEnd()) {
@@ -319,7 +365,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     private void handleDroppedRequestForAccumulation(Accumulation accum) {
         if (accum.hasRrPair()) {
-            accum.getRrPair().getTrafficStreamsHeld().forEach(listener::onTrafficStreamIgnored);
+            var rrPair = accum.getRrPair();
+            rrPair.getTrafficStreamsHeld().forEach(tsk->listener.onTrafficStreamIgnored(tsk));
         }
         log.atTrace().setMessage(()->"resetting to forget "+ accum.trafficChannelKey).log();
         accum.resetToIgnoreAndForgetCurrentRequest();
@@ -340,7 +387,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return false;
     }
 
-    private boolean  rotateAccumulationOnReadIfNecessary(String connectionId, Accumulation accum) {
+    private boolean rotateAccumulationOnReadIfNecessary(String connectionId, Accumulation accum) {
         if (rotateAccumulationIfNecessary(connectionId, accum)) {
             reusedKeepAliveCounter.incrementAndGet();
             return true;
@@ -354,26 +401,32 @@ public class CapturedTrafficToHttpTransactionAccumulator {
      */
     private boolean handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
-        var requestPacketBytes = accumulation.getRrPair().requestData;
+        var rrPair = accumulation.getRrPair();
+        var httpMessage = rrPair.requestData;
         metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, accumulation.getRequestKey().toString())
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, accumulation.getRequestKey().getTrafficStreamKey().getConnectionId()).emit();
-        assert (requestPacketBytes != null);
-        assert (!requestPacketBytes.hasInProgressSegment());
-        listener.onRequestReceived(accumulation.getRequestKey(), requestPacketBytes);
+                .setAttribute(MetricsAttributeKey.REQUEST_ID,
+                        rrPair.getRequestContext().getLogicalEnclosingScope().getReplayerRequestKey().toString())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
+                        rrPair.getRequestContext().getLogicalEnclosingScope().getLogicalEnclosingScope().getConnectionId()).emit();
+        assert (httpMessage != null);
+        assert (!httpMessage.hasInProgressSegment());
+        var requestCtx = rrPair.getRequestContext();
+        rrPair.rotateRequestGatheringToResponse();
+        listener.onRequestReceived(requestCtx, httpMessage);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;
     }
 
-    private void handleEndOfResponse(Accumulation accumulation,
-                                     RequestResponsePacketPair.ReconstructionStatus status) {
+    private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
-        metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, accumulation.getRequestKey().toString())
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, accumulation.getRequestKey().getTrafficStreamKey().getConnectionId()).emit();
         var rrPair = accumulation.getRrPair();
+        var requestKey = rrPair.getHttpTransactionContext().getReplayerRequestKey();
+        metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
+                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
+                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
+                        requestKey.getTrafficStreamKey().getConnectionId()).emit();
         rrPair.completionStatus = status;
-        listener.onFullDataReceived(accumulation.getRequestKey(), rrPair);
+        listener.onFullDataReceived(requestKey, rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
     }
@@ -381,7 +434,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public void close() {
         liveStreams.values().forEach(accum -> {
             requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
-            fireAccumulationsCallbacksAndClose(accum, RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY);
+            fireAccumulationsCallbacksAndClose(accum,
+                    RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY);
         });
         liveStreams.clear();
     }
@@ -404,6 +458,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                             "reproducing this to the target cluster.").log();
                     if (accumulation.hasRrPair()) {
                         listener.onTrafficStreamsExpired(status,
+                                accumulation.trafficChannelKey.getTrafficStreamsContext(),
                                 Collections.unmodifiableList(accumulation.getRrPair().trafficStreamKeysBeingHeld));
                     }
                     return;
@@ -418,8 +473,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             }
         } finally {
             if (accumulation.hasSignaledRequests()) {
-                listener.onConnectionClose(accumulation.trafficChannelKey, accumulation.getIndexOfCurrentRequest(),
-                        status, accumulation.getLastTimestamp(), getTrafficStreamsHeldByAccum(accumulation));
+                listener.onConnectionClose(accumulation, status, accumulation.getLastTimestamp(),
+                        getTrafficStreamsHeldByAccum(accumulation));
             }
         }
     }

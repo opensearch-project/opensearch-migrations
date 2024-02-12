@@ -21,14 +21,17 @@ RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 
 COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
+COPY simpleDocumentGenerator.py /root/
 COPY catIndices.sh /root/
 COPY showFetchMigrationCommand.sh /root/
 COPY setupIntegTests.sh /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 COPY kafkaExport.sh /root/kafka-tools
+RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN chmod ug+x /root/runTestBenchmarks.sh
 RUN chmod ug+x /root/humanReadableLogs.py
+RUN chmod ug+x /root/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh

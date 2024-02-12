@@ -2,10 +2,11 @@ package org.opensearch.migrations.replay;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -16,7 +17,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
-class ExpiringTrafficStreamMapUnorderedTest {
+class ExpiringTrafficStreamMapUnorderedTest extends InstrumentationTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
 
@@ -34,21 +35,26 @@ class ExpiringTrafficStreamMapUnorderedTest {
                 });
         var createdAccumulations = new ArrayList<Accumulation>();
         var expiredCountsPerLoop = new ArrayList<Integer>();
-        for (int i=0; i<expectedExpirationCounts.length; ++i) {
+        for (int i = 0; i < expectedExpirationCounts.length; ++i) {
             var ts = Instant.ofEpochSecond(timestamps[i]);
-            var tsk = new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0);
-            var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk, k->new Accumulation(tsk, 0));
-            expiringMap.expireOldEntries(new PojoTrafficStreamKey(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0), accumulation, ts);
+            var tsk = PojoTrafficStreamKeyAndContext.build(TEST_NODE_ID_STRING, connectionGenerator.apply(i), 0,
+                    rootContext::createTrafficStreamContextForTest);
+            var accumulation = expiringMap.getOrCreateWithoutExpiration(tsk, k -> new Accumulation(tsk, 0));
+            expiringMap.expireOldEntries(PojoTrafficStreamKeyAndContext.build(TEST_NODE_ID_STRING,
+                            connectionGenerator.apply(i), 0,
+                            rootContext::createTrafficStreamContextForTest),
+                    accumulation, ts);
             createdAccumulations.add(accumulation);
             if (accumulation != null) {
-                var rrPair = accumulation.getOrCreateTransactionPair(new PojoTrafficStreamKey("n","c",1));
+                var rrPair = accumulation.getOrCreateTransactionPair(PojoTrafficStreamKeyAndContext.build("n", "c", 1,
+                        rootContext::createTrafficStreamContextForTest), Instant.EPOCH);
                 rrPair.addResponseData(ts, ("Add" + i).getBytes(StandardCharsets.UTF_8));
             }
             expiredCountsPerLoop.add(expiredAccumulations.size());
         }
         Assertions.assertEquals(
-                Arrays.stream(expectedExpirationCounts).mapToObj(i->""+i).collect(Collectors.joining()),
-                expiredCountsPerLoop.stream().map(i->""+i).collect(Collectors.joining()));
+                Arrays.stream(expectedExpirationCounts).mapToObj(i -> "" + i).collect(Collectors.joining()),
+                expiredCountsPerLoop.stream().map(i -> "" + i).collect(Collectors.joining()));
     }
 
     @Test

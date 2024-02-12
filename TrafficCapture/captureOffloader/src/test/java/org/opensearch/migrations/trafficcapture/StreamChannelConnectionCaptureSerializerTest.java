@@ -28,6 +28,7 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 @Slf4j

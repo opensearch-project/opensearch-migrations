@@ -10,11 +10,14 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.RootOtelContext;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -26,7 +29,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.SortedSet;
-import java.util.StringJoiner;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -49,7 +51,7 @@ import java.util.stream.Stream;
  * @return
  */
 @Slf4j
-public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
+public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends InstrumentationTest {
 
     public static final int MAX_COMMANDS_IN_CONNECTION = 256;
 
@@ -88,6 +90,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         }
     }
 
+    static class TestRootContext extends RootOtelContext {
+        public TestRootContext() {
+            super(null);
+        }
+    }
+
     public static InMemoryConnectionCaptureFactory buildSerializerFactory(int bufferSize, Runnable onClosedCallback) {
         return new InMemoryConnectionCaptureFactory("TEST_NODE_ID", bufferSize, onClosedCallback);
     }
@@ -109,11 +117,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
         return bb;
     }
 
-    static AtomicInteger uniqueIdCounter = new AtomicInteger();
-    static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset,
-                                             List<ObservationDirective> directives) throws Exception {
+    static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
+                                              List<ObservationDirective> directives, TestContext rootContext) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
-        var offloader = connectionFactory.createOffloader("TEST_"+uniqueIdCounter.incrementAndGet());
+        var tsk = PojoTrafficStreamKeyAndContext.build("n", "test_"+uniqueIdCounter.incrementAndGet(),
+                0, rootContext::createTrafficStreamContextForTest);
+        var offloader = connectionFactory.createOffloader(rootContext.createChannelContext(tsk));
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive);
         }
@@ -185,11 +194,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
     @MethodSource("loadSimpleCombinations")
     void generateAndTest(String testName, int bufferSize, int skipCount,
                          List<ObservationDirective> directives, List<Integer> expectedSizes) throws Exception {
-        var trafficStreams = Arrays.stream(makeTrafficStreams(bufferSize, 0, directives))
-                .skip(skipCount);
+        var trafficStreams = Arrays.stream(makeTrafficStreams(bufferSize, 0, new AtomicInteger(),
+                directives, rootContext)).skip(skipCount);
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
-        accumulateTrafficStreamsWithNewAccumulator(trafficStreams, reconstructedTransactions, requestsReceived);
+        accumulateTrafficStreamsWithNewAccumulator(rootContext, trafficStreams, reconstructedTransactions,
+                requestsReceived);
         var splitSizes = unzipRequestResponseSizes(expectedSizes);
         assertReconstructedTransactionsMatchExpectations(reconstructedTransactions, splitSizes._1, splitSizes._2);
         Assertions.assertEquals(requestsReceived.get(), reconstructedTransactions.size());
@@ -203,21 +213,24 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
      * @return
      */
     static SortedSet<Integer>
-    accumulateTrafficStreamsWithNewAccumulator(Stream<TrafficStream> trafficStreams,
-                                                           List<RequestResponsePacketPair> aggregations,
-                                                           AtomicInteger requestsReceived) {
+    accumulateTrafficStreamsWithNewAccumulator(TestContext context,
+                                               Stream<TrafficStream> trafficStreams,
+                                               List<RequestResponsePacketPair> aggregations,
+                                               AtomicInteger requestsReceived) {
         var tsIndicesReceived = new TreeSet<Integer>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(UniqueReplayerRequestKey key, HttpMessageAndTimestamp request) {
+                            public void onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                                          @NonNull HttpMessageAndTimestamp request) {
                                 requestsReceived.incrementAndGet();
                             }
 
                             @Override
-                            public void onFullDataReceived(UniqueReplayerRequestKey requestKey, RequestResponsePacketPair fullPair) {
-                                var sourceIdx = requestKey.getSourceRequestIndex();
+                            public void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                                           @NonNull RequestResponsePacketPair fullPair) {
+                                var sourceIdx = ctx.getReplayerRequestKey().getSourceRequestIndex();
                                 if (fullPair.completionStatus ==
                                         RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
                                     return;
@@ -236,22 +249,28 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
+                                                                IReplayContexts.@NonNull IChannelKeyContext ctx,
+                                                                @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
-                            public void onConnectionClose(ISourceTrafficChannelKey key, int channelInteractionNumber,
+                            public void onConnectionClose(int channelInteractionNumber,
+                                                          @NonNull IReplayContexts.IChannelKeyContext ctx,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
-                                                          Instant when,
-                                                          List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
+                                                          @NonNull Instant when,
+                                                          @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
-                            @Override public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
-                                tsIndicesReceived.add(tsk.getTrafficStreamIndex());
+                            @Override public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {
+                                tsIndicesReceived.add(ctx.getTrafficStreamKey().getTrafficStreamIndex());
                             }
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();
-        trafficStreams.forEach(ts->trafficAccumulator.accept(new TrafficStreamWithEmbeddedKey(ts)));
+        ;
+        trafficStreams.forEach(ts->trafficAccumulator.accept(
+                new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts,
+                        context::createTrafficStreamContextForTest)
+                )));
         trafficAccumulator.close();
         return tsIndicesReceived;
     }

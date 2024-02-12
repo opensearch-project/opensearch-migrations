@@ -5,7 +5,6 @@ endpoint="https://capture-proxy-es:9200"
 auth_user="admin"
 auth_pass="admin"
 no_auth=false
-no_ssl=false
 
 usage() {
   echo ""
@@ -47,10 +46,6 @@ while [[ $# -gt 0 ]]; do
             no_auth=true
             shift
             ;;
-        --no-ssl)
-            no_ssl=true
-            shift
-            ;;
         -h|--h|--help)
           usage
           ;;
@@ -64,21 +59,24 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+
+# Initialize an empty array to hold non-empty values
+options=()
+
+if [[ "$endpoint" == https:* ]]; then
+    options+=("use_ssl:true,verify_certs:false")
+fi
+
+
 # Populate auth string
-if [ "$no_auth" = true ]; then
-    auth_string=""
-else
-    auth_string=",basic_auth_user:${auth_user},basic_auth_password:${auth_pass}"
+if [ "$no_auth" = false ]; then
+    options+=("basic_auth_user:${auth_user},basic_auth_password:${auth_pass}")
 fi
 
-if [ "$no_ssl" = true ]; then
-    base_options_string=""
-else
-    base_options_string="use_ssl:true,verify_certs:false"
-fi
+# Join the non-empty values using a comma
+client_options=$(IFS=,; echo "${options[*]}")
 
-# Construct the final client options string
-client_options="${base_options_string}${auth_string}"
+set -o xtrace
 
 echo "Running opensearch-benchmark workloads against ${endpoint}"
 echo "Running opensearch-benchmark w/ 'geonames' workload..." &&

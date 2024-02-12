@@ -11,6 +11,7 @@ import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {createAwsDistroForOtelPushInstrumentationPolicy} from "../common-utilities";
 
 export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -72,10 +73,14 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
         let securityGroups = [
           SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
           migrationAnalyticsSecurityGroup
-      ]
+        ]
+
+        const servicePolicies = [createAwsDistroForOtelPushInstrumentationPolicy()]
+
         this.createService({
             serviceName: `otel-collector`,
-            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelcol"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelCollector"),
+            dockerImageCommand: ["--config=/etc/otel-config-aws.yaml"],
             securityGroups: securityGroups,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
@@ -83,6 +88,7 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             serviceConnectServices: [serviceConnectServiceCollector, serviceConnectServiceHealthCheck],
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 4317,
+            taskRolePolicies: servicePolicies,
             environment: {
               "ANALYTICS_DOMAIN_ENDPOINT": analyticsDomainEndpoint
             },

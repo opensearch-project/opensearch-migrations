@@ -1,0 +1,6 @@
+service:
+  pipelines:
+    metrics:
+      receivers: [ otlp ]
+      processors:
+      exporters:

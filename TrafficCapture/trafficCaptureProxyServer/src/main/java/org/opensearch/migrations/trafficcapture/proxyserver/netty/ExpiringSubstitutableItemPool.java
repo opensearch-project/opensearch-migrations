@@ -303,7 +303,12 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     }
 
     @Override
+    @SneakyThrows
     public String toString() {
+        return eventLoop.submit(() -> toStringOnThread()).get();
+    }
+
+    private String toStringOnThread() {
         final StringBuilder sb = new StringBuilder("ExpiringSubstitutableItemPool{");
         sb.append("poolSize=").append(poolSize);
         if (eventLoop.inEventLoop()) {
