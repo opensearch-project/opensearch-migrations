@@ -58,7 +58,6 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                     null, null, false, null) {
                 @Override
                 public void append(LogEvent event) {
-                    System.out.println("LogEvent: " + event.getMessage().getFormattedMessage());
                     logEvents.add(event.getMessage().getFormattedMessage());
                 }
             };
@@ -104,7 +103,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
-            var contents = closeableLogSetup.logEvents.stream().findFirst().get();
+            var contents = closeableLogSetup.logEvents.get(0);
             log.info("Output="+contents);
             Assertions.assertTrue(contents.contains(NODE_ID));
         }
@@ -122,7 +121,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
-            var contents = closeableLogSetup.logEvents.stream().findFirst().get();
+            var contents = closeableLogSetup.logEvents.get(0);
             log.info("Output="+contents);
             Assertions.assertTrue(contents.contains(NODE_ID));
             Assertions.assertTrue(contents.contains(TEST_EXCEPTION_MESSAGE));
