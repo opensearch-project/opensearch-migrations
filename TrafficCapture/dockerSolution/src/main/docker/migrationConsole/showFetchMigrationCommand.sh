@@ -14,6 +14,10 @@ usage() {
   exit 1
 }
 
+# Default values
+create_only=false
+dry_run=false
+
 while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
@@ -46,10 +50,6 @@ fi
 
 # ECS command overrides argument with placeholder for flags
 OVERRIDES_ARG="--overrides '{ \"containerOverrides\": [ { \"name\": \"fetch-migration\", \"command\": <FLAGS> }]}'"
-
-# Default values
-create_only=false
-dry_run=false
 
 # Build flags string
 flags=""
