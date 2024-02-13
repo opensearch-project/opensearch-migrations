@@ -17,6 +17,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -47,8 +48,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-
-import static org.opensearch.migrations.coreutils.MetricsLogger.initializeOpenTelemetry;
 
 @Slf4j
 public class CaptureProxy {
@@ -187,7 +186,7 @@ public class CaptureProxy {
 
     private static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
-        return connectionId -> new StreamChannelConnectionCaptureSerializer<>(null, connectionId,
+        return ctx -> new StreamChannelConnectionCaptureSerializer<>(null, ctx.getConnectionId(),
                 new StreamLifecycleManager<>() {
                     @Override
                     public CodedOutputStreamHolder createStream() {
@@ -235,13 +234,15 @@ public class CaptureProxy {
         return kafkaProps;
     }
 
-    private static IConnectionCaptureFactory getConnectionCaptureFactory(Parameters params) throws IOException {
+    private static IConnectionCaptureFactory
+    getConnectionCaptureFactory(Parameters params, RootCaptureContext rootContext) throws IOException {
         var nodeId = getNodeId();
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
         } else if (params.kafkaConnection != null) {
-            return new KafkaCaptureFactory(nodeId, new KafkaProducer<>(buildKafkaProperties(params)), params.maximumTrafficStreamSize);
+            return new KafkaCaptureFactory(rootContext,
+                    nodeId, new KafkaProducer<>(buildKafkaProperties(params)), params.maximumTrafficStreamSize);
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
         } else {
@@ -301,9 +302,8 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
-        if (params.otelCollectorEndpoint != null) {
-            initializeOpenTelemetry("capture-proxy", params.otelCollectorEndpoint);
-        }
+        var rootContext = new RootCaptureContext(
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture"));
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),
@@ -326,8 +326,8 @@ public class CaptureProxy {
             }).orElse(null);
             var headerCapturePredicate =
                     new HeaderValueFilteringCapturePredicate(convertPairListToMap(params.suppressCaptureHeaderPairs));
-            proxy.start(backsideConnectionPool, params.numThreads, sslEngineSupplier,
-                    getConnectionCaptureFactory(params), headerCapturePredicate);
+            proxy.start(rootContext, backsideConnectionPool, params.numThreads, sslEngineSupplier,
+                    getConnectionCaptureFactory(params, rootContext), headerCapturePredicate);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;

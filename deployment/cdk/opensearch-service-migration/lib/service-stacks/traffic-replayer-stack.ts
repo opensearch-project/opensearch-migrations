@@ -93,7 +93,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
             taskInstanceCount: 0,
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
             dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],

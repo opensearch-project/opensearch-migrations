@@ -6,7 +6,6 @@ import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -26,15 +25,16 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * At a basic level, this class aims to be a generic serializer which can receive ByteBuffer data and serialize the data
- * into the defined Protobuf format {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream}, and then write
- * this formatted data to the provided CodedOutputStream.
- *
- * Commented throughout the class are example markers such as (e.g. 1: "1234ABCD") which line up with the textual
- * representation of this Protobuf format to be used as a guide as fields are written. An example TrafficStream can
- * also be visualized below for reference.
- *
- * 1: "91ba4f3a-0b34-11ee-be56-0242ac120002"
+ * This class serves as a generic serializer. Its primary function is to take ByteBuffer data,
+ * serialize it into the Protobuf format as defined by
+ * {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream}, and then output
+ * the formatted data to a given CodedOutputStream.
+ * <p>
+ * Within the class, example markers are commented (e.g., 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2").
+ * These markers correspond to the textual representation of the Protobuf format and serve as a guide
+ * for field serialization. Below is a visual representation of an example `TrafficStream` for further reference:
+ * <pre>{@code
+ * 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2"
  * 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
  * 2 {
  *   1 {
@@ -42,7 +42,7 @@ import java.util.concurrent.CompletableFuture;
  *     2: 682312000
  *   }
  *   4 {
- *     1: "POST /test-index/_bulk?pretty…”
+ *     1: "POST /test-index/_bulk?pretty…"
  *   }
  * }
  * 2 {
@@ -56,11 +56,14 @@ import java.util.concurrent.CompletableFuture;
  *   }
  * }
  * 3: 1
+ * }
+ * </pre>
  */
 @Slf4j
 public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConnectionCaptureSerializer<T> {
 
-    private static final int MAX_ID_SIZE = 96;
+    // 100 is the default size of netty connectionId and kafka nodeId along with serializationTags
+    private static final int MAX_ID_SIZE = 100;
 
     private boolean readObservationsAreWaitingForEom;
     private int eomsSoFar;
@@ -106,7 +109,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         } else {
             currentCodedOutputStreamHolderOrNull = streamManager.createStream();
             var currentCodedOutputStream = currentCodedOutputStreamHolderOrNull.getOutputStream();
-            // e.g. 1: "1234ABCD"
+            // e.g. 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2"
             currentCodedOutputStream.writeString(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionIdString);
             if (nodeIdString != null) {
                 // e.g. 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
@@ -189,20 +192,22 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         if (streamHasBeenClosed || (currentCodedOutputStreamHolderOrNull == null && !isFinal)) {
             return CompletableFuture.completedFuture(null);
         }
-        CodedOutputStream currentStream = getOrCreateCodedOutputStream();
-        var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
-        // e.g. 3: 1
-        currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
-        log.trace("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
-        currentStream.flush();
-        assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that " +
-                "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
-        var future = streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
-        currentCodedOutputStreamHolderOrNull = null;
-        if (isFinal) {
-            streamHasBeenClosed = true;
+        try {
+            CodedOutputStream currentStream = getOrCreateCodedOutputStream();
+            var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
+            // e.g. 3: 1
+            currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
+            log.trace("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
+            currentStream.flush();
+            assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that " +
+                    "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
+            return streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
+        } finally {
+            currentCodedOutputStreamHolderOrNull = null;
+            if (isFinal) {
+                streamHasBeenClosed = true;
+            }
         }
-        return future;
     }
 
     @Override
@@ -233,7 +238,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     @Override
     public void addCloseEvent(Instant timestamp) throws IOException {
         beginSubstreamObservation(timestamp, TrafficObservation.CLOSE_FIELD_NUMBER, 1);
-        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.CLOSE_FIELD_NUMBER, CloseObservation.getDefaultInstance());
+        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.CLOSE_FIELD_NUMBER,
+                CloseObservation.getDefaultInstance());
     }
 
     @Override
@@ -242,7 +248,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void addStringMessage(int captureFieldNumber, int dataFieldNumber,
-                                  Instant timestamp, String str) throws IOException {
+                                  Instant timestamp, @NonNull String str) throws IOException {
         int dataSize = 0;
         int lengthSize = 1;
         if (str.length() > 0) {

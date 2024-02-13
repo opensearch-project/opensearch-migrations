@@ -42,7 +42,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         parsed.targetRequestOp.ifPresent(r -> tupleMap.put("targetRequest", r));
         parsed.targetResponseOp.ifPresent(r -> tupleMap.put("targetResponse", r));
 
-        tupleMap.put("connectionId", formatUniqueRequestKey(tuple.uniqueRequestKey));
+        tupleMap.put("connectionId", formatUniqueRequestKey(tuple.getRequestKey()));
         Optional.ofNullable(tuple.errorCause).ifPresent(e -> tupleMap.put("error", e.toString()));
 
         return tupleMap;
@@ -127,7 +127,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                 // TARGET_LATENCY
                 .add(t.map(r->""+r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY)).orElse(MISSING_STR))
                 // REQUEST_ID
-                .add(formatUniqueRequestKey(tuple.uniqueRequestKey))
+                .add(formatUniqueRequestKey(tuple.getRequestKey()))
                 .toString();
     }
 

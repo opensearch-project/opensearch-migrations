@@ -7,9 +7,11 @@ import lombok.NonNull;
 import java.nio.ByteBuffer;
 
 public class CodedOutputStreamAndByteBufferWrapper implements CodedOutputStreamHolder {
-    @NonNull @Getter
+    @NonNull
+    @Getter
     private final CodedOutputStream outputStream;
-    @NonNull @Getter
+    @NonNull
+    @Getter
     private final ByteBuffer byteBuffer;
 
     public CodedOutputStreamAndByteBufferWrapper(int bufferSize) {

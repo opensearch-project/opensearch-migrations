@@ -17,9 +17,8 @@ RUN apt-get update && \
     vim \
     jq \
     unzip \
-    less 
-
-    #pip3 install urllib3==1.25.11 opensearch-benchmark==1.1.0 awscurl tqdm
+    less && \
+    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli
 
 # Experimental libraries needed for API
 #RUN if [ "$EXPERIMENTAL" = "true" ]; then \
@@ -30,28 +29,38 @@ RUN apt-get update && \
         #werkzeug==3.0.1; \
     #fi
 
-# TODO upon the next release of opensearch-benchmark the awscli package should be installed by pip3, with the expected boto3 version upgrade resolving the current conflicts between opensearch-benchmark and awscli
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
-COPY runTestBenchmarks.sh /root/
-COPY humanReadableLogs.py /root/
-COPY catIndices.sh /root/
-COPY showFetchMigrationCommand.sh /root/
-COPY setupIntegTests.sh /root/
-COPY msk-iam-auth.properties /root/kafka-tools/aws
-COPY kafkaCmdRef.md /root/kafka-tools
-RUN chmod ug+x /root/runTestBenchmarks.sh
-RUN chmod ug+x /root/humanReadableLogs.py
-RUN chmod ug+x /root/catIndices.sh
-RUN chmod ug+x /root/showFetchMigrationCommand.sh
+
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
 RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
 RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v1.1.9/aws-msk-iam-auth-1.1.9-all.jar
 WORKDIR /root
 
-# Experimental
+# Add Traffic Replayer jars for running KafkaPrinter from this container
+COPY build/jars /root/kafka-tools/replayer-jars
+RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
+RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
+
+COPY runTestBenchmarks.sh /root/
+COPY humanReadableLogs.py /root/
+COPY simpleDocumentGenerator.py /root/
+COPY catIndices.sh /root/
+COPY showFetchMigrationCommand.sh /root/
+COPY setupIntegTests.sh /root/
+COPY msk-iam-auth.properties /root/kafka-tools/aws
+COPY kafkaCmdRef.md /root/kafka-tools
+COPY kafkaExport.sh /root/kafka-tools
+RUN ln -s /usr/bin/python3 /usr/bin/python
+RUN chmod ug+x /root/runTestBenchmarks.sh
+RUN chmod ug+x /root/humanReadableLogs.py
+RUN chmod ug+x /root/simpleDocumentGenerator.py
+RUN chmod ug+x /root/catIndices.sh
+RUN chmod ug+x /root/showFetchMigrationCommand.sh
+RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
+
+# Experimental Django API
 COPY console /console
 RUN pip3 install -r /console/requirements.txt
 
