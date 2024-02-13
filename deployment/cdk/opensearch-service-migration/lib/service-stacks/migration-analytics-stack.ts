@@ -79,7 +79,7 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: `otel-collector`,
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelCollector"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelCollector"),
             dockerImageCommand: ["--config=/etc/otel-config-aws.yaml"],
             securityGroups: securityGroups,
             taskCpuUnits: 1024,

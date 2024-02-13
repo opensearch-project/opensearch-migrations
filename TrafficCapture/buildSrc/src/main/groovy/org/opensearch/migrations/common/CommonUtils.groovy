@@ -3,7 +3,6 @@ package org.opensearch.migrations.common
 import org.gradle.api.tasks.Copy
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
-import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
 class CommonUtils {
     static def calculateDockerHash(def projectName, def project) {
@@ -23,17 +22,20 @@ class CommonUtils {
     }
 
     static def copyArtifact(Project project, String projectName) {
-        def dockerBuildDir = "build/docker/${projectName}"
-        def artifactsDir = "${dockerBuildDir}/jars"
-        project.task("copyArtifact_${projectName}", type: Copy) {
-            dependsOn ":${projectName}:build"
-            dependsOn ":${projectName}:jar"
-            if (projectName == "trafficCaptureProxyServerTest") {
+        def destBuildDir = "build/docker/${projectName}"
+        def destDir = "${destBuildDir}/jars"
+        copyArtifact(project, projectName, projectName, destDir)
+    }
+    static def copyArtifact(Project project, String artifactProjectName, String destProjectName, String destDir) {
+        project.task("copyArtifact_${destProjectName}", type: Copy) {
+            dependsOn ":${artifactProjectName}:build"
+            dependsOn ":${artifactProjectName}:jar"
+            if (destProjectName == "trafficCaptureProxyServerTest") {
                 include "*.properties"
             }
-            from { project.project(":${projectName}").configurations.findByName("runtimeClasspath").files }
-            from { project.project(":${projectName}").tasks.getByName('jar') }
-            into artifactsDir
+            from { project.project(":${artifactProjectName}").configurations.findByName("runtimeClasspath").files }
+            from { project.project(":${artifactProjectName}").tasks.getByName('jar') }
+            into destDir
             include "*.jar"
             duplicatesStrategy = 'WARN'
         }
