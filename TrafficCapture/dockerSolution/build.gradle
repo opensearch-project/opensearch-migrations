@@ -31,8 +31,8 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
             dependsOn "copyArtifact_${projectName}"
         }
         def hash = calculateDockerHash(projectName)
-        images.add("migrations/${dockerImageName}:$hash".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
+        images.add("migrations/${dockerImageName}:$hash")
+        images.add("migrations/${dockerImageName}:latest")
         inputDir = project.file("src/main/docker/${projectName}")
     }
 }
@@ -55,8 +55,8 @@ javaContainerServices.forEach { projectName, dockerImageName ->
     task "buildDockerImage_${projectName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${projectName}"
         inputDir = project.file("${dockerBuildDir}")
-        images.add("migrations/${dockerImageName}:${version}".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
+        images.add("migrations/${dockerImageName}:${version}")
+        images.add("migrations/${dockerImageName}:latest")
     }
 }
 
