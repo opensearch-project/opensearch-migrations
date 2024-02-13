@@ -25,6 +25,11 @@ def dockerFilesForExternalServices = [
 // Create the static docker files that aren't hosting migrations java code from this repo
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
     task("buildDockerImage_${projectName}", type: DockerBuildImage) {
+        if (projectName == "migrationConsole") {
+            def destDir = "src/main/docker/${projectName}/build/jars"
+            CommonUtils.copyArtifact(project, "trafficReplayer", projectName, destDir)
+            dependsOn "copyArtifact_${projectName}"
+        }
         def hash = calculateDockerHash(projectName)
         images.add("migrations/${dockerImageName}:$hash")
         images.add("migrations/${dockerImageName}:latest")
@@ -41,8 +46,6 @@ def baseImageProjectOverrides = [
 ]
 
 javaContainerServices.each { projectName, dockerImageName ->
-    def dockerBuildDir = "build/docker/${projectName}"
-    def artifactsDir = "${dockerBuildDir}/jars";
     CommonUtils.copyArtifact(project, projectName)
     CommonUtils.createDockerfile(project, projectName, baseImageProjectOverrides, dockerFilesForExternalServices)
 }

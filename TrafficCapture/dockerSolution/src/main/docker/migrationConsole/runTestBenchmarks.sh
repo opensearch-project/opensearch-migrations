@@ -18,7 +18,6 @@ usage() {
   echo "  --auth-user                           The basic auth user to use for OSB requests."
   echo "  --auth-pass                           The basic auth password to use for OSB requests."
   echo "  --no-auth                             Use no auth when making OSB requests."
-  echo "  --no-ssl                              Disable SSL when making OSB requests."
   echo ""
   exit 1
 }

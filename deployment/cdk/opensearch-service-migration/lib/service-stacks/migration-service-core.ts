@@ -26,6 +26,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
     readonly dockerFilePath?: string,
+    readonly dockerDirectoryPath?: string,
     readonly dockerImageRegistryName?: string,
     readonly dockerImageCommand?: string[],
     readonly taskRolePolicies?: PolicyStatement[],
@@ -72,8 +73,8 @@ export class MigrationServiceCore extends Stack {
     }
 
     createService(props: MigrationServiceCoreProps) {
-        if ((!props.dockerFilePath && !props.dockerImageRegistryName) || (props.dockerFilePath && props.dockerImageRegistryName)) {
-            throw new Error(`Exactly one option [dockerFilePath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
+        if ((!props.dockerDirectoryPath && !props.dockerImageRegistryName) || (props.dockerDirectoryPath && props.dockerImageRegistryName)) {
+            throw new Error(`Exactly one option [dockerDirectoryPath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
         }
 
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
@@ -95,9 +96,11 @@ export class MigrationServiceCore extends Stack {
         }
 
         let serviceImage
-        if (props.dockerFilePath) {
+        if (props.dockerDirectoryPath) {
             serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
-                directory: props.dockerFilePath
+                directory: props.dockerDirectoryPath,
+                // File path relative to above directory path
+                file: props.dockerFilePath
             }))
         }
         else {
