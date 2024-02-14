@@ -11,7 +11,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
@@ -36,7 +35,6 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
-    private static final Random RANDOM = new Random();
 
     @Override
     protected TestContext makeInstrumentationContext() {
@@ -52,7 +50,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         final String instanceName;
 
         public CloseableLogSetup() {
-            instanceName = this.getClass().getName() + "." + RANDOM.nextLong();
+            instanceName = this.getClass().getName() + ".Thread" + Thread.currentThread().getId();
 
             testAppender = new AbstractAppender(instanceName,
                     null, null, false, null) {
