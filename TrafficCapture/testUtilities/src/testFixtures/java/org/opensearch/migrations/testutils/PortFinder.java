@@ -1,6 +1,8 @@
 package org.opensearch.migrations.testutils;
 
 
+import java.io.IOException;
+import java.net.ServerSocket;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Random;
@@ -17,7 +19,6 @@ public class PortFinder {
     private PortFinder() {}
 
     private static final int MAX_PORT_TRIES = 100;
-    private static final Random random = new Random();
 
     public static class ExceededMaxPortAssigmentAttemptException extends Exception {
         public ExceededMaxPortAssigmentAttemptException(Throwable cause) {
@@ -30,8 +31,8 @@ public class PortFinder {
         int numTries = 0;
         while (true) {
             try {
-                int port = random.nextInt((2 << 15) - 1025) + 1025;
-                r.accept(Integer.valueOf(port));
+                int port = findOpenPort();
+                r.accept(port);
                 return port;
             } catch (Exception e) {
                 if (++numTries >= MAX_PORT_TRIES) {
@@ -44,4 +45,14 @@ public class PortFinder {
         }
     }
 
+  public static int findOpenPort() {
+    try (ServerSocket serverSocket = new ServerSocket(0)) {
+      int port = serverSocket.getLocalPort();
+      log.info("Open port found: " + port);
+      return port;
+    } catch (IOException e) {
+      log.error("Failed to find an open port: " + e.getMessage());
+      throw new RuntimeException(e);
+    }
+  }
 }

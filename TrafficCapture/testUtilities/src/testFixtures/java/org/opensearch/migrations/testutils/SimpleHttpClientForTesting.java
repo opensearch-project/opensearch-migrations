@@ -5,6 +5,8 @@ import java.nio.charset.Charset;
 import lombok.AllArgsConstructor;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.BasicHttpClientConnectionManager;
@@ -19,6 +21,8 @@ import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.http.io.entity.InputStreamEntity;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.ssl.SSLContexts;
+import org.apache.hc.core5.util.Timeout;
+
 import java.nio.charset.Charset;
 
 import java.io.IOException;
@@ -37,6 +41,9 @@ import java.util.stream.Stream;
  * certificate.
  */
 public class SimpleHttpClientForTesting implements AutoCloseable {
+
+    private final static Timeout DEFAULT_RESPONSE_TIMEOUT = Timeout.ofSeconds(5);
+    private final static Timeout DEFAULT_CONNECTION_TIMEOUT = Timeout.ofSeconds(5);
 
     private final CloseableHttpClient httpClient;
 
@@ -65,7 +72,15 @@ public class SimpleHttpClientForTesting implements AutoCloseable {
     }
 
     private SimpleHttpClientForTesting(BasicHttpClientConnectionManager connectionManager) {
-        httpClient = HttpClients.custom().setConnectionManager(connectionManager).build();
+        var requestConfig = RequestConfig.custom()
+            .setConnectionRequestTimeout(DEFAULT_CONNECTION_TIMEOUT)
+            .setResponseTimeout(DEFAULT_RESPONSE_TIMEOUT)
+            .build();
+
+        httpClient = HttpClients.custom()
+            .setConnectionManager(connectionManager)
+            .setDefaultRequestConfig(requestConfig)
+            .build();
     }
 
     @AllArgsConstructor
