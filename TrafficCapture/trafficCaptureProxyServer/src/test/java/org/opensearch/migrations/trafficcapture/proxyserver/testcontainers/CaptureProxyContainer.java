@@ -1,4 +1,4 @@
-package org.opensearch.migrations.trafficcapture.proxyserver;
+package org.opensearch.migrations.trafficcapture.proxyserver.testcontainers;
 
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import java.time.Duration;
@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.testutils.PortFinder;
+import org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
