@@ -10,6 +10,8 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
@@ -76,7 +78,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         }
     }
 
-    //@ParameterizedTest
+    @ParameterizedTest
     @CsvSource(value = {
             "3,false",
             "-1,false",
@@ -84,6 +86,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
             "-1,true",
     })
     @Tag("longTest")
+    @ResourceLock("TrafficReplayerRunner")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
