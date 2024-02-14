@@ -1,5 +1,5 @@
 ## Configuration Options
-These tables list all CDK context configuration values a user can specify for this project
+These tables list all CDK context configuration values a user can specify for this project. These will normally be added to the `cdk.context.json` file in the same directory as this markdown file.
 
 
 ### Migration Service Options
