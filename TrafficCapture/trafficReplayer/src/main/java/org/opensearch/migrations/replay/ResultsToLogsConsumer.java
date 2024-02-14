@@ -19,8 +19,17 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
     public static final String TRANSACTION_SUMMARY_LOGGER = "TransactionSummaryLogger";
     private static final ObjectMapper PLAIN_MAPPER = new ObjectMapper();
 
-    Logger tupleLogger = LoggerFactory.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
-    Logger progressLogger = makeTransactionSummaryLogger();
+    private final Logger tupleLogger;
+    private final Logger progressLogger;
+
+    public ResultsToLogsConsumer() {
+        this(null, null);
+    }
+
+    public ResultsToLogsConsumer(Logger tupleLogger, Logger progressLogger) {
+        this.tupleLogger = tupleLogger != null ? tupleLogger : LoggerFactory.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
+        this.progressLogger = progressLogger != null ? progressLogger : makeTransactionSummaryLogger();
+    }
 
     // set this up so that the preamble prints out once, right after we have a logger
     // if it's configured to output at all

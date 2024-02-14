@@ -73,8 +73,8 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
 
         @Override
         public void close() {
-            testAppender.stop();
             internalLogger.removeAppender(testAppender);
+            testAppender.stop();
         }
     }
 
@@ -96,8 +96,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var resultsToLogsConsumer = new ResultsToLogsConsumer();
-            resultsToLogsConsumer.tupleLogger = closeableLogSetup.testLogger;
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
@@ -114,8 +113,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var resultsToLogsConsumer = new ResultsToLogsConsumer();
-            resultsToLogsConsumer.tupleLogger = closeableLogSetup.testLogger;
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
@@ -264,8 +262,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
              var closeableLogSetup = new CloseableLogSetup()) {
             var tuple = new SourceTargetCaptureTuple(tupleContext,
                     sourcePair, targetRequest, targetResponse, HttpRequestTransformationStatus.SKIPPED, null, Duration.ofMillis(267));
-            var streamConsumer = new ResultsToLogsConsumer();
-            streamConsumer.tupleLogger = closeableLogSetup.testLogger;
+            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
             var consumer = new TupleParserChainConsumer(streamConsumer);
             consumer.accept(tuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
