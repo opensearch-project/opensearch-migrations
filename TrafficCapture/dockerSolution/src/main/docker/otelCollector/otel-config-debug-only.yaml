@@ -1,0 +1,31 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+processors:
+extensions:
+  zpages:
+    endpoint: :55679
+  pprof:
+    endpoint: :1888
+  health_check:
+exporters:
+  logging:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+service:
+  extensions: [zpages, pprof, health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors:
+      exporters: [logging]
+    metrics:
+      receivers: [otlp]
+      processors:
+      exporters: [logging]
+    logs:
+      receivers: [otlp]
+      processors:
+      exporters: [logging]

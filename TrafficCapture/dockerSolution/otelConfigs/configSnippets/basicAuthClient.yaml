@@ -1,0 +1,5 @@
+extensions:
+  basicauth/client:
+    client_auth:
+      username: "admin"
+      password: "admin"

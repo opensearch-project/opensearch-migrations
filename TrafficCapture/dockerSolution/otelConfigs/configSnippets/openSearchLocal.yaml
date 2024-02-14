@@ -1,0 +1,11 @@
+exporters:
+  opensearch:
+    http:
+      endpoint: "https://opensearchanalytics:9200"
+      auth:
+        authenticator: basicauth/client
+      tls:
+        insecure_skip_verify: true
+
+service:
+  extensions: [ basicauth/client ]
