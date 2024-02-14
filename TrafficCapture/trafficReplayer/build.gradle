@@ -120,13 +120,8 @@ jar {
     }
 }
 
-// TODO: Fix Parallel Execution for junit trafficReplayer tests to eliminate forkEvery
-test {
-    forkEvery(1)
-}
-
+// TODO: Fix Parallel Execution for junit trafficReplayer tests to eliminate forking and rely on threads
 slowTest {
     forkEvery(1)
-    maxHeapSize = "1024m"
-    jvmArgs '-Xmx1024m', '-Xms256m'
+    maxParallelForks = Runtime.runtime.availableProcessors()
 }
