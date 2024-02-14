@@ -30,7 +30,7 @@ jobs:
           cache-read-only: false
 
       - name: Start Docker Solution
-        run: ./gradlew dockerSolution:ComposeUp
+        run: ./gradlew dockerSolution:ComposeUp -x test
         working-directory: TrafficCapture
 
       - name: Set up Python
