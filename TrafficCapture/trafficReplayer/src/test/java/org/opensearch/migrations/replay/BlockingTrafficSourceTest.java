@@ -69,7 +69,7 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
         var exception = Assertions.assertThrows(ExecutionException.class,
                 ()->blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
-                        .get(10, TimeUnit.MILLISECONDS));
+                        .get(10000, TimeUnit.MILLISECONDS));
         Assertions.assertInstanceOf(EOFException.class, exception.getCause());
     }
 

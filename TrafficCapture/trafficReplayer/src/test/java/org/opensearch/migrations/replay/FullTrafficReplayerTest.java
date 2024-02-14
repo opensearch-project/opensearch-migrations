@@ -6,6 +6,7 @@ import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -74,6 +75,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             "-1,true",
     })
     @Tag("longTest")
+    @ResourceLock("TrafficReplayerRunner")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),

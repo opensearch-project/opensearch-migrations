@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
@@ -128,6 +129,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
+    @ResourceLock("OpenTelemetryExtension")
     public void testThatAPostInASinglePacketBlocksFutureActivity(boolean usePool) throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
         var bb = TestUtilities.getByteBuf(fullTrafficBytes, usePool);
@@ -137,6 +139,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
+    @ResourceLock("OpenTelemetryExtension")
     public void testThatAPostInTinyPacketsBlocksFutureActivity(boolean usePool) throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
         writeMessageAndVerify(fullTrafficBytes, getSingleByteAtATimeWriter(usePool, fullTrafficBytes));
@@ -261,6 +264,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     @WrapWithNettyLeakDetection(repetitions = 16)
+    @ResourceLock("OpenTelemetryExtension")
     public void testThatAPostInTinyPacketsBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
         testThatAPostInTinyPacketsBlocksFutureActivity(usePool);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);
@@ -269,6 +273,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     @WrapWithNettyLeakDetection(repetitions = 32)
+    @ResourceLock("OpenTelemetryExtension")
     public void testThatAPostInASinglePacketBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
         testThatAPostInASinglePacketBlocksFutureActivity(usePool);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);
