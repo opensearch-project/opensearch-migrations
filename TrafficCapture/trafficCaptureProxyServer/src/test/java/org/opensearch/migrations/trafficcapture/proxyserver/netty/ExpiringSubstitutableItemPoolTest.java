@@ -20,8 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.parallel.Isolated;
 
 @Slf4j
+@Isolated("Isolation based on temporal checks")
 class ExpiringSubstitutableItemPoolTest {
 
     public static final int NUM_POOLED_ITEMS = 5;
