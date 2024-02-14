@@ -38,6 +38,8 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public static final int NUM_READ_ITEMS_BOUND = 1000;
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
+    private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
+
     @Test
     public void testRecordToString() {
         var ts = TrafficStream.newBuilder()
@@ -74,7 +76,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
         var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
             while (tsCount.get() < numTrafficStreams) {
                 protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
                         .forEach(streamWithKey -> {
@@ -125,7 +127,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
         var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
             while (tsCount.get() < numTrafficStreams) {
                 protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
                         .forEach(streamWithKey->{

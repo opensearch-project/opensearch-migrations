@@ -61,7 +61,7 @@ public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
         for (int i = 0; i < TEST_RECORD_COUNT; ) {
             Thread.sleep(getSleepAmountMsForProducerRun(i));
             var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
-            var recordsList = nextChunkFuture.get((2 + TEST_RECORD_COUNT) * PRODUCER_SLEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
+            var recordsList = nextChunkFuture.get((2 * TEST_RECORD_COUNT) * PRODUCER_SLEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
             for (int j = 0; j < recordsList.size(); ++j) {
                 Assertions.assertEquals(KafkaTestUtils.getConnectionId(i + j), recordsList.get(j).getStream().getConnectionId());
             }

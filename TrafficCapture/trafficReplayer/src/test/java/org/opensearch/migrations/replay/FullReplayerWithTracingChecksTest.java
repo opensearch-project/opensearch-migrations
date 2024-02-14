@@ -7,6 +7,7 @@ import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -41,6 +42,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     }
 
     @Test
+    @ResourceLock("TrafficReplayerRunner")
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
@@ -57,11 +59,13 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 () -> TestContext.withAllTracking(),
                 trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
+        httpServer.close();
         log.info("done");
     }
 
     @ParameterizedTest
     @ValueSource(ints = {1,2})
+    @ResourceLock("TrafficReplayerRunner")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
@@ -108,7 +112,8 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                         Assertions.assertTrue(wasNew);
                     });
         } finally {
-            tr.shutdown(null);
+            tr.shutdown(null).join();
+            httpServer.close();
         }
 
         Assertions.assertEquals(numRequests, tuplesReceived.size());
