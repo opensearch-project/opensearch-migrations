@@ -65,6 +65,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
 
     @ParameterizedTest
     @ValueSource(ints = {1,2})
+    @ResourceLock("TrafficReplayerRunner")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),

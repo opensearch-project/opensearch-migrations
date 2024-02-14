@@ -19,6 +19,7 @@ import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
@@ -89,6 +90,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @ResourceLock("TestContext")
     public void testOutputterWithNulls() throws IOException {
 
         var urk = new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
@@ -107,6 +109,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @ResourceLock("TestContext")
     public void testOutputterWithException() {
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(),
@@ -131,6 +134,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @ResourceLock("TestContext")
     public void testOutputterForGet() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT =
                 "" +
@@ -189,6 +193,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @ResourceLock("TestContext")
     public void testOutputterForPost() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT = "" +
                 "{\n" +
