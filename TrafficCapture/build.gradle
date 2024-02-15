@@ -48,6 +48,11 @@ allprojects {
     }
 
     task slowTest(type: Test) {
+        useJUnitPlatform {
+            // SlowTests currently use additional resource overhead, so halving core based parallelism
+            systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
+            systemProperty 'junit.jupiter.execution.parallel.config.dynamic.factor', '0.5'
+        }
         systemProperty 'disableMemoryLeakTests', 'false'
         jacoco {
             enabled = true
@@ -85,3 +90,4 @@ jacocoTestReport {
         html.destination file("${buildDir}/reports/jacoco/test/html")
     }
 }
+
