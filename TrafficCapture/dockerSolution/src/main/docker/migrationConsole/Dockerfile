@@ -47,11 +47,11 @@ COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
 COPY migrationUtils.py /root/
 COPY startFetchMigration.py /root/
-COPY startLiveCaptureMigration.py.py /root/
-COPY stopFetchMigration.py.py /root/
-COPY stopLiveCaptureMigration.py.py /root/
-COPY getFetchMigrationStatus.py.py /root/
-COPY getLiveCaptureMigrationStatus.py.py /root/
+COPY startLiveCaptureMigration.py /root/
+COPY stopFetchMigration.py /root/
+COPY stopLiveCaptureMigration.py /root/
+COPY getFetchMigrationStatus.py /root/
+COPY getLiveCaptureMigrationStatus.py /root/
 COPY simpleDocumentGenerator.py /root/
 COPY catIndices.sh /root/
 COPY setupIntegTests.sh /root/
