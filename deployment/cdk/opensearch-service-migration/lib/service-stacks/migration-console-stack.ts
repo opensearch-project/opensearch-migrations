@@ -113,12 +113,21 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        const allClusterTasksArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:task/migration-${props.stage}-ecs-cluster/*`
+        const clusterTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [allClusterTasksArn],
+            actions: [
+                "ecs:StopTask",
+                "ecs:DescribeTasks"
+            ]
+        })
+
         const listTasksPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: ["*"],
             actions: [
                 "ecs:ListTasks",
-                "ecs:DescribeTasks"
             ]
         })
 
@@ -139,7 +148,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, listTasksPolicy, artifactS3PublishPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, clusterTasksPolicy, listTasksPolicy, artifactS3PublishPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
