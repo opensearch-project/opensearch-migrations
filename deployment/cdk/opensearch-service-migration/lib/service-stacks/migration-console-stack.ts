@@ -108,7 +108,16 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             effect: Effect.ALLOW,
             resources: [allReplayerServiceArn],
             actions: [
-                "ecs:UpdateService"
+                "ecs:UpdateService",
+                "ecs:DescribeServices"
+            ]
+        })
+
+        const listTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "ecs:ListTasks"
             ]
         })
 
@@ -129,7 +138,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, artifactS3PublishPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, listTasksPolicy, artifactS3PublishPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
@@ -142,7 +151,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 effect: Effect.ALLOW,
                 resources: [fetchMigrationTaskDefArn],
                 actions: [
-                    "ecs:RunTask"
+                    "ecs:RunTask",
+                    "ecs:StopTask",
+                    "ecs:DescribeTasks"
                 ]
             })
             const fetchMigrationTaskRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`);
