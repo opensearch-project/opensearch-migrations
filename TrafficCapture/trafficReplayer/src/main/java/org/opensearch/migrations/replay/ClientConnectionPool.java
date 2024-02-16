@@ -37,7 +37,6 @@ public class ClientConnectionPool {
         if (eventLoopGroup.isShuttingDown()) {
             throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
         }
-        log.warn("creating connection session");
         // arguably the most only thing that matters here is associating this item with an
         // EventLoop (thread).  As the channel needs to be recycled, we'll come back to the
         // event loop that was tied to the original channel to bind all future channels to
