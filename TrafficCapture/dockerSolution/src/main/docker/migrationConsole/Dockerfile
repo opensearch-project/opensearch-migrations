@@ -45,9 +45,15 @@ RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 
 COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
+COPY migrationUtils.py /root/
+COPY startFetchMigration.py /root/
+COPY startLiveCaptureMigration.py.py /root/
+COPY stopFetchMigration.py.py /root/
+COPY stopLiveCaptureMigration.py.py /root/
+COPY getFetchMigrationStatus.py.py /root/
+COPY getLiveCaptureMigrationStatus.py.py /root/
 COPY simpleDocumentGenerator.py /root/
 COPY catIndices.sh /root/
-COPY showFetchMigrationCommand.sh /root/
 COPY setupIntegTests.sh /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
@@ -55,9 +61,15 @@ COPY kafkaExport.sh /root/kafka-tools
 RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN chmod ug+x /root/runTestBenchmarks.sh
 RUN chmod ug+x /root/humanReadableLogs.py
+RUN chmod ug+x /root/migrationUtils.py
+RUN chmod ug+x /root/startFetchMigration.py
+RUN chmod ug+x /root/startLiveCaptureMigration.py
+RUN chmod ug+x /root/stopFetchMigration.py
+RUN chmod ug+x /root/stopLiveCaptureMigration.py
+RUN chmod ug+x /root/getFetchMigrationStatus.py
+RUN chmod ug+x /root/getLiveCaptureMigrationStatus.py
 RUN chmod ug+x /root/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
-RUN chmod ug+x /root/showFetchMigrationCommand.sh
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
 # Experimental Django API
