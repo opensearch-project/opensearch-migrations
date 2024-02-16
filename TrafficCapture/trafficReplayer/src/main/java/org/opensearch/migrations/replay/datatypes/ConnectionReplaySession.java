@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * that will go out on the channel.
  */
 @Slf4j
-public class ConnectionReplaySession implements AutoCloseable {
+public class ConnectionReplaySession {
 
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
@@ -35,22 +35,19 @@ public class ConnectionReplaySession implements AutoCloseable {
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture> channelFutureFuture;
     public final OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
-    private final AtomicReference<IReplayContexts.ISocketContext> socketContext;
+    @Getter
+    private final IReplayContexts.IChannelKeyContext channelKeyContext;
 
     public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext) {
         this.eventLoop = eventLoop;
+        this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
-        this.socketContext = new AtomicReference<>(channelKeyContext.createSocketContext());
     }
 
     @SneakyThrows
     public ChannelFuture getInnerChannelFuture() {
         return channelFutureFuture.get();
-    }
-
-    public IReplayContexts.ISocketContext getSocketContext() {
-        return socketContext.get();
     }
 
     public boolean hasWorkRemaining() {
@@ -59,13 +56,5 @@ public class ConnectionReplaySession implements AutoCloseable {
 
     public long calculateSizeSlowly() {
         return schedule.calculateSizeSlowly() + scheduleSequencer.numPending();
-    }
-
-    @Override
-    public void close() throws Exception {
-        var oldVal = socketContext.getAndSet(null);
-        if (oldVal != null) {
-            oldVal.close();
-        }
     }
 }

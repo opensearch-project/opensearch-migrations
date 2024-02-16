@@ -165,21 +165,21 @@ public class ClientConnectionPool {
         channelAndFutureWork.getChannelFutureFuture().map(cff->cff
                         .thenAccept(cf-> {
                             log.atTrace().setMessage(() -> "closing channel " + cf.channel() +
-                                    "(" + channelAndFutureWork.getSocketContext() + ")...").log();
+                                    "(" + channelAndFutureWork.getChannelKeyContext() + ")...").log();
                             cf.channel().close()
                                     .addListener(closeFuture -> {
                                         log.atTrace().setMessage(() -> "channel.close() has finished for " +
-                                                channelAndFutureWork.getSocketContext()).log();
-                                        channelAndFutureWork.close();
+                                                channelAndFutureWork.getChannelKeyContext()).log();
                                         if (closeFuture.isSuccess()) {
                                             channelClosedFuture.future.complete(channelAndFutureWork.getInnerChannelFuture().channel());
                                         } else {
                                             channelClosedFuture.future.completeExceptionally(closeFuture.cause());
                                         }
                                         if (channelAndFutureWork.hasWorkRemaining()) {
-                                            log.atWarn().setMessage(() -> "Work items are still remaining for this connection session" +
+                                            log.atWarn().setMessage(() ->
+                                                    "Work items are still remaining for this connection session" +
                                                     "(last associated with connection=" +
-                                                    channelAndFutureWork.getSocketContext() +
+                                                    channelAndFutureWork.getChannelKeyContext() +
                                                     ").  " + channelAndFutureWork.calculateSizeSlowly() +
                                                     " requests that were enqueued won't be run").log();
                                         }

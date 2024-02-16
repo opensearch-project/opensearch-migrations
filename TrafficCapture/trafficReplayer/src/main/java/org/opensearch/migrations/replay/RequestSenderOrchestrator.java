@@ -237,7 +237,7 @@ public class RequestSenderOrchestrator {
             log.atTrace().setMessage(()->"channel creation has finished initialized (success="+f.isSuccess()+")").log();
             if (!f.isSuccess()) {
                 log.atWarn().setMessage(()->"setting up channel was not successful and not running the task for " +
-                        channelFutureAndItsFutureRequests.getSocketContext()).log();
+                        channelFutureAndItsFutureRequests.getChannelKeyContext()).log();
                 responseFuture.future.completeExceptionally(
                         new IllegalStateException("channel was returned in a bad state", f.cause()));
             } else {
