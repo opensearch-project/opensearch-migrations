@@ -17,8 +17,10 @@ RUN apt-get update && \
     vim \
     jq \
     unzip \
-    less && \
-    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli pexpect StrEnum
+    less
+RUN pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm pexpect StrEnum
+# AWS CLI v2 is not available on PYPI: https://github.com/aws/aws-cli/issues/4947
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
 
 # Experimental libraries needed for API
 #RUN if [ "$EXPERIMENTAL" = "true" ]; then \
