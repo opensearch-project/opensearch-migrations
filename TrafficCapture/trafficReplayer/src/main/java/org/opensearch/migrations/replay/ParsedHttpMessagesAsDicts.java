@@ -107,13 +107,9 @@ public class ParsedHttpMessagesAsDicts {
     }
 
     private static byte[] getBytesFromByteBuf(ByteBuf buf) {
-        if (buf.hasArray()) {
-            return buf.array();
-        } else {
-            var bytes = new byte[buf.readableBytes()];
-            buf.getBytes(buf.readerIndex(), bytes);
-            return bytes;
-        }
+        var bytes = new byte[buf.readableBytes()];
+        buf.getBytes(buf.readerIndex(), bytes);
+        return bytes;
     }
 
     private static Map<String, Object> fillMap(LinkedHashMap<String, Object> map,

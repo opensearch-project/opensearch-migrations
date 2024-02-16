@@ -156,7 +156,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                         "        \"Status-Code\": 200,\n" +
                         "        \"Reason-Phrase\": \"OK\",\n" +
                         "        \"response_time_ms\": 0,\n" +
-                        "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                         "        \"Content-transfer-encoding\": \"chunked\",\n" +
                         "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                         "        \"Content-type\": \"text/plain\",\n" +
@@ -180,7 +180,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                         "        \"Status-Code\": 200,\n" +
                         "        \"Reason-Phrase\": \"OK\",\n" +
                         "        \"response_time_ms\": 267,\n" +
-                        "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                         "        \"Content-transfer-encoding\": \"chunked\",\n" +
                         "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                         "        \"Content-type\": \"text/plain\",\n" +
@@ -201,7 +201,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Request-URI\": \"/test\",\n" +
                 "        \"Method\": \"POST\",\n" +
                 "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                "        \"body\": \"UE9TVCAvdGVzdCBIVFRQLzEuMQpIb3N0OiBmb28uZXhhbXBsZQpDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24KQ29udGVudC1MZW5ndGg6IDYxNgoKewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
+                "        \"body\": \"ewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
                 "        \"Host\": \"foo.example\",\n" +
                 "        \"Content-Type\": \"application/json\",\n" +
                 "        \"Content-Length\": \"616\"\n" +
@@ -213,7 +213,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Status-Code\": 200,\n" +
                 "        \"Reason-Phrase\": \"OK\",\n" +
                 "        \"response_time_ms\": 0,\n" +
-                "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                 "        \"Content-transfer-encoding\": \"chunked\",\n" +
                 "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                 "        \"Content-type\": \"text/plain\",\n" +
@@ -224,7 +224,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Request-URI\": \"/test\",\n" +
                 "        \"Method\": \"POST\",\n" +
                 "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                "        \"body\": \"UE9TVCAvdGVzdCBIVFRQLzEuMQpIb3N0OiBmb28uZXhhbXBsZQpDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24KQ29udGVudC1MZW5ndGg6IDYxNgoKewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
+                "        \"body\": \"ewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
                 "        \"Host\": \"foo.example\",\n" +
                 "        \"Content-Type\": \"application/json\",\n" +
                 "        \"Content-Length\": \"616\"\n" +
@@ -236,7 +236,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Status-Code\": 200,\n" +
                 "        \"Reason-Phrase\": \"OK\",\n" +
                 "        \"response_time_ms\": 267,\n" +
-                "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                 "        \"Content-transfer-encoding\": \"chunked\",\n" +
                 "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                 "        \"Content-type\": \"text/plain\",\n" +
