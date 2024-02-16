@@ -7,8 +7,11 @@ import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -18,7 +21,7 @@ import org.opensearch.migrations.replay.util.OnlineRadixSorter;
  * that will go out on the channel.
  */
 @Slf4j
-public class ConnectionReplaySession {
+public class ConnectionReplaySession implements AutoCloseable {
 
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
@@ -32,21 +35,22 @@ public class ConnectionReplaySession {
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture> channelFutureFuture;
     public final OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
-
-    @Getter
-    @Setter
-    private final IReplayContexts.ISocketContext socketContext;
+    private final AtomicReference<IReplayContexts.ISocketContext> socketContext;
 
     public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext) {
         this.eventLoop = eventLoop;
         this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
-        this.socketContext = channelKeyContext.createSocketContext();
+        this.socketContext = new AtomicReference<>(channelKeyContext.createSocketContext());
     }
 
     @SneakyThrows
     public ChannelFuture getInnerChannelFuture() {
         return channelFutureFuture.get();
+    }
+
+    public IReplayContexts.ISocketContext getSocketContext() {
+        return socketContext.get();
     }
 
     public boolean hasWorkRemaining() {
@@ -55,5 +59,13 @@ public class ConnectionReplaySession {
 
     public long calculateSizeSlowly() {
         return schedule.calculateSizeSlowly() + scheduleSequencer.numPending();
+    }
+
+    @Override
+    public void close() throws Exception {
+        var oldVal = socketContext.getAndSet(null);
+        if (oldVal != null) {
+            oldVal.close();
+        }
     }
 }

@@ -37,7 +37,7 @@ public class ClientConnectionPool {
         if (eventLoopGroup.isShuttingDown()) {
             throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
         }
-        log.trace("creating connection session");
+        log.warn("creating connection session");
         // arguably the most only thing that matters here is associating this item with an
         // EventLoop (thread).  As the channel needs to be recycled, we'll come back to the
         // event loop that was tied to the original channel to bind all future channels to
@@ -121,6 +121,9 @@ public class ClientConnectionPool {
         if (channelsFuture != null) {
             closeClientConnectionChannel(channelsFuture);
             connectionId2ChannelCache.invalidate(connId);
+        } else {
+            log.atTrace().setMessage(()->"No ChannelFuture for " + ctx +
+                    " in closeConnection.  The connection may have already been closed").log();
         }
     }
 
@@ -161,29 +164,38 @@ public class ClientConnectionPool {
 
         channelAndFutureWork.getChannelFutureFuture().map(cff->cff
                         .thenAccept(cf-> {
+                            log.atTrace().setMessage(() -> "closing channel " + cf.channel() +
+                                    "(" + channelAndFutureWork.getSocketContext() + ")...").log();
                             cf.channel().close()
                                     .addListener(closeFuture -> {
-                                        channelAndFutureWork.getSocketContext().close();
+                                        log.atTrace().setMessage(() -> "channel.close() has finished for " +
+                                                channelAndFutureWork.getSocketContext()).log();
+                                        channelAndFutureWork.close();
                                         if (closeFuture.isSuccess()) {
                                             channelClosedFuture.future.complete(channelAndFutureWork.getInnerChannelFuture().channel());
                                         } else {
                                             channelClosedFuture.future.completeExceptionally(closeFuture.cause());
                                         }
+                                        if (channelAndFutureWork.hasWorkRemaining()) {
+                                            log.atWarn().setMessage(() -> "Work items are still remaining for this connection session" +
+                                                    "(last associated with connection=" +
+                                                    channelAndFutureWork.getSocketContext() +
+                                                    ").  " + channelAndFutureWork.calculateSizeSlowly() +
+                                                    " requests that were enqueued won't be run").log();
+                                        }
+                                        var schedule = channelAndFutureWork.schedule;
+                                        while (channelAndFutureWork.hasWorkRemaining()) {
+                                            var scheduledItemToKill = schedule.peekFirstItem();
+                                            schedule.removeFirstItem();
+                                        }
                                     });
-                            if (channelAndFutureWork.hasWorkRemaining()) {
-                                log.atWarn().setMessage(()->"Work items are still remaining for this connection session" +
-                                        "(last associated with connection=" +
-                                        channelAndFutureWork.getSocketContext() +
-                                        ").  " + channelAndFutureWork.calculateSizeSlowly() +
-                                        " requests that were enqueued won't be run").log();
-                            }
-                            var schedule = channelAndFutureWork.schedule;
-                            while (channelAndFutureWork.hasWorkRemaining()) {
-                                var scheduledItemToKill = schedule.peekFirstItem();
-                                schedule.removeFirstItem();
-                            }
                         })
-                        .exceptionally(t->{channelClosedFuture.future.completeExceptionally(t);return null;}),
+                        .exceptionally(t->{
+                            log.atWarn().setMessage(()->"client connection encountered an exception while closing")
+                                    .setCause(t).log();
+                            channelClosedFuture.future.completeExceptionally(t);
+                            return null;
+                        }),
                 ()->"closing channel if its ChannelFuture was created");
         return channelClosedFuture;
     }
