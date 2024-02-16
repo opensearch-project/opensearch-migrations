@@ -117,7 +117,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             effect: Effect.ALLOW,
             resources: ["*"],
             actions: [
-                "ecs:ListTasks"
+                "ecs:ListTasks",
+                "ecs:DescribeTasks"
             ]
         })
 
@@ -152,8 +153,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 resources: [fetchMigrationTaskDefArn],
                 actions: [
                     "ecs:RunTask",
-                    "ecs:StopTask",
-                    "ecs:DescribeTasks"
+                    "ecs:StopTask"
                 ]
             })
             const fetchMigrationTaskRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`);

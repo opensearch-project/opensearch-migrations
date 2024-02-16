@@ -18,9 +18,13 @@ RUN apt-get update && \
     jq \
     unzip \
     less
-RUN pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm pexpect StrEnum
+
+# Experimental Django API
+COPY console /console
+RUN pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl awscli==1.29.85 tqdm pexpect StrEnum -r /console/requirements.txt
+
 # AWS CLI v2 is not available on PYPI: https://github.com/aws/aws-cli/issues/4947
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
+#RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
 
 # Experimental libraries needed for API
 #RUN if [ "$EXPERIMENTAL" = "true" ]; then \
@@ -73,11 +77,6 @@ RUN chmod ug+x /root/getLiveCaptureMigrationStatus.py
 RUN chmod ug+x /root/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
-
-# Experimental Django API
-COPY console /console
-RUN pip3 install -r /console/requirements.txt
-
 
 COPY init.sh /init.sh
 RUN chmod +x /init.sh
