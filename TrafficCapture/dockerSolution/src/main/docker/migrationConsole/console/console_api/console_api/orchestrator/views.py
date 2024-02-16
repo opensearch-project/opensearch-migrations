@@ -25,8 +25,6 @@ root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
 
 env_stage = get_deployed_stage()
-fetch_tracking_status = OperationStatus.NO_MIGRATION
-live_capture_tracking_status = OperationStatus.NO_MIGRATION
 
 class MigrationType(StrEnum):
     FULL_LOAD = 'full-load'
@@ -62,12 +60,8 @@ def perform_action(request, full_load_func, cdc_func):
     status_code = 200
     if migration_type == MigrationType.FULL_LOAD:
         action_output = full_load_func()
-        global fetch_tracking_status
-        fetch_tracking_status = action_output['status']
     elif migration_type == MigrationType.CDC:
         action_output = cdc_func()
-        global live_capture_tracking_status
-        live_capture_tracking_status = action_output['status']
     else:
         #TODO add validation for incoming model
         raise RuntimeError(f'Unknown MigrationType provided: {migration_type}')
@@ -77,8 +71,6 @@ def perform_action(request, full_load_func, cdc_func):
         message = action_output['message']
         status = action_output['status']
 
-    global tracking_status
-    tracking_status = status
     data = {
         'MigrationStatus': status,
         'Details': message,
@@ -92,16 +84,11 @@ def migration_status(request):
 
     logger.info(pretty_request(request, request.body))
 
-    # This is a bit of a hack for now to "guess" the current status based on our previous recorded status and the
-    # current state of the containers. I expect this to get removed as the story becomes more solidified around
-    # tracking migration state
-    global fetch_tracking_status
-    global live_capture_tracking_status
-    fetch_status = get_fetch_migration_status(env_stage, fetch_tracking_status)
-    live_capture_status = get_live_capture_migration_status(env_stage, live_capture_tracking_status)
+    # This is a bit limited for now, more or less we are detecting "Am I starting?", "Am I running?", or
+    # "Am I doing nothing?" based on the presence (or absence) of containers and their container status
+    fetch_status = get_fetch_migration_status(env_stage)
+    live_capture_status = get_live_capture_migration_status(env_stage)
     logger.info(f'Fetch status: {fetch_status}, Live Capture status: {live_capture_status}')
-    fetch_tracking_status = fetch_status
-    live_capture_tracking_status = live_capture_status
 
     data = {
         'FetchMigrationStatus': fetch_status,

@@ -19,7 +19,7 @@ class OperationStatus(StrEnum):
     STOPPED = 'STOPPED'
     FAILED = 'FAILED'
     LOAD_COMPLETE = 'LOAD_COMPLETE'
-    NO_MIGRATION = 'NO_MIGRATION'
+    NO_ACTIVE_MIGRATION = 'NO_ACTIVE_MIGRATION'
 
 
 def get_fetch_migration_task_arn(stage: str, ecs_client) -> str:
