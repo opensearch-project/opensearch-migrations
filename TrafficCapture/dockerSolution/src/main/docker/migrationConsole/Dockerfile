@@ -18,7 +18,7 @@ RUN apt-get update && \
     jq \
     unzip \
     less && \
-    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli
+    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli pexpect StrEnum
 
 # Experimental libraries needed for API
 #RUN if [ "$EXPERIMENTAL" = "true" ]; then \

@@ -1,12 +1,39 @@
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
+from strenum import StrEnum
 from .serializers import MigrationStatusSerializer
 import datetime
-import subprocess
-import os
 import sys
+import json
+import logging
 
-def pretty_request(request):
+sys.path.append("/root")
+from stopFetchMigration import stop_fetch_migration
+from stopLiveCaptureMigration import stop_live_capture_migration
+from startFetchMigration import start_fetch_migration
+from startLiveCaptureMigration import start_live_capture_migration
+from getFetchMigrationStatus import get_fetch_migration_status
+from getLiveCaptureMigrationStatus import get_live_capture_migration_status
+from migrationUtils import get_deployed_stage, is_migration_active, OperationStatus
+
+root_logger = logging.getLogger()
+root_logger.handlers = []
+root_logger.setLevel(logging.INFO)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+root_logger.addHandler(console_handler)
+logger = logging.getLogger(__name__)
+
+env_stage = get_deployed_stage()
+fetch_tracking_status = OperationStatus.NO_MIGRATION
+live_capture_tracking_status = OperationStatus.NO_MIGRATION
+
+class MigrationType(StrEnum):
+    FULL_LOAD = 'full-load'
+    CDC = 'cdc'
+
+
+def pretty_request(request, decoded_body):
     headers = ''
     for header, value in request.META.items():
         if not header.startswith('HTTP'):
@@ -21,66 +48,81 @@ def pretty_request(request):
     ).format(
         method=request.method,
         headers=headers,
-        body=request.body,
+        body=decoded_body,
     )
+
+
+def perform_action(request, full_load_func, cdc_func):
+    body = json.loads(request.body.decode("utf-8"))
+    logger.info(pretty_request(request, body))
+    migration_type = body['MigrationType']
+    action_output = ''
+    message = ''
+    status = ''
+    status_code = 200
+    if migration_type == MigrationType.FULL_LOAD:
+        action_output = full_load_func()
+        global fetch_tracking_status
+        fetch_tracking_status = action_output['status']
+    elif migration_type == MigrationType.CDC:
+        action_output = cdc_func()
+        global live_capture_tracking_status
+        live_capture_tracking_status = action_output['status']
+    else:
+        #TODO add validation for incoming model
+        raise RuntimeError(f'Unknown MigrationType provided: {migration_type}')
+
+    if action_output:
+        logger.info(f'Action output: {action_output}')
+        message = action_output['message']
+        status = action_output['status']
+
+    global tracking_status
+    tracking_status = status
+    data = {
+        'MigrationStatus': status,
+        'Details': message,
+        'Timestamp': datetime.datetime.now(datetime.timezone.utc)
+    }
+    return Response(data, status=status_code)
+
 
 @api_view(['GET'])
 def migration_status(request):
 
-    sys.stderr.write(pretty_request(request))
+    logger.info(pretty_request(request, request.body))
+
+    # This is a bit of a hack for now to "guess" the current status based on our previous recorded status and the
+    # current state of the containers. I expect this to get removed as the story becomes more solidified around
+    # tracking migration state
+    global fetch_tracking_status
+    global live_capture_tracking_status
+    fetch_status = get_fetch_migration_status(env_stage, fetch_tracking_status)
+    live_capture_status = get_live_capture_migration_status(env_stage, live_capture_tracking_status)
+    logger.info(f'Fetch status: {fetch_status}, Live Capture status: {live_capture_status}')
+    fetch_tracking_status = fetch_status
+    live_capture_tracking_status = live_capture_status
+
     data = {
-        'status': 'Completed',
-        'details': 'Migration completed successfully.',
-        'timestamp': datetime.datetime.now(datetime.timezone.utc)
+        'FetchMigrationStatus': fetch_status,
+        'LiveCaptureMigrationStatus': live_capture_status,
+        'Timestamp': datetime.datetime.now(datetime.timezone.utc)
     }
 
-    serializer = MigrationStatusSerializer(data=data)
-
-    serializer.is_valid(raise_exception=True)
-
-    return Response(serializer.data)
+    #serializer = MigrationStatusSerializer(data=data)
+    #serializer.is_valid(raise_exception=True)
+    return Response(data, status=200)
 
 
 @api_view(['POST'])
 def start_migration(request):
+    return perform_action(request,
+                          lambda: start_fetch_migration(env_stage, False),
+                          lambda: start_live_capture_migration(env_stage, False))
 
-    # TODO remove temporary mocking
-    sys.stderr.write(pretty_request(request))
-    data = {
-        'status': 'Started',
-        'details': 'Migration started.',
-        'timestamp': datetime.datetime.now(datetime.timezone.utc)
-    }
-    return Response(data, status=200)
-
-    # Use subprocess.Popen to run the command
-    #process = subprocess.Popen(['/root/catIndices.sh'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    full_load = os.getenv('FETCH_MIGRATION_COMMAND')
-    if not full_load:
-        return Response({"errors": ["Cannot execute full load command"]}, status=400)
-
-    # TODO: Create replayer command
-    # command = os.getenv('START_REPLAYER')
-    process = subprocess.Popen(['ls'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    output, errors = process.communicate()
-
-    # Check for errors
-    if process.returncode != 0:
-        return Response({"errors": errors}, status=400)
-
-    # Split the output into a list of files
-    index_listing = output.split('\n')
-
-    # Return the list of files in the response
-    return Response({"Index Listing\n": index_listing})
 
 @api_view(['POST'])
 def stop_migration(request):
-    # TODO remove temporary mocking
-    sys.stderr.write(pretty_request(request))
-    data = {
-        'status': 'Stopped',
-        'details': 'Migration stopped.',
-        'timestamp': datetime.datetime.now(datetime.timezone.utc)
-    }
-    return Response(data, status=200)
+    return perform_action(request,
+                          lambda: stop_fetch_migration(env_stage, False),
+                          lambda: stop_live_capture_migration(env_stage, False))

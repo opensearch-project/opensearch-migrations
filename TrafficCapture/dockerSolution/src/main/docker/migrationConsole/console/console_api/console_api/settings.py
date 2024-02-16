@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-26h*wo1qzffhpum=bn#8d(7e8mo-w9fr6*wdy#%izy#5^85-a9
 DEBUG = True
 
 # TODO adjust this hardcoded value
-ALLOWED_HOSTS = ['migration-console', 'migration-console.migration.dev.local']
+ALLOWED_HOSTS = ['migration-console', 'migration-console.migration.dev.local', 'localhost']
 
 
 # Application definition
