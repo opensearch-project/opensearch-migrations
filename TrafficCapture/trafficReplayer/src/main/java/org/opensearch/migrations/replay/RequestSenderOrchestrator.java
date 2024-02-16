@@ -116,6 +116,8 @@ public class RequestSenderOrchestrator {
                         "getting a ConnectionReplaySession for it").log();
                 var channelFutureAndRequestSchedule = ((ConnectionReplaySession) submitFuture.get());
                 if (channelFutureAndRequestSchedule == null) {
+                    log.atWarn().setMessage(()->"channelFutureAndRequestSchedule returned==null.  " +
+                            "Not running the successFn for " + ctx).log();
                     finalTunneledResponse.future.complete(null);
                     return;
                 }
@@ -143,7 +145,7 @@ public class RequestSenderOrchestrator {
                                                     });
                                         })
                                         .exceptionally(t->{
-                                            log.atTrace().setCause(t).setMessage(()->ctx +
+                                            log.atWarn().setCause(t).setMessage(()->ctx +
                                                     " ChannelFuture creation threw an exception").log();
                                             finalTunneledResponse.future.completeExceptionally(t);
                                             return null;
@@ -234,6 +236,8 @@ public class RequestSenderOrchestrator {
         cf.addListener(f->{
             log.atTrace().setMessage(()->"channel creation has finished initialized (success="+f.isSuccess()+")").log();
             if (!f.isSuccess()) {
+                log.atWarn().setMessage(()->"setting up channel was not successful and not running the task for " +
+                        channelFutureAndItsFutureRequests.getSocketContext()).log();
                 responseFuture.future.completeExceptionally(
                         new IllegalStateException("channel was returned in a bad state", f.cause()));
             } else {
