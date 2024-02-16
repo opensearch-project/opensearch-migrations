@@ -31,8 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -131,7 +129,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
             byName = testSpanExporter.getFinishedSpanItems().stream().collect(Collectors.groupingBy(SpanData::getName));
         }
 
-        private int getCount(String k) {
+        private int getCountAndRemoveSpan(String k) {
             var rval = Optional.ofNullable(byName.get(k)).map(List::size).orElse(-1);
             byName.remove(k);
             return rval;
@@ -150,7 +148,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         var traceProcessor = new TraceProcessor(testSpanExporter);
         for (int numTries=1; ; ++numTries) {
             final String TCP_CONNECTION_SCOPE_NAME = "tcpConnection";
-            var numTraces = traceProcessor.getCount(TCP_CONNECTION_SCOPE_NAME);
+            var numTraces = traceProcessor.getCountAndRemoveSpan(TCP_CONNECTION_SCOPE_NAME);
             switch (numTraces) {
                 case 1:
                     break;
@@ -171,23 +169,23 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
             break;
         }
 
-        Assertions.assertEquals(1, traceProcessor.getCount("channel"));
-        Assertions.assertEquals(1, traceProcessor.getCount("trafficStreamLifetime"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCount("httpTransaction"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCount("accumulatingRequest"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCount("accumulatingResponse"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCount("transformation"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCount("targetTransaction"));
-        Assertions.assertEquals(numRequests*2, traceProcessor.getCount("scheduled"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCount("requestSending"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCount("comparingResults"));
+        Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("channel"));
+        Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("trafficStreamLifetime"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("httpTransaction"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingRequest"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingResponse"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("transformation"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("targetTransaction"));
+        Assertions.assertEquals(numRequests*2, traceProcessor.getCountAndRemoveSpan("scheduled"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("requestSending"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("comparingResults"));
 
-        Assertions.assertTrue(traceProcessor.getCount("waitingForResponse") > 0);
-        Assertions.assertTrue(traceProcessor.getCount("readNextTrafficStreamChunk") > 0);
+        Assertions.assertTrue(traceProcessor.getCountAndRemoveSpan("waitingForResponse") > 0);
+        Assertions.assertTrue(traceProcessor.getCountAndRemoveSpan("readNextTrafficStreamChunk") > 0);
         // ideally, we'd be getting these back too, but our requests are malformed, so the server closes, which
         // may occur before we've started to accumulate the response.  So - just ignore these, but make sure that
         // there isn't anything else that we've missed.
-        traceProcessor.getCount("receivingResponse");
+        traceProcessor.getCountAndRemoveSpan("receivingResponse");
 
         Assertions.assertEquals("", traceProcessor.getRemainingItemsString());
     }
