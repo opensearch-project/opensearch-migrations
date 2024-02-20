@@ -34,7 +34,11 @@ historical-data-migration:
       connection:
         insecure: true
   # Additional pipeline options/optimizations
+  buffer:
+    bounded_blocking: # Values recommended by an expert
+      buffer_size: 1000000
+      batch_size: 12500
   # For maximum throughput, match workers to number of vCPUs (default: 1)
-  workers: 1
+  workers: 2
   # delay is how often the worker threads should process data (default: 3000 ms)
   delay: 0

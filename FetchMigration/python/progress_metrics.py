@@ -95,7 +95,8 @@ class ProgressMetrics:
         self.__record_value(self._REC_IN_FLIGHT_KEY, rec_in_flight)
 
     def update_no_partitions_count(self, no_part_count: Optional[int]):
-        self.__record_value(self._NO_PART_KEY, no_part_count)
+        if no_part_count and no_part_count > 0:
+            self.__record_value(self._NO_PART_KEY, no_part_count)
 
     def get_doc_completion_percentage(self) -> int:
         success_doc_count = self.__get_current_value(self._SUCCESS_DOCS_KEY)
