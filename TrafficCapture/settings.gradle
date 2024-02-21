@@ -40,3 +40,13 @@ addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
 include 'replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled'
 findProject(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled')?.name = 'untitled'
 
+// Enable Gradle Scan Publishing for CI/CD
+if (System.getenv().containsKey("CI")) {
+    gradleEnterprise {
+        buildScan {
+            termsOfServiceUrl = "https://gradle.com/terms-of-service"
+            termsOfServiceAgree = "yes"
+            tag("CI")
+        }
+    }
+}

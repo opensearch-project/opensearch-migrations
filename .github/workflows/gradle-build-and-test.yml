@@ -24,11 +24,11 @@ jobs:
           gradle-home-cache-cleanup: true
 
       - name: Run Gradle Build
-        run: ./gradlew build -x test --info
+        run: ./gradlew build -x test --scan --info --stacktrace
         working-directory: TrafficCapture
 
       - name: Run Tests with Coverage
-        run: ./gradlew jacocoTestReport --info
+        run: ./gradlew jacocoTestReport --scan --info --stacktrace
         working-directory: TrafficCapture
 
       - name: Upload to Codecov
