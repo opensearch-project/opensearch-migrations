@@ -280,7 +280,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        var allMetricData = rootContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
+        var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var filteredMetrics = allMetricData.stream().filter(md->md.getName().startsWith("tupleResult"))
                 .collect(Collectors.toList());
         // TODO - find out how to verify these metrics

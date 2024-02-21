@@ -8,13 +8,16 @@ import io.opentelemetry.sdk.metrics.data.AggregationTemporality;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.sdk.metrics.export.MetricExporter;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
-import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.NonNull;
+import lombok.SneakyThrows;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -24,8 +27,10 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-@Getter
 public class InMemoryInstrumentationBundle implements AutoCloseable {
+
+    public static final Duration DEFAULT_COLLECTION_PERIOD = Duration.ofMillis(1);
+    private static final int MIN_MILLIS_TO_WAIT_FOR_FINISH = 10;
 
     public static class LastMetricsExporter implements MetricExporter {
         private final Queue<MetricData> finishedMetricItems = new ConcurrentLinkedQueue<>();
@@ -62,9 +67,13 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
         }
     }
 
+    @Getter
     public final OpenTelemetrySdk openTelemetrySdk;
-    public final InMemorySpanExporter testSpanExporter;
-    public final LastMetricsExporter testMetricExporter;
+    private final InMemorySpanExporter testSpanExporter;
+    private final LastMetricsExporter testMetricExporter;
+    private final PeriodicMetricReader periodicMetricReader;
+    private final Duration collectionPeriod;
+    private boolean alreadyWaitedForMetrics;
 
     public InMemoryInstrumentationBundle(boolean collectTraces,
                                          boolean collectMetrics) {
@@ -74,8 +83,15 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
 
     public InMemoryInstrumentationBundle(InMemorySpanExporter testSpanExporter,
                                          LastMetricsExporter testMetricExporter) {
+        this(testSpanExporter, testMetricExporter, DEFAULT_COLLECTION_PERIOD);
+    }
+
+    public InMemoryInstrumentationBundle(InMemorySpanExporter testSpanExporter,
+                                         LastMetricsExporter testMetricExporter,
+                                         Duration collectionPeriod) {
         this.testSpanExporter = testSpanExporter;
         this.testMetricExporter = testMetricExporter;
+        this.collectionPeriod = collectionPeriod;
 
         var otelBuilder = OpenTelemetrySdk.builder();
         if (testSpanExporter != null) {
@@ -83,18 +99,51 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
                     .addSpanProcessor(SimpleSpanProcessor.create(testSpanExporter)).build());
         }
         if (testMetricExporter != null) {
+            this.periodicMetricReader = PeriodicMetricReader.builder(testMetricExporter)
+                    .setInterval(Duration.ofMillis(collectionPeriod.toMillis()))
+                    .build();
             otelBuilder = otelBuilder.setMeterProvider(SdkMeterProvider.builder()
-                    .registerMetricReader(PeriodicMetricReader.builder(testMetricExporter)
-                            .setInterval(Duration.ofMillis(100))
-                            .build())
+                    .registerMetricReader(periodicMetricReader)
                     .build());
+        } else {
+            this.periodicMetricReader = null;
         }
         openTelemetrySdk = otelBuilder.build();
     }
 
+    public List<SpanData> getFinishedSpans() {
+        if (testSpanExporter == null) {
+            throw new IllegalStateException("Metrics collector was not configured");
+        }
+        return testSpanExporter.getFinishedSpanItems();
+    }
+
+    /**
+     * Waits double the collectionPeriod time (once) before returning the collected metrics
+     * @return
+     */
+    @SneakyThrows
+    public Collection<MetricData> getFinishedMetrics() {
+        if (testMetricExporter == null) {
+            throw new IllegalStateException("Metrics collector was not configured");
+        }
+        if (!alreadyWaitedForMetrics) {
+            Thread.sleep(Math.max(collectionPeriod.toMillis() * 2, MIN_MILLIS_TO_WAIT_FOR_FINISH));
+            alreadyWaitedForMetrics = true;
+        }
+        return testMetricExporter.getFinishedMetricItems();
+    }
+
     @Override
     public void close() {
-        Optional.ofNullable(testMetricExporter).ifPresent(MetricExporter::close);
+        Optional.ofNullable(testMetricExporter).ifPresent(me -> {
+            try {
+                periodicMetricReader.close();
+            } catch (IOException e) {
+                throw Lombok.sneakyThrow(e);
+            }
+            me.close();
+        });
         Optional.ofNullable(testSpanExporter).ifPresent(te -> {
             te.close();
             te.reset();

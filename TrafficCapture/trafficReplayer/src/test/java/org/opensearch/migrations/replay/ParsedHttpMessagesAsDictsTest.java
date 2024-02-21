@@ -8,10 +8,6 @@ import java.util.Optional;
 
 class ParsedHttpMessagesAsDictsTest extends InstrumentationTest {
 
-    ParsedHttpMessagesAsDicts makeTestData() {
-        return makeTestData(null, null);
-    }
-
     @Override
     protected TestContext makeInstrumentationContext() {
         return TestContext.withTracking(false, true);

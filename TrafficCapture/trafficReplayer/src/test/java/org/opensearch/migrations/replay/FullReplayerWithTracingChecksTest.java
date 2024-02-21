@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -118,15 +118,14 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         }
 
         Assertions.assertEquals(numRequests, tuplesReceived.size());
-        checkSpansForSimpleReplayedTransactions(rootContext.inMemoryInstrumentationBundle.testSpanExporter,
-                numRequests);
+        checkSpansForSimpleReplayedTransactions(rootContext.inMemoryInstrumentationBundle, numRequests);
         log.info("done");
     }
 
     private static class TraceProcessor {
         Map<String, List<SpanData>> byName;
-        public TraceProcessor(InMemorySpanExporter testSpanExporter) {
-            byName = testSpanExporter.getFinishedSpanItems().stream().collect(Collectors.groupingBy(SpanData::getName));
+        public TraceProcessor(List<SpanData> finishedSpans) {
+            byName = finishedSpans.stream().collect(Collectors.groupingBy(SpanData::getName));
         }
 
         private int getCountAndRemoveSpan(String k) {
@@ -144,8 +143,9 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
      * This function is written like this rather than with a loop so that the backtrace will show WHICH
      * key was corrupted.
      */
-    private void checkSpansForSimpleReplayedTransactions(InMemorySpanExporter testSpanExporter, int numRequests) {
-        var traceProcessor = new TraceProcessor(testSpanExporter);
+    private void checkSpansForSimpleReplayedTransactions(InMemoryInstrumentationBundle inMemoryBundle,
+                                                         int numRequests) {
+        var traceProcessor = new TraceProcessor(inMemoryBundle.getFinishedSpans());
         for (int numTries=1; ; ++numTries) {
             final String TCP_CONNECTION_SCOPE_NAME = "tcpConnection";
             var numTraces = traceProcessor.getCountAndRemoveSpan(TCP_CONNECTION_SCOPE_NAME);
@@ -153,7 +153,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 case 1:
                     break;
                 case -1:
-                    traceProcessor = new TraceProcessor(testSpanExporter);
+                    traceProcessor = new TraceProcessor(inMemoryBundle.getFinishedSpans());
                     if (numTries > 5) {
                         Assertions.fail("Even after waiting/polling, no " + TCP_CONNECTION_SCOPE_NAME + " was found.");
                     }
