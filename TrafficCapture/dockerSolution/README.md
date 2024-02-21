@@ -23,7 +23,7 @@ migrations network.  However, the collector's export configuration can be overri
 The [otel-aws.yml](src/main/docker/composeExtensions/otel-aws.yml) will use that docker-compose extension.
 That extension uses the collector configurations (from the container's base image) and wires the ~/.aws/credentials
 file into the container to provide the collector credentials that it needs to push metrics and traces to CloudWatch
-and X-Ray.  In addition to the [default configuration](src/main/docker/composeExtensions/otel-prometheus-jaeger-opensearch.yml)
+and X-Ray.  In addition to the [default configuration](src/main/docker/composeExtensions/otel-prometheus-jaeger.yml)
 to use local containers, a [third option](src/main/docker/composeExtensions/otel-everything.yml) will use _BOTH_ local
 containers AND the AWS services.
 

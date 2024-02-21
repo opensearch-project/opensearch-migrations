@@ -22,7 +22,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
-    readonly analyticsServiceEnabled?: boolean
+    readonly otelCollectorEnabled?: boolean
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -88,7 +88,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         }
         replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand
         replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
-        replayerCommand = props.analyticsServiceEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
+        replayerCommand = props.otelCollectorEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
