@@ -3,15 +3,23 @@ package org.opensearch.migrations.replay;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.Unpooled;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
-import org.apache.logging.log4j.core.Logger;
-import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
@@ -20,15 +28,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.stream.Collectors;
+import org.slf4j.LoggerFactory;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
@@ -43,28 +43,38 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     private static class CloseableLogSetup implements AutoCloseable {
-        List<String> logEvents = new ArrayList<>();
+        List<String> logEvents = Collections.synchronizedList(new ArrayList<>());
         AbstractAppender testAppender;
+        org.slf4j.Logger testLogger;
+        org.apache.logging.log4j.core.Logger internalLogger;
+
+        final String instanceName;
+
         public CloseableLogSetup() {
-            testAppender = new AbstractAppender(ResultsToLogsConsumer.OUTPUT_TUPLE_JSON_LOGGER,
+            instanceName = this.getClass().getName() + ".Thread" + Thread.currentThread().getId();
+
+            testAppender = new AbstractAppender(instanceName,
                     null, null, false, null) {
                 @Override
                 public void append(LogEvent event) {
                     logEvents.add(event.getMessage().getFormattedMessage());
                 }
             };
-            var tupleLogger = (Logger) LogManager.getLogger(ResultsToLogsConsumer.OUTPUT_TUPLE_JSON_LOGGER);
-            tupleLogger.setLevel(Level.ALL);
+
             testAppender.start();
-            tupleLogger.setAdditive(false);
-            tupleLogger.addAppender(testAppender);
-            var loggerCtx = ((LoggerContext) LogManager.getContext(false));
+
+            internalLogger = (org.apache.logging.log4j.core.Logger) LogManager.getLogger(instanceName);
+            testLogger = LoggerFactory.getLogger(instanceName);
+
+            // Cast to core.Logger to access internal methods
+            internalLogger.setLevel(Level.ALL);
+            internalLogger.setAdditive(false);
+            internalLogger.addAppender(testAppender);
         }
 
         @Override
         public void close() {
-            var tupleLogger = (Logger) LogManager.getLogger(ResultsToLogsConsumer.OUTPUT_TUPLE_JSON_LOGGER);
-            tupleLogger.removeAppender(testAppender);
+            internalLogger.removeAppender(testAppender);
             testAppender.stop();
         }
     }
@@ -80,6 +90,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @ResourceLock("TestContext")
     public void testOutputterWithNulls() throws IOException {
 
         var urk = new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
@@ -87,7 +98,8 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new TupleParserChainConsumer(new ResultsToLogsConsumer());
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
+            var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -97,13 +109,15 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
-    public void testOutputterWithException() throws IOException {
+    @ResourceLock("TestContext")
+    public void testOutputterWithException() {
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(),
                 null, null, null, null,
                 exception, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
-            var consumer = new TupleParserChainConsumer(new ResultsToLogsConsumer());
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
+            var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
             var contents = closeableLogSetup.logEvents.get(0);
@@ -113,13 +127,14 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         }
     }
 
-    public static byte[] loadResourceAsBytes(String path) throws IOException {
+    private static byte[] loadResourceAsBytes(String path) throws IOException {
         try (InputStream inputStream = ResultsToLogsConsumerTest.class.getResourceAsStream(path)) {
             return inputStream.readAllBytes();
         }
     }
 
     @Test
+    @ResourceLock("TestContext")
     public void testOutputterForGet() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT =
                 "" +
@@ -141,7 +156,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                         "        \"Status-Code\": 200,\n" +
                         "        \"Reason-Phrase\": \"OK\",\n" +
                         "        \"response_time_ms\": 0,\n" +
-                        "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                         "        \"Content-transfer-encoding\": \"chunked\",\n" +
                         "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                         "        \"Content-type\": \"text/plain\",\n" +
@@ -165,7 +180,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                         "        \"Status-Code\": 200,\n" +
                         "        \"Reason-Phrase\": \"OK\",\n" +
                         "        \"response_time_ms\": 267,\n" +
-                        "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                         "        \"Content-transfer-encoding\": \"chunked\",\n" +
                         "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                         "        \"Content-type\": \"text/plain\",\n" +
@@ -178,6 +193,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @ResourceLock("TestContext")
     public void testOutputterForPost() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT = "" +
                 "{\n" +
@@ -185,7 +201,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Request-URI\": \"/test\",\n" +
                 "        \"Method\": \"POST\",\n" +
                 "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                "        \"body\": \"UE9TVCAvdGVzdCBIVFRQLzEuMQpIb3N0OiBmb28uZXhhbXBsZQpDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24KQ29udGVudC1MZW5ndGg6IDYxNgoKewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
+                "        \"body\": \"ewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
                 "        \"Host\": \"foo.example\",\n" +
                 "        \"Content-Type\": \"application/json\",\n" +
                 "        \"Content-Length\": \"616\"\n" +
@@ -197,7 +213,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Status-Code\": 200,\n" +
                 "        \"Reason-Phrase\": \"OK\",\n" +
                 "        \"response_time_ms\": 0,\n" +
-                "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                 "        \"Content-transfer-encoding\": \"chunked\",\n" +
                 "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                 "        \"Content-type\": \"text/plain\",\n" +
@@ -208,7 +224,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Request-URI\": \"/test\",\n" +
                 "        \"Method\": \"POST\",\n" +
                 "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                "        \"body\": \"UE9TVCAvdGVzdCBIVFRQLzEuMQpIb3N0OiBmb28uZXhhbXBsZQpDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24KQ29udGVudC1MZW5ndGg6IDYxNgoKewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
+                "        \"body\": \"ewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
                 "        \"Host\": \"foo.example\",\n" +
                 "        \"Content-Type\": \"application/json\",\n" +
                 "        \"Content-Length\": \"616\"\n" +
@@ -220,7 +236,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Status-Code\": 200,\n" +
                 "        \"Reason-Phrase\": \"OK\",\n" +
                 "        \"response_time_ms\": 267,\n" +
-                "        \"body\": \"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LXRyYW5zZmVyLWVuY29kaW5nOiBjaHVua2VkDQpEYXRlOiBUaHUsIDA4IEp1biAyMDIzIDIzOjA2OjIzIEdNVA0KVHJhbnNmZXItZW5jb2Rpbmc6IGNodW5rZWQNCkNvbnRlbnQtdHlwZTogdGV4dC9wbGFpbg0KRnVudGltZTogY2hlY2tJdCENCg0KMWUNCkkgc2hvdWxkIGJlIGRlY3J5cHRlZCB0ZXN0ZXIhCg0KMA0KDQo=\",\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
                 "        \"Content-transfer-encoding\": \"chunked\",\n" +
                 "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
                 "        \"Content-type\": \"text/plain\",\n" +
@@ -232,7 +248,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT);
     }
 
-    public void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
+    private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
         var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
                 rootContext::createTrafficStreamContextForTest);
         var sourcePair = new RequestResponsePacketPair(trafficStreamKey, Instant.EPOCH,
@@ -251,7 +267,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
              var closeableLogSetup = new CloseableLogSetup()) {
             var tuple = new SourceTargetCaptureTuple(tupleContext,
                     sourcePair, targetRequest, targetResponse, HttpRequestTransformationStatus.SKIPPED, null, Duration.ofMillis(267));
-            var streamConsumer = new ResultsToLogsConsumer();
+            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
             var consumer = new TupleParserChainConsumer(streamConsumer);
             consumer.accept(tuple);
             Assertions.assertEquals(1, closeableLogSetup.logEvents.size());

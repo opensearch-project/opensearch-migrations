@@ -6,6 +6,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.DefaultChannelPromise;
@@ -62,6 +63,18 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private final Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
+
+    private static class ConnectionClosedListenerHandler extends ChannelDuplexHandler {
+        private final IReplayContexts.ISocketContext socketContext;
+        ConnectionClosedListenerHandler(IReplayContexts.IChannelKeyContext channelKeyContext) {
+            socketContext = channelKeyContext.createSocketContext();
+        }
+        @Override
+        public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+            socketContext.close();
+            super.channelUnregistered(ctx);
+        }
+    }
 
     public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
                                      IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
@@ -120,7 +133,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         Bootstrap b = new Bootstrap();
         b.group(eventLoopGroup)
                 .channel(NioSocketChannel.class)
-                .handler(new ChannelDuplexHandler())
+                .handler(new ConnectionClosedListenerHandler(channelKeyContext))
                 .option(ChannelOption.AUTO_READ, false);
 
         var outboundChannelFuture = b.connect(host, port);
@@ -129,7 +142,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         outboundChannelFuture.addListener((ChannelFutureListener) connectFuture -> {
             if (connectFuture.isSuccess()) {
                 var pipeline = connectFuture.channel().pipeline();
-                pipeline.removeFirst();
                 log.atTrace().setMessage(()-> channelKeyContext.getChannelKey() +
                         " Done setting up client channel & it was successful").log();
                 if (sslContext != null) {
@@ -162,7 +174,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private static boolean channelIsInUse(Channel c) {
         var pipeline = c.pipeline();
         var lastHandler = pipeline.last();
-        if (lastHandler == null || lastHandler instanceof SslHandler) {
+        if (lastHandler instanceof ConnectionClosedListenerHandler || lastHandler instanceof SslHandler) {
             assert !c.config().isAutoRead();
             return false;
         } else {
@@ -227,7 +239,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     log.atDebug().setMessage(()->"Ignoring an exception that the "+handlerName+" wasn't present").log();
                 }
             }
-            while (!(pipeline.last() instanceof SslHandler) && (pipeline.last() != null)) {
+            while (true) {
+                var lastHandler = pipeline.last();
+                if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
+                    break;
+                }
                 pipeline.removeLast();
             }
             channel.config().setAutoRead(false);

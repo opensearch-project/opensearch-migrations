@@ -4,9 +4,11 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.data.SpanData;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -26,9 +28,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -41,6 +43,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     }
 
     @Test
+    @ResourceLock("TrafficReplayerRunner")
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
@@ -57,11 +60,13 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 () -> TestContext.withAllTracking(),
                 trafficSourceSupplier);
         Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
+        httpServer.close();
         log.info("done");
     }
 
     @ParameterizedTest
     @ValueSource(ints = {1,2})
+    @ResourceLock("TrafficReplayerRunner")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
@@ -108,7 +113,8 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                         Assertions.assertTrue(wasNew);
                     });
         } finally {
-            tr.shutdown(null);
+            tr.shutdown(null).join();
+            httpServer.close();
         }
 
         Assertions.assertEquals(numRequests, tuplesReceived.size());
@@ -117,42 +123,70 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         log.info("done");
     }
 
+    private static class TraceProcessor {
+        Map<String, List<SpanData>> byName;
+        public TraceProcessor(InMemorySpanExporter testSpanExporter) {
+            byName = testSpanExporter.getFinishedSpanItems().stream().collect(Collectors.groupingBy(SpanData::getName));
+        }
+
+        private int getCountAndRemoveSpan(String k) {
+            var rval = Optional.ofNullable(byName.get(k)).map(List::size).orElse(-1);
+            byName.remove(k);
+            return rval;
+        }
+
+        public String getRemainingItemsString() {
+            return byName.entrySet().stream().map(kvp->kvp.getKey()+":"+kvp.getValue()).collect(Collectors.joining());
+        }
+    }
+
     /**
      * This function is written like this rather than with a loop so that the backtrace will show WHICH
      * key was corrupted.
      */
     private void checkSpansForSimpleReplayedTransactions(InMemorySpanExporter testSpanExporter, int numRequests) {
-        var byName = testSpanExporter.getFinishedSpanItems().stream().collect(Collectors.groupingBy(SpanData::getName));
-        BiConsumer<Integer, String> chk = (i, k) -> {
-            Assertions.assertNotNull(byName.get(k));
-            Assertions.assertEquals(i, byName.get(k).size());
-            byName.remove(k);
-        };
-        chk.accept(1,"channel");
-        chk.accept(1,"tcpConnection");
-        chk.accept(1, "trafficStreamLifetime");
-        chk.accept(numRequests, "httpTransaction");
-        chk.accept(numRequests, "accumulatingRequest");
-        chk.accept(numRequests, "accumulatingResponse");
-        chk.accept(numRequests, "transformation");
-        chk.accept(numRequests, "targetTransaction");
-        chk.accept(numRequests*2, "scheduled");
-        chk.accept(numRequests, "requestSending");
-        chk.accept(numRequests, "comparingResults");
+        var traceProcessor = new TraceProcessor(testSpanExporter);
+        for (int numTries=1; ; ++numTries) {
+            final String TCP_CONNECTION_SCOPE_NAME = "tcpConnection";
+            var numTraces = traceProcessor.getCountAndRemoveSpan(TCP_CONNECTION_SCOPE_NAME);
+            switch (numTraces) {
+                case 1:
+                    break;
+                case -1:
+                    traceProcessor = new TraceProcessor(testSpanExporter);
+                    if (numTries > 5) {
+                        Assertions.fail("Even after waiting/polling, no " + TCP_CONNECTION_SCOPE_NAME + " was found.");
+                    }
+                    try {
+                        Thread.sleep(250);
+                    } catch (InterruptedException e) {
+                        throw Lombok.sneakyThrow(e);
+                    }
+                    continue;
+                default:
+                    Assertions.fail("Found " + numTraces + " for " + TCP_CONNECTION_SCOPE_NAME);
+            }
+            break;
+        }
 
-        Consumer<String> chkNonZero = k-> {
-            Assertions.assertNotNull(byName.get(k));
-            Assertions.assertFalse(byName.get(k).isEmpty());
-            byName.remove(k);
-        };
-        chkNonZero.accept("waitingForResponse");
-        chkNonZero.accept("readNextTrafficStreamChunk");
+        Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("channel"));
+        Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("trafficStreamLifetime"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("httpTransaction"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingRequest"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingResponse"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("transformation"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("targetTransaction"));
+        Assertions.assertEquals(numRequests*2, traceProcessor.getCountAndRemoveSpan("scheduled"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("requestSending"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("comparingResults"));
+
+        Assertions.assertTrue(traceProcessor.getCountAndRemoveSpan("waitingForResponse") > 0);
+        Assertions.assertTrue(traceProcessor.getCountAndRemoveSpan("readNextTrafficStreamChunk") > 0);
         // ideally, we'd be getting these back too, but our requests are malformed, so the server closes, which
         // may occur before we've started to accumulate the response.  So - just ignore these, but make sure that
         // there isn't anything else that we've missed.
-        byName.remove("receivingResponse");
+        traceProcessor.getCountAndRemoveSpan("receivingResponse");
 
-        Assertions.assertEquals("", byName.entrySet().stream()
-                .map(kvp->kvp.getKey()+":"+kvp.getValue()).collect(Collectors.joining()));
+        Assertions.assertEquals("", traceProcessor.getRemainingItemsString());
     }
 }

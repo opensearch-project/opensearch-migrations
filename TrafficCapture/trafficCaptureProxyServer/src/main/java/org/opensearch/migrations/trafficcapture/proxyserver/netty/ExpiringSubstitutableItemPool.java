@@ -319,8 +319,6 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
             sb.append(", numInProgressItems=").append(inProgressItems.size());
             sb.append(", numReadyItems=").append(readyItems.size());
         }
-        sb.append(", inProgressItems=").append(inProgressItems);
-        sb.append(", readyItems=").append(readyItems);
         sb.append(", itemSupplier=").append(itemSupplier);
         sb.append(", onExpirationConsumer=").append(onExpirationConsumer);
         sb.append(", eventLoop=").append(eventLoop);

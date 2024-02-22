@@ -14,9 +14,10 @@ import requests
 import responses
 from responses import matchers
 
-import index_operations
+import index_management
 from component_template_info import ComponentTemplateInfo
 from endpoint_info import EndpointInfo
+from exceptions import IndexManagementError, RequestError
 from index_template_info import IndexTemplateInfo
 from tests import test_constants
 
@@ -29,7 +30,7 @@ def create_base_template_response(list_name: str, body: dict) -> dict:
     }}}]}
 
 
-class TestIndexOperations(unittest.TestCase):
+class TestIndexManagement(unittest.TestCase):
     @responses.activate
     def test_fetch_all_indices(self):
         # Set up GET response
@@ -45,7 +46,7 @@ class TestIndexOperations(unittest.TestCase):
         }
         responses.get(test_constants.SOURCE_ENDPOINT + "*", json=test_data)
         # Now send request
-        index_data = index_operations.fetch_all_indices(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        index_data = index_management.fetch_all_indices(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(3, len(index_data.keys()))
         # Test that internal data has been filtered, but non-internal data is retained
         index_settings = index_data[test_constants.INDEX1_NAME][test_constants.SETTINGS_KEY]
@@ -63,7 +64,7 @@ class TestIndexOperations(unittest.TestCase):
                       match=[matchers.json_params_matcher(test_data[test_constants.INDEX2_NAME])])
         responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX3_NAME,
                       match=[matchers.json_params_matcher(test_data[test_constants.INDEX3_NAME])])
-        failed = index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_management.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
         self.assertEqual(0, len(failed))
 
     @responses.activate
@@ -78,11 +79,11 @@ class TestIndexOperations(unittest.TestCase):
         responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX1_NAME,
                       match=[matchers.json_params_matcher(expected_payload)])
         # Empty "aliases" should be stripped
-        failed = index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_management.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
         self.assertEqual(0, len(failed))
         # Index without "aliases" should not fail
         del test_data[test_constants.INDEX1_NAME][aliases_key]
-        failed = index_operations.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_management.create_indices(test_data, EndpointInfo(test_constants.TARGET_ENDPOINT))
         self.assertEqual(0, len(failed))
 
     @responses.activate
@@ -94,7 +95,7 @@ class TestIndexOperations(unittest.TestCase):
                       json={})
         responses.put(test_constants.TARGET_ENDPOINT + test_constants.INDEX3_NAME,
                       json={})
-        failed_indices = index_operations.create_indices(test_constants.BASE_INDICES_DATA,
+        failed_indices = index_management.create_indices(test_constants.BASE_INDICES_DATA,
                                                          EndpointInfo(test_constants.TARGET_ENDPOINT))
         # Verify that failed indices are returned with their respective errors
         self.assertEqual(1, len(failed_indices))
@@ -114,7 +115,7 @@ class TestIndexOperations(unittest.TestCase):
                                "aggregations": {"count": {"buckets": test_buckets}}}
         responses.get(expected_count_endpoint, json=mock_count_response)
         # Now send request
-        doc_count_result = index_operations.doc_count(test_indices, EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        doc_count_result = index_management.doc_count(test_indices, EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(total_docs, doc_count_result.total)
 
     @responses.activate
@@ -122,34 +123,43 @@ class TestIndexOperations(unittest.TestCase):
         test_indices = {test_constants.INDEX1_NAME, test_constants.INDEX2_NAME}
         expected_count_endpoint = test_constants.SOURCE_ENDPOINT + ",".join(test_indices) + "/_search"
         responses.get(expected_count_endpoint, body=requests.Timeout())
-        self.assertRaises(RuntimeError, index_operations.doc_count, test_indices,
-                          EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        try:
+            index_management.doc_count(test_indices, EndpointInfo(test_constants.SOURCE_ENDPOINT))
+            # test should not reach this line
+            self.fail("Expected exception not thrown")
+        except IndexManagementError as e:
+            self.assertIsNotNone(e.__cause__)
+            self.assertTrue(isinstance(e.__cause__, RequestError))
 
     @responses.activate
     def test_get_request_errors(self):
         # Set up list of error types to test
         test_errors = [requests.ConnectionError(), requests.HTTPError(), requests.Timeout(),
                        requests.exceptions.MissingSchema()]
-        # Verify that each error is wrapped in a RuntimeError
+        # Verify that each error is wrapped in a IndexManagementError, then a RequestError
         for e in test_errors:
             responses.get(test_constants.SOURCE_ENDPOINT + "*", body=e)
-            self.assertRaises(RuntimeError, index_operations.fetch_all_indices,
-                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
+            try:
+                index_management.fetch_all_indices(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+            except IndexManagementError as ime:
+                self.assertIsNotNone(ime.__cause__)
+                self.assertTrue(isinstance(ime.__cause__, RequestError))
+                self.assertIsNotNone(ime.__cause__.__cause__)
 
     @responses.activate
     def test_fetch_all_component_templates_empty(self):
         # 1 - Empty response
         responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json={})
-        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         # Missing key returns empty result
         self.assertEqual(0, len(result))
         # 2 - Valid response structure but no templates
         responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json={"component_templates": []})
-        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(0, len(result))
         # 2 - Invalid response structure
         responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json={"templates": []})
-        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(0, len(result))
 
     @responses.activate
@@ -158,7 +168,7 @@ class TestIndexOperations(unittest.TestCase):
         test_index = test_constants.BASE_INDICES_DATA[test_constants.INDEX3_NAME]
         test_resp = create_base_template_response("component_templates", test_index)
         responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", json=test_resp)
-        result = index_operations.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         # Result should contain one template
         self.assertEqual(1, len(result))
         template = result.pop()
@@ -172,16 +182,16 @@ class TestIndexOperations(unittest.TestCase):
     def test_fetch_all_index_templates_empty(self):
         # 1 - Empty response
         responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json={})
-        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         # Missing key returns empty result
         self.assertEqual(0, len(result))
         # 2 - Valid response structure but no templates
         responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json={"index_templates": []})
-        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(0, len(result))
         # 2 - Invalid response structure
         responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json={"templates": []})
-        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         self.assertEqual(0, len(result))
 
     @responses.activate
@@ -197,7 +207,7 @@ class TestIndexOperations(unittest.TestCase):
         template_body["index_patterns"] = [test_index_pattern]
         template_body["composed_of"] = [test_component_template_name]
         responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", json=test_resp)
-        result = index_operations.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        result = index_management.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
         # Result should contain one template
         self.assertEqual(1, len(result))
         template = result.pop()
@@ -213,14 +223,12 @@ class TestIndexOperations(unittest.TestCase):
         responses.get(test_constants.SOURCE_ENDPOINT + "_component_template", body=requests.Timeout())
         responses.get(test_constants.SOURCE_ENDPOINT + "_index_template", body=requests.HTTPError())
         try:
-            self.assertRaises(RuntimeError, index_operations.fetch_all_component_templates,
-                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
-        except RuntimeError as e:
+            index_management.fetch_all_component_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except IndexManagementError as e:
             self.assertIsNotNone(e.__cause__)
         try:
-            self.assertRaises(RuntimeError, index_operations.fetch_all_index_templates,
-                              EndpointInfo(test_constants.SOURCE_ENDPOINT))
-        except RuntimeError as e:
+            index_management.fetch_all_index_templates(EndpointInfo(test_constants.SOURCE_ENDPOINT))
+        except IndexManagementError as e:
             self.assertIsNotNone(e.__cause__)
 
     @responses.activate
@@ -240,7 +248,7 @@ class TestIndexOperations(unittest.TestCase):
                       match=[matchers.json_params_matcher(test1_template_def)])
         responses.put(test_constants.TARGET_ENDPOINT + "_component_template/test2",
                       match=[matchers.json_params_matcher(test2_template_def)])
-        failed = index_operations.create_component_templates(test_templates,
+        failed = index_management.create_component_templates(test_templates,
                                                              EndpointInfo(test_constants.TARGET_ENDPOINT))
         self.assertEqual(0, len(failed))
         # Also test index templates
@@ -252,7 +260,7 @@ class TestIndexOperations(unittest.TestCase):
                       match=[matchers.json_params_matcher(test1_template_def)])
         responses.put(test_constants.TARGET_ENDPOINT + "_index_template/test2",
                       match=[matchers.json_params_matcher(test2_template_def)])
-        failed = index_operations.create_index_templates(test_templates, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_management.create_index_templates(test_templates, EndpointInfo(test_constants.TARGET_ENDPOINT))
         self.assertEqual(0, len(failed))
 
     @responses.activate
@@ -261,13 +269,13 @@ class TestIndexOperations(unittest.TestCase):
         responses.put(test_constants.TARGET_ENDPOINT + "_component_template/test1", body=requests.Timeout())
         responses.put(test_constants.TARGET_ENDPOINT + "_index_template/test2", body=requests.HTTPError())
         test_input = ComponentTemplateInfo({"name": "test1", "component_template": {}})
-        failed = index_operations.create_component_templates({test_input}, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_management.create_component_templates({test_input}, EndpointInfo(test_constants.TARGET_ENDPOINT))
         # Verify that failures return their respective errors
         self.assertEqual(1, len(failed))
         self.assertTrue("test1" in failed)
         self.assertTrue(isinstance(failed["test1"], requests.Timeout))
         test_input = IndexTemplateInfo({"name": "test2", "index_template": {}})
-        failed = index_operations.create_index_templates({test_input}, EndpointInfo(test_constants.TARGET_ENDPOINT))
+        failed = index_management.create_index_templates({test_input}, EndpointInfo(test_constants.TARGET_ENDPOINT))
         # Verify that failures return their respective errors
         self.assertEqual(1, len(failed))
         self.assertTrue("test2" in failed)

@@ -7,8 +7,11 @@ import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -32,16 +35,14 @@ public class ConnectionReplaySession {
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture> channelFutureFuture;
     public final OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
-
     @Getter
-    @Setter
-    private final IReplayContexts.ISocketContext socketContext;
+    private final IReplayContexts.IChannelKeyContext channelKeyContext;
 
     public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext) {
         this.eventLoop = eventLoop;
+        this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
-        this.socketContext = channelKeyContext.createSocketContext();
     }
 
     @SneakyThrows

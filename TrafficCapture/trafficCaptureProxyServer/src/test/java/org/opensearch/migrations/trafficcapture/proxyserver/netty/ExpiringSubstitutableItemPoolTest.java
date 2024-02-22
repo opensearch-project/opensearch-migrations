@@ -20,8 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.parallel.Isolated;
 
 @Slf4j
+@Isolated("Isolation based on temporal checks")
 class ExpiringSubstitutableItemPoolTest {
 
     public static final int NUM_POOLED_ITEMS = 5;
@@ -69,7 +71,6 @@ class ExpiringSubstitutableItemPoolTest {
                     return rval;
                 },
                 item->{
-                    expireCountdownLatch.countDown();
                     log.info("Expiring item: "+item);
                     try {
                         expiredItems.add(item.get());
@@ -79,6 +80,7 @@ class ExpiringSubstitutableItemPoolTest {
                     } catch (ExecutionException e) {
                         throw Lombok.sneakyThrow(e);
                     }
+                    expireCountdownLatch.countDown();
                 });
         for (int i = 0; i<NUM_POOLED_ITEMS; ++i) {
             Thread.sleep(TIME_BETWEEN_INITIAL_ITEMS.toMillis());

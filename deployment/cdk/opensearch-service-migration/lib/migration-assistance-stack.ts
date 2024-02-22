@@ -183,7 +183,7 @@ export class MigrationAssistanceStack extends Stack {
         });
 
         const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
-            bucketName: `migration-artifacts-${props.stage}-${this.region}`,
+            bucketName: `migration-artifacts-${this.account}-${props.stage}-${this.region}`,
             encryption: BucketEncryption.S3_MANAGED,
             enforceSSL: true
         });

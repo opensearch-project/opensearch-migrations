@@ -14,6 +14,7 @@ import requests
 
 from component_template_info import ComponentTemplateInfo
 from endpoint_info import EndpointInfo
+from exceptions import IndexManagementError, RequestError
 from index_doc_count import IndexDocCount
 from index_template_info import IndexTemplateInfo
 
@@ -46,21 +47,21 @@ def __send_get_request(url: str, endpoint: EndpointInfo, payload: Optional[dict]
                             timeout=__TIMEOUT_SECONDS)
         resp.raise_for_status()
         return resp
-    except requests.ConnectionError:
-        raise RuntimeError(f"ConnectionError on GET request to cluster endpoint: {endpoint.get_url()}")
+    except requests.ConnectionError as e:
+        raise RequestError(f"ConnectionError on GET request to cluster endpoint: {endpoint.get_url()}") from e
     except requests.HTTPError as e:
-        raise RuntimeError(f"HTTPError on GET request to cluster endpoint: {endpoint.get_url()} - {e!s}")
-    except requests.Timeout:
+        raise RequestError(f"HTTPError on GET request to cluster endpoint: {endpoint.get_url()}") from e
+    except requests.Timeout as e:
         # TODO retry mechanism
-        raise RuntimeError(f"Timed out on GET request to cluster endpoint: {endpoint.get_url()}")
+        raise RequestError(f"Timed out on GET request to cluster endpoint: {endpoint.get_url()}") from e
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"GET request failure to cluster endpoint: {endpoint.get_url()} - {e!s}")
+        raise RequestError(f"GET request failure to cluster endpoint: {endpoint.get_url()}") from e
 
 
 def fetch_all_indices(endpoint: EndpointInfo) -> dict:
     all_indices_url: str = endpoint.add_path(__ALL_INDICES_ENDPOINT)
     try:
-        # raises RuntimeError in case of any request errors
+        # raises RequestError in case of any request errors
         resp = __send_get_request(all_indices_url, endpoint)
         result = dict(resp.json())
         for index in list(result.keys()):
@@ -74,8 +75,8 @@ def fetch_all_indices(endpoint: EndpointInfo) -> dict:
                     if __INDEX_KEY in index_settings:
                         index_settings[__INDEX_KEY].pop(setting, None)
         return result
-    except RuntimeError as e:
-        raise RuntimeError(f"Failed to fetch metadata from cluster endpoint: {e!s}")
+    except RequestError as e:
+        raise IndexManagementError("Failed to fetch metadata from cluster endpoint") from e
 
 
 def create_indices(indices_data: dict, endpoint: EndpointInfo) -> dict:
@@ -101,7 +102,7 @@ def doc_count(indices: set, endpoint: EndpointInfo) -> IndexDocCount:
     count_endpoint_suffix: str = ','.join(indices) + __SEARCH_COUNT_PATH
     doc_count_endpoint: str = endpoint.add_path(count_endpoint_suffix)
     try:
-        # raises RuntimeError in case of any request errors
+        # raises RequestError in case of any request errors
         resp = __send_get_request(doc_count_endpoint, endpoint, __SEARCH_COUNT_PAYLOAD)
         result = dict(resp.json())
         total: int = __TOTAL_COUNT_JSONPATH.find(result)[0].value
@@ -110,13 +111,13 @@ def doc_count(indices: set, endpoint: EndpointInfo) -> IndexDocCount:
         for entry in counts_list:
             count_map[entry[__BUCKET_INDEX_NAME_KEY]] = entry[__BUCKET_DOC_COUNT_KEY]
         return IndexDocCount(total, count_map)
-    except RuntimeError as e:
-        raise RuntimeError(f"Failed to fetch doc_count: {e!s}")
+    except RequestError as e:
+        raise IndexManagementError("Failed to fetch doc_count") from e
 
 
 def __fetch_templates(endpoint: EndpointInfo, path: str, root_key: str, factory) -> set:
     url: str = endpoint.add_path(path)
-    # raises RuntimeError in case of any request errors
+    # raises RequestError in case of any request errors
     try:
         resp = __send_get_request(url, endpoint)
         result = set()
@@ -124,27 +125,27 @@ def __fetch_templates(endpoint: EndpointInfo, path: str, root_key: str, factory)
             for template in resp.json()[root_key]:
                 result.add(factory(template))
         return result
-    except RuntimeError as e:
+    except RequestError as e:
         # Chain the underlying exception as a cause
-        raise RuntimeError("Failed to fetch template metadata from cluster endpoint") from e
+        raise IndexManagementError("Failed to fetch template metadata from cluster endpoint") from e
 
 
 def fetch_all_component_templates(endpoint: EndpointInfo) -> set[ComponentTemplateInfo]:
     try:
-        # raises RuntimeError in case of any request errors
+        # raises RequestError in case of any request errors
         return __fetch_templates(endpoint, __COMPONENT_TEMPLATES_PATH, __COMPONENT_TEMPLATE_LIST_KEY,
                                  lambda t: ComponentTemplateInfo(t))
-    except RuntimeError as e:
-        raise RuntimeError("Failed to fetch component template metadata") from e
+    except IndexManagementError as e:
+        raise IndexManagementError("Failed to fetch component template metadata") from e
 
 
 def fetch_all_index_templates(endpoint: EndpointInfo) -> set[IndexTemplateInfo]:
     try:
-        # raises RuntimeError in case of any request errors
+        # raises RequestError in case of any request errors
         return __fetch_templates(endpoint, __INDEX_TEMPLATES_PATH, __INDEX_TEMPLATE_LIST_KEY,
                                  lambda t: IndexTemplateInfo(t))
-    except RuntimeError as e:
-        raise RuntimeError("Failed to fetch index template metadata") from e
+    except IndexManagementError as e:
+        raise IndexManagementError("Failed to fetch index template metadata") from e
 
 
 def __create_templates(templates: set[ComponentTemplateInfo], endpoint: EndpointInfo, template_path: str) -> dict:
