@@ -9,6 +9,7 @@ import {KafkaBrokerStack} from "../lib/service-stacks/kafka-broker-stack";
 import {KafkaZookeeperStack} from "../lib/service-stacks/kafka-zookeeper-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import {OpenSearchContainerStack} from "../lib/service-stacks/opensearch-container-stack";
+import {OtelCollectorStack} from "../lib/service-stacks/migration-otel-collector-stack";
 
 // Mock using local Dockerfile (which may not exist and would fail synthesis) with the intent of using a "fake-image" from a public registry
 jest.mock("aws-cdk-lib/aws-ecr-assets")
@@ -72,7 +73,7 @@ test('Test all migration services with Kafka container get created when enabled'
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack, OpenSearchContainerStack]
+        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack, OpenSearchContainerStack, OtelCollectorStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)

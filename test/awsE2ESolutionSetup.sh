@@ -15,7 +15,7 @@ prepare_source_nodes_for_capture () {
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
   kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
-  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/
+  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/otelCollectorSGId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
