@@ -42,7 +42,9 @@ public class ClientConnectionPool {
         // event loop that was tied to the original channel to bind all future channels to
         // the same event loop.  That means that we don't have to worry about concurrent
         // accesses/changes to the OTHER value that we're storing within the cache.
-        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx);
+        var eventLoop = eventLoopGroup.next();
+        return new ConnectionReplaySession(eventLoop, channelKeyCtx,
+                ()->getResilientClientChannelProducer(eventLoop, channelKeyCtx));
     }
 
     public ClientConnectionPool(URI serverUri, SslContext sslContext, int numThreads) {
@@ -135,10 +137,7 @@ public class ClientConnectionPool {
             return rval;
         }
         return channelFutureAndSchedule.eventLoop.submit(() -> {
-            if (channelFutureAndSchedule.getChannelFutureFuture() == null) {
-                channelFutureAndSchedule.setChannelFutureFuture(
-                        getResilientClientChannelProducer(channelFutureAndSchedule.eventLoop, ctx));
-            }
+            channelFutureAndSchedule.getOrCreateChannelFutureFuture();
             return channelFutureAndSchedule;
         });
     }

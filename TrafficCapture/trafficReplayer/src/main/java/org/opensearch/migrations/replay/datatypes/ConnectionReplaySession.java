@@ -3,15 +3,13 @@ package org.opensearch.migrations.replay.datatypes;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
 
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -31,22 +29,31 @@ public class ConnectionReplaySession {
      */
     public final EventLoop eventLoop;
     @Getter
-    @Setter
+    private Supplier<DiagnosticTrackableCompletableFuture<String, ChannelFuture>> channelFutureFutureFactory;
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture> channelFutureFuture;
     public final OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
 
-    public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext) {
+    public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext,
+                                   Supplier<DiagnosticTrackableCompletableFuture<String, ChannelFuture>>
+                                           channelFutureFutureFactory)
+    {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
+        this.channelFutureFutureFactory = channelFutureFutureFactory;
+        this.channelFutureFuture = channelFutureFutureFactory.get();
+    }
+
+    public DiagnosticTrackableCompletableFuture<String, ChannelFuture> getActiveChannelFutureFuture() {
+        return channelFutureFuture.map(cf->cf);
     }
 
     @SneakyThrows
-    public ChannelFuture getInnerChannelFuture() {
+    public ChannelFuture getAsIsChannelFuture() {
         return channelFutureFuture.get();
     }
 

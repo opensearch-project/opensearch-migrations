@@ -255,7 +255,8 @@ public class RequestSenderOrchestrator {
     }
 
     private static NettyPacketToHttpConsumer
-    memoizePacketConsumer(IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext, ChannelFuture channelFuture,
+    memoizePacketConsumer(IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext,
+                          ChannelFuture channelFuture,
                           AtomicReference<NettyPacketToHttpConsumer> packetReceiver) {
         if (packetReceiver.get() == null) {
             packetReceiver.set(new NettyPacketToHttpConsumer(channelFuture, httpTransactionContext));

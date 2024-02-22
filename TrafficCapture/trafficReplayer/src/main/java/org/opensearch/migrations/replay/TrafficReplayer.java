@@ -602,18 +602,19 @@ public class TrafficReplayer {
                                       @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
-            liveTrafficStreamLimiter.addWork(1);
-            var requestPushFuture = transformAndSendRequest(replayEngine, request, ctx);
-            var requestKey = ctx.getReplayerRequestKey();
-            requestFutureMap.put(requestKey, requestPushFuture);
-            liveRequests.put(requestKey, true);
-            requestPushFuture.map(f->f.whenComplete((v,t)->{
-                        liveRequests.remove(requestKey);
-                        liveTrafficStreamLimiter.doneProcessing(1);
-                        log.atTrace()
-                                .setMessage(()->"Summary response value for " + requestKey + " returned=" + v).log();
-                    }),
-                    ()->"logging summary");
+            liveTrafficStreamLimiter.queueWork(1, workItem -> {
+                var requestPushFuture = transformAndSendRequest(replayEngine, request, ctx);
+                var requestKey = ctx.getReplayerRequestKey();
+                requestFutureMap.put(requestKey, requestPushFuture);
+                liveRequests.put(requestKey, true);
+                requestPushFuture.map(f -> f.whenComplete((v, t) -> {
+                            liveRequests.remove(requestKey);
+                            liveTrafficStreamLimiter.doneProcessing(workItem);
+                            log.atTrace()
+                                    .setMessage(() -> "Summary response value for " + requestKey + " returned=" + v).log();
+                        }),
+                        () -> "logging summary");
+            });
         }
 
         @Override

@@ -60,7 +60,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * pending.
      */
     DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
-    private final Channel channel;
+    private Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
 
@@ -87,23 +87,27 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var parentContext = ctx.createTargetRequestContext();
         this.setCurrentMessageContext(parentContext.createHttpSendingContext());
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
-        DiagnosticTrackableCompletableFuture<String,Void>  initialFuture =
-                new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
-                        () -> "incoming connection is ready for " + clientConnection);
-        this.activeChannelFuture = initialFuture;
-        this.channel = clientConnection.channel();
+        this.activeChannelFuture = new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
+                () -> "incoming connection is ready for " + clientConnection);
+        var initialFuture = this.activeChannelFuture;
 
         log.atDebug().setMessage(() ->
                 "C'tor: incoming clientConnection pipeline=" + clientConnection.channel().pipeline()).log();
+        activateLiveChannel(clientConnection, initialFuture);
+    }
+
+    private void activateLiveChannel(ChannelFuture clientConnection, DiagnosticTrackableCompletableFuture<String, Void> initialFuture) {
         clientConnection.addListener(connectFuture -> {
             if (connectFuture.isSuccess()) {
-                activateChannelForThisConsumer();
-            }
-        }).addListener(completelySetupFuture -> {
-            if (completelySetupFuture.isSuccess()) {
-                initialFuture.future.complete(null);
+                if (channel.isActive()) {
+                    activateChannelForThisConsumer();
+                    this.channel = clientConnection.channel();
+                    initialFuture.future.complete(null);
+                } else {
+                    //activateLiveChannel(createClientConnection(1,1,1,1), initialFuture);
+                }
             } else {
-                initialFuture.future.completeExceptionally(completelySetupFuture.cause());
+                initialFuture.future.completeExceptionally(connectFuture.cause());
             }
         });
     }
@@ -141,11 +145,12 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var rval = new DefaultChannelPromise(outboundChannelFuture.channel());
         outboundChannelFuture.addListener((ChannelFutureListener) connectFuture -> {
             if (connectFuture.isSuccess()) {
-                var pipeline = connectFuture.channel().pipeline();
+                final var channel  = connectFuture.channel();
+                var pipeline = channel.pipeline();
                 log.atTrace().setMessage(()-> channelKeyContext.getChannelKey() +
-                        " Done setting up client channel & it was successful").log();
+                        " Done setting up client channel & it was successful for " + channel).log();
                 if (sslContext != null) {
-                    var sslEngine = sslContext.newEngine(connectFuture.channel().alloc());
+                    var sslEngine = sslContext.newEngine(channel.alloc());
                     sslEngine.setUseClientMode(true);
                     var sslHandler = new SslHandler(sslEngine);
                     addLoggingHandler(pipeline, "A");
@@ -184,6 +189,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     private void activateChannelForThisConsumer() {
+        assert channel.isActive();
         if (channelIsInUse(channel)) {
             throw new IllegalStateException("Channel " + channel + "is being used elsewhere already!");
         }
@@ -231,12 +237,13 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private void deactivateChannel() {
         try {
             var pipeline = channel.pipeline();
-            log.atDebug().setMessage(() -> "Resetting the pipeline currently at: " + pipeline).log();
+            log.atDebug().setMessage(() -> "Resetting the pipeline for channel " + channel +
+                    "currently at: " + pipeline).log();
             for (var handlerName : new String[]{WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME}) {
                 try {
                     pipeline.remove(handlerName);
                 } catch (NoSuchElementException e) {
-                    log.atDebug().setMessage(()->"Ignoring an exception that the "+handlerName+" wasn't present").log();
+                    log.atWarn().setMessage(()->"Ignoring an exception that the "+handlerName+" wasn't present").log();
                 }
             }
             while (true) {
@@ -247,7 +254,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 pipeline.removeLast();
             }
             channel.config().setAutoRead(false);
-            log.atDebug().setMessage(() -> "Reset the pipeline back to: " + pipeline).log();
+            log.atDebug().setMessage(() -> "Reset the pipeline for channel " + channel + " back to: " + pipeline).log();
         } finally {
             getCurrentRequestSpan().close();
             getParentContext().close();

@@ -6,6 +6,7 @@ import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -67,6 +68,30 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         }
     }
 
+    @Test
+    @ResourceLock("TrafficReplayerRunner")
+    public void fullTestWithThrottledStart() throws Throwable {
+        var random = new Random(1);
+        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
+                response -> TestHttpServerContext.makeResponse(random, response));
+        var nonTrackingContext = TestContext.noOtelTracking();
+        var streamAndSizes = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(nonTrackingContext,
+                1024, true);
+        var numExpectedRequests = streamAndSizes.numHttpTransactions;
+        var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());
+        log.atInfo().setMessage(() -> trafficStreams.stream().map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
+                .collect(Collectors.joining("\n"))).log();
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
+        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(
+                numExpectedRequests, httpServer.localhostEndpoint(),
+                () -> t -> {},
+                () -> nonTrackingContext,
+                trafficSourceSupplier);
+        Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(),
+                trafficSourceSupplier.nextReadCursor.get());
+        log.info("done");
+    }
+
     @ParameterizedTest
     @CsvSource(value = {
             "3,false",
@@ -76,7 +101,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     })
     @Tag("longTest")
     @ResourceLock("TrafficReplayerRunner")
-    public void fullTest(int testSize, boolean randomize) throws Throwable {
+    public void fullTestWithRestarts(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
                 response -> TestHttpServerContext.makeResponse(random, response));
@@ -195,6 +220,4 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             return CommitResult.Immediate;
         }
     }
-
-
 }
