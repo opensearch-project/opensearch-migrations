@@ -136,12 +136,14 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
-    ports:
-        #- "${PORT:-}:8000"
-      - "8000:8000"
+    # Django API port
+    #ports:
+      #- "8000:8000"
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
-#    command: ./runTestBenchmarks.sh
+    # Django API entry
+    #command: /experimental/init.sh
+    #command: ./runTestBenchmarks.sh
 
 volumes:
   zookeeper_data:

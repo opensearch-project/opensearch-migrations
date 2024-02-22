@@ -18,7 +18,8 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
-    readonly migrationAnalyticsEnabled: boolean
+    readonly migrationAnalyticsEnabled: boolean,
+    readonly enableDjangoAPI?: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -63,18 +64,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         if (props.migrationAnalyticsEnabled) {
             securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)))
         }
-
-        const servicePort: PortMapping = {
-            name: "django-connect",
-            hostPort: 8000,
-            containerPort: 8000,
-            protocol: Protocol.TCP
-        }
-        const serviceConnectService: ServiceConnectService = {
-            portMappingName: "django-connect",
-            dnsName: "migration-console",
-            port: 8000
-        }
+        let servicePortMappings: PortMapping[]|undefined
+        let serviceConnectServices: ServiceConnectService[]|undefined
+        let serviceDiscoveryPort: number|undefined
+        let serviceDiscoveryEnabled = false
+        let dockerImageCommand: string[]|undefined
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
@@ -140,6 +134,22 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "s3:PutObject"
             ]
         })
+        if (props.enableDjangoAPI) {
+            servicePortMappings = [{
+                name: "django-connect",
+                hostPort: 8000,
+                containerPort: 8000,
+                protocol: Protocol.TCP
+            }]
+            serviceConnectServices = [{
+                portMappingName: "django-connect",
+                dnsName: "migration-console",
+                port: 8000
+            }]
+            serviceDiscoveryPort = 8000
+            serviceDiscoveryEnabled = true
+            dockerImageCommand = ['/bin/sh', '-c', '/experimental/init.sh']
+        }
 
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
@@ -183,10 +193,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             serviceName: "migration-console",
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
-            portMappings: [servicePort],
-            serviceConnectServices: [serviceConnectService],
-            serviceDiscoveryEnabled: true,
-            serviceDiscoveryPort: 8000,
+            portMappings: servicePortMappings,
+            serviceConnectServices: serviceConnectServices,
+            serviceDiscoveryEnabled: serviceDiscoveryEnabled,
+            serviceDiscoveryPort: serviceDiscoveryPort,
+            dockerImageCommand: dockerImageCommand,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,

@@ -1,5 +1,4 @@
 FROM ubuntu:jammy
-ARG EXPERIMENTAL
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -20,20 +19,14 @@ RUN apt-get update && \
     less
 
 # Experimental Django API
-COPY console /console
-RUN pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl awscli==1.29.85 tqdm pexpect StrEnum -r /console/requirements.txt
+COPY console /experimental/console
+COPY init.sh /experimental/init.sh
+RUN chmod +x /experimental/init.sh
 
-# AWS CLI v2 is not available on PYPI: https://github.com/aws/aws-cli/issues/4947
+RUN pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl awscli==1.29.85 tqdm pexpect StrEnum -r /experimental/console/requirements.txt
+
+# AWS CLI v2 is not available on PYPI: https://github.com/aws/aws-cli/issues/4947, following command is needed to install
 #RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
-
-# Experimental libraries needed for API
-#RUN if [ "$EXPERIMENTAL" = "true" ]; then \
-    #pip3 install \
-        #django==5.0.1 \
-        #djangorestframework==3.14.0 \
-        #django-extensions==3.2.3 \
-        #werkzeug==3.0.1; \
-    #fi
 
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
@@ -78,6 +71,5 @@ RUN chmod ug+x /root/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
-COPY init.sh /init.sh
-RUN chmod +x /init.sh
-ENTRYPOINT ["/init.sh"]
+#CMD /experimental/init.sh
+CMD tail -f /dev/null

@@ -162,6 +162,7 @@ export class StackComposer {
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyESExtraArgs = this.getContextForType('captureProxyESExtraArgs', 'string', defaultValues, contextJSON)
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const migrationConsoleDjangoAPIEnabled = this.getContextForType('migrationConsoleDjangoAPIEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
@@ -536,6 +537,7 @@ export class StackComposer {
                 streamingSourceType: streamingSourceType,
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationAnalyticsEnabled: migrationAnalyticsServiceEnabled,
+                enableDjangoAPI: migrationConsoleDjangoAPIEnabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
