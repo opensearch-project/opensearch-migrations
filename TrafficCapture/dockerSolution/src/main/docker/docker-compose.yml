@@ -89,33 +89,34 @@ services:
     image: 'opensearchproject/opensearch:latest'
     environment:
       - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=admin
     networks:
       - migrations
     ports:
       - "29200:9200"
 
-  opensearchanalytics:
-    image: 'opensearchproject/opensearch:latest'
-    environment:
-      - discovery.type=single-node
-    networks:
-      - migrations
-    ports:
-      - "39200:9200"
+#  opensearchanalytics:
+#    image: 'opensearchproject/opensearch:latest'
+#    environment:
+#      - discovery.type=single-node
+#    networks:
+#      - migrations
+#    ports:
+#      - "39200:9200"
 
-  opensearch-dashboards:
-    image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
-    container_name: opensearch-dashboards
-    ports:
-      - "5601:5601" # Map host port 5601 to container port 5601
-    expose:
-      - "5601" # Expose port 5601 for web access to OpenSearch Dashboards
-    networks:
-      - migrations
-    volumes:
-      - ./opensearchDashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
-    depends_on:
-      - opensearchanalytics
+#  opensearch-dashboards:
+#    image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
+#    container_name: opensearch-dashboards
+#    ports:
+#      - "5601:5601" # Map host port 5601 to container port 5601
+#    expose:
+#      - "5601" # Expose port 5601 for web access to OpenSearch Dashboards
+#    networks:
+#      - migrations
+#    volumes:
+#      - ./opensearchDashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
+#    depends_on:
+#      - opensearchanalytics
 
 #  otel-collector:
 #    image: public.ecr.aws/a0w2c5q7/otelcol-with-opensearch:latest
