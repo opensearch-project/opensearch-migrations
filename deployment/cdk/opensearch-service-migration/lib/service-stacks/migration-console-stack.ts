@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -11,13 +11,15 @@ import {
     createOpenSearchServerlessIAMAccessPolicy
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
+import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
-    readonly migrationAnalyticsEnabled: boolean
+    readonly migrationAnalyticsEnabled: boolean,
+    readonly enableDjangoAPI?: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -62,6 +64,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         if (props.migrationAnalyticsEnabled) {
             securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)))
         }
+        let servicePortMappings: PortMapping[]|undefined
+        let serviceConnectServices: ServiceConnectService[]|undefined
+        let serviceDiscoveryPort: number|undefined
+        let serviceDiscoveryEnabled = false
+        let dockerBuildArgs: { [key: string]: string }|undefined
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
@@ -95,7 +102,26 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             effect: Effect.ALLOW,
             resources: [allReplayerServiceArn],
             actions: [
-                "ecs:UpdateService"
+                "ecs:UpdateService",
+                "ecs:DescribeServices"
+            ]
+        })
+
+        const allClusterTasksArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:task/migration-${props.stage}-ecs-cluster/*`
+        const clusterTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [allClusterTasksArn],
+            actions: [
+                "ecs:StopTask",
+                "ecs:DescribeTasks"
+            ]
+        })
+
+        const listTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "ecs:ListTasks",
             ]
         })
 
@@ -108,6 +134,24 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "s3:PutObject"
             ]
         })
+        if (props.enableDjangoAPI) {
+            servicePortMappings = [{
+                name: "django-connect",
+                hostPort: 8000,
+                containerPort: 8000,
+                protocol: Protocol.TCP
+            }]
+            serviceConnectServices = [{
+                portMappingName: "django-connect",
+                dnsName: "migration-console",
+                port: 8000
+            }]
+            serviceDiscoveryPort = 8000
+            serviceDiscoveryEnabled = true
+            dockerBuildArgs = {
+                "CONSOLE_TYPE": "django-console"
+            }
+        }
 
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
@@ -116,7 +160,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, artifactS3PublishPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, clusterTasksPolicy, listTasksPolicy, artifactS3PublishPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
@@ -129,7 +173,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 effect: Effect.ALLOW,
                 resources: [fetchMigrationTaskDefArn],
                 actions: [
-                    "ecs:RunTask"
+                    "ecs:RunTask",
+                    "ecs:StopTask"
                 ]
             })
             const fetchMigrationTaskRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`);
@@ -150,6 +195,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             serviceName: "migration-console",
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
+            portMappings: servicePortMappings,
+            serviceConnectServices: serviceConnectServices,
+            serviceDiscoveryEnabled: serviceDiscoveryEnabled,
+            serviceDiscoveryPort: serviceDiscoveryPort,
+            dockerBuildArgs: dockerBuildArgs,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
