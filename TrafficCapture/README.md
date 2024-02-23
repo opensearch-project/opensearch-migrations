@@ -156,3 +156,23 @@ dependencies {
     //... other dependencies
 }
 ```
+
+The entire list of published subprojects is
+```text
+captureKafkaOffloader
+captureOffloader
+captureProtobufs
+coreUtilities
+jsonJMESPathMessageTransformer
+jsonJMESPathMessageTransformerProvider
+jsonJoltMessageTransformer
+jsonJoltMessageTransformerProvider
+jsonMessageTransformerInterface
+jsonMessageTransformers
+nettyWireLogging
+openSearch23PlusTargetTransformerProvider
+replayerPlugins
+trafficCaptureProxyServer
+trafficCaptureProxyServerTest
+trafficReplayer
+```
