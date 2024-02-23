@@ -6,6 +6,7 @@ from strenum import StrEnum
 
 logger = logging.getLogger(__name__)
 
+
 class ECSTaskStatus(StrEnum):
     PROVISIONING = 'PROVISIONING'
     PENDING = 'PENDING'

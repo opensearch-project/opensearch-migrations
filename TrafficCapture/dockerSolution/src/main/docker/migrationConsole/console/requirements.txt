@@ -2,7 +2,7 @@ Django==4.2.10
 django-extensions==3.2.3
 djangorestframework==3.14.0
 tzdata==2023.4
-tqdm==4.66.1
+tqdm
 awscurl
 boto3
 botocore

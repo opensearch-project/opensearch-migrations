@@ -68,7 +68,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         let serviceConnectServices: ServiceConnectService[]|undefined
         let serviceDiscoveryPort: number|undefined
         let serviceDiscoveryEnabled = false
-        let dockerImageCommand: string[]|undefined
+        let dockerBuildArgs: { [key: string]: string }|undefined
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
@@ -148,7 +148,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }]
             serviceDiscoveryPort = 8000
             serviceDiscoveryEnabled = true
-            dockerImageCommand = ['/bin/sh', '-c', '/experimental/init.sh']
+            dockerBuildArgs = {
+                "CONSOLE_TYPE": "django-console"
+            }
         }
 
         const environment: { [key: string]: string; } = {
@@ -197,7 +199,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             serviceConnectServices: serviceConnectServices,
             serviceDiscoveryEnabled: serviceDiscoveryEnabled,
             serviceDiscoveryPort: serviceDiscoveryPort,
-            dockerImageCommand: dockerImageCommand,
+            dockerBuildArgs: dockerBuildArgs,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,

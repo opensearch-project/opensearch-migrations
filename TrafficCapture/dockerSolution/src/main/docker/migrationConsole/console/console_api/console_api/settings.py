@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -25,21 +26,21 @@ SECRET_KEY = 'django-insecure-26h*wo1qzffhpum=bn#8d(7e8mo-w9fr6*wdy#%izy#5^85-a9
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-# TODO adjust this hardcoded value
-ALLOWED_HOSTS = ['migration-console', 'migration-console.migration.dev.local', 'localhost']
+DEPLOYED_STAGE = os.environ.get('MIGRATION_STAGE')
+ALLOWED_HOSTS = ['migration-console', f'migration-console.migration.{DEPLOYED_STAGE}.local', 'localhost']
 
 
 # Application definition
 
 INSTALLED_APPS = [
-#    'django.contrib.admin',
+    #'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'rest_framework',
     'django_extensions',
-#    'django.contrib.staticfiles',
+    #'django.contrib.staticfiles',
 ]
 
 MIDDLEWARE = [

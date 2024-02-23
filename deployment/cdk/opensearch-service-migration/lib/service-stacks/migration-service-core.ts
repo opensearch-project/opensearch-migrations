@@ -29,6 +29,9 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly dockerDirectoryPath?: string,
     readonly dockerImageRegistryName?: string,
     readonly dockerImageCommand?: string[],
+    readonly dockerBuildArgs?: {
+        [key: string]: string
+    },
     readonly taskRolePolicies?: PolicyStatement[],
     readonly mountPoints?: MountPoint[],
     readonly volumes?: Volume[],
@@ -100,6 +103,7 @@ export class MigrationServiceCore extends Stack {
         if (props.dockerDirectoryPath) {
             serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
                 directory: props.dockerDirectoryPath,
+                buildArgs: props.dockerBuildArgs,
                 // File path relative to above directory path
                 file: props.dockerFilePath
             }))

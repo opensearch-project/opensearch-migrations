@@ -1,7 +1,6 @@
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from strenum import StrEnum
-from .serializers import MigrationStatusSerializer
 import datetime
 import sys
 import json
@@ -14,7 +13,7 @@ from startFetchMigration import start_fetch_migration
 from startLiveCaptureMigration import start_live_capture_migration
 from getFetchMigrationStatus import get_fetch_migration_status
 from getLiveCaptureMigrationStatus import get_live_capture_migration_status
-from migrationUtils import get_deployed_stage, is_migration_active, OperationStatus
+from migrationUtils import get_deployed_stage
 
 root_logger = logging.getLogger()
 root_logger.handlers = []
@@ -25,6 +24,7 @@ root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
 
 env_stage = get_deployed_stage()
+
 
 class MigrationType(StrEnum):
     FULL_LOAD = 'full-load'
