@@ -1,4 +1,5 @@
-FROM ubuntu:jammy
+ARG CONSOLE_TYPE=console
+FROM ubuntu:jammy AS console
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -18,12 +19,7 @@ RUN apt-get update && \
     unzip \
     less
 
-# Experimental Django API
-COPY console /experimental/console
-COPY init.sh /experimental/init.sh
-RUN chmod +x /experimental/init.sh
-
-RUN pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl awscli==1.29.85 tqdm pexpect StrEnum -r /experimental/console/requirements.txt
+RUN pip3 install urllib3 opensearch-benchmark awscurl awscli==1.29.85 tqdm pexpect StrEnum
 
 # AWS CLI v2 is not available on PYPI: https://github.com/aws/aws-cli/issues/4947, following command is needed to install
 #RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
@@ -51,9 +47,9 @@ COPY stopFetchMigration.py /root/
 COPY stopLiveCaptureMigration.py /root/
 COPY getFetchMigrationStatus.py /root/
 COPY getLiveCaptureMigrationStatus.py /root/
-COPY simpleDocumentGenerator.py /root/
+COPY simpleDocumentGenerator.py /root/test/
 COPY catIndices.sh /root/
-COPY setupIntegTests.sh /root/
+COPY setupIntegTests.sh /root/test/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 COPY kafkaExport.sh /root/kafka-tools
@@ -67,9 +63,19 @@ RUN chmod ug+x /root/stopFetchMigration.py
 RUN chmod ug+x /root/stopLiveCaptureMigration.py
 RUN chmod ug+x /root/getFetchMigrationStatus.py
 RUN chmod ug+x /root/getLiveCaptureMigrationStatus.py
-RUN chmod ug+x /root/simpleDocumentGenerator.py
+RUN chmod ug+x /root/test/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
-#CMD /experimental/init.sh
 CMD tail -f /dev/null
+
+FROM console AS django-console
+
+# Experimental Django API
+COPY console /experimental/console
+
+RUN pip3 install markupsafe==2.0.1 -r /experimental/console/requirements.txt
+
+CMD python3 /experimental/console/console_api/manage.py runserver_plus 0.0.0.0:8000
+
+FROM ${CONSOLE_TYPE}
