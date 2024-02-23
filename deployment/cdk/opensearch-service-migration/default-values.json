@@ -6,6 +6,7 @@
   "nodeToNodeEncryptionEnabled": true,
   "encryptionAtRestEnabled": true,
   "vpcEnabled": true,
+  "defaultFargateCpuArch": "X86_64",
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": true,

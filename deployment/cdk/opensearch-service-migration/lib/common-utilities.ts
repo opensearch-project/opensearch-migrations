@@ -1,6 +1,7 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 
 export function createOpenSearchIAMAccessPolicy(region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
@@ -120,4 +121,16 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
         ]
     }))
     return serviceTaskRole
+}
+
+export function validateFargateCpuArch(cpuArch: string): CpuArchitecture {
+    if (cpuArch.toUpperCase() === "X86_64") {
+        return CpuArchitecture.X86_64
+    }
+    else if (cpuArch.toUpperCase() === "ARM64") {
+        return CpuArchitecture.ARM64
+    }
+    else {
+        throw new Error(`Unknown Fargate cpu architecture provided: ${cpuArch}`)
+    }
 }

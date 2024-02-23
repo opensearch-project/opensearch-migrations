@@ -6,7 +6,7 @@ import {
   SecurityGroup,
   IVpc,
 } from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -15,6 +15,7 @@ import {createAwsDistroForOtelPushInstrumentationPolicy} from "../common-utiliti
 
 export interface MigrationAnalyticsProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly bastionHostEnabled?: boolean
 }
 
@@ -82,6 +83,7 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/otelCollector"),
             dockerImageCommand: ["--config=/etc/otel-config-aws.yaml"],
             securityGroups: securityGroups,
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             portMappings: [otelCollectorPort, otelHealthCheckPort],

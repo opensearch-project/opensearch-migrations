@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -13,6 +13,7 @@ import {createMSKProducerIAMPolicies} from "../common-utilities";
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly customSourceClusterEndpoint?: string,
     readonly analyticsServiceEnabled?: boolean,
     readonly extraArgs?: string,
@@ -60,6 +61,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
             taskRolePolicies: servicePolicies,
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
             ...props
