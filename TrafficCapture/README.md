@@ -10,6 +10,7 @@
         - [Traffic Capture Proxy Server](#traffic-capture-proxy-server)
         - [Traffic Replayer](#traffic-replayer)
         - [Capture Kafka Offloader](#capture-kafka-offloader)
+    - [Publishing](#publishing)
 
 ## Overview
 
@@ -136,3 +137,22 @@ The Capture Kafka Offloader will act as a Kafka Producer for offloading captured
 
 Learn more about its functionality and setup here: [Capture Kafka Offloader](captureKafkaOffloader/README.md)
 
+## Publishing
+
+This project can be published to a local maven repository with:
+```sh
+./gradlew publishToMavenLocal
+```
+
+And subsequently imported into a separate gradle project with (replacing name with any subProject name) 
+```groovy
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    implementation group: "org.opensearch.migrations.trafficcapture", name: "captureKafkaOffloader", version: "0.1.0-SNAPSHOT"
+    //... other dependencies
+}
+```
