@@ -2,43 +2,43 @@ version: '3.7'
 services:
 
 
-  prometheus:
-    container_name: prometheus
-    image: prom/prometheus:latest
-    networks:
-      - migrations
-    volumes:
-      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--enable-feature=exemplar-storage'
+#  prometheus:
+#    container_name: prometheus
+#    image: prom/prometheus:latest
+#    networks:
+#      - migrations
+#    volumes:
+#      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
+#    ports:
+#      - "9090:9090"
+#    command:
+#      - '--config.file=/etc/prometheus/prometheus.yml'
+#      - '--enable-feature=exemplar-storage'
 
-  # Jaeger
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    networks:
-      - migrations
-    ports:
-      - "16686:16686"
-      - "4317"
-      - "4318"
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
+#  # Jaeger
+#  jaeger:
+#    image: jaegertracing/all-in-one:latest
+#    networks:
+#      - migrations
+#    ports:
+#      - "16686:16686"
+#      - "4317"
+#      - "4318"
+#    environment:
+#      - COLLECTOR_OTLP_ENABLED=true
 
-  grafana:
-    image: grafana/grafana:latest
-    networks:
-      - migrations
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./grafana_data:/var/lib/grafana
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    depends_on:
-      - prometheus
+#  grafana:
+#    image: grafana/grafana:latest
+#    networks:
+#      - migrations
+#    ports:
+#      - "3000:3000"
+#    volumes:
+#      - ./grafana_data:/var/lib/grafana
+#    environment:
+#      - GF_SECURITY_ADMIN_PASSWORD=admin
+#    depends_on:
+#      - prometheus
 
   zookeeper:
     image: docker.io/bitnami/zookeeper:3.8
