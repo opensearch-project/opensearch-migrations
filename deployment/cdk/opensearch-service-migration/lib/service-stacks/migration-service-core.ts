@@ -1,21 +1,20 @@
 import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
-    CfnService as FargateCfnService,
+    CfnService as FargateCfnService, CloudMapOptions,
     Cluster,
     ContainerImage,
     FargateService,
     FargateTaskDefinition,
     LogDrivers,
     MountPoint,
-    PortMapping, Ulimit,
+    PortMapping, ServiceConnectService, Ulimit,
     Volume
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";

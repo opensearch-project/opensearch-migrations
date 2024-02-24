@@ -1,10 +1,9 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
+import {PortMapping, Protocol, ServiceConnectService, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 
 export interface OpenSearchContainerProps extends StackPropsExt {
     readonly vpc: IVpc
