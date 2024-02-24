@@ -8,7 +8,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 /**
@@ -30,12 +32,13 @@ public class ConnectionReplaySession {
     public final EventLoop eventLoop;
     @Getter
     private Supplier<DiagnosticTrackableCompletableFuture<String, ChannelFuture>> channelFutureFutureFactory;
-    private DiagnosticTrackableCompletableFuture<String, ChannelFuture> channelFutureFuture;
+    private ChannelFuture cachedChannel; // only can be accessed from the eventLoop thread
     public final OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
 
+    @SneakyThrows
     public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext,
                                    Supplier<DiagnosticTrackableCompletableFuture<String, ChannelFuture>>
                                            channelFutureFutureFactory)
@@ -45,16 +48,45 @@ public class ConnectionReplaySession {
         this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
         this.channelFutureFutureFactory = channelFutureFutureFactory;
-        this.channelFutureFuture = channelFutureFutureFactory.get();
     }
 
-    public DiagnosticTrackableCompletableFuture<String, ChannelFuture> getActiveChannelFutureFuture() {
-        return channelFutureFuture.map(cf->cf);
+    public DiagnosticTrackableCompletableFuture<String, ChannelFuture>
+    getFutureThatReturnsChannelFuture(boolean requireActiveChannel) {
+        StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture =
+                new StringTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "procuring a connection");
+        eventLoop.submit(() -> {
+            if (!requireActiveChannel || (cachedChannel != null && cachedChannel.channel().isActive())) {
+                eventLoopFuture.future.complete(cachedChannel);
+            } else {
+                createNewChannelFuture(requireActiveChannel, eventLoopFuture);
+            }
+        });
+        return eventLoopFuture;
     }
 
-    @SneakyThrows
-    public ChannelFuture getAsIsChannelFuture() {
-        return channelFutureFuture.get();
+    private void createNewChannelFuture(boolean requireActiveChannel,
+                                       StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture)
+    {
+        channelFutureFutureFactory.get().future.whenComplete((v,t)-> {
+            if (requireActiveChannel) {
+                if (t != null || !v.channel().isActive()) {
+                    if (t != null) {
+                        channelKeyContext.addCaughtException(t);
+                        log.atWarn().setMessage(() -> "Caught exception while trying to get an active channel")
+                                .setCause(t).log();
+                    }
+                    createNewChannelFuture(requireActiveChannel, eventLoopFuture);
+                } else {
+                    cachedChannel = v;
+                    eventLoopFuture.future.complete(v);
+                }
+            } else if (t != null) {
+                channelKeyContext.addException(t, true);
+                eventLoopFuture.future.completeExceptionally(t);
+            } else {
+                eventLoopFuture.future.complete(v);
+            }
+        });
     }
 
     public boolean hasWorkRemaining() {

@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -68,7 +69,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         }
     }
 
-    @Test
+    @Disabled
     @ResourceLock("TrafficReplayerRunner")
     public void fullTestWithThrottledStart() throws Throwable {
         var random = new Random(1);

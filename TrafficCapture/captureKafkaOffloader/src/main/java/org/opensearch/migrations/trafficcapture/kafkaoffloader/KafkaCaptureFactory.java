@@ -151,7 +151,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         return (metadata, exception) -> {
             log.atInfo().setMessage(()->"kafka completed sending a record").log();
             if (exception != null) {
-                flushContext.addException(exception);
+                flushContext.addException(exception, true);
                 log.error("Error sending producer record: {}", recordId, exception);
                 cf.completeExceptionally(exception);
             } else {

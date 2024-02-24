@@ -7,11 +7,11 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseDecoder;
@@ -19,6 +19,7 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
@@ -26,6 +27,7 @@ import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringHandler;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
+import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -51,6 +53,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private static final MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
+    public static final String CONNECTION_CLOSE_HANDLER_NAME = "CONNECTION_CLOSE_HANDLER";
     public static final String SSL_HANDLER_NAME = "ssl";
     public static final String WRITE_COUNT_WATCHER_HANDLER_NAME = "writeCountWatcher";
     public static final String READ_COUNT_WATCHER_HANDLER_NAME = "readCountWatcher";
@@ -60,6 +63,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * pending.
      */
     DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
+    ConnectionReplaySession replaySession;
     private Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
@@ -76,40 +80,48 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         }
     }
 
-    public NettyPacketToHttpConsumer(NioEventLoopGroup eventLoopGroup, URI serverUri, SslContext sslContext,
-                                     IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext) {
-        this(createClientConnection(eventLoopGroup, sslContext, serverUri,
-                        httpTransactionContext.getLogicalEnclosingScope()), httpTransactionContext);
-    }
-
-    public NettyPacketToHttpConsumer(ChannelFuture clientConnection,
+    public NettyPacketToHttpConsumer(ConnectionReplaySession replaySession,
                                      IReplayContexts.IReplayerHttpTransactionContext ctx) {
+        this.replaySession = replaySession;
         var parentContext = ctx.createTargetRequestContext();
         this.setCurrentMessageContext(parentContext.createHttpSendingContext());
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         this.activeChannelFuture = new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
-                () -> "incoming connection is ready for " + clientConnection);
+                () -> "incoming connection is ready for " + replaySession);
         var initialFuture = this.activeChannelFuture;
 
         log.atDebug().setMessage(() ->
-                "C'tor: incoming clientConnection pipeline=" + clientConnection.channel().pipeline()).log();
-        activateLiveChannel(clientConnection, initialFuture);
+                "C'tor: incoming session=" + replaySession).log();
+        activateLiveChannel(initialFuture);
     }
 
-    private void activateLiveChannel(ChannelFuture clientConnection, DiagnosticTrackableCompletableFuture<String, Void> initialFuture) {
-        clientConnection.addListener(connectFuture -> {
-            if (connectFuture.isSuccess()) {
-                if (channel.isActive()) {
-                    activateChannelForThisConsumer();
-                    this.channel = clientConnection.channel();
-                    initialFuture.future.complete(null);
+    private void activateLiveChannel(DiagnosticTrackableCompletableFuture<String, Void> initialFuture) {
+        replaySession.getFutureThatReturnsChannelFuture(true).thenAccept(channelFuture-> {
+            channelFuture.addListener(connectFuture -> {
+                final var ctx = replaySession.getChannelKeyContext();
+                if (connectFuture.isSuccess()) {
+                    final var c = channelFuture.channel();
+                    if (c.isActive()) {
+                        this.channel = c;
+                        initializeChannelPipeline();
+                        initialFuture.future.complete(null);
+                    } else {
+                        // this may loop forever - until the event loop is shutdown
+                        // (see the ClientConnectionPool::shutdownNow())
+                        ctx.addFailedChannelCreation();
+                        log.atWarn().setMessage(()->"Channel wasn't active, trying to create another for this request")
+                                .log();
+                        activateLiveChannel(initialFuture);
+                    }
                 } else {
-                    //activateLiveChannel(createClientConnection(1,1,1,1), initialFuture);
+                    ctx.addFailedChannelCreation();
+                    ctx.addException(channelFuture.cause(), true);
+                    log.atWarn().setMessage(()->"error creating channel, not retrying")
+                            .setCause(connectFuture.cause()).log();
+                    initialFuture.future.completeExceptionally(connectFuture.cause());
                 }
-            } else {
-                initialFuture.future.completeExceptionally(connectFuture.cause());
-            }
-        });
+            });
+        }, () -> "creating an alive connection");
     }
 
     private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> &
@@ -125,7 +137,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public IReplayContexts.ITargetRequestContext getParentContext() {
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
-    
+
     public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup,
                                                        SslContext sslContext,
                                                        URI serverUri,
@@ -136,8 +148,14 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
         Bootstrap b = new Bootstrap();
         b.group(eventLoopGroup)
+                .handler(new ChannelInitializer<>(){
+                    @Override
+                    protected void initChannel(@NonNull Channel ch) throws Exception {
+                        ch.pipeline().addFirst(CONNECTION_CLOSE_HANDLER_NAME,
+                                new ConnectionClosedListenerHandler(channelKeyContext));
+                    }
+                })
                 .channel(NioSocketChannel.class)
-                .handler(new ConnectionClosedListenerHandler(channelKeyContext))
                 .option(ChannelOption.AUTO_READ, false);
 
         var outboundChannelFuture = b.connect(host, port);
@@ -146,14 +164,14 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         outboundChannelFuture.addListener((ChannelFutureListener) connectFuture -> {
             if (connectFuture.isSuccess()) {
                 final var channel  = connectFuture.channel();
-                var pipeline = channel.pipeline();
                 log.atTrace().setMessage(()-> channelKeyContext.getChannelKey() +
                         " Done setting up client channel & it was successful for " + channel).log();
+                var pipeline = channel.pipeline();
                 if (sslContext != null) {
                     var sslEngine = sslContext.newEngine(channel.alloc());
                     sslEngine.setUseClientMode(true);
                     var sslHandler = new SslHandler(sslEngine);
-                    addLoggingHandler(pipeline, "A");
+                    addLoggingHandlerLast(pipeline, "A");
                     pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
                     sslHandler.handshakeFuture().addListener(handshakeFuture -> {
                         if (handshakeFuture.isSuccess()) {
@@ -188,14 +206,14 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         }
     }
 
-    private void activateChannelForThisConsumer() {
+    private void initializeChannelPipeline() {
         assert channel.isActive();
         if (channelIsInUse(channel)) {
             throw new IllegalStateException("Channel " + channel + "is being used elsewhere already!");
         }
         var pipeline = channel.pipeline();
         // add these size counters BEFORE TLS?  Notice that when removing from the pipeline, we need to be more careful
-        pipeline.addFirst(WRITE_COUNT_WATCHER_HANDLER_NAME, new WriteMeteringHandler(size->{
+        pipeline.addAfter(CONNECTION_CLOSE_HANDLER_NAME, WRITE_COUNT_WATCHER_HANDLER_NAME, new WriteMeteringHandler(size->{
             // client side, so this is the request
             if (size == 0) { return; }
             if (!(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
@@ -204,7 +222,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             }
             getParentContext().onBytesSent(size);
         }));
-        pipeline.addFirst(READ_COUNT_WATCHER_HANDLER_NAME, new ReadMeteringHandler(size->{
+        pipeline.addAfter(CONNECTION_CLOSE_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME, new ReadMeteringHandler(size->{
             // client side, so this is the response
             if (size == 0) { return; }
             if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
@@ -213,24 +231,24 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             }
             getParentContext().onBytesReceived(size);
         }));
-        addLoggingHandler(pipeline, "B");
+        addLoggingHandlerLast(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
-        addLoggingHandler(pipeline, "C");
+        addLoggingHandlerLast(pipeline, "C");
         pipeline.addLast(new HttpResponseDecoder());
-        addLoggingHandler(pipeline, "D");
+        addLoggingHandlerLast(pipeline, "D");
         // TODO - switch this out to use less memory.
         // We only need to know when the response has been fully received, not the contents
         // since we're already logging those in the sniffer earlier in the pipeline.
         pipeline.addLast(new HttpObjectAggregator(1024 * 1024));
-        addLoggingHandler(pipeline, "D");
+        addLoggingHandlerLast(pipeline, "D");
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
-        addLoggingHandler(pipeline, "E");
+        addLoggingHandlerLast(pipeline, "E");
         log.atTrace().setMessage(() -> "Added handlers to the pipeline: " + pipeline).log();
 
         channel.config().setAutoRead(true);
     }
 
-    private static void addLoggingHandler(ChannelPipeline pipeline, String name) {
+    private static void addLoggingHandlerLast(ChannelPipeline pipeline, String name) {
         PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel->pipeline.addLast(new LoggingHandler("n"+name, logLevel)));
     }
 
@@ -263,8 +281,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
     @Override
     public DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(ByteBuf packetData) {
-        activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelInitException) -> {
-            if (channelInitException == null) {
+        activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
+            if (channelException == null) {
                 log.atTrace().setMessage(()->"outboundChannelFuture is ready writing packets (hash=" +
                         System.identityHashCode(packetData) + ")").log();
                 return writePacketAndUpdateFuture(packetData);
@@ -273,7 +291,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         "outbound channel was not set up successfully, NOT writing bytes hash=" +
                         System.identityHashCode(packetData)).log();
                 channel.close();
-                return DiagnosticTrackableCompletableFuture.Factory.failedFuture(channelInitException, ()->"");
+                return DiagnosticTrackableCompletableFuture.Factory.failedFuture(channelException, ()->"exception");
             }
         }, ()->"consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
         log.atTrace().setMessage(()->"Setting up write of packetData["+packetData+"] hash=" +
@@ -354,7 +372,13 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     }
                     return rval;
                 }, ()->"Waiting for previous consumes to set the future")
-                .map(f->f.whenComplete((v,t)-> deactivateChannel()), ()->"clearing pipeline");
+                .map(f->f.whenComplete((v,t) -> {
+                    if (channel == null) {
+                        log.atInfo().setMessage(()->"").log();
+                    } else {
+                        deactivateChannel();
+                    }
+                }), ()->"clearing pipeline");
         log.atTrace().setMessage(()->"Chaining finalization work off of " + activeChannelFuture +
                 ".  Returning finalization future="+ff).log();
         return ff;

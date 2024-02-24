@@ -44,7 +44,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                     log.atWarn().setCause(t)
                             .setMessage("Error offloading the request, but forwarding it to the service anyway").log();
                     ReferenceCountUtil.release(msg);
-                    messageContext.addException(t);
+                    messageContext.addCaughtException(t);
                 }
                 try {
                     super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);

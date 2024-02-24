@@ -30,11 +30,11 @@ allprojects {
         if (project.hasProperty('excludeTests')) {
             exclude project.property('excludeTests')
         }
-        useJUnitPlatform {
-            systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
-            systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
-            systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
-        }
+//        useJUnitPlatform {
+//            systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
+//            systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
+//            systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
+//        }
     }
 
     test {

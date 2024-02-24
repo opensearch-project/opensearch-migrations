@@ -28,7 +28,11 @@ public interface IInstrumentationAttributes {
         return e == null ? attributesBuilder.build() : attributesBuilder.put(HAD_EXCEPTION_KEY, true).build();
     }
 
-    default void addException(Throwable e) {
+    default void addCaughtException(Throwable e) {
+        addException(e, false);
+    }
+
+    default void addException(Throwable e, boolean exceptionIsPropagating) {
         meterIncrementEvent(getMetrics().exceptionCounter);
     }
 

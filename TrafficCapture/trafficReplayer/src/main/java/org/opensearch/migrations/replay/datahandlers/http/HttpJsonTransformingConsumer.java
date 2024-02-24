@@ -115,7 +115,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 channel.writeInbound(new EndOfInput());   // so send our own version of 'EOF'
             }
         } catch (Exception e) {
-            this.transformationContext.addException(e);
+            this.transformationContext.addCaughtException(e);
             log.atLevel(e instanceof NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException ?
                             Level.DEBUG : Level.WARN)
                     .setMessage("Caught IncompleteJsonBodyException when sending the end of content")
