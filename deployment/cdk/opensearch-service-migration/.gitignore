@@ -4,7 +4,7 @@
 node_modules
 cdk.context.json
 coverage
-
+dist
 # CDK asset staging directory
 .cdk.staging
 cdk.out
