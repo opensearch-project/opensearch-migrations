@@ -27,6 +27,9 @@
   },
   "exclude": [
     "node_modules",
-    "cdk.out"
+    "cdk.out",
+    "dist",
+    "test",
+    "bin"
   ]
 }
