@@ -94,7 +94,7 @@ services:
       - "29200:9200"
 
   opensearchanalytics:
-    image: 'opensearchproject/opensearch:latest'
+    image: 'opensearchproject/opensearch:2.11.0'
     environment:
       - discovery.type=single-node
     networks:
@@ -103,7 +103,7 @@ services:
       - "39200:9200"
 
   opensearch-dashboards:
-    image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
+    image: migrations/opensearch_dashboards:2.11.0 # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
     container_name: opensearch-dashboards
     ports:
       - "5601:5601" # Map host port 5601 to container port 5601
