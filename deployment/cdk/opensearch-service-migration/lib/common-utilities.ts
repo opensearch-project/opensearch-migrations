@@ -123,14 +123,20 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
     return serviceTaskRole
 }
 
-export function validateFargateCpuArch(cpuArch: string): CpuArchitecture {
-    if (cpuArch.toUpperCase() === "X86_64") {
+export function validateFargateCpuArch(cpuArch?: string): CpuArchitecture {
+    const desiredArch = cpuArch ? cpuArch : process.arch
+    const desiredArchUpper = desiredArch.toUpperCase()
+
+    if (desiredArchUpper === "X86_64" || desiredArchUpper === "X64") {
         return CpuArchitecture.X86_64
-    }
-    else if (cpuArch.toUpperCase() === "ARM64") {
+    } else if (desiredArchUpper === "ARM64") {
         return CpuArchitecture.ARM64
-    }
-    else {
-        throw new Error(`Unknown Fargate cpu architecture provided: ${cpuArch}`)
+    } else {
+        if (cpuArch) {
+            throw new Error(`Unknown Fargate cpu architecture provided: ${desiredArch}`)
+        }
+        else {
+            throw new Error(`Unsupported process cpu architecture detected: ${desiredArch}, CDK requires X64 or ARM64 for Docker image compatability`)
+        }
     }
 }
