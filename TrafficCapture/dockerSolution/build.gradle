@@ -62,9 +62,13 @@ javaContainerServices.forEach { projectName, dockerImageName ->
 
 dockerCompose {
     def extensionsDir = "src/main/docker/composeExtensions/"
-    useComposeFiles = project.hasProperty('multiProxy') ?
-            ['src/main/docker/docker-compose.yml', 'src/main/docker/docker-compose-multi.yml'] :
-            ['src/main/docker/docker-compose.yml', "${extensionsDir}" + "proxy-single.yml"]
+    useComposeFiles =
+            ['src/main/docker/docker-compose.yml',
+             "${extensionsDir}/" + (project.hasProperty("otel-collector") ?
+                     "${project.getProperty('otel-collector')}" :
+                     "otel-prometheus-jaeger-opensearch.yml"),
+             "${extensionsDir}" + (project.hasProperty("multiProxy") ? "proxy-multi.yml" : "proxy-single.yml")
+            ]
 }
 
 task buildDockerImages {

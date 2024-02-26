@@ -2,43 +2,43 @@ version: '3.7'
 services:
 
 
-#  prometheus:
-#    container_name: prometheus
-#    image: prom/prometheus:latest
-#    networks:
-#      - migrations
-#    volumes:
-#      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
-#    ports:
-#      - "9090:9090"
-#    command:
-#      - '--config.file=/etc/prometheus/prometheus.yml'
-#      - '--enable-feature=exemplar-storage'
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    networks:
+      - migrations
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--enable-feature=exemplar-storage'
 
-#  # Jaeger
-#  jaeger:
-#    image: jaegertracing/all-in-one:latest
-#    networks:
-#      - migrations
-#    ports:
-#      - "16686:16686"
-#      - "4317"
-#      - "4318"
-#    environment:
-#      - COLLECTOR_OTLP_ENABLED=true
+  # Jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    networks:
+      - migrations
+    ports:
+      - "16686:16686"
+      - "4317"
+      - "4318"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
 
-#  grafana:
-#    image: grafana/grafana:latest
-#    networks:
-#      - migrations
-#    ports:
-#      - "3000:3000"
-#    volumes:
-#      - ./grafana_data:/var/lib/grafana
-#    environment:
-#      - GF_SECURITY_ADMIN_PASSWORD=admin
-#    depends_on:
-#      - prometheus
+  grafana:
+    image: grafana/grafana:latest
+    networks:
+      - migrations
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
 
   zookeeper:
     image: docker.io/bitnami/zookeeper:3.8
@@ -68,7 +68,6 @@ services:
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
     depends_on:
       - zookeeper
-      - opensearchtarget
 
   replayer:
     image: 'migrations/traffic_replayer:latest'
@@ -89,34 +88,33 @@ services:
     image: 'opensearchproject/opensearch:latest'
     environment:
       - discovery.type=single-node
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=DemoPass123!
     networks:
       - migrations
     ports:
       - "29200:9200"
 
-#  opensearchanalytics:
-#    image: 'opensearchproject/opensearch:latest'
-#    environment:
-#      - discovery.type=single-node
-#    networks:
-#      - migrations
-#    ports:
-#      - "39200:9200"
+  opensearchanalytics:
+    image: 'opensearchproject/opensearch:latest'
+    environment:
+      - discovery.type=single-node
+    networks:
+      - migrations
+    ports:
+      - "39200:9200"
 
-#  opensearch-dashboards:
-#    image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
-#    container_name: opensearch-dashboards
-#    ports:
-#      - "5601:5601" # Map host port 5601 to container port 5601
-#    expose:
-#      - "5601" # Expose port 5601 for web access to OpenSearch Dashboards
-#    networks:
-#      - migrations
-#    volumes:
-#      - ./opensearchDashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
-#    depends_on:
-#      - opensearchanalytics
+  opensearch-dashboards:
+    image: migrations/opensearch_dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
+    container_name: opensearch-dashboards
+    ports:
+      - "5601:5601" # Map host port 5601 to container port 5601
+    expose:
+      - "5601" # Expose port 5601 for web access to OpenSearch Dashboards
+    networks:
+      - migrations
+    volumes:
+      - ./opensearchDashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
+    depends_on:
+      - opensearchanalytics
 
 #  otel-collector:
 #    image: public.ecr.aws/a0w2c5q7/otelcol-with-opensearch:latest
