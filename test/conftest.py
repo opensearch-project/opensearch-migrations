@@ -26,7 +26,7 @@ def pytest_addoption(parser):
     parser.addoption("--source_username", action="store", default="admin")
     parser.addoption("--source_password", action="store", default="admin")
     parser.addoption("--target_username", action="store", default="admin")
-    parser.addoption("--target_password", action="store", default="DemoPass123!")
+    parser.addoption("--target_password", action="store", default="admin")
     parser.addoption("--unique_id", action="store", default=uuid.uuid4().hex)
 
 
