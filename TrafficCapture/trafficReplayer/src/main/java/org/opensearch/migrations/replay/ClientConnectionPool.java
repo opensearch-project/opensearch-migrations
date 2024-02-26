@@ -11,6 +11,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
+import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
@@ -133,12 +134,9 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    public ConnectionReplaySession getCachedSession(IReplayContexts.IChannelKeyContext channelKeyCtx,
-                                                    boolean dontCreate) {
-
-        var crs = dontCreate ? connectionId2ChannelCache.getIfPresent(channelKeyCtx.getConnectionId()) :
-                connectionId2ChannelCache.get(channelKeyCtx.getConnectionId(),
-                        () -> buildConnectionReplaySession(channelKeyCtx));
+    public @NonNull ConnectionReplaySession getCachedSession(IReplayContexts.IChannelKeyContext channelKeyCtx) {
+        var crs = connectionId2ChannelCache.get(channelKeyCtx.getConnectionId(),
+                () -> buildConnectionReplaySession(channelKeyCtx));
         log.atTrace().setMessage(()->"returning ReplaySession=" + crs + " for " + channelKeyCtx.getConnectionId() +
                 " from " + channelKeyCtx).log();
         return crs;
@@ -175,7 +173,7 @@ public class ClientConnectionPool {
                                                     " requests that were enqueued won't be run").log();
                                 }
                                 var schedule = channelAndFutureWork.schedule;
-                                while (channelAndFutureWork.hasWorkRemaining()) {
+                                while (channelAndFutureWork.schedule.hasPendingTransmissions()) {
                                     var scheduledItemToKill = schedule.peekFirstItem();
                                     schedule.removeFirstItem();
                                 }

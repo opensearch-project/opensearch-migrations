@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -90,6 +91,11 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     public DiagnosticTrackableCompletableFuture<D, T>
     exceptionally(Function<Throwable, T> fn, @NonNull Supplier<D> diagnosticSupplier) {
         return this.map(cf->cf.exceptionally(fn), diagnosticSupplier);
+    }
+
+    public DiagnosticTrackableCompletableFuture<D, T>
+    whenComplete(BiConsumer<? super T, Throwable> fn, @NonNull Supplier<D> diagnosticSupplier) {
+        return map(cf->cf.whenComplete((v,t)->fn.accept(v,t)), diagnosticSupplier);
     }
 
     public <U> DiagnosticTrackableCompletableFuture<D, U>

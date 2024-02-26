@@ -5,14 +5,18 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
+import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
 import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
 
+import javax.net.ssl.SSLException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,11 +40,33 @@ public class TrafficReplayerRunner {
 
     private TrafficReplayerRunner() {}
 
-    static void runReplayerUntilSourceWasExhausted(int numExpectedRequests, URI endpoint,
+    static void runReplayerUntilSourceWasExhausted(int numExpectedRequests,
+                                                   URI endpoint,
+                                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
+                                                   Supplier<TestContext> rootContextSupplier,
+                                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
+            throws Throwable
+    {
+        runReplayerUntilSourceWasExhausted(numExpectedRequests,
+                rootContext -> {
+                    try {
+                        return new TrafficReplayer(rootContext, endpoint, null,
+                                new StaticAuthTransformerFactory("TEST"), null,
+                                true, 10, 10*1024);
+                    } catch (SSLException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                tupleListenerSupplier, rootContextSupplier, trafficSourceFactory);
+    }
+
+    static void runReplayerUntilSourceWasExhausted(int numExpectedRequests,
+                                                   Function<IRootReplayerContext, TrafficReplayer> trafficReplayerFactory,
                                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
                                                    Supplier<TestContext> rootContextSupplier,
                                                    Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
             throws Throwable {
+        boolean skipFinally = false;
         AtomicInteger runNumberRef = new AtomicInteger();
         var totalUniqueEverReceived = new AtomicInteger();
 
@@ -53,7 +79,9 @@ public class TrafficReplayerRunner {
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
             try (var rootContext = rootContextSupplier.get()) {
-                runTrafficReplayer(rootContext, ()->trafficSourceFactory.apply(rootContext), endpoint, (t) -> {
+                var trafficReplayer = trafficReplayerFactory.apply(rootContext);
+                runTrafficReplayer(trafficReplayer, ()->trafficSourceFactory.apply(rootContext),
+                        (t) -> {
                     if (runNumber != runNumberRef.get()) {
                         // for an old replayer.  I'm not sure why shutdown isn't blocking until all threads are dead,
                         // but that behavior only impacts this test as far as I can tell.
@@ -93,6 +121,7 @@ public class TrafficReplayerRunner {
                                 ? (FabricatedErrorToKillTheReplayer) e.immediateCause
                                 : null);
                 if (killSignalError == null) {
+                    skipFinally = true;
                     throw e.immediateCause;
                 } else if (killSignalError.doneWithTest) {
                     log.info("Kill signal has indicated that the test is complete, so breaking out of the loop");
@@ -101,13 +130,15 @@ public class TrafficReplayerRunner {
                     log.info("Kill signal has indicated that the test loop should restart. Continuing.");
                 }
             } finally {
-                waitForWorkerThreadsToStop();
-                log.info("Upon appending.... counter="+counter.get()+" totalUnique="+totalUniqueEverReceived.get()+
-                        " runNumber="+runNumber + "\n" +
-                        completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")));
-                log.info(Strings.repeat("\n", 20));
-                receivedPerRun.add(counter.get());
-                totalUniqueEverReceivedSizeAfterEachRun.add(totalUniqueEverReceived.get());
+                if (!skipFinally) {
+                    waitForWorkerThreadsToStop();
+                    log.info("Upon appending.... counter=" + counter.get() + " totalUnique=" +
+                            totalUniqueEverReceived.get() + " runNumber=" + runNumber + "\n" +
+                            completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")));
+                    log.info(Strings.repeat("\n", 20));
+                    receivedPerRun.add(counter.get());
+                    totalUniqueEverReceivedSizeAfterEachRun.add(totalUniqueEverReceived.get());
+                }
             }
         }
         log.atInfo().setMessage(()->"completely received request keys=\n{}")
@@ -136,19 +167,15 @@ public class TrafficReplayerRunner {
         Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
     }
 
-    private static void runTrafficReplayer(TestContext rootContext,
+    private static void runTrafficReplayer(TrafficReplayer trafficReplayer,
                                            Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
-                                           URI endpoint,
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
         log.info("Starting a new replayer and running it");
-        var tr = new TrafficReplayer(rootContext, endpoint, null,
-                new StaticAuthTransformerFactory("TEST"), null,
-                true, 10, 10*1024);
 
         try (var os = new NullOutputStream();
              var trafficSource = captureSourceSupplier.get();
              var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
+            trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
                     new TimeShifter(10 * 1000), tupleReceiver);
         }
     }

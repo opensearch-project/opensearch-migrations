@@ -38,6 +38,10 @@ public class TrafficStreamLimiter implements AutoCloseable {
     private void consumeFromQueue() {
         while (!stopped.get()) {
             var workItem = workQueue.take();
+            log.atDebug().setMessage(()->"liveTrafficStreamCostGate.permits: {} acquiring: {}")
+                    .addArgument(liveTrafficStreamCostGate.availablePermits())
+                    .addArgument(workItem.cost)
+                    .log();
             liveTrafficStreamCostGate.acquire(workItem.cost);
             log.atDebug().setMessage(()->"Acquired liveTrafficStreamCostGate (available=" +
                     liveTrafficStreamCostGate.availablePermits()+")").log();
@@ -46,21 +50,10 @@ public class TrafficStreamLimiter implements AutoCloseable {
     }
 
     public WorkItem queueWork(int cost, Consumer<WorkItem> task) {
-        log.atDebug().setMessage(()->"liveTrafficStreamCostGate.permits: {} acquiring: {}")
-                .addArgument(liveTrafficStreamCostGate.availablePermits())
-                .addArgument(cost)
-                .log();
-        try {
-            liveTrafficStreamCostGate.acquire(cost);
-            log.atDebug().setMessage(()->"Acquired liveTrafficStreamCostGate (available=" +
-                    liveTrafficStreamCostGate.availablePermits()+")").log();
-            var workItem = new WorkItem(task, cost);
-            workItem.task.accept(workItem);
-            return workItem;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw Lombok.sneakyThrow(e);
-        }
+        var workItem = new WorkItem(task, cost);
+        var rval = workQueue.offer(workItem);
+        assert rval;
+        return workItem;
     }
 
     public void doneProcessing(WorkItem workItem) {

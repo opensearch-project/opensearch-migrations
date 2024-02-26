@@ -38,7 +38,7 @@ public class RequestSenderOrchestrator {
     public <T> DiagnosticTrackableCompletableFuture<String, T>
     scheduleWork(IReplayContexts.IReplayerHttpTransactionContext ctx, Instant timestamp,
                  Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
-        var connectionSession = clientConnectionPool.getCachedSession(ctx.getChannelKeyContext(), false);
+        var connectionSession = clientConnectionPool.getCachedSession(ctx.getChannelKeyContext());
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm processing work has finished");
@@ -114,13 +114,7 @@ public class RequestSenderOrchestrator {
                                  boolean ignoreIfChannelNotActive,
                                  DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
                                  Consumer<ConnectionReplaySession> onSessionCallback) {
-        final var replaySession = clientConnectionPool.getCachedSession(ctx, ignoreIfChannelNotActive);
-        if (replaySession == null) {
-            log.atLevel(ignoreIfChannelNotActive ? Level.TRACE : Level.ERROR)
-                    .setMessage(()->"No cached replaySession.  Not running the onSessionCallback for " + ctx).log();
-            finalTunneledResponse.future.complete(null);
-            return finalTunneledResponse;
-        }
+        final var replaySession = clientConnectionPool.getCachedSession(ctx);
         replaySession.eventLoop.submit(()->{
                     log.atTrace().setMessage(() -> "adding work item at slot " +
                             channelInteractionNumber + " for " + replaySession.getChannelKeyContext() + " with " +

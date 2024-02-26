@@ -84,9 +84,7 @@ public class TrafficReplayer {
     private final TrafficStreamLimiter liveTrafficStreamLimiter;
     private final AtomicInteger successfulRequestCount;
     private final AtomicInteger exceptionRequestCount;
-    private final IRootReplayerContext topLevelContext;
-    private final ConcurrentHashMap<UniqueReplayerRequestKey,
-            DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>> requestFutureMap;
+    public final IRootReplayerContext topLevelContext;
     private final ConcurrentHashMap<UniqueReplayerRequestKey,
             DiagnosticTrackableCompletableFuture<String, Void>> requestToFinalWorkFuturesMap;
 
@@ -95,7 +93,6 @@ public class TrafficReplayer {
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
     private final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
-    private final ConcurrentHashMap<UniqueReplayerRequestKey, Boolean> liveRequests = new ConcurrentHashMap<>();
     private Future nettyShutdownFuture;
 
     public static class DualException extends Exception {
@@ -166,7 +163,6 @@ public class TrafficReplayer {
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
         clientConnectionPool = new ClientConnectionPool(serverUri,
                 loadSslContext(serverUri, allowInsecureConnections), numSendingThreads);
-        requestFutureMap = new ConcurrentHashMap<>();
         requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         successfulRequestCount = new AtomicInteger();
         exceptionRequestCount = new AtomicInteger();
@@ -600,36 +596,41 @@ public class TrafficReplayer {
         @Override
         public void onRequestReceived(IReplayContexts.@NonNull IReplayerHttpTransactionContext ctx,
                                       @NonNull HttpMessageAndTimestamp request) {
-            replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
-
-            liveTrafficStreamLimiter.queueWork(1, workItem -> {
-                var requestPushFuture = transformAndSendRequest(replayEngine, request, ctx);
-                var requestKey = ctx.getReplayerRequestKey();
-                requestFutureMap.put(requestKey, requestPushFuture);
-                liveRequests.put(requestKey, true);
-                requestPushFuture.map(f -> f.whenComplete((v, t) -> {
-                            liveRequests.remove(requestKey);
-                            liveTrafficStreamLimiter.doneProcessing(workItem);
-                            log.atTrace()
-                                    .setMessage(() -> "Summary response value for " + requestKey + " returned=" + v).log();
-                        }),
-                        () -> "logging summary");
-            });
         }
 
         @Override
         public void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                                        @NonNull RequestResponsePacketPair rrPair) {
-            log.atInfo().setMessage(()->"Done receiving captured stream for " + ctx +
-                    ":" + rrPair.requestData).log();
+
+            final var request = rrPair.requestData;
+            replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
+
+            var allWorkFinishedForTransaction =
+                    new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
+                            ()->"waiting for work to be queued and run through TrafficStreamLimiter");
             var requestKey = ctx.getReplayerRequestKey();
-            var resultantCf = requestFutureMap.remove(requestKey)
-                    .map(f -> f.handle((summary,t)->handleCompletedTransaction(ctx, rrPair, summary, t)),
-                            () -> "TrafficReplayer.runReplayWithIOStreams.progressTracker");
-            if (!resultantCf.future.isDone()) {
+            liveTrafficStreamLimiter.queueWork(1, workItem -> {
+                var requestPushFuture = transformAndSendRequest(replayEngine, request, ctx);
+                requestPushFuture.map(f -> f.handle((v, t) -> {
+                            log.atInfo().setMessage(() -> "Done receiving captured stream for " + ctx +
+                                    ":" + rrPair.requestData).log();
+                            liveTrafficStreamLimiter.doneProcessing(workItem);
+                            log.atTrace().setMessage(() ->
+                                    "Summary response value for " + requestKey + " returned=" + v).log();
+                            return handleCompletedTransaction(ctx, rrPair, v, t);
+                        }), () -> "logging summary")
+                        .whenComplete((v,t)->{
+                            if (t != null) {
+                                allWorkFinishedForTransaction.future.completeExceptionally(t);
+                            } else {
+                                allWorkFinishedForTransaction.future.complete(null);
+                            }
+                        }, ()->"");
+            });
+            if (!allWorkFinishedForTransaction.future.isDone()) {
                 log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
-                requestToFinalWorkFuturesMap.put(requestKey, resultantCf);
-                if (resultantCf.future.isDone()) {
+                requestToFinalWorkFuturesMap.put(requestKey, allWorkFinishedForTransaction);
+                if (allWorkFinishedForTransaction.future.isDone()) {
                     requestToFinalWorkFuturesMap.remove(requestKey);
                 }
             }
@@ -814,7 +815,11 @@ public class TrafficReplayer {
         }
     }
 
-    private static void writeStatusLogsForRemainingWork(Level logLevel, Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[] allRemainingWorkArray) {
+    private static void writeStatusLogsForRemainingWork(Level logLevel,
+                                                        Map.Entry<UniqueReplayerRequestKey,
+                                                                DiagnosticTrackableCompletableFuture<String,
+                                                                        TransformedTargetRequestAndResponse>>[]
+                                                                allRemainingWorkArray) {
         log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
         if (log.isInfoEnabled()) {
             LoggingEventBuilder loggingEventBuilderToUse = log.isTraceEnabled() ? log.atTrace() : log.atInfo();
@@ -879,7 +884,8 @@ public class TrafficReplayer {
 
     public static DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
     transformAndSendRequest(PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
-                            ReplayEngine replayEngine, IReplayContexts.IReplayerHttpTransactionContext ctx,
+                            ReplayEngine replayEngine,
+                            IReplayContexts.IReplayerHttpTransactionContext ctx,
                             @NonNull Instant start, @NonNull Instant end,
                             Supplier<Stream<byte[]>> packetsSupplier)
     {

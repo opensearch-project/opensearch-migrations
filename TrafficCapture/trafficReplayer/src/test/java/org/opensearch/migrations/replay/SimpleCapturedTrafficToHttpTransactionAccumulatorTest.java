@@ -266,7 +266,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                         });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();
-        ;
+
         trafficStreams.forEach(ts->trafficAccumulator.accept(
                 new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts,
                         context::createTrafficStreamContextForTest)

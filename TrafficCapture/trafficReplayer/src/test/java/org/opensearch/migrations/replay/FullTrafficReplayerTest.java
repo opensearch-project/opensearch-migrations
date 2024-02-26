@@ -13,9 +13,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -23,9 +25,14 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.testcontainers.shaded.org.bouncycastle.jcajce.provider.symmetric.RC2;
 
+import javax.net.ssl.SSLException;
 import java.io.EOFException;
+import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
@@ -69,7 +76,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         }
     }
 
-    @Disabled
+    @Test
     @ResourceLock("TrafficReplayerRunner")
     public void fullTestWithThrottledStart() throws Throwable {
         var random = new Random(1);
@@ -77,19 +84,47 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 response -> TestHttpServerContext.makeResponse(random, response));
         var nonTrackingContext = TestContext.noOtelTracking();
         var streamAndSizes = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(nonTrackingContext,
-                1024, true);
+                16, true);
         var numExpectedRequests = streamAndSizes.numHttpTransactions;
         var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());
         log.atInfo().setMessage(() -> trafficStreams.stream().map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
                 .collect(Collectors.joining("\n"))).log();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
+        Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceSupplier = rc -> new ISimpleTrafficCaptureSource() {
+            boolean isDone = false;
+            @Override
+            public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
+                if (isDone) {
+                    return CompletableFuture.failedFuture(new EOFException());
+                } else {
+                    isDone = true;
+                    return CompletableFuture.completedFuture(trafficStreams.stream()
+                            .map(ts -> new PojoTrafficStreamAndKey(ts,
+                                    PojoTrafficStreamKeyAndContext.build(ts, rc::createTrafficStreamContextForTest)))
+                            .map(v -> (ITrafficStreamWithKey) v)
+                            .collect(Collectors.toList()));
+                }
+            }
+
+            @Override
+            public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
+                return null;
+            }
+        };
+
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(
-                numExpectedRequests, httpServer.localhostEndpoint(),
+                numExpectedRequests,
+                rc -> {
+                    try {
+                        return new TrafficReplayer(rc, httpServer.localhostEndpoint(), null,
+                                new StaticAuthTransformerFactory("TEST"), null,
+                                true, 1, 1);
+                    } catch (SSLException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
                 () -> t -> {},
                 () -> nonTrackingContext,
                 trafficSourceSupplier);
-        Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(),
-                trafficSourceSupplier.nextReadCursor.get());
         log.info("done");
     }
 
