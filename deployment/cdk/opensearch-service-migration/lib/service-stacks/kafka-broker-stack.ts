@@ -1,6 +1,7 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {
+    CpuArchitecture,
     PortMapping, Protocol
 } from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
@@ -9,7 +10,8 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 
 export interface KafkaBrokerProps extends StackPropsExt {
-    readonly vpc: IVpc
+    readonly vpc: IVpc,
+    readonly fargateCpuArch: CpuArchitecture
 }
 
 /**
@@ -62,6 +64,7 @@ export class KafkaBrokerStack extends MigrationServiceCore {
             },
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 256,
             taskMemoryLimitMiB: 2048,
             ...props
