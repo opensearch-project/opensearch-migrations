@@ -25,3 +25,11 @@ test('Test invalid fargate cpu arch strings throws error', () => {
     expect(getArchFunction).toThrowError()
 })
 
+test('Test detected fargate cpu arch is valid', () => {
+    const detectedArch = process.arch
+    const detectedArchUpper = detectedArch.toUpperCase()
+
+    const expectedCpuArch = detectedArchUpper === "X64" ? CpuArchitecture.X86_64 : CpuArchitecture.ARM64
+    const cpuArch = validateFargateCpuArch()
+    expect(cpuArch).toEqual(expectedCpuArch)
+})
