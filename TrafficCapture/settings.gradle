@@ -37,8 +37,6 @@ include('captureKafkaOffloader',
 )
 
 addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
-include 'replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled'
-findProject(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled')?.name = 'untitled'
 
 if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED") && hasProperty('gradleEnterprise')) {
     gradleEnterprise {

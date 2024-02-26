@@ -12,6 +12,7 @@
         - [Capture Kafka Offloader](#capture-kafka-offloader)
     - [Building](#building)
         - [Gradle Scans](#gradle-scans)
+    - [Publishing](#publishing)
 
 ## Overview
 
@@ -175,3 +176,43 @@ echo 'export OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED=' >> ~/.zshrc
 ```
 
 Access your detailed build reports by following the link provided at the end of your Gradle command's output.
+
+## Publishing
+
+This project can be published to a local maven repository with:
+```sh
+./gradlew publishToMavenLocal
+```
+
+And subsequently imported into a separate gradle project with (replacing name with any subProject name) 
+```groovy
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    implementation group: "org.opensearch.migrations.trafficcapture", name: "captureKafkaOffloader", version: "0.1.0-SNAPSHOT"
+    //... other dependencies
+}
+```
+
+The entire list of published subprojects is
+```text
+captureKafkaOffloader
+captureOffloader
+captureProtobufs
+coreUtilities
+jsonJMESPathMessageTransformer
+jsonJMESPathMessageTransformerProvider
+jsonJoltMessageTransformer
+jsonJoltMessageTransformerProvider
+jsonMessageTransformerInterface
+jsonMessageTransformers
+nettyWireLogging
+openSearch23PlusTargetTransformerProvider
+replayerPlugins
+trafficCaptureProxyServer
+trafficCaptureProxyServerTest
+trafficReplayer
+```
