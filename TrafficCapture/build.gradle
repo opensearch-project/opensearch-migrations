@@ -9,6 +9,35 @@ allprojects {
     }
 }
 
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'maven-publish'
+    def excludedProjects = [
+            'buildSrc',
+            'dockerSolution',
+            // TODO: Get testFixtures exported to Maven
+            'testUtilities',
+    ]
+    if (!(project.name in excludedProjects)) {
+        publishing {
+            publications {
+                mavenJava(MavenPublication) {
+                    artifactId = project.name
+
+                    from components.java
+
+                    groupId = 'org.opensearch.migrations.trafficcapture'
+                    version = '0.1.0-SNAPSHOT'
+
+                    // Suppress POM metadata warnings for test fixtures
+                    suppressPomMetadataWarningsFor('testFixturesApiElements')
+                    suppressPomMetadataWarningsFor('testFixturesRuntimeElements')
+                }
+            }
+        }
+    }
+}
+
 allprojects {
     apply plugin: 'java'
     apply plugin: 'jacoco'
