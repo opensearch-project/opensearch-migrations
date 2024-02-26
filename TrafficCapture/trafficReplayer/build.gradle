@@ -122,7 +122,7 @@ jar {
 
 // TODO: Fix Parallel Execution for junit trafficReplayer tests
 //  with resourceSharing of TrafficReplayerRunner to eliminate forking and rely on threads
-slowTest {
-    forkEvery(1)
-    maxParallelForks = Runtime.runtime.availableProcessors()
-}
+//slowTest {
+//    forkEvery(1)
+//    maxParallelForks = Runtime.runtime.availableProcessors()
+//}
