@@ -1,13 +1,21 @@
 {
-  "name": "opensearch-service-domain-cdk",
+  "name": "@opensearch-project/opensearch-service-migration-cdk",
   "version": "1.0.0",
   "description": "CDK infrastructure for migrating to AWS OpenSearch",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "author": {
-    "name": "Amazon Web Services",
-    "url": "https://github.com/opensearch-project/opensearch-migrations"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opensearch-project/opensearch-migrations.git",
+    "directory": "deployment/cdk/opensearch-service-migration"
+  },
+  "bugs": {
+    "url": "https://github.com/opensearch-project/opensearch-migrations/issues"
+  },
+  "homepage": "https://github.com/opensearch-project/opensearch-migrations#readme",
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "build": "tsc",
