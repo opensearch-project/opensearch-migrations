@@ -1,21 +1,23 @@
 import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
-    CfnService as FargateCfnService,
+    CfnService as FargateCfnService, CloudMapOptions,
     Cluster,
-    ContainerImage,
+    ContainerImage, CpuArchitecture,
     FargateService,
     FargateTaskDefinition,
     LogDrivers,
     MountPoint,
-    PortMapping, Ulimit,
+    PortMapping,
+    ServiceConnectService,
+    Ulimit,
+    OperatingSystemFamily,
     Volume
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
@@ -25,6 +27,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly serviceName: string,
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
+    readonly cpuArchitecture: CpuArchitecture,
     readonly dockerFilePath?: string,
     readonly dockerDirectoryPath?: string,
     readonly dockerImageRegistryName?: string,
@@ -87,6 +90,10 @@ export class MigrationServiceCore extends Stack {
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
             ephemeralStorageGiB: 75,
+            runtimePlatform: {
+                operatingSystemFamily: OperatingSystemFamily.LINUX,
+                cpuArchitecture: props.cpuArchitecture
+            },
             family: `migration-${props.stage}-${props.serviceName}`,
             memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
             cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
