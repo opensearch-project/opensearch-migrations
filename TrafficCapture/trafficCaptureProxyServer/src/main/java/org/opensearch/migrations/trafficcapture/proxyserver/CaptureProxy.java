@@ -55,7 +55,7 @@ public class CaptureProxy {
     private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
     public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
 
-    static class Parameters {
+    public static class Parameters {
         @Parameter(required = false,
                 names = {"--traceDirectory"},
                 arity = 1,
@@ -142,7 +142,7 @@ public class CaptureProxy {
                 description = "The header name (which will be interpreted in a case-insensitive manner) and a regex " +
                         "pattern.  When the incoming request has a header that matches the regex, it will be passed " +
                         "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
-        private List<String> suppressCaptureHeaderPairs = new ArrayList<>();
+        List<String> suppressCaptureHeaderPairs = new ArrayList<>();
     }
 
     static Parameters parseArgs(String[] args) {
@@ -167,7 +167,7 @@ public class CaptureProxy {
     }
 
     @SneakyThrows
-    private static Settings getSettings(@NonNull String configFile) {
+    protected static Settings getSettings(@NonNull String configFile) {
         var builder = Settings.builder();
         try (var lines = Files.lines(Paths.get(configFile))) {
             lines
@@ -184,7 +184,7 @@ public class CaptureProxy {
         return builder.build();
     }
 
-    private static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
+    protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
         return ctx -> new StreamChannelConnectionCaptureSerializer<>(null, ctx.getConnectionId(),
                 new StreamLifecycleManager<>() {
@@ -201,7 +201,7 @@ public class CaptureProxy {
                 });
     }
 
-    private static String getNodeId() {
+    protected static String getNodeId() {
         return UUID.randomUUID().toString();
     }
 
@@ -234,7 +234,7 @@ public class CaptureProxy {
         return kafkaProps;
     }
 
-    private static IConnectionCaptureFactory
+    protected static IConnectionCaptureFactory
     getConnectionCaptureFactory(Parameters params, RootCaptureContext rootContext) throws IOException {
         var nodeId = getNodeId();
         // Resist the urge for now though until it comes in as a request/need.
@@ -252,7 +252,7 @@ public class CaptureProxy {
 
     // Utility method for converting uri string to an actual URI object. Similar logic is placed in the trafficReplayer
     // module: TrafficReplayer.java
-    private static URI convertStringToUri(String uriString) {
+    protected static URI convertStringToUri(String uriString) {
         URI serverUri;
         try {
             serverUri = new URI(uriString);
@@ -274,7 +274,7 @@ public class CaptureProxy {
         return serverUri;
     }
 
-    private static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections) throws
+    protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections) throws
         SSLException {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
@@ -287,7 +287,7 @@ public class CaptureProxy {
         }
     }
 
-    private static Map<String, String> convertPairListToMap(List<String> list) {
+    protected static Map<String, String> convertPairListToMap(List<String> list) {
         var map = new TreeMap<String, String>();
         for (int i=0; i<list.size(); i+=2) {
             map.put(list.get(i), list.get(i+1));
