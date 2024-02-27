@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -9,6 +9,7 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface ElasticsearchProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly fargateCpuArch: CpuArchitecture
 }
 
 /**
@@ -44,6 +45,7 @@ export class ElasticsearchStack extends MigrationServiceCore {
             serviceConnectServices: [serviceConnectService],
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 9200,
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
             ...props

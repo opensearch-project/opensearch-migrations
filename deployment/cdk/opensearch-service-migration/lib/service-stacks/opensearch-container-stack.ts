@@ -1,12 +1,13 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol, ServiceConnectService, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface OpenSearchContainerProps extends StackPropsExt {
-    readonly vpc: IVpc
+    readonly vpc: IVpc,
+    readonly fargateCpuArch: CpuArchitecture
 }
 
 /**
@@ -60,6 +61,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             serviceConnectServices: [serviceConnectService],
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
+            cpuArchitecture: props.fargateCpuArch,
             ulimits: ulimits,
             ...props
         });

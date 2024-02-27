@@ -3,12 +3,15 @@ import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
     CfnService as FargateCfnService, CloudMapOptions,
     Cluster,
-    ContainerImage,
+    ContainerImage, CpuArchitecture,
     FargateService,
     FargateTaskDefinition,
     LogDrivers,
     MountPoint,
-    PortMapping, ServiceConnectService, Ulimit,
+    PortMapping,
+    ServiceConnectService,
+    Ulimit,
+    OperatingSystemFamily,
     Volume
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
@@ -24,6 +27,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly serviceName: string,
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
+    readonly cpuArchitecture: CpuArchitecture,
     readonly dockerFilePath?: string,
     readonly dockerDirectoryPath?: string,
     readonly dockerImageRegistryName?: string,
@@ -86,6 +90,10 @@ export class MigrationServiceCore extends Stack {
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
             ephemeralStorageGiB: 75,
+            runtimePlatform: {
+                operatingSystemFamily: OperatingSystemFamily.LINUX,
+                cpuArchitecture: props.cpuArchitecture
+            },
             family: `migration-${props.stage}-${props.serviceName}`,
             memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
             cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
