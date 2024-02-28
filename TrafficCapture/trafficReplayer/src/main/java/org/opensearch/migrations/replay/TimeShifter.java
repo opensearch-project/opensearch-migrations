@@ -36,27 +36,26 @@ public class TimeShifter {
             assert didSetSystemStart : "expected to always start systemTimeStart immediately after sourceTimeStart ";
         }
         log.atLevel(didSet ? Level.INFO : Level.TRACE)
-                .setMessage("Set baseline source timestamp for all future interactions to {}")
-                .addArgument(sourceTime).log();
+            .setMessage("Set baseline source timestamp for all future interactions to {}")
+            .addArgument(sourceTime).log();
     }
 
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
-        // realtime = systemTimeStart + rateMultiplier * (sourceTime-sourceTimeStart)
         if (sourceTimeStart.get() == null) {
             throw new IllegalStateException("setFirstTimestamp has not yet been called");
         }
+        // realtime = systemTimeStart + ((sourceTime-sourceTimeStart) / rateMultiplier)
         return systemTimeStart.get()
-                .plus(Duration.ofMillis((long)
-                        (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)));
+            .plus(Duration.ofMillis((long)
+                (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)));
     }
 
     Optional<Instant> transformRealTimeToSourceTime(Instant realTime) {
         return Optional.ofNullable(sourceTimeStart.get())
-                .map(start ->
-                    // sourceTime = realTime - systemTimeStart + sourceTimeStart
-                    // sourceTime = sourceTimeStart + (realTime-systemTimeStart) / rateMultiplier
-                    start.plus(Duration.ofMillis((long)
-                            (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier))));
+            .map(start ->
+                // sourceTime = sourceTimeStart + (realTime-systemTimeStart) * rateMultiplier
+                start.plus(Duration.ofMillis((long)
+                    (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier))));
     }
 
     public double maxRateMultiplier() {

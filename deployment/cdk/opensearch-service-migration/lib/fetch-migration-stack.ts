@@ -3,9 +3,9 @@ import {IVpc} from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {
     Cluster,
-    ContainerImage,
+    ContainerImage, CpuArchitecture,
     FargateTaskDefinition,
-    LogDrivers,
+    LogDrivers, OperatingSystemFamily,
     Secret as ECSSecret
 } from "aws-cdk-lib/aws-ecs";
 import {Secret as SMSecret} from "aws-cdk-lib/aws-secretsmanager";
@@ -22,7 +22,8 @@ import {
 export interface FetchMigrationProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly dpPipelineTemplatePath: string,
-    readonly sourceEndpoint: string
+    readonly sourceEndpoint: string,
+    readonly fargateCpuArch: CpuArchitecture
 }
 
 export class FetchMigrationStack extends Stack {
@@ -49,9 +50,13 @@ export class FetchMigrationStack extends Stack {
         ecsTaskRole.addToPolicy(openSearchServerlessPolicy)
         // ECS Task Definition
         const fetchMigrationFargateTask = new FargateTaskDefinition(this, "fetchMigrationFargateTask", {
+            runtimePlatform: {
+                operatingSystemFamily: OperatingSystemFamily.LINUX,
+                cpuArchitecture: props.fargateCpuArch
+            },
             family: `migration-${props.stage}-${serviceName}`,
-            memoryLimitMiB: 4096,
-            cpu: 1024,
+            memoryLimitMiB: 8192,
+            cpu: 2048,
             taskRole: ecsTaskRole
         });
 

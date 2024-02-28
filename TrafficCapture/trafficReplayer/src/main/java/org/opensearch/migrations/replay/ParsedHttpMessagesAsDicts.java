@@ -5,12 +5,8 @@ import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.HttpHeaders;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogBuilder;
-import org.opensearch.migrations.coreutils.MetricsLogger;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
+import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import java.time.Duration;
 import java.util.Base64;
@@ -40,14 +36,16 @@ public class ParsedHttpMessagesAsDicts {
     public final Optional<Map<String, Object>> sourceResponseOp;
     public final Optional<Map<String, Object>> targetRequestOp;
     public final Optional<Map<String, Object>> targetResponseOp;
+    public final IReplayContexts.ITupleHandlingContext context;
 
-    public ParsedHttpMessagesAsDicts(SourceTargetCaptureTuple tuple) {
+    public ParsedHttpMessagesAsDicts(@NonNull SourceTargetCaptureTuple tuple) {
         this(tuple, Optional.ofNullable(tuple.sourcePair));
     }
 
-    protected ParsedHttpMessagesAsDicts(SourceTargetCaptureTuple tuple,
+    protected ParsedHttpMessagesAsDicts(@NonNull SourceTargetCaptureTuple tuple,
                                         Optional<RequestResponsePacketPair> sourcePairOp) {
-        this(getSourceRequestOp(tuple.uniqueRequestKey, sourcePairOp),
+        this(tuple.context,
+                getSourceRequestOp(tuple.context, sourcePairOp),
                 getSourceResponseOp(tuple, sourcePairOp),
                 getTargetRequestOp(tuple),
                 getTargetResponseOp(tuple));
@@ -56,74 +54,51 @@ public class ParsedHttpMessagesAsDicts {
     private static Optional<Map<String, Object>> getTargetResponseOp(SourceTargetCaptureTuple tuple) {
         return Optional.ofNullable(tuple.targetResponseData)
                 .filter(r -> !r.isEmpty())
-                .map(d -> convertResponse(tuple.uniqueRequestKey, d, tuple.targetResponseDuration));
+                .map(d -> convertResponse(tuple.context, d, tuple.targetResponseDuration));
     }
 
     private static Optional<Map<String, Object>> getTargetRequestOp(SourceTargetCaptureTuple tuple) {
         return Optional.ofNullable(tuple.targetRequestData)
-                .map(d -> d.asByteArrayStream())
-                .map(d -> convertRequest(tuple.uniqueRequestKey, d.collect(Collectors.toList())));
+                .map(TransformedPackets::asByteArrayStream)
+                .map(d -> convertRequest(tuple.context, d.collect(Collectors.toList())));
     }
 
     private static Optional<Map<String, Object>> getSourceResponseOp(SourceTargetCaptureTuple tuple,
                                                                      Optional<RequestResponsePacketPair> sourcePairOp) {
         return sourcePairOp.flatMap(p ->
                 Optional.ofNullable(p.responseData).flatMap(d -> Optional.ofNullable(d.packetBytes))
-                        .map(d -> convertResponse(tuple.uniqueRequestKey, d,
+                        .map(d -> convertResponse(tuple.context, d,
                                 // TODO: These durations are not measuring the same values!
                                 Duration.between(tuple.sourcePair.requestData.getLastPacketTimestamp(),
                                         tuple.sourcePair.responseData.getLastPacketTimestamp()))));
     }
 
-    private static Optional<Map<String, Object>> getSourceRequestOp(@NonNull UniqueSourceRequestKey diagnosticKey,
-            Optional<RequestResponsePacketPair> sourcePairOp) {
+    private static Optional<Map<String, Object>>
+    getSourceRequestOp(@NonNull IReplayContexts.ITupleHandlingContext context,
+                       Optional<RequestResponsePacketPair> sourcePairOp) {
         return sourcePairOp.flatMap(p ->
                 Optional.ofNullable(p.requestData).flatMap(d -> Optional.ofNullable(d.packetBytes))
-                        .map(d -> convertRequest(diagnosticKey, d)));
+                        .map(d -> convertRequest(context, d)));
     }
 
-    public ParsedHttpMessagesAsDicts(Optional<Map<String, Object>> sourceRequestOp1,
+    public ParsedHttpMessagesAsDicts(IReplayContexts.ITupleHandlingContext context,
+                                     Optional<Map<String, Object>> sourceRequestOp1,
                                      Optional<Map<String, Object>> sourceResponseOp2,
                                      Optional<Map<String, Object>> targetRequestOp3,
                                      Optional<Map<String, Object>> targetResponseOp4) {
+        this.context = context;
         this.sourceRequestOp = sourceRequestOp1;
         this.sourceResponseOp = sourceResponseOp2;
         this.targetRequestOp = targetRequestOp3;
         this.targetResponseOp = targetResponseOp4;
+        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOp);
     }
 
-    private static MetricsLogBuilder addMetricIfPresent(MetricsLogBuilder metricBuilder,
-                                                        MetricsAttributeKey key, Optional<Object> value) {
-        return value.map(v -> metricBuilder.setAttribute(key, v)).orElse(metricBuilder);
-    }
-
-    public MetricsLogBuilder buildStatusCodeMetrics(MetricsLogger logger, UniqueSourceRequestKey requestKey) {
-        var builder = logger.atSuccess(MetricsEvent.STATUS_CODE_COMPARISON);
-        return buildStatusCodeMetrics(builder, requestKey);
-    }
-
-    public MetricsLogBuilder buildStatusCodeMetrics(MetricsLogBuilder logBuilder, UniqueSourceRequestKey requestKey) {
-        return buildStatusCodeMetrics(logBuilder, requestKey, sourceResponseOp, targetResponseOp);
-    }
-
-    public static MetricsLogBuilder buildStatusCodeMetrics(MetricsLogBuilder builder,
-                                                           UniqueSourceRequestKey requestKey,
-                                                           Optional<Map<String, Object>> sourceResponseOp,
-                                                           Optional<Map<String, Object>> targetResponseOp) {
-        var sourceStatus = sourceResponseOp.map(r -> r.get(STATUS_CODE_KEY));
-        var targetStatus = targetResponseOp.map(r -> r.get(STATUS_CODE_KEY));
-        builder = builder.setAttribute(MetricsAttributeKey.REQUEST_ID,
-                requestKey.getTrafficStreamKey().getConnectionId() + "." + requestKey.getSourceRequestIndex());
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.SOURCE_HTTP_STATUS, sourceStatus);
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.TARGET_HTTP_STATUS, targetStatus);
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_STATUS_MATCH,
-                sourceStatus.flatMap(ss -> targetStatus.map(ts -> ss.equals(ts)))
-                        .filter(x -> x).map(b -> (Object) 1).or(() -> Optional.<Object>of(Integer.valueOf(0))));
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_METHOD,
-                sourceResponseOp.map(r -> r.get("Method")));
-        builder = addMetricIfPresent(builder, MetricsAttributeKey.HTTP_ENDPOINT,
-                sourceResponseOp.map(r -> r.get("Request-URI")));
-        return builder;
+    public static void fillStatusCodeMetrics(@NonNull IReplayContexts.ITupleHandlingContext context,
+                                             Optional<Map<String, Object>> sourceResponseOp,
+                                             Optional<Map<String, Object>> targetResponseOp) {
+        sourceResponseOp.ifPresent(r -> context.setSourceStatus((Integer) r.get(STATUS_CODE_KEY)));
+        targetResponseOp.ifPresent(r -> context.setTargetStatus((Integer) r.get(STATUS_CODE_KEY)));
     }
 
 
@@ -132,13 +107,9 @@ public class ParsedHttpMessagesAsDicts {
     }
 
     private static byte[] getBytesFromByteBuf(ByteBuf buf) {
-        if (buf.hasArray()) {
-            return buf.array();
-        } else {
-            var bytes = new byte[buf.readableBytes()];
-            buf.getBytes(buf.readerIndex(), bytes);
-            return bytes;
-        }
+        var bytes = new byte[buf.readableBytes()];
+        buf.getBytes(buf.readerIndex(), bytes);
+        return bytes;
     }
 
     private static Map<String, Object> fillMap(LinkedHashMap<String, Object> map,
@@ -150,34 +121,37 @@ public class ParsedHttpMessagesAsDicts {
         return map;
     }
 
-    private static Map<String, Object> makeSafeMap(@NonNull UniqueSourceRequestKey diagnosticKey,
+    private static Map<String, Object> makeSafeMap(@NonNull IReplayContexts.ITupleHandlingContext context,
                                                    Callable<Map<String, Object>> c) {
         try {
             return c.call();
         } catch (Exception e) {
             // TODO - this isn't a good design choice.
             // We should follow through with the spirit of this class and leave this as empty optional values
-            log.atWarn().setMessage(()->"Putting what may be a bogus value in the output because transforming it " +
-                    "into json threw an exception for "+diagnosticKey.toString()).setCause(e).log();
+            log.atWarn().setMessage(() -> "Putting what may be a bogus value in the output because transforming it " +
+                    "into json threw an exception for " + context).setCause(e).log();
             return Map.of("Exception", (Object) e.toString());
         }
     }
 
-    private static Map<String, Object> convertRequest(@NonNull UniqueSourceRequestKey diagnosticKey,
+    private static Map<String, Object> convertRequest(@NonNull IReplayContexts.ITupleHandlingContext context,
                                                       @NonNull List<byte[]> data) {
-        return makeSafeMap(diagnosticKey, () -> {
+        return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
             var message = HttpByteBufFormatter.parseHttpRequestFromBufs(byteToByteBufStream(data), true);
             map.put("Request-URI", message.uri());
             map.put("Method", message.method().toString());
             map.put("HTTP-Version", message.protocolVersion().toString());
+            context.setMethod(message.method().toString());
+            context.setEndpoint(message.uri());
+            context.setHttpVersion(message.protocolVersion().toString());
             return fillMap(map, message.headers(), message.content());
         });
     }
 
-    private static Map<String, Object> convertResponse(@NonNull UniqueSourceRequestKey diagnosticKey,
+    private static Map<String, Object> convertResponse(@NonNull IReplayContexts.ITupleHandlingContext context,
                                                        @NonNull List<byte[]> data, Duration latency) {
-        return makeSafeMap(diagnosticKey, () -> {
+        return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
             var message = HttpByteBufFormatter.parseHttpResponseFromBufs(byteToByteBufStream(data), true);
             map.put("HTTP-Version", message.protocolVersion());

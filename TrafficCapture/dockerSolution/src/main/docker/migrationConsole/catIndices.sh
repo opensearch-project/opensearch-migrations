@@ -15,41 +15,66 @@ else
     target_auth_user_and_pass="admin:admin"
 fi
 
+usage() {
+  echo ""
+  echo "Script to display all indices and doc counts for both the source cluster and target cluster."
+  echo ""
+  echo "Usage: "
+  echo "  ./catIndices.sh <>"
+  echo ""
+  echo "Options:"
+  echo "  --target-endpoint                           The target endpoint to query."
+  echo "  --target-auth-user-and-pass                 The basic auth user and pass to use for target requests, e.g. 'admin:admin'."
+  echo "  --target-no-auth                            Flag to provide no auth in target requests."
+  echo "  --source-endpoint                           The source endpoint to query."
+  echo "  --source-auth-user-and-pass                 The basic auth user and pass to use for source requests, e.g. 'admin:admin'."
+  echo "  --source-no-auth                            Flag to provide no auth in source requests."
+  echo ""
+  exit 1
+}
+
 # Override default values with optional command-line arguments
 while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
-        --target_endpoint)
+        --target-endpoint)
             target_endpoint="$2"
             shift
             shift
             ;;
-        --target_auth_user_and_pass)
+        --target-auth-user-and-pass)
             target_auth_user_and_pass="$2"
             shift
             shift
             ;;
-        --target_no_auth)
+        --target-no-auth)
             target_no_auth=true
             shift
             ;;
-        --source_endpoint)
+        --source-endpoint)
             source_endpoint="$2"
             shift
             shift
             ;;
-        --source_auth_user_and_pass)
+        --source-auth-user-and-pass)
             source_auth_user_and_pass="$2"
             shift
             shift
             ;;
-        --source_no_auth)
+        --source-no-auth)
             source_no_auth=true
             shift
             ;;
+        -h|--h|--help)
+          usage
+          ;;
+        -*)
+          echo "Unknown option $1"
+          usage
+          ;;
         *)
-            shift
-            ;;
+          shift
+          ;;
     esac
 done
 
@@ -64,10 +89,12 @@ if [ "$target_no_auth" = true ]; then
 fi
 
 echo "SOURCE CLUSTER"
+curl $source_endpoint/_refresh --insecure $source_auth_string &> /dev/null
 echo "curl $source_endpoint/_cat/indices?v"
 curl $source_endpoint/_cat/indices?v --insecure $source_auth_string
 echo ""
 echo "TARGET CLUSTER"
+curl $target_endpoint/_refresh --insecure $target_auth_string &> /dev/null
 echo "curl $target_endpoint/_cat/indices?v"
 curl $target_endpoint/_cat/indices?v --insecure $target_auth_string
 echo ""

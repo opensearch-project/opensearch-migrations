@@ -10,15 +10,16 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.NonNull;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 
 import javax.net.ssl.SSLEngine;
 import java.util.function.Supplier;
 
 public class NettyScanningHttpProxy {
-    private final int proxyPort;
-    private Channel mainChannel;
-    private EventLoopGroup workerGroup;
-    private EventLoopGroup bossGroup;
+    protected final int proxyPort;
+    protected Channel mainChannel;
+    protected EventLoopGroup workerGroup;
+    protected EventLoopGroup bossGroup;
 
     public NettyScanningHttpProxy(int proxyPort) {
         this.proxyPort = proxyPort;
@@ -28,7 +29,8 @@ public class NettyScanningHttpProxy {
         return proxyPort;
     }
 
-    public void start(BacksideConnectionPool backsideConnectionPool,
+    public void start(IRootWireLoggingContext rootContext,
+                      BacksideConnectionPool backsideConnectionPool,
                       int numThreads,
                       Supplier<SSLEngine> sslEngineSupplier,
                       IConnectionCaptureFactory<Object> connectionCaptureFactory,
@@ -39,7 +41,7 @@ public class NettyScanningHttpProxy {
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
-                    .childHandler(new ProxyChannelInitializer<>(backsideConnectionPool, sslEngineSupplier,
+                    .childHandler(new ProxyChannelInitializer<>(rootContext, backsideConnectionPool, sslEngineSupplier,
                             connectionCaptureFactory, requestCapturePredicate))
                     .childOption(ChannelOption.AUTO_READ, false)
                     .bind(proxyPort).sync().channel();

@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
-import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpRequest;
 import lombok.Getter;
 

@@ -6,8 +6,12 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -18,6 +22,7 @@ import org.opensearch.migrations.replay.util.OnlineRadixSorter;
  */
 @Slf4j
 public class ConnectionReplaySession {
+
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
      * vended by a CompletableFuture (e.g. possibly a rate limiter).  If the ChannelFuture hasn't
@@ -25,17 +30,17 @@ public class ConnectionReplaySession {
      * EventLoop so that we can route all calls for this object into that loop/thread.
      */
     public final EventLoop eventLoop;
-    @Getter @Setter
-    private DiagnosticTrackableCompletableFuture<String,ChannelFuture> channelFutureFuture;
-    public final OnlineRadixSorter<Runnable> scheduleSequencer;
-    public final TimeToResponseFulfillmentFutureMap schedule;
-
     @Getter
     @Setter
-    private ISourceTrafficChannelKey channelId;
+    private DiagnosticTrackableCompletableFuture<String, ChannelFuture> channelFutureFuture;
+    public final OnlineRadixSorter<Runnable> scheduleSequencer;
+    public final TimeToResponseFulfillmentFutureMap schedule;
+    @Getter
+    private final IReplayContexts.IChannelKeyContext channelKeyContext;
 
-    public ConnectionReplaySession(EventLoop eventLoop) {
+    public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext) {
         this.eventLoop = eventLoop;
+        this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter<>(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
     }

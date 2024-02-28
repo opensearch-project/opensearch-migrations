@@ -13,7 +13,6 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
-LOG_JSON_TUPLE_FIELD = "message"
 BASE64_ENCODED_TUPLE_PATHS = ["sourceRequest.body", "targetRequest.body", "sourceResponse.body", "targetResponse.body"]
 # TODO: I'm not positive about the capitalization of the Content-Encoding and Content-Type headers.
 # This version worked on my test cases, but not guaranteed to work in all cases.
@@ -149,9 +148,7 @@ def parse_body_value(raw_value: str, content_encoding: Optional[str],
 
 
 def parse_tuple(line: str, line_no: int) -> dict:
-    item = json.loads(line)
-    message = item[LOG_JSON_TUPLE_FIELD]
-    tuple = json.loads(message)
+    tuple = json.loads(line)
     try:
         is_bulk_path = BULK_URI_PATH in get_element(URI_PATH, tuple, raise_on_error=True)
     except DictionaryPathException as e:

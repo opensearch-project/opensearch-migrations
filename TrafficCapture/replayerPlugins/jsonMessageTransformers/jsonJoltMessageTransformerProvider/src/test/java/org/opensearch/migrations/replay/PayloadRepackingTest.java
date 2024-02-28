@@ -9,6 +9,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 
@@ -22,7 +24,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
-public class PayloadRepackingTest {
+public class PayloadRepackingTest extends InstrumentationTest {
 
     public static Stream<List<Object>> expandList(Stream<List<Object>> stream, List possibilities) {
         return stream.flatMap(list-> possibilities.stream().map(innerB -> {
@@ -45,8 +47,12 @@ public class PayloadRepackingTest {
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
         var transformerBuilder = JsonJoltTransformer.newBuilder();
 
-        if (doGzip) { transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP); }
-        if (doChunked) { transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.MAKE_CHUNKED); }
+        if (doGzip) {
+            transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP);
+        }
+        if (doChunked) {
+            transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.MAKE_CHUNKED);
+        }
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
@@ -59,8 +65,8 @@ public class PayloadRepackingTest {
         expectedRequestHeaders.add("host", "localhost");
         expectedRequestHeaders.add("Content-Length", "46");
 
-        TestUtils.runPipelineAndValidate(transformerBuilder.build(), null,null,
-                stringParts, expectedRequestHeaders,
+        TestUtils.runPipelineAndValidate(rootContext, transformerBuilder.build(), null,
+                null, stringParts, expectedRequestHeaders,
                 referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder));
     }
 
@@ -91,7 +97,8 @@ public class PayloadRepackingTest {
 
         ObjectMapper mapper = new ObjectMapper();
         var simpleTransform = mapper.readValue(simplePayloadTransform,
-                new TypeReference<LinkedHashMap<String, Object>>(){});
+                new TypeReference<LinkedHashMap<String, Object>>() {
+                });
         transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.PASS_THRU);
         transformerBuilder.addOperationObject(simpleTransform);
 
@@ -104,7 +111,7 @@ public class PayloadRepackingTest {
         expectedRequestHeaders.add("content-type", "application/json; charset=UTF-8");
         expectedRequestHeaders.add("Content-Length", "55");
 
-        TestUtils.runPipelineAndValidate(transformerBuilder.build(), null,
+        TestUtils.runPipelineAndValidate(rootContext, transformerBuilder.build(), null,
                 extraHeaders, List.of(jsonPayload), expectedRequestHeaders,
                 x -> "{\"top\":[{\"Name\":\"A\",\"Value\":1},{\"Name\":\"B\",\"Value\":2}]}");
     }

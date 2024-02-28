@@ -8,13 +8,61 @@ down again.
 Notice that most of the Dockerfiles are dynamically constructed in the build hierarchy. Some efforts have been made
 to ensure that changes will make it into containers to be launched.
 
-### Running the Docker Solution
+## Running the Docker Solution
 
 While in the TrafficCapture directory, run the following command:
 
 `./gradlew :dockerSolution:composeUp`
 
-### Compatibility
+### Running with different telemetry flavors.
+
+By default, composeUp will run an otel-collector that exports instrumentation to other local containers within the
+migrations network.  However, the collector's export configuration can be overridden via the otel-collector property:
+`TrafficCapture % ./gradlew :dockerSolution:composeUp -Potel-collector=otel-aws.yml`
+
+The [otel-aws.yml](src/main/docker/composeExtensions/otel-aws.yml) will use that docker-compose extension.
+That extension uses the collector configurations (from the container's base image) and wires the ~/.aws/credentials
+file into the container to provide the collector credentials that it needs to push metrics and traces to CloudWatch
+and X-Ray.  In addition to the [default configuration](src/main/docker/composeExtensions/otel-prometheus-jaeger-opensearch.yml)
+to use local containers, a [third option](src/main/docker/composeExtensions/otel-everything.yml) will use _BOTH_ local
+containers AND the AWS services.
+
+## Maintaining configurations
+
+### Otel-Collector configurations
+
+The migrations components use OpenTelemetry for instrumentation so that different systems can be utilized across 
+(Prometheus, CloudWatch, Zipkin, etc) and across different types of infrastructure.  The docker solutions vended 
+in this directory try to provide flexibility and consistency between different environments.  Base images may 
+change in the future as otel matures and configurations will also need to be updated over time due to external
+changes (e.g. debug/logging exporter) or internal ones (buffering parameters).  To manage the 5 starting 
+configurations that we produce for one purpose or another, support code is within [otelConfigs](otelConfigs).
+
+The otel-collector configuration is contained within one yaml file.  That single file configures the collector 
+to interface with many different systems.  Maintaining consistency of configurations even as they're 
+copy-pasted between each other isn't scalable.  Complicating matters more is that the base
+otel-collector from otel and the AWS distro both lack a posix base system.  That makes cons-ing any 
+configurations within the container challenging.  The compromise struck here is to do the construction of 
+configuration files as a preprocessing step BEFORE docker builds.  That preprocessing logic is within
+dockerSolution/otelConfigs.
+
+A python script creates individual (but complete) otel-collector configurations 
+([consConfigSnippets.py](otelConfigs/consConfigSnippets.py)).
+A shell script ([makeConfigFiles.sh](otelConfigs/makeConfigFiles.sh)) runs 5 configuration sets
+to output the otel-config-*.yaml files that are used by the 
+[otelCollector image](src/main/docker/otelCollector/Dockerfile) and the 
+[compose configurations](src/main/docker/composeExtensions/).  The compose configurations override 
+the original otel collector configurations with new ones.  Those compose files also vary by specifying
+different ports depending upon which services have been configured (Prometheus, zpages, etc ports).
+
+Those configurations are created by merging a set of YAML snippets into a final file.  Within the 
+dependencies.yml file, parents (and their respective snippets) are dependencies of their children.  
+As consConfigSnippets.py is invoked, all ancestors' snippets are included before the children that 
+were specified.  To further simplify management of dependencies, snippets may have multiple dependencies.
+Upon hitting each dependency for the first time, all of its dependencies are also found and included 
+within the final yaml configuration that is being output.
+
+## Compatibility
 
 The tools in this directory can only be built if you have Java version 11 installed.
 

@@ -7,24 +7,27 @@ import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
 import lombok.NonNull;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpRequestHandler;
+import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
-import org.opensearch.migrations.trafficcapture.netty.LoggingHttpResponseHandler;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 
 import javax.net.ssl.SSLEngine;
 import java.io.IOException;
 import java.util.function.Supplier;
 
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
+    protected final IConnectionCaptureFactory<T> connectionCaptureFactory;
+    protected final Supplier<SSLEngine> sslEngineProvider;
+    protected final IRootWireLoggingContext rootContext;
+    protected final BacksideConnectionPool backsideConnectionPool;
+    protected final RequestCapturePredicate requestCapturePredicate;
 
-    private final IConnectionCaptureFactory<T> connectionCaptureFactory;
-    private final Supplier<SSLEngine> sslEngineProvider;
-    private final BacksideConnectionPool backsideConnectionPool;
-    private final RequestCapturePredicate requestCapturePredicate;
-
-    public ProxyChannelInitializer(BacksideConnectionPool backsideConnectionPool, Supplier<SSLEngine> sslEngineSupplier,
+    public ProxyChannelInitializer(IRootWireLoggingContext rootContext,
+                                   BacksideConnectionPool backsideConnectionPool,
+                                   Supplier<SSLEngine> sslEngineSupplier,
                                    IConnectionCaptureFactory<T> connectionCaptureFactory,
                                    @NonNull RequestCapturePredicate requestCapturePredicate) {
+        this.rootContext = rootContext;
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
@@ -46,10 +49,10 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
             ch.pipeline().addLast(new SslHandler(sslEngineProvider.get()));
         }
 
-        var offloader = connectionCaptureFactory.createOffloader(ch.id().asLongText());
-        ch.pipeline().addLast(new LoggingHttpResponseHandler(offloader));
-        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpRequestHandler<T>(offloader,
-                requestCapturePredicate, this::shouldGuaranteeMessageOffloading));
+        var connectionId = ch.id().asLongText();
+        ch.pipeline().addLast(new ConditionallyReliableLoggingHttpHandler<>(rootContext,
+                "", connectionId, connectionCaptureFactory, requestCapturePredicate,
+                this::shouldGuaranteeMessageOffloading));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
     }
 }

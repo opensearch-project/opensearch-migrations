@@ -13,6 +13,7 @@ import org.opensearch.migrations.replay.AggregatedRawResponse;
 public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
 
     private final AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
+
     private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideSnifferHandler");
 
     public BacksideSnifferHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder) {

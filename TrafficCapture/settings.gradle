@@ -37,6 +37,3 @@ include('captureKafkaOffloader',
 )
 
 addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
-include 'replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled'
-findProject(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider:untitled')?.name = 'untitled'
-

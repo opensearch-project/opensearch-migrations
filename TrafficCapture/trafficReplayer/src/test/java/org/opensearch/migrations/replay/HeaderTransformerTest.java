@@ -7,6 +7,7 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import java.time.Duration;
@@ -15,14 +16,13 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 @Slf4j
 @WrapWithNettyLeakDetection
-public class HeaderTransformerTest {
+public class HeaderTransformerTest extends InstrumentationTest {
 
     private static final String SILLY_TARGET_CLUSTER_NAME = "remoteguest";
     private static final String SOURCE_CLUSTER_NAME = "localhost";
@@ -35,7 +35,7 @@ public class HeaderTransformerTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
         var transformingHandler = new HttpJsonTransformingConsumer(transformer, null, testPacketCapture,
-                "TEST", TestRequestKey.getTestConnectionRequestId(0));
+                rootContext.getTestConnectionRequestContext(0));
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
                         "HoSt: " + SOURCE_CLUSTER_NAME + "\r\n" +
@@ -79,7 +79,6 @@ public class HeaderTransformerTest {
 
     @Test
     public void testMalformedPayloadIsPassedThrough() throws Exception {
-        var referenceStringBuilder = new StringBuilder();
         // mock object.  values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(null, 12, null,
                 null, HttpRequestTransformationStatus.COMPLETED, null);
@@ -87,8 +86,8 @@ public class HeaderTransformerTest {
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
-                httpBasicAuthTransformer, testPacketCapture, "TEST", 
-                TestRequestKey.getTestConnectionRequestId(0));
+                httpBasicAuthTransformer, testPacketCapture,
+                rootContext.getTestConnectionRequestContext(0));
 
         runRandomPayloadWithTransformer(transformingHandler, dummyAggregatedResponse, testPacketCapture,
                 contentLength -> "GET / HTTP/1.1\r\n" +
@@ -114,7 +113,7 @@ public class HeaderTransformerTest {
         var transformingHandler = new HttpJsonTransformingConsumer(
                 new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME, null,
                         "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"),
-                null, testPacketCapture, "TEST", TestRequestKey.getTestConnectionRequestId(0));
+                null, testPacketCapture, rootContext.getTestConnectionRequestContext(0));
 
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)

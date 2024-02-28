@@ -14,10 +14,6 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
-import java.util.function.Function;
-import java.util.stream.Collector;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -36,20 +32,6 @@ public class Utils {
         return referenceValue.updateAndGet(existing -> Math.max(existing, pointInTimeMillis));
     }
 
-    /**
-     * See https://en.wikipedia.org/wiki/Fold_(higher-order_function)
-     */
-    public static <A, B> Collector<A, ?, B>
-    foldLeft(final B seedValue, final BiFunction<? super B, ? super A, ? extends B> f) {
-        return Collectors.collectingAndThen(
-                Collectors.reducing(
-                        Function.<B>identity(),
-                        a -> b -> f.apply(b, a),
-                        Function::andThen),
-                finisherArg -> finisherArg.apply(seedValue)
-        );
-    }
-
     @SneakyThrows(value = {IOException.class})
     public static String packetsToCompressedTrafficStream(Stream<byte[]> byteArrStream) {
         var tsb = TrafficStream.newBuilder()
@@ -57,7 +39,7 @@ public class Utils {
         var trafficStreamOfReads =
                 byteArrStream.map(bArr->ReadObservation.newBuilder().setData(ByteString.copyFrom(bArr)).build())
                 .map(r->TrafficObservation.newBuilder().setRead(r))
-                .collect(foldLeft(tsb, (existing,newObs)->tsb.addSubStream(newObs)))
+                .collect(org.opensearch.migrations.Utils.foldLeft(tsb, (existing, newObs)->tsb.addSubStream(newObs)))
                 .build();
         try (var baos = new ByteArrayOutputStream()) {
             try (var gzStream = new GZIPOutputStream(baos)) {

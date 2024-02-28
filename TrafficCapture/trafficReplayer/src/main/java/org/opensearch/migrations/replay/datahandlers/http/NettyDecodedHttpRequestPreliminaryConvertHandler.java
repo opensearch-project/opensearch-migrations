@@ -4,18 +4,19 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.coreutils.MetricsAttributeKey;
 import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -27,36 +28,31 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    private UniqueReplayerRequestKey requestKeyForMetricsLogging;
+    private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
     static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
                                                             RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
-                                                            String diagnosticLabel,
-                                                            UniqueReplayerRequestKey requestKeyForMetricsLogging) {
+                                                            IReplayContexts.IRequestTransformationContext httpTransactionContext) {
         this.transformer = transformer;
         this.chunkSizes = chunkSizes;
         this.requestPipelineOrchestrator = requestPipelineOrchestrator;
-        this.diagnosticLabel = "[" + diagnosticLabel + "] ";
-        this.requestKeyForMetricsLogging = requestKeyForMetricsLogging;
+        this.diagnosticLabel = "[" + httpTransactionContext + "] ";
+        this.httpTransactionContext = httpTransactionContext;
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+    public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
+            httpTransactionContext.onHeaderParse();
             var request = (HttpRequest) msg;
-            log.info(new StringBuilder(diagnosticLabel)
-                    .append(" parsed request: ")
-                    .append(request.method())
-                    .append(" ")
-                    .append(request.uri())
-                    .append(" ")
-                    .append(request.protocolVersion().text())
-                    .toString());
+            log.atInfo().setMessage(()-> diagnosticLabel + " parsed request: " +
+                    request.method() + " " + request.uri() + " " + request.protocolVersion().text()).log();
             metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
-                    .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKeyForMetricsLogging)
-                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKeyForMetricsLogging.getTrafficStreamKey().getConnectionId())
+                    .setAttribute(MetricsAttributeKey.REQUEST_ID, httpTransactionContext)
+                    .setAttribute(MetricsAttributeKey.CONNECTION_ID,
+                            httpTransactionContext.getLogicalEnclosingScope().getConnectionId())
                     .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
                     .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 

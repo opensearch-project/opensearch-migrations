@@ -8,17 +8,18 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamWithEmbeddedKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.testcontainers.containers.KafkaContainer;
@@ -40,7 +41,7 @@ import java.util.stream.Stream;
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("requiresDocker")
-public class KafkaRestartingTrafficReplayerTest {
+public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
     public static final String TEST_GROUP_PRODUCER_ID = "TEST_GROUP_PRODUCER_ID";
@@ -68,7 +69,7 @@ public class KafkaRestartingTrafficReplayerTest {
             return tuple -> {
                 if (counter.incrementAndGet() > stopPoint) {
                     log.warn("Request received after our ingest threshold. Throwing.  Discarding " +
-                            tuple.uniqueRequestKey);
+                            tuple.context);
                     var nextStopPoint = stopPoint + new Random(stopPoint).nextInt(stopPoint + 1);
                     nextStopPointRef.compareAndSet(stopPoint, nextStopPoint);
                     throw new TrafficReplayerRunner.FabricatedErrorToKillTheReplayer(false);
@@ -77,7 +78,7 @@ public class KafkaRestartingTrafficReplayerTest {
         }
     }
 
-    //@ParameterizedTest
+    @ParameterizedTest
     @CsvSource(value = {
             "3,false",
             "-1,false",
@@ -85,11 +86,13 @@ public class KafkaRestartingTrafficReplayerTest {
             "-1,true",
     })
     @Tag("longTest")
+    @ResourceLock("TrafficReplayerRunner")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response->TestHttpServerContext.makeResponse(random, response));
-        var streamAndConsumer = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(testSize, randomize);
+        var streamAndConsumer =
+                TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(), testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
                 .collect(Collectors.joining("\n"))).log();
@@ -98,9 +101,11 @@ public class KafkaRestartingTrafficReplayerTest {
                 Streams.concat(trafficStreams.stream(), Stream.of(SENTINEL_TRAFFIC_STREAM)));
         TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
-                () -> new SentinelSensingTrafficSource(
-                        new KafkaTrafficCaptureSource(buildKafkaConsumer(), TEST_TOPIC_NAME,
+                () -> TestContext.noOtelTracking(),
+                rootContext -> new SentinelSensingTrafficSource(
+                        new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(), TEST_TOPIC_NAME,
                                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
+        httpServer.close();
         log.info("done");
     }
 
@@ -119,8 +124,8 @@ public class KafkaRestartingTrafficReplayerTest {
         var kafkaProducer = buildKafkaProducer();
         var counter = new AtomicInteger();
         loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer, streams, s -> s.forEach(trafficStream ->
-                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, new TrafficStreamWithEmbeddedKey(trafficStream),
-                        TEST_TOPIC_NAME, "KEY_" + counter.incrementAndGet())));
+                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer,
+                        trafficStream, TEST_TOPIC_NAME, "KEY_" + counter.incrementAndGet())));
         Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
     }
 
@@ -160,18 +165,21 @@ public class KafkaRestartingTrafficReplayerTest {
     }
 
     private Supplier<ISimpleTrafficCaptureSource>
-    loadStreamsToKafkaFromCompressedFile(KafkaConsumer<String, byte[]> kafkaConsumer,
+    loadStreamsToKafkaFromCompressedFile(TestContext rootCtx,
+                                         KafkaConsumer<String, byte[]> kafkaConsumer,
                                          String filename, int recordCount) throws Exception {
         var kafkaProducer = buildKafkaProducer();
-        loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer, new V0_1TrafficCaptureSource(filename),
+        loadStreamsAsynchronouslyWithCloseableResource(kafkaConsumer,
+                new V0_1TrafficCaptureSource(rootCtx, filename),
                 originalTrafficSource -> {
                     try {
                         for (int i = 0; i < recordCount; ++i) {
                             List<ITrafficStreamWithKey> chunks = null;
-                            chunks = originalTrafficSource.readNextTrafficStreamChunk().get();
+                            chunks = originalTrafficSource.readNextTrafficStreamChunk(rootCtx::createReadChunkContext)
+                                    .get();
                             for (int j = 0; j < chunks.size(); ++j) {
-                                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, chunks.get(j), TEST_TOPIC_NAME,
-                                        "KEY_" + i + "_" + j);
+                                KafkaTestUtils.writeTrafficStreamRecord(kafkaProducer, chunks.get(j).getStream(),
+                                        TEST_TOPIC_NAME, "KEY_" + i + "_" + j);
                                 Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
                             }
                         }
@@ -179,7 +187,7 @@ public class KafkaRestartingTrafficReplayerTest {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-        return () -> new KafkaTrafficCaptureSource(kafkaConsumer, TEST_TOPIC_NAME,
+        return () -> new KafkaTrafficCaptureSource(rootCtx, kafkaConsumer, TEST_TOPIC_NAME,
                 Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS));
     }
 

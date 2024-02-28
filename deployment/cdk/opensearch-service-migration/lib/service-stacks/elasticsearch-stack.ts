@@ -1,15 +1,15 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
-import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 
 export interface ElasticsearchProps extends StackPropsExt {
     readonly vpc: IVpc,
+    readonly fargateCpuArch: CpuArchitecture
 }
 
 /**
@@ -39,12 +39,13 @@ export class ElasticsearchStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "elasticsearch",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard"),
             securityGroups: securityGroups,
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 9200,
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
             ...props

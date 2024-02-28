@@ -13,8 +13,10 @@ import logging
 import yaml
 
 import endpoint_utils
-import index_operations
+import index_management
 import utils
+from endpoint_info import EndpointInfo
+from exceptions import MetadataMigrationError
 from index_diff import IndexDiff
 from metadata_migration_params import MetadataMigrationParams
 from metadata_migration_result import MetadataMigrationResult
@@ -50,6 +52,76 @@ def print_report(diff: IndexDiff, total_doc_count: int):  # pragma no cover
     logging.info("Target document count: " + str(total_doc_count))
 
 
+def index_metadata_migration(source: EndpointInfo, target: EndpointInfo,
+                             args: MetadataMigrationParams) -> MetadataMigrationResult:
+    result = MetadataMigrationResult()
+    # Fetch indices
+    source_indices = index_management.fetch_all_indices(source)
+    # If source indices is empty, return immediately
+    if len(source_indices.keys()) == 0:
+        return result
+    target_indices = index_management.fetch_all_indices(target)
+    # Compute index differences and create result object
+    diff = IndexDiff(source_indices, target_indices)
+    if diff.identical_indices:
+        # Identical indices with zero documents on the target are eligible for migration
+        target_doc_count = index_management.doc_count(diff.identical_indices, target)
+        # doc_count only returns indices that have non-zero counts, so the difference in responses
+        # gives us the set of identical, empty indices
+        result.migration_indices = diff.identical_indices.difference(target_doc_count.index_doc_count_map.keys())
+        diff.set_identical_empty_indices(result.migration_indices)
+    if diff.indices_to_create:
+        result.migration_indices.update(diff.indices_to_create)
+    if result.migration_indices:
+        doc_count_result = index_management.doc_count(result.migration_indices, source)
+        result.target_doc_count = doc_count_result.total
+    # Print report
+    if args.report:
+        print_report(diff, result.target_doc_count)
+    # Create index metadata on target
+    if result.migration_indices and not args.dryrun:
+        index_data = dict()
+        for index_name in diff.indices_to_create:
+            index_data[index_name] = source_indices[index_name]
+        failed_indices = index_management.create_indices(index_data, target)
+        fail_count = len(failed_indices)
+        if fail_count > 0:
+            logging.error(f"Failed to create {fail_count} of {len(index_data)} indices")
+            for failed_index_name, error in failed_indices.items():
+                logging.error(f"Index name {failed_index_name} failed: {error!s}")
+            raise MetadataMigrationError("Metadata migration failed, index creation unsuccessful")
+    return result
+
+
+# Returns true if there were failures, false otherwise
+def __log_template_failures(failures: dict, target_count: int) -> bool:
+    fail_count = len(failures)
+    if fail_count > 0:
+        logging.error(f"Failed to create {fail_count} of {target_count} templates")
+        for failed_template_name, error in failures.items():
+            logging.error(f"Template name {failed_template_name} failed: {error!s}")
+        # Return true to signal failures
+        return True
+    else:
+        # No failures, return false
+        return False
+
+
+# Raises RuntimeError if component/index template migration fails
+def template_migration(source: EndpointInfo, target: EndpointInfo):
+    # Fetch and migrate component templates first
+    templates = index_management.fetch_all_component_templates(source)
+    failures = index_management.create_component_templates(templates, target)
+    if not __log_template_failures(failures, len(templates)):
+        # Only migrate index templates if component template migration had no failures
+        templates = index_management.fetch_all_index_templates(source)
+        failures = index_management.create_index_templates(templates, target)
+        if __log_template_failures(failures, len(templates)):
+            raise MetadataMigrationError("Failed to create some index templates")
+    else:
+        raise MetadataMigrationError("Failed to create some component templates, aborting index template creation")
+
+
 def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
     # Sanity check
     if not args.report and len(args.output_file) == 0:
@@ -65,45 +137,15 @@ def run(args: MetadataMigrationParams) -> MetadataMigrationResult:
                                                                                  endpoint_utils.SOURCE_KEY)
     target_endpoint_info = endpoint_utils.get_endpoint_info_from_pipeline_config(pipeline_config,
                                                                                  endpoint_utils.SINK_KEY)
-    result = MetadataMigrationResult()
-    # Fetch indices
-    source_indices = index_operations.fetch_all_indices(source_endpoint_info)
-    # If source indices is empty, return immediately
-    if len(source_indices.keys()) == 0:
-        return result
-    target_indices = index_operations.fetch_all_indices(target_endpoint_info)
-    # Compute index differences and print report
-    diff = IndexDiff(source_indices, target_indices)
-    if diff.identical_indices:
-        # Identical indices with zero documents on the target are eligible for migration
-        target_doc_count = index_operations.doc_count(diff.identical_indices, target_endpoint_info)
-        # doc_count only returns indices that have non-zero counts, so the difference in responses
-        # gives us the set of identical, empty indices
-        result.migration_indices = diff.identical_indices.difference(target_doc_count.index_doc_count_map.keys())
-        diff.set_identical_empty_indices(result.migration_indices)
-    if diff.indices_to_create:
-        result.migration_indices.update(diff.indices_to_create)
-    if result.migration_indices:
-        doc_count_result = index_operations.doc_count(result.migration_indices, source_endpoint_info)
-        result.target_doc_count = doc_count_result.total
-    if args.report:
-        print_report(diff, result.target_doc_count)
-    if result.migration_indices:
-        # Write output YAML
-        if len(args.output_file) > 0:
-            write_output(dp_config, result.migration_indices, args.output_file)
-            logging.debug("Wrote output YAML pipeline to: " + args.output_file)
-        if not args.dryrun:
-            index_data = dict()
-            for index_name in diff.indices_to_create:
-                index_data[index_name] = source_indices[index_name]
-            failed_indices = index_operations.create_indices(index_data, target_endpoint_info)
-            fail_count = len(failed_indices)
-            if fail_count > 0:
-                logging.error(f"Failed to create {fail_count} of {len(index_data)} indices")
-                for failed_index_name, error in failed_indices.items():
-                    logging.error(f"Index name {failed_index_name} failed: {error!s}")
-                raise RuntimeError("Metadata migration failed, index creation unsuccessful")
+    result = index_metadata_migration(source_endpoint_info, target_endpoint_info, args)
+    # Write output YAML
+    if result.migration_indices and len(args.output_file) > 0:
+        write_output(dp_config, result.migration_indices, args.output_file)
+        logging.debug("Wrote output YAML pipeline to: " + args.output_file)
+    if not args.dryrun:
+        # Create component and index templates, may raise RuntimeError
+        template_migration(source_endpoint_info, target_endpoint_info)
+    # Finally return result
     return result
 
 
@@ -135,6 +177,6 @@ if __name__ == '__main__':  # pragma no cover
     arg_parser.add_argument("--report", "-r", action="store_true",
                             help="Print a report of the index differences")
     arg_parser.add_argument("--dryrun", action="store_true",
-                            help="Skips the actual creation of indices on the target cluster")
+                            help="Skips the actual creation of metadata on the target cluster")
     namespace = arg_parser.parse_args()
     run(MetadataMigrationParams(namespace.config_file_path, namespace.output_file, namespace.report, namespace.dryrun))

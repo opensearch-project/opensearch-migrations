@@ -1,13 +1,18 @@
 #!/bin/bash
 
-# Ensure Fetch Migration command is available before proceeding
-if [ -z "$FETCH_MIGRATION_COMMAND" ]; then
-    echo "Fetch Migration unavailable or not deployed, exiting..."
-    exit 1
-fi
-
-# ECS command overrides argument with placeholder for flags
-OVERRIDES_ARG="--overrides '{ \"containerOverrides\": [ { \"name\": \"fetch-migration\", \"command\": <FLAGS> }]}'"
+usage() {
+  echo ""
+  echo "Script to display the AWS CLI command needed to execute a Fetch Migration, based on provided options."
+  echo ""
+  echo "Usage: "
+  echo "  ./showFetchMigrationCommand.sh <>"
+  echo ""
+  echo "Options:"
+  echo "  --create-only                            Skips data migration and only creates indices on the target cluster."
+  echo "  --dryrun                                 Performs a dry-run. Only a report is printed - no indices are created or migrated."
+  echo ""
+  exit 1
+}
 
 # Default values
 create_only=false
@@ -24,11 +29,27 @@ while [[ $# -gt 0 ]]; do
             dry_run=true
             shift
             ;;
+        -h|--h|--help)
+            usage
+            ;;
+        -*)
+            echo "Unknown option $1"
+            usage
+            ;;
         *)
             shift
             ;;
     esac
 done
+
+# Ensure Fetch Migration command is available before proceeding
+if [ -z "$FETCH_MIGRATION_COMMAND" ]; then
+    echo "Fetch Migration is unavailable or not deployed as required FETCH_MIGRATION_COMMAND environment variable is missing, exiting..."
+    exit 1
+fi
+
+# ECS command overrides argument with placeholder for flags
+OVERRIDES_ARG="--overrides '{ \"containerOverrides\": [ { \"name\": \"fetch-migration\", \"command\": <FLAGS> }]}'"
 
 # Build flags string
 flags=""

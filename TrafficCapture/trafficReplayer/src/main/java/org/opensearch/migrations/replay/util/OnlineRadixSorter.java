@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.util;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.ArrayList;
 import java.util.function.Consumer;
 
@@ -21,6 +23,7 @@ import java.util.function.Consumer;
  *
  * @param <T>
  */
+@Slf4j
 public class OnlineRadixSorter<T> {
     ArrayList<T> items;
     int currentOffset;
@@ -31,8 +34,10 @@ public class OnlineRadixSorter<T> {
     }
 
     public void add(int index, T item, Consumer<T> sortedItemVisitor) {
+        assert index >= currentOffset;
         if (currentOffset == index) {
             ++currentOffset;
+            log.atTrace().setMessage(()->"Running callback for "+index+": "+this).log();
             sortedItemVisitor.accept(item);
             while (currentOffset < items.size()) {
                 var nextItem = items.get(currentOffset);
@@ -59,6 +64,7 @@ public class OnlineRadixSorter<T> {
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("OnlineRadixSorter{");
+        sb.append("id=").append(System.identityHashCode(this));
         sb.append("items=").append(items);
         sb.append(", currentOffset=").append(currentOffset);
         sb.append('}');

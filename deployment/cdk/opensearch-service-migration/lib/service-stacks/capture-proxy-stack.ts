@@ -1,10 +1,9 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
-import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
@@ -13,8 +12,10 @@ import {createMSKProducerIAMPolicies} from "../common-utilities";
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly customSourceClusterEndpoint?: string,
-    readonly analyticsServiceEnabled?: boolean
+    readonly analyticsServiceEnabled?: boolean,
+    readonly extraArgs?: string,
 }
 
 /**
@@ -50,14 +51,16 @@ export class CaptureProxyStack extends MigrationServiceCore {
         let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
         command = props.analyticsServiceEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
+        command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
         this.createService({
             serviceName: "capture-proxy",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
             ...props

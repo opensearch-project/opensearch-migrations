@@ -2,6 +2,7 @@ import {App} from 'aws-cdk-lib';
 import {FetchMigrationStack} from "../lib/fetch-migration-stack";
 import {Template} from "aws-cdk-lib/assertions";
 import {NetworkStack} from "../lib/network-stack";
+import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 
 test('Test default fetch migration stack creates required resources', () => {
     const app = new App();
@@ -16,7 +17,8 @@ test('Test default fetch migration stack creates required resources', () => {
         dpPipelineTemplatePath: "./dp_pipeline_template.yaml",
         sourceEndpoint: "https://test-cluster",
         defaultDeployId: "default",
-        stage: "unit-test"
+        stage: "unit-test",
+        fargateCpuArch: CpuArchitecture.X86_64,
 
     })
 

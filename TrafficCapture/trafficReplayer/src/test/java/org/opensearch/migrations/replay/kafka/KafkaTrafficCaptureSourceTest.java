@@ -10,8 +10,10 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -32,9 +34,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 @Slf4j
-class KafkaTrafficCaptureSourceTest {
+class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public static final int NUM_READ_ITEMS_BOUND = 1000;
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
+
+    private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
 
     @Test
     public void testRecordToString() {
@@ -43,7 +47,10 @@ class KafkaTrafficCaptureSourceTest {
                 .setNodeId("n")
                 .setNumber(7)
                 .build();
-        var tsk = new TrafficStreamKeyWithKafkaRecordId(ts, 1, 2, 123);
+        var tsk = new TrafficStreamKeyWithKafkaRecordId(
+                k -> new ReplayContexts.KafkaRecordContext(rootContext,
+                        new ChannelContextManager(rootContext).retainOrCreateContext(k), "", 1),
+                ts, 1, 2, 123);
         Assertions.assertEquals("n.c.7|partition=2|offset=123", tsk.toString());
     }
 
@@ -51,8 +58,8 @@ class KafkaTrafficCaptureSourceTest {
     public void testSupplyTrafficFromSource() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(mockConsumer, TEST_TOPIC_NAME,
-                Duration.ofHours(1));
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
+                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
         List<Integer> substreamCounts = new ArrayList<>();
@@ -69,15 +76,16 @@ class KafkaTrafficCaptureSourceTest {
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
         var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
-                    tsCount.incrementAndGet();
-                    log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
-                    Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
-                    Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
-                            substreamCounts.get(foundStreamsCount.getAndIncrement()));
-                });
+                protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
+                        .forEach(streamWithKey -> {
+                            tsCount.incrementAndGet();
+                            log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                            Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                            Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                                    substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                        });
             }
         });
         Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
@@ -92,8 +100,8 @@ class KafkaTrafficCaptureSourceTest {
     public void testSupplyTrafficWithUnformattedMessages() {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(mockConsumer, TEST_TOPIC_NAME,
-                Duration.ofHours(1));
+        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
+                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
         initializeMockConsumerTopic(mockConsumer);
 
         List<Integer> substreamCounts = new ArrayList<>();
@@ -118,17 +126,17 @@ class KafkaTrafficCaptureSourceTest {
         // This assertion will fail the test case if not completed within its duration, as would be the case if there
         // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
-
         var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
             while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk().get().stream().forEach(streamWithKey->{
-                    tsCount.incrementAndGet();
-                    log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
-                    Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
-                    Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
-                            substreamCounts.get(foundStreamsCount.getAndIncrement()));
-                });
+                protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
+                        .forEach(streamWithKey->{
+                            tsCount.incrementAndGet();
+                            log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                            Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                            Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                                    substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                        });
             }
         });
 

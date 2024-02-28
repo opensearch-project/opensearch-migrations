@@ -1,19 +1,25 @@
 package org.opensearch.migrations.coreutils;
 
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.event.Level;
 import org.slf4j.Logger;
+import org.slf4j.event.Level;
 import org.slf4j.spi.LoggingEventBuilder;
+
+import java.util.Optional;
 
 
 @Slf4j
-public
-class MetricsLogBuilder {
+public class MetricsLogBuilder {
     private Logger logger;
     private LoggingEventBuilder loggingEventBuilder;
 
     public MetricsLogBuilder(Logger logger) {
         this.logger = logger;
+    }
+
+    public static MetricsLogBuilder addMetricIfPresent(MetricsLogBuilder metricBuilder,
+                                                       MetricsAttributeKey key, Optional<Object> value) {
+        return value.map(v -> metricBuilder.setAttribute(key, v)).orElse(metricBuilder);
     }
 
     public MetricsLogBuilder setAttribute(MetricsAttributeKey key, Object value) {

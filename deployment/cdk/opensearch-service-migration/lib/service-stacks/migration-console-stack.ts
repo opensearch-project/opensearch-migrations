@@ -1,13 +1,12 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
-    createMSKConsumerIAMPolicies,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy
 } from "../common-utilities";
@@ -18,6 +17,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly migrationAnalyticsEnabled: boolean
 }
 
@@ -99,13 +99,25 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "ecs:UpdateService"
             ]
         })
+
+        const artifactS3Arn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/artifactS3Arn`)
+        const artifactS3AnyObjectPath = `${artifactS3Arn}/*`
+        const artifactS3PublishPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [artifactS3AnyObjectPath],
+            actions: [
+                "s3:PutObject"
+            ]
+        })
+
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
-            "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints
+            "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
+            "MIGRATION_STAGE": props.stage
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, artifactS3PublishPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
@@ -137,12 +149,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "migration-console",
-            dockerFilePath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
             taskRolePolicies: servicePolicies,
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 1024,
             ...props
