@@ -212,7 +212,14 @@ jsonMessageTransformers
 nettyWireLogging
 openSearch23PlusTargetTransformerProvider
 replayerPlugins
+testUtilities
 trafficCaptureProxyServer
 trafficCaptureProxyServerTest
 trafficReplayer
+```
+
+To include a testFixture dependency, define the import like
+
+```groovy
+testImplementation testFixtures('org.opensearch.migrations.trafficcapture:trafficReplayer:0.1.0-SNAPSHOT')
 ```
