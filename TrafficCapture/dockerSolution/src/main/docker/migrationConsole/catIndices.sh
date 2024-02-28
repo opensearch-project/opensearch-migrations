@@ -12,7 +12,7 @@ if [ -n "$MIGRATION_DOMAIN_ENDPOINT" ]; then
     target_auth_user_and_pass="admin:Admin123!"
 else
     target_endpoint="https://opensearchtarget:9200"
-    target_auth_user_and_pass="admin:admin"
+    target_auth_user_and_pass="admin:myStrongPassword123!"
 fi
 
 usage() {
