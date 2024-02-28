@@ -241,11 +241,5 @@ eval "set -- $(
         tr '\n' ' '
     )" '"$@"'
 
-# Check if OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED exists, and if --scan is not in the arguments and --no-scan is not provided
-if [ -n "${OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED+set}" ] && ! printf '%s\n' "$@" | grep -q -- '--scan' && ! printf '%s\n' "$@" | grep -q -- '--no-scan'; then
-    echo "Enabling Gradle Scan based on environment variable OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED"
-    set -- "$@" '--scan'  # Append --scan to the arguments
-fi
-
 
 exec "$JAVACMD" "$@"

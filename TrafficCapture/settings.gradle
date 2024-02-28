@@ -7,6 +7,10 @@
  * in the user manual at https://docs.gradle.org/8.0.2/userguide/multi_project_builds.html
  */
 
+plugins {
+    id("com.gradle.enterprise") version("3.16.2")
+}
+
 void addSubProjects(String path, File dir) {
     if (dir.isDirectory() == false) return;
     if (dir.name == 'buildSrc') return;
@@ -38,9 +42,10 @@ include('captureKafkaOffloader',
 
 addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
 
-if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED") && hasProperty('gradleEnterprise')) {
+if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED")) {
     gradleEnterprise {
         buildScan {
+            publishAlways()
             termsOfServiceUrl = "https://gradle.com/terms-of-service"
             termsOfServiceAgree = "yes"
         }
