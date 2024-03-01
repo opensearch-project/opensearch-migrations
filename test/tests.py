@@ -269,8 +269,6 @@ class E2ETests(unittest.TestCase):
                 cmd_exec = cmd_exec + " --no-auth"
             elif self.source_auth_type == "basic":
                 cmd_exec = cmd_exec + f" --auth-user {self.source_username} --auth-pass {self.source_password}"
-            if not self.source_verify_ssl:
-                cmd_exec = cmd_exec + " --no-ssl"
             logger.warning(f"Running local command: {cmd_exec}")
             subprocess.run(cmd_exec, shell=True)
             # TODO: Enhance our waiting logic for determining when all OSB records have been processed by Replayer
