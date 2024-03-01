@@ -9,6 +9,31 @@ allprojects {
     }
 }
 
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'maven-publish'
+    def excludedProjects = [
+            'buildSrc',
+            'dockerSolution',
+    ]
+    if (!(project.name in excludedProjects)) {
+        publishing {
+            publications {
+                mavenJava(MavenPublication) {
+                    from components.java
+
+                    group = 'org.opensearch.migrations.trafficcapture'
+                    version = '0.1.0-SNAPSHOT'
+
+                    // Suppress POM metadata warnings for test fixtures
+                    suppressPomMetadataWarningsFor('testFixturesApiElements')
+                    suppressPomMetadataWarningsFor('testFixturesRuntimeElements')
+                }
+            }
+        }
+    }
+}
+
 allprojects {
     apply plugin: 'java'
     apply plugin: 'jacoco'

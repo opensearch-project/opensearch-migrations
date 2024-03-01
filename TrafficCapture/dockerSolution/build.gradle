@@ -67,7 +67,7 @@ dockerCompose {
                      "${project.getProperty('otel-collector')}" :
                      "otel-prometheus-jaeger.yml"),
              "${extensionsDir}" + (project.hasProperty("multiProxy") ? "proxy-multi.yml" : "proxy-single.yml")
-                     ]
+            ]
 }
 
 task buildDockerImages {

@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -17,6 +17,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly otelCollectorEnabled: boolean
 }
 
@@ -154,6 +155,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
             taskRolePolicies: servicePolicies,
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 1024,
             ...props

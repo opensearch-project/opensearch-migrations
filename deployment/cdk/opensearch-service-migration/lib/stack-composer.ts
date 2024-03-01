@@ -18,6 +18,7 @@ import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
+import {validateFargateCpuArch} from "./common-utilities";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -159,6 +160,7 @@ export class StackComposer {
         const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
+        const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyESExtraArgs = this.getContextForType('captureProxyESExtraArgs', 'string', defaultValues, contextJSON)
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -196,6 +198,8 @@ export class StackComposer {
         } else if (targetClusterEndpoint || osContainerServiceEnabled) {
             targetEndpoint = targetClusterEndpoint ? targetClusterEndpoint : "https://opensearch:9200"
         }
+
+        const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
         const streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
@@ -330,6 +334,7 @@ export class StackComposer {
             otelCollectorStack = new OtelCollectorStack(scope, "otel-collector", {
                 stackName: `OSMigrations-${stage}-${region}-OtelCollector`,
                 description: "This stack contains the OpenTelemetry Collector",
+                fargateCpuArch: fargateCpuArch,
                 vpc:networkStack.vpc,
                 stage: stage,
                 defaultDeployId: defaultDeployId,
@@ -347,6 +352,7 @@ export class StackComposer {
                 description: "This stack contains resources for the OpenSearch Container ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(osContainerStack, [migrationStack])
@@ -361,6 +367,7 @@ export class StackComposer {
                 description: "This stack contains resources for the Kafka Zookeeper ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(kafkaZookeeperStack, [migrationStack])
@@ -375,6 +382,7 @@ export class StackComposer {
                 description: "This stack contains resources for the Kafka Broker ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(kafkaBrokerStack, [migrationStack, kafkaZookeeperStack])
@@ -392,6 +400,7 @@ export class StackComposer {
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(fetchMigrationStack, [migrationStack, openSearchStack, osContainerStack])
@@ -409,6 +418,7 @@ export class StackComposer {
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack, otelCollectorStack])
@@ -430,6 +440,7 @@ export class StackComposer {
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,
@@ -445,6 +456,7 @@ export class StackComposer {
                 description: "This stack contains resources for a testing mock Elasticsearch single node cluster ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(elasticsearchStack, [migrationStack])
@@ -463,6 +475,7 @@ export class StackComposer {
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, otelCollectorStack, migrationStack,
@@ -481,6 +494,7 @@ export class StackComposer {
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
                 ...props,
             })
             // To enable the Migration Console to make requests to other service endpoints with Service Connect,

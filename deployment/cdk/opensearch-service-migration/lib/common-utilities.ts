@@ -1,6 +1,7 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 
 export function createOpenSearchIAMAccessPolicy(region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
@@ -120,4 +121,22 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
         ]
     }))
     return serviceTaskRole
+}
+
+export function validateFargateCpuArch(cpuArch?: string): CpuArchitecture {
+    const desiredArch = cpuArch ? cpuArch : process.arch
+    const desiredArchUpper = desiredArch.toUpperCase()
+
+    if (desiredArchUpper === "X86_64" || desiredArchUpper === "X64") {
+        return CpuArchitecture.X86_64
+    } else if (desiredArchUpper === "ARM64") {
+        return CpuArchitecture.ARM64
+    } else {
+        if (cpuArch) {
+            throw new Error(`Unknown Fargate cpu architecture provided: ${desiredArch}`)
+        }
+        else {
+            throw new Error(`Unsupported process cpu architecture detected: ${desiredArch}, CDK requires X64 or ARM64 for Docker image compatability`)
+        }
+    }
 }

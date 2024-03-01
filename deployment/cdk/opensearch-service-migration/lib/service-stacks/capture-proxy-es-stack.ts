@@ -1,10 +1,9 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
-import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
@@ -14,6 +13,7 @@ export interface CaptureProxyESProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     readonly otelCollectorEnabled: boolean,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly extraArgs?: string,
 }
 
@@ -75,6 +75,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             serviceConnectServices: [serviceConnectService, esServiceConnectService],
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 19200,
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             ...props

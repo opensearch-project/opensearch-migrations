@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -18,6 +18,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly enableClusterFGACAuth: boolean,
     readonly streamingSourceType: StreamingSourceType,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly addOnMigrationId?: string,
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
@@ -102,6 +103,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             environment: {
                 "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
             },
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             ...props
