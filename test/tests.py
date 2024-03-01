@@ -264,7 +264,7 @@ class E2ETests(unittest.TestCase):
 
     def test_0006_OSB(self):
         if self.deployment_type == "cloud":
-            cmd_exec = f"/root/runTestBenchmarks.sh --unique-id {self.unique_id} --endpoint {self.proxy_endpoint}"
+            cmd_exec = f"/root/runTestBenchmarks.sh --endpoint {self.proxy_endpoint}"
             if self.source_auth_type == "none":
                 cmd_exec = cmd_exec + " --no-auth"
             elif self.source_auth_type == "basic":
