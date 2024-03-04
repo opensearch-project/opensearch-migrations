@@ -10,6 +10,8 @@
         - [Traffic Capture Proxy Server](#traffic-capture-proxy-server)
         - [Traffic Replayer](#traffic-replayer)
         - [Capture Kafka Offloader](#capture-kafka-offloader)
+    - [Building](#building)
+        - [Gradle Scans](#gradle-scans)
     - [Publishing](#publishing)
 
 ## Overview
@@ -136,6 +138,44 @@ Input file: /shared_replayer_output/tuples.log; Output file: local-tuples.log
 The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.
 
 Learn more about its functionality and setup here: [Capture Kafka Offloader](captureKafkaOffloader/README.md)
+
+## Building
+
+The building process for this project is streamlined through the use of Gradle. This section outlines the necessary steps to build the project and execute tests effectively.
+
+To compile the project and execute unit tests, use the following command:
+
+```sh
+./gradlew build
+```
+
+This command compiles the source code and runs the quick unit tests, ensuring the project is correctly assembled and functional.
+
+For a comprehensive test run, including both quick unit tests and more extensive slow tests, execute:
+
+```sh
+./gradlew test slowTest --rerun
+```
+
+This command initiates all tests, ensuring thorough validation of the project. The `--rerun` option is used to ignore existing task output cache for the specified tasks.
+
+### Gradle Scans
+
+Gradle Scans offer a more intuitive understanding of build outputs. To enable Gradle Scans for enhanced output analysis, append `--scan` to your Gradle command.
+This action requires acceptance of the Gradle Scan terms of service.
+To automate this acceptance and enable scans by default, set the `OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED` environment variable:
+
+```sh
+export OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED=
+```
+
+For persistent configuration in Zsh:
+
+```sh
+echo 'export OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED=' >> ~/.zshrc
+```
+
+Access your detailed build reports by following the link provided at the end of your Gradle command's output.
 
 ## Publishing
 
