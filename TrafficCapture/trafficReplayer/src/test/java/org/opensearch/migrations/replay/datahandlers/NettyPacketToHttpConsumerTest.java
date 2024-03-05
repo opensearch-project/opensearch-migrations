@@ -195,7 +195,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     public void testMetricCountsFor_testThatConnectionsAreKeptAliveAndShared(boolean useTls) throws Exception {
         testThatConnectionsAreKeptAliveAndShared(useTls);
         Thread.sleep(200); // let metrics settle down
-        var allMetricData = rootContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
+        var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         long tcpOpenConnectionCount = allMetricData.stream().filter(md->md.getName().startsWith("tcpConnectionCount"))
                 .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
         long connectionsOpenedCount = allMetricData.stream().filter(md->md.getName().startsWith("connectionsOpened"))
