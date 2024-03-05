@@ -52,7 +52,6 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
         let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
             Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
         let adminUserName: string|undefined = props.fineGrainedManagerUserName
-        console.log("demo="+props.enableDemoAdmin)
         if (props.enableDemoAdmin) { // Enable demo mode setting
             adminUserName = "admin"
             adminUserSecret = new Secret(this, "demoUserSecret", {

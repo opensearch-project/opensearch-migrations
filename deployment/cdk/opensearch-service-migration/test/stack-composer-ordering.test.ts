@@ -5,8 +5,7 @@ import {CaptureProxyStack} from "../lib/service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "../lib/service-stacks/elasticsearch-stack";
 import {TrafficReplayerStack} from "../lib/service-stacks/traffic-replayer-stack";
 import {MigrationConsoleStack} from "../lib/service-stacks/migration-console-stack";
-import {KafkaBrokerStack} from "../lib/service-stacks/kafka-broker-stack";
-import {KafkaZookeeperStack} from "../lib/service-stacks/kafka-zookeeper-stack";
+import {KafkaStack} from "../lib/service-stacks/kafka-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import {OpenSearchContainerStack} from "../lib/service-stacks/opensearch-container-stack";
 import {OtelCollectorStack} from "../lib/service-stacks/migration-otel-collector-stack";
@@ -73,7 +72,7 @@ test('Test all migration services with Kafka container get created when enabled'
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack, OpenSearchContainerStack, OtelCollectorStack]
+        TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, OtelCollectorStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)
@@ -106,7 +105,7 @@ test('Test no migration services get deployed when disabled', () => {
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaBrokerStack, KafkaZookeeperStack]
+        TrafficReplayerStack, KafkaStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         expect(stack).toBeUndefined()

@@ -13,8 +13,7 @@ import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
 import {CaptureProxyStack} from "./service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
-import {KafkaBrokerStack} from "./service-stacks/kafka-broker-stack";
-import {KafkaZookeeperStack} from "./service-stacks/kafka-zookeeper-stack";
+import {KafkaStack} from "./service-stacks/kafka-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
@@ -174,7 +173,6 @@ export class StackComposer {
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const kafkaZookeeperServiceEnabled = this.getContextForType('kafkaZookeeperServiceEnabled', 'boolean', defaultValues, contextJSON)
         const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
@@ -360,24 +358,9 @@ export class StackComposer {
             this.stacks.push(osContainerStack)
         }
 
-        let kafkaZookeeperStack
-        if (kafkaZookeeperServiceEnabled && networkStack && migrationStack) {
-            kafkaZookeeperStack = new KafkaZookeeperStack(scope, "kafka-zookeeper", {
-                vpc: networkStack.vpc,
-                stackName: `OSMigrations-${stage}-${region}-KafkaZookeeper`,
-                description: "This stack contains resources for the Kafka Zookeeper ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                fargateCpuArch: fargateCpuArch,
-                ...props,
-            })
-            this.addDependentStacks(kafkaZookeeperStack, [migrationStack])
-            this.stacks.push(kafkaZookeeperStack)
-        }
-
         let kafkaBrokerStack
         if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
-            kafkaBrokerStack = new KafkaBrokerStack(scope, "kafka-broker", {
+            kafkaBrokerStack = new KafkaStack(scope, "kafka", {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
                 description: "This stack contains resources for the Kafka Broker ECS service",
@@ -386,7 +369,7 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 ...props,
             })
-            this.addDependentStacks(kafkaBrokerStack, [migrationStack, kafkaZookeeperStack])
+            this.addDependentStacks(kafkaBrokerStack, [migrationStack])
             this.stacks.push(kafkaBrokerStack)
         }
 
