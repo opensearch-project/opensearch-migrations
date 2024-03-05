@@ -29,4 +29,5 @@ dependencies {
     testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
     testImplementation testFixtures(project(path: ':testUtilities'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
 }
