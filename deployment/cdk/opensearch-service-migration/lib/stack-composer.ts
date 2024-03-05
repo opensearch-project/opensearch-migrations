@@ -353,6 +353,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                enableDemoAdmin: true,
                 ...props,
             })
             this.addDependentStacks(osContainerStack, [migrationStack])

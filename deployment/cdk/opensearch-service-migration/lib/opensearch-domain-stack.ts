@@ -49,11 +49,12 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly vpcSecurityGroupIds?: string[],
   readonly availabilityZoneCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy,
-  readonly domainAccessSecurityGroupParameter?: string,
-  readonly endpointParameterName?: string
+  readonly domainAccessSecurityGroupParameter?: string
 
 }
 
+
+export const osClusterEndpointParameterName = "osClusterEndpoint";
 
 export class OpenSearchDomainStack extends Stack {
 
@@ -94,8 +95,8 @@ export class OpenSearchDomainStack extends Stack {
     return accessPolicies
   }
 
-  createSSMParameters(domain: Domain, endpointParameterName: string|undefined, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
-    const endpointParameter = endpointParameterName ?? "osClusterEndpoint"
+  createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
+    const endpointParameter = osClusterEndpointParameterName
     new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
       description: 'OpenSearch migration parameter for OpenSearch endpoint',
       parameterName: `/migration/${stage}/${deployId}/${endpointParameter}`,
@@ -122,9 +123,6 @@ export class OpenSearchDomainStack extends Stack {
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
 
-    let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
-        Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
-
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
@@ -132,15 +130,16 @@ export class OpenSearchDomainStack extends Stack {
     const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
         StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/${domainAccessSecurityGroupParameter}`))
 
+    let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
+        Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
     // Map objects from props
     let adminUserName: string|undefined = props.fineGrainedManagerUserName
-    // Enable demo mode setting
-    if (props.enableDemoAdmin) {
+    if (props.enableDemoAdmin) { // Enable demo mode setting
       adminUserName = "admin"
       adminUserSecret = new Secret(this, "demoUserSecret", {
         secretName: `demo-user-secret-${props.stage}-${deployId}`,
         // This is unsafe and strictly for ease of use in a demo mode setup
-        secretStringValue: SecretValue.unsafePlainText("Admin123!")
+        secretStringValue: SecretValue.unsafePlainText("myStrongPassword123!")
       })
     }
     const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
@@ -216,7 +215,7 @@ export class OpenSearchDomainStack extends Stack {
       removalPolicy: props.domainRemovalPolicy
     });
 
-    this.createSSMParameters(domain, props.endpointParameterName, adminUserName, adminUserSecret, props.stage, deployId)
+    this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
 
   }
 }
