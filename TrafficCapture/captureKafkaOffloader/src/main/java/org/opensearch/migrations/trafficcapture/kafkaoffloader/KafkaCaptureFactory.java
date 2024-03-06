@@ -1,14 +1,17 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import com.google.protobuf.CodedOutputStream;
+import java.nio.ByteBuffer;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
@@ -16,19 +19,10 @@ import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
-import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.KafkaRecordContext;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.time.Instant;
-import java.util.Arrays;
-import java.util.concurrent.CompletableFuture;
 
 
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMetadata> {
-
-    private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHandler");
 
     private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes and
@@ -115,38 +109,34 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                     topicNameForTraffic, recordId, kafkaRecord.value().length);
 
             // Producer Send will block on calls such as retrieving cluster metadata, running fully async
-            CompletableFuture.supplyAsync(() -> producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId, flushContext)));
-            return cf;
+            return CompletableFuture.supplyAsync(() -> {
+                    try {
+                        /*
+                         * The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
+                         * documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
+                         * "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
+                         * and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
+                         *
+                         * Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
+                         * retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
+                         * as well as basic retry backoff
+                         */
+                        return producer.send(kafkaRecord).get();
+                    } catch (Exception e) {
+                        throw new CompletionException(e);
+                    }
+                })
+                .whenComplete(((recordMetadata, throwable) -> {
+                    if (throwable != null) {
+                        flushContext.addException(throwable);
+                        log.error("Error sending producer record: {}", recordId, throwable);
+                    } else {
+                        log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
+                            recordId, recordMetadata.topic(), recordMetadata.partition());
+                    }
+                    flushContext.close();
+                }));
         }
     }
 
-    /**
-     * The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
-     * documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
-     * "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
-     * and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
-     * <p>
-     * Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
-     * retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
-     * as well as basic retry backoff
-     */
-    private Callback handleProducerRecordSent(CompletableFuture<RecordMetadata> cf, String recordId,
-                                              KafkaRecordContext flushContext) {
-        // Keep this out of the inner class because it is more unsafe to include it within
-        // the inner class since the inner class has context that shouldn't be used.  This keeps
-        // that field out of scope.
-        return (metadata, exception) -> {
-            log.atInfo().setMessage(()->"kafka completed sending a record").log();
-            if (exception != null) {
-                flushContext.addException(exception);
-                log.error("Error sending producer record: {}", recordId, exception);
-                cf.completeExceptionally(exception);
-            } else {
-                log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
-                        recordId, metadata.topic(), metadata.partition());
-                cf.complete(metadata);
-            }
-            flushContext.close();
-        };
-    }
 }

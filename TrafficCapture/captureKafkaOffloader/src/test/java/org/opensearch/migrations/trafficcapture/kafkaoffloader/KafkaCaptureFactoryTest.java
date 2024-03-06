@@ -2,8 +2,14 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import io.netty.buffer.Unpooled;
 import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
@@ -99,34 +105,32 @@ public class KafkaCaptureFactoryTest {
     }
 
     @Test
-    public void testLinearOffloadingIsSuccessful() throws IOException, InterruptedException {
+    public void testLinearOffloadingIsSuccessful()
+        throws IOException, InterruptedException, ExecutionException, TimeoutException {
         KafkaCaptureFactory kafkaCaptureFactory =
                 new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
                         TEST_NODE_ID_STRING, mockProducer, 1024*1024);
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
-        List<Callback> recordSentCallbacks = new ArrayList<>(3);
+        List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);
 
-        ReentrantLock producerLock = new ReentrantLock(true);
         List<CountDownLatch> latches = Arrays.asList(
             new CountDownLatch(1),
             new CountDownLatch(1),
             new CountDownLatch(1)
         );
 
-        // Start with producer locked to ensure offloader apis are non-blocking
-        producerLock.lock();
-
         var latchIterator = latches.iterator();
-        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
-            producerLock.lock();
+        when(mockProducer.send(any())).thenAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
-            Callback recordSentCallback = (Callback) args[1];
-            recordSentCallbacks.add(recordSentCallback);
+            var recordMetadata = generateRecordMetadata(record.topic(), 1);
+
+            var future = new FutureTask<>(() -> recordMetadata);
+            recordSentFutures.add(future);
+
             latchIterator.next().countDown();
-            producerLock.unlock();
-            return null;
+            return future;
         });
 
         Instant ts = Instant.now();
@@ -144,24 +148,25 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
 
-        producerLock.unlock();
-
-        latches.get(0).await();
-        recordSentCallbacks.get(0).onCompletion(generateRecordMetadata(topic, 1), null);
+        awaitLatchWithTestFailOnTimeout(latches.get(0));
+        recordSentFutures.get(0).run();
+        cf1.get(1, TimeUnit.SECONDS);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
 
-        latches.get(1).await();
-        recordSentCallbacks.get(1).onCompletion(generateRecordMetadata(topic, 2), null);
+        awaitLatchWithTestFailOnTimeout(latches.get(1));
+        recordSentFutures.get(1).run();
+        cf2.get(1, TimeUnit.SECONDS);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(true, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
 
-        latches.get(2).await();
-        recordSentCallbacks.get(2).onCompletion(generateRecordMetadata(topic, 1), null);
+        awaitLatchWithTestFailOnTimeout(latches.get(2));
+        recordSentFutures.get(2).run();
+        cf3.get(1, TimeUnit.SECONDS);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(true, cf2.isDone());
@@ -170,8 +175,63 @@ public class KafkaCaptureFactoryTest {
         mockProducer.close();
     }
 
+    @Test
+    public void testOffloaderFlushCommitIsNonBlockingOnKafkaProducer()
+        throws IOException, InterruptedException, ExecutionException, TimeoutException {
+        KafkaCaptureFactory kafkaCaptureFactory =
+            new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
+                TEST_NODE_ID_STRING, mockProducer, 1024*1024);
+        var offloader = kafkaCaptureFactory.createOffloader(createCtx());
+
+        List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);
+
+        ReentrantLock producerLock = new ReentrantLock(true);
+        CountDownLatch latch = new CountDownLatch(1);
+
+        // Start with producer locked to ensure offloader api is non-blocking
+        producerLock.lock();
+
+        when(mockProducer.send(any())).thenAnswer(invocation -> {
+            producerLock.lock();
+            Object[] args = invocation.getArguments();
+            ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
+            var recordMetadata = generateRecordMetadata(record.topic(), 1);
+
+            var future = new FutureTask<>(() -> recordMetadata);
+            recordSentFutures.add(future);
+
+            latch.countDown();
+            producerLock.unlock();
+            return future;
+        });
+
+        Instant ts = Instant.now();
+        byte[] fakeDataBytes = "FakeData".getBytes(StandardCharsets.UTF_8);
+        var bb = Unpooled.wrappedBuffer(fakeDataBytes);
+        offloader.addReadEvent(ts, bb);
+        var cf1 = offloader.flushCommitAndResetStream(false);
+        bb.release();
+
+        Assertions.assertEquals(false, cf1.isDone());
+
+        producerLock.unlock();
+
+        awaitLatchWithTestFailOnTimeout(latch);
+        recordSentFutures.get(0).run();
+        cf1.get(1, TimeUnit.SECONDS);
+
+        Assertions.assertEquals(true, cf1.isDone());
+        mockProducer.close();
+    }
+
     private RecordMetadata generateRecordMetadata(String topicName, int partition) {
         TopicPartition topicPartition = new TopicPartition(topicName, partition);
         return new RecordMetadata(topicPartition, 0, 0, 0, 0, 0);
+    }
+
+    @SneakyThrows
+    private void awaitLatchWithTestFailOnTimeout(CountDownLatch latch) {
+        boolean successful = latch.await(1, TimeUnit.SECONDS);
+        Assertions.assertTrue(successful);
     }
 }
