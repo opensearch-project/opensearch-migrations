@@ -1,6 +1,9 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import io.netty.buffer.Unpooled;
+import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.locks.ReentrantLock;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
@@ -96,18 +99,33 @@ public class KafkaCaptureFactoryTest {
     }
 
     @Test
-    public void testLinearOffloadingIsSuccessful() throws IOException {
+    public void testLinearOffloadingIsSuccessful() throws IOException, InterruptedException {
         KafkaCaptureFactory kafkaCaptureFactory =
                 new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
                         TEST_NODE_ID_STRING, mockProducer, 1024*1024);
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<Callback> recordSentCallbacks = new ArrayList<>(3);
+
+        ReentrantLock producerLock = new ReentrantLock(true);
+        List<CountDownLatch> latches = Arrays.asList(
+            new CountDownLatch(1),
+            new CountDownLatch(1),
+            new CountDownLatch(1)
+        );
+
+        // Start with producer locked to ensure offloader apis are non-blocking
+        producerLock.lock();
+
+        var latchIterator = latches.iterator();
         when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
+            producerLock.lock();
             Object[] args = invocation.getArguments();
             ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
             Callback recordSentCallback = (Callback) args[1];
             recordSentCallbacks.add(recordSentCallback);
+            latchIterator.next().countDown();
+            producerLock.unlock();
             return null;
         });
 
@@ -125,16 +143,24 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertEquals(false, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
+
+        producerLock.unlock();
+
+        latches.get(0).await();
         recordSentCallbacks.get(0).onCompletion(generateRecordMetadata(topic, 1), null);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(false, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
+
+        latches.get(1).await();
         recordSentCallbacks.get(1).onCompletion(generateRecordMetadata(topic, 2), null);
 
         Assertions.assertEquals(true, cf1.isDone());
         Assertions.assertEquals(true, cf2.isDone());
         Assertions.assertEquals(false, cf3.isDone());
+
+        latches.get(2).await();
         recordSentCallbacks.get(2).onCompletion(generateRecordMetadata(topic, 1), null);
 
         Assertions.assertEquals(true, cf1.isDone());

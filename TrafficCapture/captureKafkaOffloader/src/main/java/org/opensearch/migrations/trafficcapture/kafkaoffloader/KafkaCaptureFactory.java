@@ -8,8 +8,6 @@ import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
 import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
@@ -104,32 +102,21 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             var osh = (CodedOutputStreamWrapper) outputStreamHolder;
 
             final var connectionId = telemetryContext.getConnectionId();
-            try {
-                String recordId = String.format("%s.%d", connectionId, index);
-                var byteBuffer = osh.byteBuffer;
-                ProducerRecord<String, byte[]> kafkaRecord = new ProducerRecord<>(topicNameForTraffic, recordId,
-                        Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
-                // Used to essentially wrap Future returned by Producer to CompletableFuture
-                var cf = new CompletableFuture<RecordMetadata>();
-                log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
-                var flushContext = rootScope.createKafkaRecordContext(telemetryContext,
-                        topicNameForTraffic, recordId, kafkaRecord.value().length);
+            String recordId = String.format("%s.%d", connectionId, index);
+            var byteBuffer = osh.byteBuffer;
+            ProducerRecord<String, byte[]> kafkaRecord = new ProducerRecord<>(topicNameForTraffic, recordId,
+                    Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
+            // Used to essentially wrap Future returned by Producer to CompletableFuture
+            var cf = new CompletableFuture<RecordMetadata>();
+            log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
-                // Async request to Kafka cluster
-                producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId, flushContext));
-                metricsLogger.atSuccess(MetricsEvent.RECORD_SENT_TO_KAFKA)
-                        .setAttribute(MetricsAttributeKey.CHANNEL_ID, connectionId)
-                        .setAttribute(MetricsAttributeKey.TOPIC_NAME, topicNameForTraffic)
-                        .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, kafkaRecord.value().length)
-                        .setAttribute(MetricsAttributeKey.REQUEST_ID, recordId).emit();
-                return cf;
-            } catch (Exception e) {
-                metricsLogger.atError(MetricsEvent.RECORD_FAILED_TO_KAFKA, e)
-                        .setAttribute(MetricsAttributeKey.CHANNEL_ID, connectionId)
-                        .setAttribute(MetricsAttributeKey.TOPIC_NAME, topicNameForTraffic).emit();
-                throw e;
-            }
+            var flushContext = rootScope.createKafkaRecordContext(telemetryContext,
+                    topicNameForTraffic, recordId, kafkaRecord.value().length);
+
+            // Producer Send will block on calls such as retrieving cluster metadata, running fully async
+            CompletableFuture.supplyAsync(() -> producer.send(kafkaRecord, handleProducerRecordSent(cf, recordId, flushContext)));
+            return cf;
         }
     }
 

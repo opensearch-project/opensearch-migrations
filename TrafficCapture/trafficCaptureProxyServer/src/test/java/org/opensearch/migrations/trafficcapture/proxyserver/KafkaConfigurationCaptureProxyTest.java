@@ -15,7 +15,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.ThrowingConsumer;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -77,8 +76,6 @@ public class KafkaConfigurationCaptureProxyTest {
 
     @ParameterizedTest
     @EnumSource(FailureMode.class)
-    @Disabled
-    // TODO: Fix proxy bug and enable test
     public void testCaptureProxyWithKafkaImpairedBeforeStart(FailureMode failureMode) {
         try (var captureProxy = new CaptureProxyContainer(toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
             toxiproxyTestBase.getProxyUrlHttp(kafkaProxy))) {
