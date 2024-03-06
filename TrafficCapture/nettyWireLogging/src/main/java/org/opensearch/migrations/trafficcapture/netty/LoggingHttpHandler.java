@@ -19,9 +19,6 @@ import lombok.Getter;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
@@ -32,7 +29,6 @@ import java.time.Instant;
 
 @Slf4j
 public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
-    private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
 
     static class CaptureIgnoreState {
         static final byte CAPTURE = 0;
@@ -200,11 +196,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                                                        HttpRequest httpRequest) throws Exception {
         messageContext = messageContext.createWaitingForResponseContext();
         super.channelRead(ctx, msg);
-
-        metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_REQUEST)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
-                .setAttribute(MetricsAttributeKey.HTTP_METHOD, httpRequest.method().toString())
-                .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, httpRequest.uri()).emit();
     }
 
     @Override
@@ -232,8 +223,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             captureState.liveReadObservationsInOffloader = false;
         }
 
-        metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         requestContext.onBytesRead(bb.readableBytes());
 
 
@@ -271,8 +260,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
             trafficOffloader.addWriteEvent(Instant.now(), bb);
         }
-        metricsLogger.atSuccess(MetricsEvent.RECEIVED_RESPONSE_COMPONENT)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         responseContext.onBytesWritten(bb.readableBytes());
 
         super.write(ctx, msg, promise);

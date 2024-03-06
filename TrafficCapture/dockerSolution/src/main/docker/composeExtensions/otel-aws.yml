@@ -12,7 +12,6 @@ services:
     volumes:
       - ~/.aws:/home/aoc/.aws
     environment:
-      - ANALYTICS_DOMAIN_ENDPOINT=opensearchanalytics # use the local container for compose here
       - AWS_REGION=us-east-2
       - AWS_DEFAULT_REGION=us-east-2
       - AWS_PROFILE=default

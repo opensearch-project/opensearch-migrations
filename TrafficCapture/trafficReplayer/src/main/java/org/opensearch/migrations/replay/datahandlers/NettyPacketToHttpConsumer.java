@@ -21,9 +21,6 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringHandler;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
@@ -50,7 +47,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * Set this to Optional.empty() to disable intra-handler logging.
      */
     private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
-    private static final MetricsLogger metricsLogger = new MetricsLogger("NettyPacketToHttpConsumer");
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     public static final String CONNECTION_CLOSE_HANDLER_NAME = "CONNECTION_CLOSE_HANDLER";
@@ -330,24 +326,12 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     } else {
                         log.atInfo().setMessage(()->"Previously returned CompletableFuture packet write had " +
                                 " an exception :" + packetData + " hash=" + System.identityHashCode(packetData)).log();
-                        metricsLogger.atError(MetricsEvent.WRITING_REQUEST_COMPONENT_FAILED, cause)
-                                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
-                                .setAttribute(MetricsAttributeKey.REQUEST_ID,
-                                        httpContext().getReplayerRequestKey().toString())
-                                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
-                                        httpContext().getReplayerRequestKey().getTrafficStreamKey().getConnectionId())
-                                .emit();
                         completableFuture.future.completeExceptionally(cause);
                         channel.close();
                     }
                 });
         log.atTrace().setMessage(()->"Writing packet data=" + packetData +
                 ".  Created future for writing data="+completableFuture).log();
-        metricsLogger.atSuccess(MetricsEvent.WROTE_REQUEST_COMPONENT)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText())
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, httpContext().getReplayerRequestKey())
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, httpContext().getConnectionId())
-                .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, readableBytes).emit();
         return completableFuture;
     }
 
