@@ -76,7 +76,7 @@ echo "Clearing non-system target indices"
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${target_endpoint}/*,-.*"
 
 echo "Print initial source and target indices after clearing indices: "
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source_endpoint ${source_endpoint} --source_no_auth --target_no_auth"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source-endpoint ${source_endpoint} --source-no-auth --target-no-auth"
 
 # Spin up Replayer container and wait for service to be stable
 aws ecs update-service --cluster "migration-${STAGE}-ecs-cluster" --service "migration-${STAGE}-traffic-replayer-default" --desired-count 1 > /dev/null 2>&1
