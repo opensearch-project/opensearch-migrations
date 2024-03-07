@@ -4,9 +4,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
@@ -17,7 +14,6 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
     private boolean doneReadingRequest; // later, when connections are reused, switch this to a counter?
     Consumer<AggregatedRawResponse> responseCallback;
-    private static final MetricsLogger metricsLogger = new MetricsLogger("BacksideHttpWatcherHandler");
 
     public BacksideHttpWatcherHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder) {
         this.aggregatedRawResponseBuilder = aggregatedRawResponseBuilder;
@@ -28,10 +24,6 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse msg) throws Exception {
         doneReadingRequest = true;
         triggerResponseCallbackAndRemoveCallback();
-//      TODO: Add requestId to this metrics log entry
-        metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_RESPONSE)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
-                .setAttribute(MetricsAttributeKey.HTTP_STATUS, msg.status().toString()).emit();
         super.channelReadComplete(ctx);
     }
 
@@ -44,9 +36,6 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         aggregatedRawResponseBuilder.addErrorCause(cause);
-//      TODO: Add requestId to this metrics log entry
-        metricsLogger.atError(MetricsEvent.RECEIVING_FULL_HTTP_RESPONSE_FAILED, cause)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         triggerResponseCallbackAndRemoveCallback();
         super.exceptionCaught(ctx, cause);
     }

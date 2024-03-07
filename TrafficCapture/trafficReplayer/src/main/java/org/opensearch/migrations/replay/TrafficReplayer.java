@@ -281,7 +281,7 @@ public class TrafficReplayer {
         @Parameter(required = false,
             names = {"--kafka-traffic-brokers"},
             arity=1,
-            description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers to bootstrap with i.e. 'localhost:9092,localhost2:9092'")
+            description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers to bootstrap with i.e. 'kafka-1:9092,kafka-2:9092'")
         String kafkaTrafficBrokers;
         @Parameter(required = false,
             names = {"--kafka-traffic-topic"},

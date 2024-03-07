@@ -54,18 +54,12 @@ public class RootOtelContext implements IRootOtelContext {
                         .build())
                 .setInterval(Duration.ofMillis(1000))
                 .build();
-        final var logProcessor = BatchLogRecordProcessor.builder(OtlpGrpcLogRecordExporter.builder()
-                        .setEndpoint(collectorEndpoint)
-                        .build())
-                .build();
 
         var openTelemetrySdk = OpenTelemetrySdk.builder()
                 .setTracerProvider(SdkTracerProvider.builder().setResource(serviceResource)
                         .addSpanProcessor(spanProcessor).build())
                 .setMeterProvider(SdkMeterProvider.builder().setResource(serviceResource)
                         .registerMetricReader(metricReader).build())
-                .setLoggerProvider(SdkLoggerProvider.builder().setResource(serviceResource)
-                        .addLogRecordProcessor(logProcessor).build())
                 .build();
 
         // Add hook to close SDK, which flushes logs

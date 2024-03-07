@@ -196,19 +196,31 @@ With the [required setup](#importing-target-clusters) on the target cluster havi
 The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
 Please note that it will be base64 encoded.
 
-## Accessing the Migration Analytics Domain
+## Monitoring Progress via Instrumentation
 
-The analytics domain receives metrics and events from the Capture Proxy and Replayer (if configured) and allows a user to visualize the progress and success of their migration.
+The replayer and capture proxy (if started with the `--otelCollectorEndpoint` argument) emit metrics through an 
+otel-collector endpoint, which is deployed as an ECS task alongside other Migrations Assistant components.  The
+otel-collector will publish metrics and traces to Amazon CloudWatch and AWS X-Ray.
 
-The domain & dashboard are only accessible from within the VPC, but a BastionHost is optionally set up within the VPC that allows a user to use Session Manager to make the dashboard avaiable locally via port forwarding.
+Some of these metrics will show simple progress, such as bytes or records transmitted.  Other records can show higher
+level information, such the number of responses with status codes that match vs those that don't.  To observe those,
+search for `statusCodesMatch` in the CloudWatch Console.  That's emitted as an attribute along with the method and
+the source/target status code (rounded down to the last hundred; i.e. a status code of 201 has a 200 attribute).
 
-For the Bastion Host to be available, add `"migrationAnalyticsBastionEnabled": true` to cdk.context.json and redeploy at least the MigrationAnalytics stack.
+Other metrics will show latencies, the number of requests, unique connections at a time and more.  Low-level and 
+high-level metrics are being improved and added.  For the latest information, see the
+[README.md](../../../TrafficCapture/coreUtilities/README.md).
 
-Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/_dashboards to view your dashboard.
-```shell
-# ./accessAnalyticsDashboard.sh STAGE REGION
-./accessAnalyticsDashboard.sh dev us-east-1
-```
+Along with metrics, traces are emitted by the replayer and the proxy (ehen proxy is run with metrics enabled, e.g. by 
+launching with --otelCollectorEndpoint set to the otel-collector deployed as part of the Migration Assistant ECS 
+cluster).  Traces will include very granular data for each connection, including how long the TCP connections are open,
+how long the source and target clusters took to send a response, as well as other internal details that can explain
+the progress of each request.  
+
+Notice that traces for the replayer will show connections and Kafka records open, in some cases, much longer than their
+representative HTTP transactions.  This is because records are considered 'active' to the replayer until they are 
+committed and records are only committed once _all_ previous records have also been committed.  Details such as that
+are defensive for when further diagnosis is necessary. 
 
 ## Configuring Capture Proxy IAM and Security Groups
 Although this CDK does not set up the Capture Proxy on source cluster nodes (except in the case of the demo solution), the Capture Proxy instances do need to communicate with resources deployed by this CDK (e.g. Kafka) which this section covers

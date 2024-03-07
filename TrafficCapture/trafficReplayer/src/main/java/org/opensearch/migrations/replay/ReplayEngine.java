@@ -3,9 +3,6 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
@@ -28,7 +25,7 @@ public class ReplayEngine {
     private final AtomicLong lastCompletedSourceTimeEpochMs;
     private final AtomicLong lastIdleUpdatedTimestampEpochMs;
     private final TimeShifter timeShifter;
-    private static final MetricsLogger metricsLogger = new MetricsLogger("ReplayEngine");
+
     /**
      * If this proves to be a contention bottleneck, we can move to a scheme with ThreadLocals
      * and on a scheduled basis, submit work to each thread to find out if they're idle or not.
@@ -143,11 +140,7 @@ public class ReplayEngine {
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1L) : Duration.ZERO;
         var requestKey = ctx.getReplayerRequestKey();
         logStartOfWork(requestKey, newCount, start, label);
-        metricsLogger.atSuccess(MetricsEvent.SCHEDULED_REQUEST_TO_BE_SENT)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKey.getTrafficStreamKey().getConnectionId())
-                .setAttribute(MetricsAttributeKey.DELAY_FROM_ORIGINAL_TO_SCHEDULED_START, Duration.between(originalStart, start).toMillis())
-                .setAttribute(MetricsAttributeKey.SCHEDULED_SEND_TIME, start.toString()).emit();
+
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets);
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }

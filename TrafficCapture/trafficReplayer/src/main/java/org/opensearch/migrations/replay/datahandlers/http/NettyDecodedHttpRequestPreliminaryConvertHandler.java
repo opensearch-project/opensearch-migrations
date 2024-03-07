@@ -6,9 +6,6 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -29,7 +26,6 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
     private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
-    static final MetricsLogger metricsLogger = new MetricsLogger("NettyDecodedHttpRequestPreliminaryConvertHandler");
 
     public NettyDecodedHttpRequestPreliminaryConvertHandler(IJsonTransformer transformer,
                                                             List<List<Integer>> chunkSizes,
@@ -49,12 +45,6 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
             var request = (HttpRequest) msg;
             log.atInfo().setMessage(()-> diagnosticLabel + " parsed request: " +
                     request.method() + " " + request.uri() + " " + request.protocolVersion().text()).log();
-            metricsLogger.atSuccess(MetricsEvent.CAPTURED_REQUEST_PARSED_TO_HTTP)
-                    .setAttribute(MetricsAttributeKey.REQUEST_ID, httpTransactionContext)
-                    .setAttribute(MetricsAttributeKey.CONNECTION_ID,
-                            httpTransactionContext.getLogicalEnclosingScope().getConnectionId())
-                    .setAttribute(MetricsAttributeKey.HTTP_METHOD, request.method())
-                    .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, request.uri()).emit();
 
             // TODO - this is super ugly and sloppy - this has to be improved
             chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));

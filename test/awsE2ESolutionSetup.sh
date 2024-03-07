@@ -15,7 +15,7 @@ prepare_source_nodes_for_capture () {
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
   kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
-  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/analyticsDomainSGId" --query 'Parameter.Value' --output text)
+  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/otelCollectorSGId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
@@ -184,7 +184,6 @@ read -r -d '' cdk_context << EOM
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "trafficReplayerExtraArgs": "--speedup-factor 10.0",
-    "migrationAnalyticsServiceEnabled": true,
     "fetchMigrationEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
     "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml"

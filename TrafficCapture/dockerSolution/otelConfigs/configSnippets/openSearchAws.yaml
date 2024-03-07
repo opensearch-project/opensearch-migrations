@@ -1,4 +1,0 @@
-exporters:
-  opensearch:
-    http:
-      endpoint: "${ANALYTICS_DOMAIN_ENDPOINT}"
