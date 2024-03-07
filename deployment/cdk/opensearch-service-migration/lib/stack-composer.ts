@@ -344,9 +344,9 @@ export class StackComposer {
 
         let osContainerStack
         if (osContainerServiceEnabled && networkStack && migrationStack) {
-            osContainerStack = new OpenSearchContainerStack(scope, "opensearch-container", {
+            osContainerStack = new OpenSearchContainerStack(scope, "opensearch-container-${deployId}", {
                 vpc: networkStack.vpc,
-                stackName: `OSMigrations-${stage}-${region}-OpenSearchContainer`,
+                stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchContainer`,
                 description: "This stack contains resources for the OpenSearch Container ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
