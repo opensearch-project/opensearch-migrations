@@ -351,6 +351,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                addOnMigrationDeployId: addOnMigrationDeployId,
                 enableDemoAdmin: true,
                 ...props,
             })
