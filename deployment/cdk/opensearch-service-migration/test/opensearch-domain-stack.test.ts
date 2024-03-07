@@ -243,7 +243,7 @@ function assertPrimaryDomainStackTemplate(template: Template) {
             DedicatedMasterType: "r6g.large.search",
             InstanceCount: 5,
             InstanceType: "r6.large.search",
-            WarmCount: 5,
+            WarmCount: 2,
             WarmType: "ultrawarm1.medium.search",
             ZoneAwarenessConfig: {
                 AvailabilityZoneCount: 3
