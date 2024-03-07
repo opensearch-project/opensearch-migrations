@@ -18,7 +18,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly migrationAnalyticsEnabled: boolean
+    readonly otelCollectorEnabled: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -60,8 +60,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
         ]
-        if (props.migrationAnalyticsEnabled) {
-            securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`)))
+        if (props.otelCollectorEnabled) {
+            securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "otelCollectorSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/otelCollectorSGId`)))
         }
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)

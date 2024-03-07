@@ -3,9 +3,6 @@ package org.opensearch.migrations.replay;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -73,8 +70,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .add("hardClosedAtShutdown: "+requestsTerminatedUponAccumulatorCloseCounter.get())
                 .toString();
     }
-
-    private static final MetricsLogger metricsLogger = new MetricsLogger("CapturedTrafficToHttpTransactionAccumulator");
 
     public CapturedTrafficToHttpTransactionAccumulator(Duration minTimeout, String hintStringToConfigureTimeout,
                                                        AccumulationCallbacks accumulationCallbacks)
@@ -403,11 +398,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
         var rrPair = accumulation.getRrPair();
         var httpMessage = rrPair.requestData;
-        metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID,
-                        rrPair.getRequestContext().getLogicalEnclosingScope().getReplayerRequestKey().toString())
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
-                        rrPair.getRequestContext().getLogicalEnclosingScope().getLogicalEnclosingScope().getConnectionId()).emit();
         assert (httpMessage != null);
         assert (!httpMessage.hasInProgressSegment());
         var requestCtx = rrPair.getRequestContext();
@@ -421,10 +411,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         var rrPair = accumulation.getRrPair();
         var requestKey = rrPair.getHttpTransactionContext().getReplayerRequestKey();
-        metricsLogger.atSuccess(MetricsEvent.ACCUMULATED_FULL_CAPTURED_SOURCE_RESPONSE)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID,
-                        requestKey.getTrafficStreamKey().getConnectionId()).emit();
         rrPair.completionStatus = status;
         listener.onFullDataReceived(requestKey, rrPair);
         log.atTrace().setMessage("resetting for end of response").log();

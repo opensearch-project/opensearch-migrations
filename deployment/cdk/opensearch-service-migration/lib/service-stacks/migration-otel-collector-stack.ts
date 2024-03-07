@@ -1,6 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
 import {
-  BastionHostLinux,
   BlockDeviceVolume,
   MachineImage,
   SecurityGroup,
@@ -13,37 +12,18 @@ import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createAwsDistroForOtelPushInstrumentationPolicy} from "../common-utilities";
 
-export interface MigrationAnalyticsProps extends StackPropsExt {
-    readonly vpc: IVpc,
-    readonly fargateCpuArch: CpuArchitecture,
-    readonly bastionHostEnabled?: boolean
+export interface OtelCollectorProps extends StackPropsExt {
+    readonly vpc: IVpc
+    readonly fargateCpuArch: CpuArchitecture
 }
 
-// The MigrationAnalyticsStack consists of the OpenTelemetry Collector ECS container & a
-// Bastion host to allow access to the opensearch dashboard.
-export class MigrationAnalyticsStack extends MigrationServiceCore {
+// The OtelCollectorStack is for the OpenTelemetry Collector ECS container
+export class OtelCollectorStack extends MigrationServiceCore {
 
-    constructor(scope: Construct, id: string, props: MigrationAnalyticsProps) {
+    constructor(scope: Construct, id: string, props: OtelCollectorProps) {
         super(scope, id, props)
 
-        const migrationAnalyticsSecurityGroup = SecurityGroup.fromSecurityGroupId(this, "migrationAnalyticsSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`))
-
-        if (props.bastionHostEnabled) {
-          // Bastion host to access Opensearch Analytics Dashboard
-          new BastionHostLinux(this, "AnalyticsDashboardBastionHost", {
-            vpc: props.vpc,
-            securityGroup: migrationAnalyticsSecurityGroup,
-            machineImage: MachineImage.latestAmazonLinux2023(),
-            blockDevices: [
-              {
-                deviceName: "/dev/xvda",
-                volume: BlockDeviceVolume.ebs(10, {
-                  encrypted: true,
-                }),
-              },
-            ],
-          });
-        }
+        const otelCollectorSecurityGroup = SecurityGroup.fromSecurityGroupId(this, "otelCollectorSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/otelCollectorSGId`))
 
         // Port Mappings for collector and health check
         const otelCollectorPort: PortMapping = {
@@ -69,11 +49,9 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
           dnsName: "otel-healthcheck"
         }
 
-        const analyticsDomainEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainEndpoint`)
-
         let securityGroups = [
           SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
-          migrationAnalyticsSecurityGroup
+          otelCollectorSecurityGroup
         ]
 
         const servicePolicies = [createAwsDistroForOtelPushInstrumentationPolicy()]
@@ -91,9 +69,6 @@ export class MigrationAnalyticsStack extends MigrationServiceCore {
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 4317,
             taskRolePolicies: servicePolicies,
-            environment: {
-              "ANALYTICS_DOMAIN_ENDPOINT": analyticsDomainEndpoint
-            },
             ...props
         });
     }

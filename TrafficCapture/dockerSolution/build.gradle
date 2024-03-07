@@ -19,7 +19,6 @@ dependencies {
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
         "migrationConsole": "migration_console",
-        "opensearchDashboards": "opensearch_dashboards",
         "otelCollector": "otel_collector"
 ]
 // Create the static docker files that aren't hosting migrations java code from this repo
@@ -66,7 +65,7 @@ dockerCompose {
             ['src/main/docker/docker-compose.yml',
              "${extensionsDir}/" + (project.hasProperty("otel-collector") ?
                      "${project.getProperty('otel-collector')}" :
-                     "otel-prometheus-jaeger-opensearch.yml"),
+                     "otel-prometheus-jaeger.yml"),
              "${extensionsDir}" + (project.hasProperty("multiProxy") ? "proxy-multi.yml" : "proxy-single.yml")
             ]
 }
@@ -74,7 +73,6 @@ dockerCompose {
 task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
     dependsOn buildDockerImage_migrationConsole
-    dependsOn buildDockerImage_opensearchDashboards
     dependsOn buildDockerImage_otelCollector
     
     dependsOn buildDockerImage_trafficCaptureProxyServer

@@ -9,7 +9,6 @@
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": true,
-  "migrationAnalyticsServiceEnabled": true,
-  "migrationAnalyticsBastionEnabled": false,
+  "otelCollectorEnabled": true,
   "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
 }

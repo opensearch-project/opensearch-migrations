@@ -33,15 +33,23 @@ value.serializer = org.apache.kafka.common.serialization.ByteArraySerializer
 
 Resources for making testing/development easier
 
-##### Setting up a development Kafka cluster
+#### Setting up a development Kafka cluster
 
-For quick startup of a Kafka cluster sample docker-compose files are placed in [dev-tools](../dev-tools/docker)
+For quick startup of Kafka, you can run it inside a docker container.  Pull the Apache Kafka image and run it.
 
-A Kafka instance can be started by running the following command in the proper directory
 ```
-docker-compose up
+docker pull apache/kafka:3.7.0
+docker run -p 9092:9092 apache/kafka:3.7.0
 ```
-This Kafka instance can then be cleaned up with the following command
-```
-docker-compose down -v
-```
+
+More information can be found at https://kafka.apache.org/quickstart, including commands to test and query a running
+Kafka cluster.
+
+#### Tests
+
+There is also a [Testcontainer](https://java.testcontainers.org/modules/kafka/) that is used
+for several tests within the migrations repo.  See 
+[KafkaTrafficCaptureSourceLongTermTest](../trafficReplayer/src/test/java/org/opensearch/migrations/replay/kafka/KafkaTrafficCaptureSourceLongTermTest.java) and 
+[KafkaConfigurationCaptureProxyTest](../trafficCaptureProxyServer/src/test/java/org/opensearch/migrations/trafficcapture/proxyserver/KafkaConfigurationCaptureProxyTest.java) 
+for examples.  These containers can start up within several seconds and the resulting tests can be simpler to 
+maintain than to rely upon mocking.
