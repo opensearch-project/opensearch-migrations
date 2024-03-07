@@ -8,9 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
@@ -70,7 +67,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
     // see https://stackoverflow.com/questions/39730126/difference-between-session-timeout-ms-and-max-poll-interval-ms-for-kafka-0-10
     public static final String DEFAULT_POLL_INTERVAL_MS = "60000";
-    private static final MetricsLogger metricsLogger = new MetricsLogger("KafkaProtobufConsumer");
 
 
     final TrackingKafkaConsumer trackingKafkaConsumer;
@@ -203,12 +199,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData,kafkaRecord) -> {
                         try {
                             TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
-                            // Ensure we increment trafficStreamsRead even at a higher log level
-                            metricsLogger.atSuccess(MetricsEvent.PARSED_TRAFFIC_STREAM_FROM_KAFKA)
-                                    .setAttribute(MetricsAttributeKey.CONNECTION_ID, ts.getConnectionId())
-                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, trackingKafkaConsumer.topic)
-                                    .setAttribute(MetricsAttributeKey.SIZE_IN_BYTES, ts.getSerializedSize()).emit();
-
                             var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
                             log.atTrace().setMessage(()->"Parsed traffic stream #" + trafficStreamsSoFar +
                                             ": " + offsetData + " " + ts).log();
@@ -222,13 +212,13 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                                     ts, offsetData);
                             return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key);
                         } catch (InvalidProtocolBufferException e) {
+                            // Assume the behavioralPolicy instance does any logging that the host may be interested in
                             RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);
-                            metricsLogger.atError(MetricsEvent.PARSING_TRAFFIC_STREAM_FROM_KAFKA_FAILED, recordError)
-                                    .setAttribute(MetricsAttributeKey.TOPIC_NAME, trackingKafkaConsumer.topic).emit();
                             if (recordError != null) {
                                 throw recordError;
+                            } else {
+                                return null;
                             }
-                            return null;
                         }
             }).filter(Objects::nonNull).collect(Collectors.<ITrafficStreamWithKey>toList());
         } catch (Exception e) {

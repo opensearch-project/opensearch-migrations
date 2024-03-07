@@ -12,13 +12,8 @@ base:
     debugTracesDetailed:
     infoTracessDetailed:
   logs:
-    openSearch:
-      openSearchAws:
-      openSearchLocal:
     debugLogsDetailed:
     infoLogsDetailed:
-  basicAuthClient:
-    openSearchLocal:
   batch:
     batchMetrics:
     batchTraces:

@@ -6,7 +6,7 @@ services:
     networks:
       - migrations
     volumes:
-      - ./composeExtensions/configs/otel-config-prometheus-jaeger-opensearch.yaml:/etc/otel-config-prometheus-jaeger-opensearch.yaml
+      - ./composeExtensions/configs/otel-config-prometheus-jaeger-opensearch.yaml:/etc/otel-config-prometheus-jaeger.yaml
     ports:
       - "1888:1888"   # pprof extension
       - "13133:13133" # health_check extension
