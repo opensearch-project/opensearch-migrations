@@ -276,7 +276,6 @@ To give an example of this process, a user could decide to configure an addition
     "engineVersion": "OS_1.3",
     "domainName": "demo-cluster-1-3",
     "dataNodeCount": 2,
-    "availabilityZoneCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "enableDemoAdmin": true,
