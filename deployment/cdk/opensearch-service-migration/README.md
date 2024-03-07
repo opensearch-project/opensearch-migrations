@@ -2,6 +2,11 @@
 
 This directory contains the infrastructure-as-code CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
+## Infrastructure Requirements
+### VPC Requirements
+There are certain requirements for imported and created VPCs used in this solution that come from its dependencies on other AWS services such as MSK(Kafka), OpenSearch Service, and ECS. These requirements should be met before using an imported VPC with this solution.
+* At least 2 private subnets should be available which span at least 2 Availability Zones
+
 ## Getting Started
 
 ### Install Prerequisites

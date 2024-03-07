@@ -47,7 +47,7 @@ export class MigrationAssistanceStack extends Stack {
             if (specifiedSubnetIds.length !== 2 && specifiedSubnetIds.length !== 3) {
                 throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected ${specifiedSubnetIds.length} subnet ids provided with 'mskSubnetIds'`)
             }
-            if (brokerNodeCount % specifiedSubnetIds.length !== 0) {
+            if (brokerNodeCount < 2 || brokerNodeCount % specifiedSubnetIds.length !== 0) {
                 throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
                     AZs (${specifiedSubnetIds.length} AZs inferred from provided 'mskSubnetIds'). The node count can be set with the 'mskBrokerNodeCount' context option.`)
             }
@@ -59,7 +59,7 @@ export class MigrationAssistanceStack extends Stack {
         if (azCount !== 2 && azCount !== 3) {
             throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected an AZ count of ${azCount} has been provided with 'mskAZCount'`)
         }
-        if (brokerNodeCount % azCount !== 0) {
+        if (brokerNodeCount < 2 || brokerNodeCount % azCount !== 0) {
             throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
                 AZs (${azCount} AZs inferred from provided 'mskAZCount'). The node count can be set with the 'mskBrokerNodeCount' context option.`)
         }
