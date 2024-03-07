@@ -121,12 +121,17 @@ public class KafkaCaptureFactoryTest {
         );
 
         var latchIterator = latches.iterator();
-        when(mockProducer.send(any())).thenAnswer(invocation -> {
+        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
-            var recordMetadata = generateRecordMetadata(record.topic(), 1);
+            Callback callback = (Callback) args[1];
 
-            var future = new FutureTask<>(() -> recordMetadata);
+            var recordMetadata = generateRecordMetadata(record.topic(), 1);
+            var future = new FutureTask<>(() -> {
+                callback.onCompletion(recordMetadata, null);
+                return recordMetadata;
+            });
+
             recordSentFutures.add(future);
 
             latchIterator.next().countDown();
@@ -191,13 +196,17 @@ public class KafkaCaptureFactoryTest {
         // Start with producer locked to ensure offloader api is non-blocking
         producerLock.lock();
 
-        when(mockProducer.send(any())).thenAnswer(invocation -> {
+        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
             producerLock.lock();
             Object[] args = invocation.getArguments();
             ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
-            var recordMetadata = generateRecordMetadata(record.topic(), 1);
+            Callback callback = (Callback) args[1];
 
-            var future = new FutureTask<>(() -> recordMetadata);
+            var recordMetadata = generateRecordMetadata(record.topic(), 1);
+            var future = new FutureTask<>(() -> {
+                callback.onCompletion(recordMetadata, null);
+                return recordMetadata;
+            });
             recordSentFutures.add(future);
 
             latch.countDown();

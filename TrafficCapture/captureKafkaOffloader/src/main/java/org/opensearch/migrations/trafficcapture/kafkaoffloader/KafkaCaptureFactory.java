@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ForkJoinPool;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -101,31 +101,21 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             var byteBuffer = osh.byteBuffer;
             ProducerRecord<String, byte[]> kafkaRecord = new ProducerRecord<>(topicNameForTraffic, recordId,
                     Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position()));
-            // Used to essentially wrap Future returned by Producer to CompletableFuture
-            var cf = new CompletableFuture<RecordMetadata>();
             log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
             var flushContext = rootScope.createKafkaRecordContext(telemetryContext,
                     topicNameForTraffic, recordId, kafkaRecord.value().length);
-
-            // Producer Send will block on calls such as retrieving cluster metadata, running fully async
-            return CompletableFuture.supplyAsync(() -> {
-                    try {
-                        /*
-                         * The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
-                         * documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
-                         * "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
-                         * and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
-                         *
-                         * Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
-                         * retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
-                         * as well as basic retry backoff
-                         */
-                        return producer.send(kafkaRecord).get();
-                    } catch (Exception e) {
-                        throw new CompletionException(e);
-                    }
-                })
+            /*
+             * The default KafkaProducer comes with built-in retry and error-handling logic that suits many cases. From the
+             * documentation here for retry: https://kafka.apache.org/35/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html
+             * "If the request fails, the producer can automatically retry. The retries setting defaults to Integer.MAX_VALUE,
+             * and it's recommended to use delivery.timeout.ms to control retry behavior, instead of retries."
+             *
+             * Apart from this the KafkaProducer has logic for deciding whether an error is transient and should be
+             * retried or not retried at all: https://kafka.apache.org/35/javadoc/org/apache/kafka/common/errors/RetriableException.html
+             * as well as basic retry backoff
+             */
+            return sendFullyAsync(producer, kafkaRecord)
                 .whenComplete(((recordMetadata, throwable) -> {
                     if (throwable != null) {
                         flushContext.addException(throwable);
@@ -139,4 +129,26 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         }
     }
 
+    // Producer Send will block on actions such as retrieving cluster metadata, allows running fully async
+    public static <K, V> CompletableFuture<RecordMetadata> sendFullyAsync(Producer<K, V> producer, ProducerRecord<K, V> record) {
+        CompletableFuture<RecordMetadata> completableFuture = new CompletableFuture<>();
+
+        ForkJoinPool.commonPool().execute(() -> {
+            try {
+                producer.send(record, (metadata, exception) -> {
+                    if (exception != null) {
+                        completableFuture.completeExceptionally(exception);
+                    }
+                    else {
+                        completableFuture.complete(metadata);
+                    }
+                });
+            }
+            catch (Exception exception) {
+                completableFuture.completeExceptionally(exception);
+            }
+        });
+
+        return completableFuture;
+    }
 }
