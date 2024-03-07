@@ -1,4 +1,4 @@
-name: cdk-tests
+name: CDK Tests
 
 on:
   push:
@@ -29,7 +29,3 @@ jobs:
         run: npm ci
       - name: Run CDK Jest Tests
         run: npm test
-      - name: Upload Coverage Report
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage/clover.xml
