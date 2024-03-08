@@ -59,7 +59,7 @@ public class KafkaConsumerContexts {
 
         public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
             meterIncrementEvent(getMetrics().kafkaPartitionsRevokedCounter);
-            onParitionsAssignedChanged(partitions.size());
+            onParitionsAssignedChanged(-1 * partitions.size());
         }
 
         public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
