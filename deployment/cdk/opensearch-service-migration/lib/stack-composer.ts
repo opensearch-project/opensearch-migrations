@@ -17,7 +17,7 @@ import {KafkaStack} from "./service-stacks/kafka-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
-import {validateFargateCpuArch} from "./common-utilities";
+import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -158,6 +158,8 @@ export class StackComposer {
         const mskRestrictPublicAccessType = this.getContextForType('mskRestrictPublicAccessType', 'string', defaultValues, contextJSON)
         const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
+        const replayerOutputEFSRemovalPolicy = this.getContextForType('replayerOutputEFSRemovalPolicy', 'string', defaultValues, contextJSON)
+        const artifactBucketRemovalPolicy = this.getContextForType('artifactBucketRemovalPolicy', 'string', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -210,10 +212,7 @@ export class StackComposer {
         }
 
         const domainRemovalPolicyName = this.getContextForType('domainRemovalPolicy', 'string', defaultValues, contextJSON)
-        const domainRemovalPolicy = domainRemovalPolicyName ? RemovalPolicy[domainRemovalPolicyName as keyof typeof RemovalPolicy] : undefined
-        if (domainRemovalPolicyName && !domainRemovalPolicy) {
-            throw new Error("Provided domainRemovalPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html")
-        }
+        const domainRemovalPolicy = parseRemovalPolicy("domainRemovalPolicy", domainRemovalPolicyName)
 
         let trafficReplayerCustomUserAgent
         if (props.customReplayerUserAgent && trafficReplayerUserAgentSuffix) {
@@ -303,6 +302,8 @@ export class StackComposer {
                 mskRestrictPublicAccessType: mskRestrictPublicAccessType,
                 mskBrokerNodeCount: mskBrokerNodeCount,
                 mskSubnetIds: mskSubnetIds,
+                replayerOutputEFSRemovalPolicy: replayerOutputEFSRemovalPolicy,
+                artifactBucketRemovalPolicy: artifactBucketRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,

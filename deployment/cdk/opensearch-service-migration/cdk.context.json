@@ -7,6 +7,7 @@
     "availabilityZoneCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
+    "artifactBucketRemovalPolicy": "DESTROY",
     "enableDemoAdmin": true,
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
