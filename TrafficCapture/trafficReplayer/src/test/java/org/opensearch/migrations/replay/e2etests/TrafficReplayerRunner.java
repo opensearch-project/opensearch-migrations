@@ -1,14 +1,17 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.e2etests;
 
 import com.google.common.base.Strings;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.opensearch.migrations.replay.ClientConnectionPool;
+import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
+import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.slf4j.event.Level;
@@ -16,7 +19,6 @@ import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
 
 import javax.net.ssl.SSLException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -34,20 +36,20 @@ import java.util.stream.IntStream;
 public class TrafficReplayerRunner {
 
     @AllArgsConstructor
-    static class FabricatedErrorToKillTheReplayer extends Error {
+    public static class FabricatedErrorToKillTheReplayer extends Error {
         public final boolean doneWithTest;
     }
 
     private TrafficReplayerRunner() {}
 
-    static void runReplayerUntilSourceWasExhausted(int numExpectedRequests,
-                                                   URI endpoint,
-                                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
-                                                   Supplier<TestContext> rootContextSupplier,
-                                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
+    public static void runReplayer(int numExpectedRequests,
+                                   URI endpoint,
+                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
+                                   Supplier<TestContext> rootContextSupplier,
+                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
             throws Throwable
     {
-        runReplayerUntilSourceWasExhausted(numExpectedRequests,
+        runReplayer(numExpectedRequests,
                 rootContext -> {
                     try {
                         return new TrafficReplayer(rootContext, endpoint, null,
@@ -60,11 +62,11 @@ public class TrafficReplayerRunner {
                 tupleListenerSupplier, rootContextSupplier, trafficSourceFactory);
     }
 
-    static void runReplayerUntilSourceWasExhausted(int numExpectedRequests,
-                                                   Function<IRootReplayerContext, TrafficReplayer> trafficReplayerFactory,
-                                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
-                                                   Supplier<TestContext> rootContextSupplier,
-                                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
+    public static void runReplayer(int numExpectedRequests,
+                                   Function<IRootReplayerContext, TrafficReplayer> trafficReplayerFactory,
+                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
+                                   Supplier<TestContext> rootContextSupplier,
+                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
             throws Throwable {
         boolean skipFinally = false;
         AtomicInteger runNumberRef = new AtomicInteger();

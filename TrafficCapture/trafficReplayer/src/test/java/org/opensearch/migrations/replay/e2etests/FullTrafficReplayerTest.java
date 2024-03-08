@@ -1,41 +1,36 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.e2etests;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
+import org.opensearch.migrations.replay.TestHttpServerContext;
+import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TrafficStreamGenerator;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceFactory;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamCursorKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
-import org.testcontainers.shaded.org.bouncycastle.jcajce.provider.symmetric.RC2;
 
 import javax.net.ssl.SSLException;
 import java.io.EOFException;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -111,7 +106,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             }
         };
 
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(
+        TrafficReplayerRunner.runReplayer(
                 numExpectedRequests,
                 rc -> {
                     try {
@@ -148,112 +143,12 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         log.atInfo().setMessage(() -> trafficStreams.stream().map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
                 .collect(Collectors.joining("\n"))).log();
         var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(
+        TrafficReplayerRunner.runReplayer(
                 numExpectedRequests, httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(),
                 () -> TestContext.noOtelTracking(),
                 trafficSourceSupplier);
         Assertions.assertEquals(trafficSourceSupplier.trafficStreamsList.size(),
                 trafficSourceSupplier.nextReadCursor.get());
         log.info("done");
-    }
-
-    @Getter
-    @ToString
-    @EqualsAndHashCode
-    private static class TrafficStreamCursorKey implements ITrafficStreamKey, Comparable<TrafficStreamCursorKey> {
-        public final int arrayIndex;
-
-        public final String connectionId;
-        public final String nodeId;
-        public final int trafficStreamIndex;
-        @Getter public final IReplayContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
-
-        public TrafficStreamCursorKey(TestContext context, TrafficStream stream, int arrayIndex) {
-            connectionId = stream.getConnectionId();
-            nodeId = stream.getNodeId();
-            trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
-            this.arrayIndex = arrayIndex;
-            trafficStreamsContext = context.createTrafficStreamContextForTest(this);
-        }
-
-        @Override
-        public int compareTo(TrafficStreamCursorKey other) {
-            return Integer.compare(arrayIndex, other.arrayIndex);
-        }
-    }
-
-    protected static class ArrayCursorTrafficSourceFactory implements Function<TestContext, ISimpleTrafficCaptureSource> {
-        List<TrafficStream> trafficStreamsList;
-        AtomicInteger nextReadCursor = new AtomicInteger();
-
-        public ArrayCursorTrafficSourceFactory(List<TrafficStream> trafficStreamsList) {
-            this.trafficStreamsList = trafficStreamsList;
-        }
-
-        public ISimpleTrafficCaptureSource apply(TestContext rootContext) {
-            var rval = new ArrayCursorTrafficCaptureSource(rootContext, this);
-            log.info("trafficSource="+rval+" readCursor="+rval.readCursor.get()+" nextReadCursor="+ nextReadCursor.get());
-            return rval;
-        }
-    }
-
-    protected static class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSource {
-        final AtomicInteger readCursor;
-        final PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
-        Integer cursorHighWatermark;
-        ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory;
-        TestContext rootContext;
-
-        public ArrayCursorTrafficCaptureSource(TestContext rootContext,
-                                               ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
-            var startingCursor = arrayCursorTrafficSourceFactory.nextReadCursor.get();
-            log.info("startingCursor = "  + startingCursor);
-            this.readCursor = new AtomicInteger(startingCursor);
-            this.arrayCursorTrafficSourceFactory = arrayCursorTrafficSourceFactory;
-            cursorHighWatermark = startingCursor;
-            this.rootContext = rootContext;
-        }
-
-        @Override
-        public CompletableFuture<List<ITrafficStreamWithKey>>
-        readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
-            var idx = readCursor.getAndIncrement();
-            log.info("reading chunk from index="+idx);
-            if (arrayCursorTrafficSourceFactory.trafficStreamsList.size() <= idx) {
-                return CompletableFuture.failedFuture(new EOFException());
-            }
-            var stream = arrayCursorTrafficSourceFactory.trafficStreamsList.get(idx);
-            var key = new TrafficStreamCursorKey(rootContext, stream, idx);
-            synchronized (pQueue) {
-                pQueue.add(key);
-                cursorHighWatermark = idx;
-            }
-            return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamAndKey(stream, key)));
-        }
-
-        @Override
-        public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-            synchronized (pQueue) { // figure out if I need to do something more efficient later
-                log.info("Commit called for "+trafficStreamKey+" with pQueue.size="+pQueue.size());
-                var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;
-                int topCursor = pQueue.peek().arrayIndex;
-                var didRemove = pQueue.remove(trafficStreamKey);
-                if (!didRemove) {
-                    log.error("no item "+incomingCursor+" to remove from "+pQueue);
-                }
-                assert didRemove;
-                if (topCursor == incomingCursor) {
-                    topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex())
-                            .orElse(cursorHighWatermark+1); // most recent cursor was previously popped
-                    log.info("Commit called for "+trafficStreamKey+", and new topCursor="+topCursor);
-                    arrayCursorTrafficSourceFactory.nextReadCursor.set(topCursor);
-                } else {
-                    log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
-                }
-            }
-            rootContext.channelContextManager.releaseContextFor(
-                    ((TrafficStreamCursorKey) trafficStreamKey).trafficStreamsContext.getChannelKeyContext());
-            return CommitResult.Immediate;
-        }
     }
 }

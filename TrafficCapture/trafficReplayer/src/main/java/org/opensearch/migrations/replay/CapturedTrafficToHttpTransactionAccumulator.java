@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -103,8 +102,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
         }
 
-        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
-                                       @NonNull RequestResponsePacketPair rrpp) {
+        public void onFullDataReceived(@NonNull RequestResponsePacketPair rrpp) {
             rrpp.getResponseContext().close();
             underlying.onFullDataReceived(rrpp.getHttpTransactionContext(), rrpp);
         }
@@ -125,7 +123,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
-            var tsCtx = tsk.getTrafficStreamsContext();
             underlying.onTrafficStreamIgnored(tsk.getTrafficStreamsContext());
         }
     };
@@ -412,7 +409,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var rrPair = accumulation.getRrPair();
         var requestKey = rrPair.getHttpTransactionContext().getReplayerRequestKey();
         rrPair.completionStatus = status;
-        listener.onFullDataReceived(requestKey, rrPair);
+        listener.onFullDataReceived(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
     }

@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.e2etests;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;

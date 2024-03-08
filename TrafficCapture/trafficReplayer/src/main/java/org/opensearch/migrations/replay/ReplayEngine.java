@@ -15,6 +15,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+/**
+ * This class is responsible for managing the BufferedFlowController, which is responsible for releasing
+ * backpressure on the traffic source so that this class can schedule those requests to run on a
+ * RequestSenderOrchestrator at the appropriate time.  This class uses a TimeShifter, the current time,
+ * progress of tasks, and periods of inactivity, to move determine
+ * from the current time, what the frontier time value should be for the traffic source
+ */
 @Slf4j
 public class ReplayEngine {
     public static final int BACKPRESSURE_UPDATE_FREQUENCY = 8;

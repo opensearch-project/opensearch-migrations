@@ -14,13 +14,13 @@ import java.util.StringJoiner;
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
-    final RequestResponsePacketPair sourcePair;
-    final TransformedPackets targetRequestData;
-    final List<byte[]> targetResponseData;
-    final HttpRequestTransformationStatus transformationStatus;
-    final Throwable errorCause;
-    Duration targetResponseDuration;
-    final IReplayContexts.ITupleHandlingContext context;
+    public final RequestResponsePacketPair sourcePair;
+    public final TransformedPackets targetRequestData;
+    public final List<byte[]> targetResponseData;
+    public final HttpRequestTransformationStatus transformationStatus;
+    public final Throwable errorCause;
+    public final Duration targetResponseDuration;
+    public final IReplayContexts.ITupleHandlingContext context;
 
     public SourceTargetCaptureTuple(@NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
                                     RequestResponsePacketPair sourcePair,

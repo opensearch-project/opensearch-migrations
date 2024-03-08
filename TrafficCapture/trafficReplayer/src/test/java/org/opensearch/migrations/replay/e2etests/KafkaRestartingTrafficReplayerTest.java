@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.e2etests;
 
 import com.google.common.collect.Streams;
 import lombok.Lombok;
@@ -13,6 +13,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
+import org.opensearch.migrations.replay.TestHttpServerContext;
+import org.opensearch.migrations.replay.TrafficStreamGenerator;
+import org.opensearch.migrations.replay.V0_1TrafficCaptureSource;
 import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -90,7 +94,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                response->TestHttpServerContext.makeResponse(random, response));
+                response-> TestHttpServerContext.makeResponse(random, response));
         var streamAndConsumer =
                 TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(), testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
@@ -99,7 +103,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
 
         loadStreamsToKafka(buildKafkaConsumer(),
                 Streams.concat(trafficStreams.stream(), Stream.of(SENTINEL_TRAFFIC_STREAM)));
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(streamAndConsumer.numHttpTransactions,
+        TrafficReplayerRunner.runReplayer(streamAndConsumer.numHttpTransactions,
                 httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
                 () -> TestContext.noOtelTracking(),
                 rootContext -> new SentinelSensingTrafficSource(

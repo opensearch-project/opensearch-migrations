@@ -268,7 +268,7 @@ public class TrafficStreamGenerator {
         public final int numHttpTransactions;
     }
 
-    static StreamAndExpectedSizes
+    public static StreamAndExpectedSizes
     generateStreamAndSumOfItsTransactions(TestContext rootContext, int count, boolean randomize) {
         var generatedCases = count > 0 ?
                 generateRandomTrafficStreamsAndSizes(rootContext, IntStream.range(0, count)) :

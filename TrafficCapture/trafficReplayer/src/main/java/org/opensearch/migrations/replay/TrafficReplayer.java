@@ -565,11 +565,11 @@ public class TrafficReplayer {
         );
     }
 
-    void setupRunAndWaitForReplayWithShutdownChecks(Duration observedPacketConnectionTimeout,
-                                                    BlockingTrafficSource trafficSource,
-                                                    TimeShifter timeShifter,
-                                                    Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
-            throws TerminationException, ExecutionException, InterruptedException {
+    public void setupRunAndWaitForReplayWithShutdownChecks(Duration observedPacketConnectionTimeout,
+                                                           BlockingTrafficSource trafficSource,
+                                                           TimeShifter timeShifter,
+                                                           Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
+    throws TerminationException, ExecutionException, InterruptedException {
         try {
             setupRunAndWaitForReplay(observedPacketConnectionTimeout, trafficSource,
                     timeShifter, resultTupleConsumer);

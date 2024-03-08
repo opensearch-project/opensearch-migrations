@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.e2etests;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -10,6 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.replay.TestHttpServerContext;
+import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceFactory;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -54,8 +59,8 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 .addSubStream(TrafficObservation.newBuilder()
                         .setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-        var trafficSourceSupplier = new FullTrafficReplayerTest.ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
-        TrafficReplayerRunner.runReplayerUntilSourceWasExhausted(0,
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
+        TrafficReplayerRunner.runReplayer(0,
                 httpServer.localhostEndpoint(), new FullTrafficReplayerTest.IndexWatchingListenerFactory(),
                 () -> TestContext.withAllTracking(),
                 trafficSourceSupplier);

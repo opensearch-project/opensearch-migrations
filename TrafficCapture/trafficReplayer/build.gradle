@@ -63,6 +63,7 @@ dependencies {
     implementation 'org.apache.commons:commons-compress:1.26.0'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    testFixturesImplementation project(':captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
