@@ -10,7 +10,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TrafficReplayer;
-import org.opensearch.migrations.replay.TrafficStreamGenerator;
+import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
@@ -78,7 +78,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
                 response -> TestHttpServerContext.makeResponse(random, response));
         var nonTrackingContext = TestContext.noOtelTracking();
-        var streamAndSizes = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(nonTrackingContext,
+        var streamAndSizes = ExhaustiveTrafficStreamGenerator.generateStreamAndSumOfItsTransactions(nonTrackingContext,
                 16, true);
         var numExpectedRequests = streamAndSizes.numHttpTransactions;
         var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());
@@ -136,7 +136,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
                 response -> TestHttpServerContext.makeResponse(random, response));
-        var streamAndSizes = TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(),
+        var streamAndSizes = ExhaustiveTrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(),
                 testSize, randomize);
         var numExpectedRequests = streamAndSizes.numHttpTransactions;
         var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());

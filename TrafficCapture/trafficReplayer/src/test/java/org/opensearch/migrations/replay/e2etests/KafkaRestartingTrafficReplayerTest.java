@@ -15,7 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
-import org.opensearch.migrations.replay.TrafficStreamGenerator;
+import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
 import org.opensearch.migrations.replay.V0_1TrafficCaptureSource;
 import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
@@ -96,7 +96,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
                 response-> TestHttpServerContext.makeResponse(random, response));
         var streamAndConsumer =
-                TrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(), testSize, randomize);
+                ExhaustiveTrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(), testSize, randomize);
         var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
         log.atInfo().setMessage(()->trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
                 .collect(Collectors.joining("\n"))).log();

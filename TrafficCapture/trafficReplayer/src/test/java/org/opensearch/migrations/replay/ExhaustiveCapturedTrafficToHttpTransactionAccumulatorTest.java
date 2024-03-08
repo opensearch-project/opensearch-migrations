@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -26,12 +27,12 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest extends I
 
     public static Arguments[] generateAllTestsAndConfirmComplete(IntStream seedStream) {
         var rootContext = TestContext.noOtelTracking();
-        var possibilitiesLeftToTest = TrafficStreamGenerator.getPossibleTests();
+        var possibilitiesLeftToTest = ExhaustiveTrafficStreamGenerator.getPossibleTests();
         var numTries = new AtomicInteger();
         StringJoiner seedsThatOfferUniqueTestCases = new StringJoiner(",");
-        var argsArray = TrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(rootContext, seedStream)
+        var argsArray = ExhaustiveTrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(rootContext, seedStream)
                 .takeWhile(c->!possibilitiesLeftToTest.isEmpty())
-                .filter(c->TrafficStreamGenerator.classifyTrafficStream(possibilitiesLeftToTest, c.trafficStreams) > 0)
+                .filter(c-> ExhaustiveTrafficStreamGenerator.classifyTrafficStream(possibilitiesLeftToTest, c.trafficStreams) > 0)
                 .flatMap(c-> {
                     seedsThatOfferUniqueTestCases.add(c.randomSeedUsed + "");
                     var n = numTries.getAndIncrement();
@@ -55,7 +56,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest extends I
         var rand = new Random(1);
         return generateAllTestsAndConfirmComplete(
 //                IntStream.generate(()->rand.nextInt())
-                TrafficStreamGenerator.RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE
+                ExhaustiveTrafficStreamGenerator.RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE
 //                List.of(2110766901)
                         .stream().mapToInt(i->i)
         );
@@ -63,7 +64,7 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest extends I
 
     private static String renderLeftToTest(HashSet<Integer> possibilitiesLeftToTest) {
         return possibilitiesLeftToTest.size() + ": " +
-                possibilitiesLeftToTest.stream().map(c->TrafficStreamGenerator.classificationToString(c))
+                possibilitiesLeftToTest.stream().map(c-> ExhaustiveTrafficStreamGenerator.classificationToString(c))
                         .sorted()
                         .collect(Collectors.joining("\n"));
     }
