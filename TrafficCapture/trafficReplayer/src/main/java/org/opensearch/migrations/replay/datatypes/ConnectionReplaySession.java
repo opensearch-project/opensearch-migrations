@@ -1,8 +1,10 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ConnectTimeoutException;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -10,6 +12,7 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
+import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
@@ -22,6 +25,8 @@ import java.util.function.Supplier;
  */
 @Slf4j
 public class ConnectionReplaySession {
+
+    private static final int MAX_CHANNEL_CREATE_RETRIES = 16;
 
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
@@ -65,17 +70,22 @@ public class ConnectionReplaySession {
     }
 
     private void createNewChannelFuture(boolean requireActiveChannel,
-                                       StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture)
+                                       StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture) {
+        createNewChannelFuture(requireActiveChannel, MAX_CHANNEL_CREATE_RETRIES, eventLoopFuture);
+    }
+
+    private void createNewChannelFuture(boolean requireActiveChannel, int retries,
+                                        StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture)
     {
         channelFutureFutureFactory.get().future.whenComplete((v,t)-> {
-            if (requireActiveChannel) {
+            if (requireActiveChannel && retries > 0 && (t == null || exceptionIsRetryable(t))) {
                 if (t != null || !v.channel().isActive()) {
                     if (t != null) {
                         channelKeyContext.addCaughtException(t);
                         log.atWarn().setMessage(() -> "Caught exception while trying to get an active channel")
                                 .setCause(t).log();
                     }
-                    createNewChannelFuture(requireActiveChannel, eventLoopFuture);
+                    createNewChannelFuture(requireActiveChannel, retries-1, eventLoopFuture);
                 } else {
                     cachedChannel = v;
                     eventLoopFuture.future.complete(v);
@@ -87,6 +97,10 @@ public class ConnectionReplaySession {
                 eventLoopFuture.future.complete(v);
             }
         });
+    }
+
+    private static boolean exceptionIsRetryable(@NonNull Throwable t) {
+        return t instanceof IOException;
     }
 
     public boolean hasWorkRemaining() {
