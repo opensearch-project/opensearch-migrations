@@ -10,11 +10,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.parallel.Execution;
-import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.internal.matchers.Same;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
@@ -24,9 +21,7 @@ import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-import org.opensearch.migrations.testutils.HttpFirstLine;
+import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -122,7 +117,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         "User-Agent", "UnitTest").entrySet().stream());
     }
 
-    private static SimpleHttpResponse makeResponseContext(HttpFirstLine request) {
+    private static SimpleHttpResponse makeResponseContext(HttpRequestFirstLine request) {
         var headers = Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",

@@ -113,7 +113,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                       @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             var tsCtx = accum.trafficChannelKey.getTrafficStreamsContext();
             underlying.onConnectionClose(accum.numberOfResets.get(), tsCtx.getLogicalEnclosingScope(),
-                    status, when, trafficStreamKeysBeingHeld);
+                    accum.startingSourceRequestIndex, status, when, trafficStreamKeysBeingHeld);
         }
 
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
@@ -407,7 +407,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         var rrPair = accumulation.getRrPair();
-        var requestKey = rrPair.getHttpTransactionContext().getReplayerRequestKey();
         rrPair.completionStatus = status;
         listener.onFullDataReceived(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();

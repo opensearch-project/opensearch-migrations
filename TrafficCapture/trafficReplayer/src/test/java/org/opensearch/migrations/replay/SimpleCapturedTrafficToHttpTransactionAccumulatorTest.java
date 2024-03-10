@@ -1,8 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -18,11 +15,9 @@ import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStrea
 import org.opensearch.migrations.replay.traffic.generator.ObservationDirective;
 import org.opensearch.migrations.replay.traffic.generator.TrafficStreamGenerator;
 import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -32,7 +27,6 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
@@ -88,7 +82,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
     @MethodSource("loadSimpleCombinations")
     void generateAndTest(String testName, int bufferSize, int skipCount,
                          List<ObservationDirective> directives, List<Integer> expectedSizes) throws Exception {
-        var trafficStreams = Arrays.stream(TrafficStreamGenerator.makeTrafficStreams(bufferSize, 0, new AtomicInteger(),
+        var trafficStreams = Arrays.stream(TrafficStreamGenerator.makeTrafficStream(bufferSize, 0, new AtomicInteger(),
                 directives, rootContext)).skip(skipCount);
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
@@ -150,6 +144,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                             @Override
                             public void onConnectionClose(int channelInteractionNumber,
                                                           @NonNull IReplayContexts.IChannelKeyContext ctx,
+                                                          int channelSessionNumber,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {

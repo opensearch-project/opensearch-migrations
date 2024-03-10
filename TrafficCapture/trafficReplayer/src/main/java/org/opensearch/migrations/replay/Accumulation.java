@@ -26,6 +26,7 @@ public class Accumulation {
     State state;
     AtomicInteger numberOfResets;
     int startingSourceRequestIndex;
+    private boolean hasBeenExpired;
 
     public Accumulation(ITrafficStreamKey key, TrafficStream ts) {
         this(key, ts.getPriorRequestsReceived()+(ts.hasLastObservationWasUnterminatedRead()?1:0),
@@ -44,6 +45,14 @@ public class Accumulation {
         this.startingSourceRequestIndex = startingSourceRequestIndex;
         this.state =
                 dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
+    }
+
+    public boolean hasBeenExpired() {
+        return hasBeenExpired;
+    }
+
+    public void expire() {
+        hasBeenExpired = true;
     }
 
     public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey,

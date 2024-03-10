@@ -11,6 +11,8 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
+import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +32,18 @@ public class ClientConnectionPool {
     private final URI serverUri;
     private final SslContext sslContext;
     public final NioEventLoopGroup eventLoopGroup;
-    private final LoadingCache<String, ConnectionReplaySession> connectionId2ChannelCache;
+    private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
+
+    @EqualsAndHashCode
+    @AllArgsConstructor
+    private static class Key {
+        private final String connectionId;
+        private final int sessionNumber;
+    }
+
+    private Key getKey(String connectionId, int sessionNumber) {
+        return new Key(connectionId, sessionNumber);
+    }
 
     public ClientConnectionPool(URI serverUri, SslContext sslContext, int numThreads) {
         this.serverUri = serverUri;
@@ -134,8 +147,9 @@ public class ClientConnectionPool {
     }
 
     @SneakyThrows
-    public @NonNull ConnectionReplaySession getCachedSession(IReplayContexts.IChannelKeyContext channelKeyCtx) {
-        var crs = connectionId2ChannelCache.get(channelKeyCtx.getConnectionId(),
+    public @NonNull ConnectionReplaySession getCachedSession(IReplayContexts.IChannelKeyContext channelKeyCtx,
+                                                             int sessionNumber) {
+        var crs = connectionId2ChannelCache.get(getKey(channelKeyCtx.getConnectionId(), sessionNumber),
                 () -> buildConnectionReplaySession(channelKeyCtx));
         log.atTrace().setMessage(()->"returning ReplaySession=" + crs + " for " + channelKeyCtx.getConnectionId() +
                 " from " + channelKeyCtx).log();

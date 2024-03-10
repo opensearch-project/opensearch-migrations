@@ -56,7 +56,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         }
         var connectionCtx = rootContext.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
         var closeFuture = senderOrchestrator.scheduleClose(
-                connectionCtx.getLogicalEnclosingScope(), NUM_REQUESTS_TO_SCHEDULE,
+                connectionCtx.getLogicalEnclosingScope(), NUM_REQUESTS_TO_SCHEDULE, 0,
                 lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());

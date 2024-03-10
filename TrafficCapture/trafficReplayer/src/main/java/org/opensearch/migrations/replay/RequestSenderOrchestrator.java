@@ -38,7 +38,8 @@ public class RequestSenderOrchestrator {
     public <T> DiagnosticTrackableCompletableFuture<String, T>
     scheduleWork(IReplayContexts.IReplayerHttpTransactionContext ctx, Instant timestamp,
                  Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
-        var connectionSession = clientConnectionPool.getCachedSession(ctx.getChannelKeyContext());
+        var connectionSession = clientConnectionPool.getCachedSession(ctx.getChannelKeyContext(),
+                ctx.getReplayerRequestKey().sourceRequestIndexSessionIdentifier);
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm processing work has finished");
@@ -76,12 +77,14 @@ public class RequestSenderOrchestrator {
         // as well as the period between connection and the first bytes sent.  However, this code is a
         // bit too cavalier.  It should be tightened at some point.
         return asynchronouslyInvokeRunnable(ctx.getLogicalEnclosingScope(),
+                requestKey.sourceRequestIndexSessionIdentifier,
                 requestKey.getReplayerRequestIndex(), false, finalTunneledResponse,
                 channelFutureAndRequestSchedule -> scheduleSendRequestOnConnectionReplaySession(ctx,
                         channelFutureAndRequestSchedule, finalTunneledResponse, start, interval, packets));
     }
 
     public StringTrackableCompletableFuture<Void> scheduleClose(IReplayContexts.IChannelKeyContext ctx,
+                                                                int sessionNumber,
                                                                 int channelInteractionNum,
                                                                 Instant timestamp) {
         var channelKey = ctx.getChannelKey();
@@ -90,7 +93,7 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm close has finished");
         log.atDebug().setMessage(() -> "Scheduling CLOSE for " + channelInteraction + " at time " + timestamp).log();
-        asynchronouslyInvokeRunnable(ctx, channelInteractionNum, true,
+        asynchronouslyInvokeRunnable(ctx, sessionNumber, channelInteractionNum, true,
                 finalTunneledResponse,
                 channelFutureAndRequestSchedule->
                     scheduleOnConnectionReplaySession(ctx, channelInteractionNum,
@@ -109,12 +112,12 @@ public class RequestSenderOrchestrator {
      * have been called.  This method isn't concerned with scheduling items, that would be left up to the callback.
      */
     private <T> DiagnosticTrackableCompletableFuture<String, T>
-    asynchronouslyInvokeRunnable(IReplayContexts.IChannelKeyContext ctx,
+    asynchronouslyInvokeRunnable(IReplayContexts.IChannelKeyContext ctx, int sessionNumber,
                                  int channelInteractionNumber,
                                  boolean ignoreIfChannelNotActive,
                                  DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
                                  Consumer<ConnectionReplaySession> onSessionCallback) {
-        final var replaySession = clientConnectionPool.getCachedSession(ctx);
+        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
         replaySession.eventLoop.submit(()->{
                     log.atTrace().setMessage(() -> "adding work item at slot " +
                             channelInteractionNumber + " for " + replaySession.getChannelKeyContext() + " with " +

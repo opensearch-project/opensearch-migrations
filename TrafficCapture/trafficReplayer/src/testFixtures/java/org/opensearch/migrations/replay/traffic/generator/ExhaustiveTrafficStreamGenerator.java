@@ -223,7 +223,7 @@ public class ExhaustiveTrafficStreamGenerator {
                 .log();
         var flushLikelihood = Math.pow(r2.nextDouble(),2.0);
         fillCommandsAndSizes(r2, flushLikelihood/4, flushLikelihood, bufferBound, commands, sizes);
-        return TrafficStreamGenerator.makeTrafficStreams(bufferSize, (int) rSeed,
+        return TrafficStreamGenerator.makeTrafficStream(bufferSize, (int) rSeed,
                 uniqueIdCounter, commands, rootContext);
     }
 

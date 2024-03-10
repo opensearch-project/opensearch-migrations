@@ -14,7 +14,7 @@ import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
-import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceFactory;
+import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -59,7 +59,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 .addSubStream(TrafficObservation.newBuilder()
                         .setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(List.of(trafficStreamWithJustClose));
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(trafficStreamWithJustClose));
         TrafficReplayerRunner.runReplayer(0,
                 httpServer.localhostEndpoint(), new FullTrafficReplayerTest.IndexWatchingListenerFactory(),
                 () -> TestContext.withAllTracking(),
@@ -105,7 +105,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 .build();
         var trafficSource =
                 new ArrayCursorTrafficCaptureSource(rootContext,
-                        new ArrayCursorTrafficSourceFactory(List.of(trafficStream)));
+                        new ArrayCursorTrafficSourceContext(List.of(trafficStream)));
         var tr = new TrafficReplayer(rootContext, httpServer.localhostEndpoint(), null,
                 new StaticAuthTransformerFactory("TEST"), null,
                 true, 10, 10 * 1024);

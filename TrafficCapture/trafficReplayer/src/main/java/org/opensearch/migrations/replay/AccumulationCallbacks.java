@@ -18,11 +18,10 @@ public interface AccumulationCallbacks {
                                  @NonNull IReplayContexts.IChannelKeyContext ctx,
                                  @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
 
-    void onConnectionClose(int channelInteractionNumber,
-                           @NonNull IReplayContexts.IChannelKeyContext ctx,
+    void onConnectionClose(int channelInteractionNum,
+                           IReplayContexts.@NonNull IChannelKeyContext ctx, int channelSessionNumber,
                            RequestResponsePacketPair.ReconstructionStatus status,
-                           @NonNull Instant when,
-                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
+                           @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
 
     void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx);
 }

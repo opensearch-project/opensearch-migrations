@@ -128,8 +128,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 }));
         }
     }
-
-
+    
     // Producer Send will block on actions such as retrieving cluster metadata, allows running fully async
     public static <K, V> CompletableFuture<RecordMetadata> sendFullyAsync(Producer<K, V> producer, ProducerRecord<K, V> record) {
         CompletableFuture<RecordMetadata> completableFuture = new CompletableFuture<>();

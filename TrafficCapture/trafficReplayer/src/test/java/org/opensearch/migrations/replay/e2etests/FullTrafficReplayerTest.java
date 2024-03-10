@@ -15,7 +15,7 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
-import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceFactory;
+import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamCursorKey;
@@ -76,7 +76,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     public void fullTestWithThrottledStart() throws Throwable {
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
-                response -> TestHttpServerContext.makeResponse(random, response));
+                firstLine -> TestHttpServerContext.makeResponse(random, firstLine));
         var nonTrackingContext = TestContext.noOtelTracking();
         var streamAndSizes = ExhaustiveTrafficStreamGenerator.generateStreamAndSumOfItsTransactions(nonTrackingContext,
                 16, true);
@@ -87,7 +87,8 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceSupplier = rc -> new ISimpleTrafficCaptureSource() {
             boolean isDone = false;
             @Override
-            public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
+            public CompletableFuture<List<ITrafficStreamWithKey>>
+            readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
                 if (isDone) {
                     return CompletableFuture.failedFuture(new EOFException());
                 } else {
@@ -142,7 +143,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());
         log.atInfo().setMessage(() -> trafficStreams.stream().map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
                 .collect(Collectors.joining("\n"))).log();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceFactory(trafficStreams);
+        var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(trafficStreams);
         TrafficReplayerRunner.runReplayer(
                 numExpectedRequests, httpServer.localhostEndpoint(), new IndexWatchingListenerFactory(),
                 () -> TestContext.noOtelTracking(),

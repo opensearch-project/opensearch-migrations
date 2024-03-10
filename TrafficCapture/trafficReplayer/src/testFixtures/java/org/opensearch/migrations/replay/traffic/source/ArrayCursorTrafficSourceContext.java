@@ -9,11 +9,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 @Slf4j
-public class ArrayCursorTrafficSourceFactory implements Function<TestContext, ISimpleTrafficCaptureSource> {
+public class ArrayCursorTrafficSourceContext implements Function<TestContext, ISimpleTrafficCaptureSource> {
     public final List<TrafficStream> trafficStreamsList;
     public final AtomicInteger nextReadCursor = new AtomicInteger();
 
-    public ArrayCursorTrafficSourceFactory(List<TrafficStream> trafficStreamsList) {
+    public ArrayCursorTrafficSourceContext(List<TrafficStream> trafficStreamsList) {
         this.trafficStreamsList = trafficStreamsList;
     }
 

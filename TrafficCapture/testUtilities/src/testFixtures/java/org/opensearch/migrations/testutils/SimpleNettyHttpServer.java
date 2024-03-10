@@ -18,8 +18,6 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.HttpVersion;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
@@ -58,14 +56,14 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     private Duration timeout;
 
     public static SimpleNettyHttpServer makeServer(boolean useTls,
-                                                   Function<HttpFirstLine, SimpleHttpResponse> makeContext)
+                                                   Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext)
         throws PortFinder.ExceededMaxPortAssigmentAttemptException
     {
         return makeServer(useTls, null, makeContext);
     }
 
     public static SimpleNettyHttpServer makeServer(boolean useTls, Duration readTimeout,
-                                              Function<HttpFirstLine, SimpleHttpResponse> makeContext)
+                                              Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext)
             throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleNettyHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
@@ -78,7 +76,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         return testServerRef.get();
     }
 
-    private static class RequestToFirstLineAdapter implements HttpFirstLine {
+    private static class RequestToFirstLineAdapter implements HttpRequestFirstLine {
         private final FullHttpRequest request;
 
         public RequestToFirstLineAdapter(FullHttpRequest request) {
@@ -109,7 +107,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     }
 
     private SimpleChannelInboundHandler<FullHttpRequest>
-    makeHandlerFromResponseContext(Function<HttpFirstLine, SimpleHttpResponse> responseBuilder) {
+    makeHandlerFromResponseContext(Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder) {
         return new SimpleChannelInboundHandler<>() {
             @Override
             protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
@@ -136,7 +134,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     }
 
     SimpleNettyHttpServer(boolean useTLS, int port, Duration timeout,
-                          Function<HttpFirstLine, SimpleHttpResponse> responseBuilder)
+                          Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder)
             throws Exception {
         this.useTls = useTLS;
         this.port = port;

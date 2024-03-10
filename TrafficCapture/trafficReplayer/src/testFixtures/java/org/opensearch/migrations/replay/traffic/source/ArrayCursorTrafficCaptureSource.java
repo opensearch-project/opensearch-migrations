@@ -19,15 +19,15 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
         final AtomicInteger readCursor;
         final PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
         Integer cursorHighWatermark;
-        ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory;
+        ArrayCursorTrafficSourceContext arrayCursorTrafficSourceContext;
         TestContext rootContext;
 
         public ArrayCursorTrafficCaptureSource(TestContext rootContext,
-                                               ArrayCursorTrafficSourceFactory arrayCursorTrafficSourceFactory) {
-            var startingCursor = arrayCursorTrafficSourceFactory.nextReadCursor.get();
+                                               ArrayCursorTrafficSourceContext arrayCursorTrafficSourceContext) {
+            var startingCursor = arrayCursorTrafficSourceContext.nextReadCursor.get();
             log.info("startingCursor = "  + startingCursor);
             this.readCursor = new AtomicInteger(startingCursor);
-            this.arrayCursorTrafficSourceFactory = arrayCursorTrafficSourceFactory;
+            this.arrayCursorTrafficSourceContext = arrayCursorTrafficSourceContext;
             cursorHighWatermark = startingCursor;
             this.rootContext = rootContext;
         }
@@ -37,10 +37,10 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
         readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
             var idx = readCursor.getAndIncrement();
             log.info("reading chunk from index="+idx);
-            if (arrayCursorTrafficSourceFactory.trafficStreamsList.size() <= idx) {
+            if (arrayCursorTrafficSourceContext.trafficStreamsList.size() <= idx) {
                 return CompletableFuture.failedFuture(new EOFException());
             }
-            var stream = arrayCursorTrafficSourceFactory.trafficStreamsList.get(idx);
+            var stream = arrayCursorTrafficSourceContext.trafficStreamsList.get(idx);
             var key = new TrafficStreamCursorKey(rootContext, stream, idx);
             synchronized (pQueue) {
                 pQueue.add(key);
@@ -64,7 +64,7 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
                     topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex())
                             .orElse(cursorHighWatermark+1); // most recent cursor was previously popped
                     log.info("Commit called for "+trafficStreamKey+", and new topCursor="+topCursor);
-                    arrayCursorTrafficSourceFactory.nextReadCursor.set(topCursor);
+                    arrayCursorTrafficSourceContext.nextReadCursor.set(topCursor);
                 } else {
                     log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
                 }

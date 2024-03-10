@@ -179,6 +179,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                             @Override
                             public void onConnectionClose(int channelInteractionNumber,
                                                           IReplayContexts.@NonNull IChannelKeyContext ctx,
+                                                          int channelSessionNumber,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
@@ -235,6 +236,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                             @Override
                             public void onConnectionClose(int channelInteractionNumber,
                                                           @NonNull IReplayContexts.IChannelKeyContext ctx,
+                                                          int channelSessionNumber,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,
                                                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {

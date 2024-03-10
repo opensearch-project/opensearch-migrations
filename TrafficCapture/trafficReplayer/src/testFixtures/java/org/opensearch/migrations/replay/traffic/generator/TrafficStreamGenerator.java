@@ -37,14 +37,14 @@ public class TrafficStreamGenerator {
         return bb;
     }
 
-    public static TrafficStream[] makeTrafficStreams(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
-                                              List<ObservationDirective> directives, TestContext rootContext) throws Exception {
+    public static TrafficStream[] makeTrafficStream(int bufferSize, int interactionOffset, AtomicInteger uniqueIdCounter,
+                                                    List<ObservationDirective> directives, TestContext rootContext) throws Exception {
         var connectionFactory = buildSerializerFactory(bufferSize, ()->{});
         var tsk = PojoTrafficStreamKeyAndContext.build("n", "test_"+uniqueIdCounter.incrementAndGet(),
                 0, rootContext::createTrafficStreamContextForTest);
         var offloader = connectionFactory.createOffloader(rootContext.createChannelContext(tsk));
         for (var directive : directives) {
-            serializeEvent(offloader, interactionOffset++, directive);
+            serializeEvent(offloader, interactionOffset++, directive, Instant.EPOCH);
         }
         offloader.addCloseEvent(Instant.EPOCH);
         offloader.flushCommitAndResetStream(true).get();
@@ -52,22 +52,22 @@ public class TrafficStreamGenerator {
     }
 
     private static void serializeEvent(IChannelConnectionCaptureSerializer offloader, int offset,
-                                       ObservationDirective directive) throws IOException {
+                                       ObservationDirective directive, Instant timestamp) throws IOException {
         switch (directive.offloaderCommandType) {
             case Read:
-                offloader.addReadEvent(Instant.EPOCH, makeSequentialByteBuf(offset, directive.size));
+                offloader.addReadEvent(timestamp, makeSequentialByteBuf(offset, directive.size));
                 return;
             case EndOfMessage:
-                offloader.commitEndOfHttpMessageIndicator(Instant.EPOCH);
+                offloader.commitEndOfHttpMessageIndicator(timestamp);
                 return;
             case Write:
-                offloader.addWriteEvent(Instant.EPOCH, makeSequentialByteBuf(offset+3, directive.size));
+                offloader.addWriteEvent(timestamp, makeSequentialByteBuf(offset+3, directive.size));
                 return;
             case Flush:
                 offloader.flushCommitAndResetStream(false);
                 return;
             case DropRequest:
-                offloader.cancelCaptureForCurrentRequest(Instant.EPOCH);
+                offloader.cancelCaptureForCurrentRequest(timestamp);
                 return;
             default:
                 throw new IllegalStateException("Unknown directive type: " + directive.offloaderCommandType);

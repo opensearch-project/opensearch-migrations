@@ -707,11 +707,11 @@ public class TrafficReplayer {
 
         @Override
         public void onConnectionClose(int channelInteractionNum,
-                                      IReplayContexts.@NonNull IChannelKeyContext ctx,
+                                      IReplayContexts.@NonNull IChannelKeyContext ctx, int channelSessionNumber,
                                       RequestResponsePacketPair.ReconstructionStatus status,
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
-            var cf = replayEngine.closeConnection(channelInteractionNum, ctx, timestamp);
+            var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
             cf.map(f->f.whenComplete((v,t)->{
                 commitTrafficStreams(status, trafficStreamKeysBeingHeld);
             }), ()->"closing the channel in the ReplayEngine");
