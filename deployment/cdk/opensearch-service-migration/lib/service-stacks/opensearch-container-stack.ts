@@ -29,9 +29,7 @@ const dnsNameForContainer = "opensearch";
 export class OpenSearchContainerStack extends MigrationServiceCore {
 
     private createSSMParameters(stage: string, deployId: string, adminUserName: string|undefined, adminUserSecret: ISecret|undefined) {
-        console.log("admin user="+adminUserName + " secret="+adminUserSecret)
         if (adminUserSecret) {
-            console.log("makin secret params")
             new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
                 description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
                 parameterName: `/migration/${stage}/${deployId}/osUserAndSecretArn`,
@@ -57,7 +55,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             adminUserSecret = new Secret(this, "demoUserSecret", {
                 secretName: `demo-user-secret-${props.stage}-${deployId}`,
                 // This is unsafe and strictly for ease of use in a demo mode setup
-                secretStringValue: SecretValue.unsafePlainText("myStrongPassword123!")
+                secretStringValue: SecretValue.unsafePlainText(opensearch_target_initial_admin_password)
             })
         }
 
