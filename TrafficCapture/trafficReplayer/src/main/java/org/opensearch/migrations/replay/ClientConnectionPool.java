@@ -28,7 +28,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class ClientConnectionPool {
-    public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
     private final URI serverUri;
     private final SslContext sslContext;
     public final NioEventLoopGroup eventLoopGroup;
@@ -45,11 +44,11 @@ public class ClientConnectionPool {
         return new Key(connectionId, sessionNumber);
     }
 
-    public ClientConnectionPool(URI serverUri, SslContext sslContext, int numThreads) {
+    public ClientConnectionPool(URI serverUri, SslContext sslContext, String targetConnectionPoolName, int numThreads) {
         this.serverUri = serverUri;
         this.sslContext = sslContext;
         this.eventLoopGroup =
-                new NioEventLoopGroup(numThreads, new DefaultThreadFactory(TARGET_CONNECTION_POOL_NAME));
+                new NioEventLoopGroup(numThreads, new DefaultThreadFactory(targetConnectionPoolName));
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(CacheLoader.from(key -> {
             throw new UnsupportedOperationException("Use Cache.get(key, callable) instead");

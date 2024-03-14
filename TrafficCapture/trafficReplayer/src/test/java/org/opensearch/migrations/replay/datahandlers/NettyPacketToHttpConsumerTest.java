@@ -166,7 +166,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         timeShifter.setFirstTimestamp(Instant.now());
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
-                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
+                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                                "targetPool for testThatConnectionsAreKeptAliveAndShared", 1)),
                 new TestFlowController(), timeShifter);
         for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {

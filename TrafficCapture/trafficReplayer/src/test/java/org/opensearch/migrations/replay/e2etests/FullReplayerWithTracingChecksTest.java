@@ -108,7 +108,8 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                         new ArrayCursorTrafficSourceContext(List.of(trafficStream)));
         var tr = new TrafficReplayer(rootContext, httpServer.localhostEndpoint(), null,
                 new StaticAuthTransformerFactory("TEST"), null,
-                true, 10, 10 * 1024);
+                true, 10, 10 * 1024,
+                "targetConnectionPool for testStreamWithRequestsWithCloseIsCommittedOnce");
 
         var tuplesReceived = new HashSet<String>();
         try (var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {

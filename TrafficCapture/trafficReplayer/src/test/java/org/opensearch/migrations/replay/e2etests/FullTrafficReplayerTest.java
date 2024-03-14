@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.e2etests;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
@@ -7,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TrafficReplayer;
@@ -23,12 +25,14 @@ import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import javax.net.ssl.SSLException;
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Random;
@@ -51,6 +55,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_NODE_ID = "TestNodeId";
     public static final String TEST_CONNECTION_ID = "testConnectionId";
+    public static final String DUMMY_URL_THAT_WILL_NEVER_BE_CONTACTED = "http://localhost:9999/";
 
     protected static class IndexWatchingListenerFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
         AtomicInteger nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
@@ -109,11 +114,11 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
 
         TrafficReplayerRunner.runReplayer(
                 numExpectedRequests,
-                rc -> {
+                (rc, threadPrefix) -> {
                     try {
                         return new TrafficReplayer(rc, httpServer.localhostEndpoint(), null,
                                 new StaticAuthTransformerFactory("TEST"), null,
-                                true, 1, 1);
+                                true, 1, 1, threadPrefix);
                     } catch (SSLException e) {
                         throw new RuntimeException(e);
                     }
@@ -122,6 +127,41 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 () -> nonTrackingContext,
                 trafficSourceSupplier);
         log.info("done");
+    }
+
+    @Test
+    public void makeSureThatCollateralDamageDoesntFreezeTests() throws Throwable {
+
+        var imposterThread = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(1000 * 1000);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }, TrafficReplayer.TARGET_CONNECTION_POOL_NAME + " Just to break a test");
+        imposterThread.start();
+
+        try {
+            var workThread = new Thread(() -> {
+                try {
+                    TrafficReplayerRunner.runReplayer(
+                            0, new URI(DUMMY_URL_THAT_WILL_NEVER_BE_CONTACTED),
+                            new IndexWatchingListenerFactory(), () -> TestContext.noOtelTracking(),
+                            new ArrayCursorTrafficSourceContext(List.of()));
+                } catch (Throwable e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            });
+            workThread.start();
+            workThread.join(1000 * 10);
+            Assertions.assertFalse(workThread.isAlive(),
+                    "Expected the work thread to die and not be confused by the imposter thread");
+        } finally {
+            imposterThread.interrupt();
+            imposterThread.join();
+        }
     }
 
     @ParameterizedTest
@@ -134,6 +174,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     @Tag("longTest")
     @ResourceLock("TrafficReplayerRunner")
     public void fullTestWithRestarts(int testSize, boolean randomize) throws Throwable {
+
         var random = new Random(1);
         var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200),
                 response -> TestHttpServerContext.makeResponse(random, response));

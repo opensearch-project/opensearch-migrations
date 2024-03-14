@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay.e2etests;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
+import io.opentelemetry.sdk.metrics.data.LongPointData;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -40,6 +42,7 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
     private static final Instant START_TIME = Instant.EPOCH.plus(Duration.ofDays(1));
     private static final long SPACING_SECONDS = 3600;
     private static final long TIME_SPEEDUP_FACTOR = SPACING_SECONDS/2;
+    private static final String TCP_CONNECTION_COUNT_METRIC_NAME = "tcpConnectionCount";
 
     private static TrafficStream makeTrafficStream(Instant t, String connectionId, int tsRequestNumber, boolean last,
                                                    Function<Supplier<TrafficObservation.Builder>,
@@ -95,15 +98,18 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200), responseTracker)) {
             var replayer = new TrafficReplayer(rc, httpServer.localhostEndpoint(), null,
                     new StaticAuthTransformerFactory("TEST"), null,
-                    true, 1, 1);
+                    true, 1, 1,
+                    "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest");
             new Thread(()->responseTracker.onCountDownFinished(Duration.ofSeconds(10),
                     ()->replayer.shutdown(null).join()));
             replayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofMillis(1),
                     trafficSource, new TimeShifter(TIME_SPEEDUP_FACTOR), t->{});
         }
-        Assertions.assertEquals(3, rc.inMemoryInstrumentationBundle.getFinishedMetrics().stream()
-                .filter(md->md.getName().startsWith("tcpConnection"))
-                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue());
+
+        var matchingMetrics = rc.inMemoryInstrumentationBundle.getMetricsUntil(TCP_CONNECTION_COUNT_METRIC_NAME,
+                IntStream.range(0,5).map(i->(i+1000)*(int)(Math.pow(2,i))),
+                filteredMetricList -> reduceMetricStreamToSum(filteredMetricList.stream()) >= 3);
+        Assertions.assertEquals(3, reduceMetricStreamToSum(matchingMetrics.stream()));
 
         Assertions.assertEquals(3, responseTracker.pathsReceivedList.size());
         Map<String,ArrayList<String>> connectionToRequestUrisMap = new HashMap<>();
@@ -119,6 +125,12 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
                         .allMatch(i -> i == Integer.valueOf(kvp.getValue().get(i))),
                         "unordered " + kvp.getKey() + ": "
                                 + String.join(",", kvp.getValue())));
+    }
+
+    private static long reduceMetricStreamToSum(Stream<MetricData> stream) {
+        return stream.reduce((a,b)->b)
+                .flatMap(s->s.getLongSumData().getPoints().stream().reduce((a,b)->b).map(LongPointData::getValue))
+                .orElse(-1L);
     }
 
     static String makePath(String connection, int i) {

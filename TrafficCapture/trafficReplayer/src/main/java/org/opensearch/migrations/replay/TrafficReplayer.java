@@ -79,6 +79,8 @@ public class TrafficReplayer {
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
 
+    public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
+
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
     private final ClientConnectionPool clientConnectionPool;
     private final TrafficStreamLimiter liveTrafficStreamLimiter;
@@ -123,7 +125,7 @@ public class TrafficReplayer {
                            boolean allowInsecureConnections)
             throws SSLException {
         this(context, serverUri, fullTransformerConfig, authTransformerFactory, null, allowInsecureConnections,
-                0, 1024);
+                0, 1024, TARGET_CONNECTION_POOL_NAME);
     }
 
 
@@ -133,10 +135,12 @@ public class TrafficReplayer {
                            IAuthTransformerFactory authTransformerFactory,
                            String userAgent,
                            boolean allowInsecureConnections,
-                           int numSendingThreads, int maxConcurrentOutstandingRequests)
+                           int numSendingThreads,
+                           int maxConcurrentOutstandingRequests,
+                           String targetConnectionPoolName)
             throws SSLException {
         this(context, serverUri, authTransformerFactory, allowInsecureConnections,
-                numSendingThreads, maxConcurrentOutstandingRequests,
+                numSendingThreads, maxConcurrentOutstandingRequests, targetConnectionPoolName,
                 new TransformationLoader()
                         .getTransformerFactoryLoader(serverUri.getHost(), userAgent, fullTransformerConfig)
         );
@@ -147,6 +151,7 @@ public class TrafficReplayer {
                            IAuthTransformerFactory authTransformer,
                            boolean allowInsecureConnections,
                            int numSendingThreads, int maxConcurrentOutstandingRequests,
+                           String clientThreadNamePrefix,
                            IJsonTransformer jsonTransformer)
             throws SSLException
     {
@@ -162,7 +167,7 @@ public class TrafficReplayer {
         }
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
         clientConnectionPool = new ClientConnectionPool(serverUri,
-                loadSslContext(serverUri, allowInsecureConnections), numSendingThreads);
+                loadSslContext(serverUri, allowInsecureConnections), clientThreadNamePrefix, numSendingThreads);
         requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         successfulRequestCount = new AtomicInteger();
         exceptionRequestCount = new AtomicInteger();
@@ -393,7 +398,7 @@ public class TrafficReplayer {
                 log.atInfo().setMessage(()->"Transformations config string: " + transformerConfig).log();
             }
             var tr = new TrafficReplayer(topContext, uri, transformerConfig, authTransformer, params.userAgent,
-                    params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests);
+                    params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests, TARGET_CONNECTION_POOL_NAME);
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());

@@ -20,12 +20,14 @@ import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
 import javax.net.ssl.SSLException;
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -50,11 +52,12 @@ public class TrafficReplayerRunner {
             throws Throwable
     {
         runReplayer(numExpectedRequests,
-                rootContext -> {
+                (rootContext, targetConnectionPoolPrefix) -> {
                     try {
                         return new TrafficReplayer(rootContext, endpoint, null,
                                 new StaticAuthTransformerFactory("TEST"), null,
-                                true, 10, 10*1024);
+                                true, 10, 10*1024,
+                                targetConnectionPoolPrefix);
                     } catch (SSLException e) {
                         throw new RuntimeException(e);
                     }
@@ -63,7 +66,7 @@ public class TrafficReplayerRunner {
     }
 
     public static void runReplayer(int numExpectedRequests,
-                                   Function<IRootReplayerContext, TrafficReplayer> trafficReplayerFactory,
+                                   BiFunction<IRootReplayerContext, String, TrafficReplayer> trafficReplayerFactory,
                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
                                    Supplier<TestContext> rootContextSupplier,
                                    Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
@@ -80,8 +83,9 @@ public class TrafficReplayerRunner {
             int runNumber = runNumberRef.get();
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
+            String targetConnectionPoolPrefix = TrafficReplayer.TARGET_CONNECTION_POOL_NAME + " run: " + runNumber;
             try (var rootContext = rootContextSupplier.get()) {
-                var trafficReplayer = trafficReplayerFactory.apply(rootContext);
+                var trafficReplayer = trafficReplayerFactory.apply(rootContext, targetConnectionPoolPrefix);
                 runTrafficReplayer(trafficReplayer, ()->trafficSourceFactory.apply(rootContext),
                         (t) -> {
                     if (runNumber != runNumberRef.get()) {
@@ -133,7 +137,7 @@ public class TrafficReplayerRunner {
                 }
             } finally {
                 if (!skipFinally) {
-                    waitForWorkerThreadsToStop();
+                    waitForWorkerThreadsToStop(targetConnectionPoolPrefix);
                     log.info("Upon appending.... counter=" + counter.get() + " totalUnique=" +
                             totalUniqueEverReceived.get() + " runNumber=" + runNumber + "\n" +
                             completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")));
@@ -182,12 +186,12 @@ public class TrafficReplayerRunner {
         }
     }
 
-    private static void waitForWorkerThreadsToStop() throws InterruptedException {
+    private static void waitForWorkerThreadsToStop(String targetConnectionPoolName) throws InterruptedException {
         var sleepMs = 2;
         final var MAX_SLEEP_MS = 100;
         while (true) {
             var rootThreadGroup = getRootThreadGroup();
-            if (!foundClientPoolThread(rootThreadGroup)) {
+            if (!foundClientPoolThread(targetConnectionPoolName, rootThreadGroup)) {
                 log.info("No client connection pool threads, done polling.");
                 return;
             } else {
@@ -198,11 +202,11 @@ public class TrafficReplayerRunner {
         }
     }
 
-    private static boolean foundClientPoolThread(ThreadGroup group) {
+    private static boolean foundClientPoolThread(String targetConnectionPoolName, ThreadGroup group) {
         Thread[] threads = new Thread[group.activeCount()*2];
         var numThreads = group.enumerate(threads);
         for (int i=0; i<numThreads; ++i) {
-            if (threads[i].getName().startsWith(ClientConnectionPool.TARGET_CONNECTION_POOL_NAME)) {
+            if (threads[i].getName().startsWith(targetConnectionPoolName)) {
                 return true;
             }
         }
@@ -211,7 +215,7 @@ public class TrafficReplayerRunner {
         ThreadGroup[] groups = new ThreadGroup[numGroups * 2];
         numGroups = group.enumerate(groups, false);
         for (int i=0; i<numGroups; ++i) {
-            if (foundClientPoolThread(groups[i])) {
+            if (foundClientPoolThread(targetConnectionPoolName, groups[i])) {
                 return true;
             }
         }
