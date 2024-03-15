@@ -267,7 +267,7 @@ public class TrafficReplayer {
                 names = {"--lookahead-time-window"},
                 arity = 1,
                 description = "Number of seconds of data that will be buffered.")
-        int lookaheadTimeSeconds = 1;
+        int lookaheadTimeSeconds = 8;
         @Parameter(required = false,
                 names = {"--max-concurrent-requests"},
                 arity = 1,
