@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -111,29 +112,27 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                            public Consumer<RequestResponsePacketPair>
+                            onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                           @NonNull HttpMessageAndTimestamp request) {
                                 requestsReceived.incrementAndGet();
-                            }
-
-                            @Override
-                            public void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                           @NonNull RequestResponsePacketPair fullPair) {
-                                var sourceIdx = ctx.getReplayerRequestKey().getSourceRequestIndex();
-                                if (fullPair.completionStatus ==
-                                        RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
-                                    return;
-                                }
-                                fullPair.getTrafficStreamsHeld().stream()
-                                        .forEach(tsk -> tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
-                                if (aggregations.size() > sourceIdx) {
-                                    var oldVal = aggregations.set(sourceIdx, fullPair);
-                                    if (oldVal != null) {
-                                        Assertions.assertEquals(oldVal, fullPair);
+                                return fullPair -> {
+                                    var sourceIdx = ctx.getReplayerRequestKey().getSourceRequestIndex();
+                                    if (fullPair.completionStatus ==
+                                            RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
+                                        return;
                                     }
-                                } else{
-                                    aggregations.add(fullPair);
-                                }
+                                    fullPair.getTrafficStreamsHeld().stream()
+                                            .forEach(tsk -> tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
+                                    if (aggregations.size() > sourceIdx) {
+                                        var oldVal = aggregations.set(sourceIdx, fullPair);
+                                        if (oldVal != null) {
+                                            Assertions.assertEquals(oldVal, fullPair);
+                                        }
+                                    } else{
+                                        aggregations.add(fullPair);
+                                    }
+                                };
                             }
 
                             @Override

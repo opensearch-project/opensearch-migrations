@@ -599,38 +599,25 @@ public class TrafficReplayer {
         private ITrafficCaptureSource trafficCaptureSource;
 
         @Override
-        public void onRequestReceived(IReplayContexts.@NonNull IReplayerHttpTransactionContext ctx,
-                                      @NonNull HttpMessageAndTimestamp request) {
-        }
-
-        @Override
-        public void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                       @NonNull RequestResponsePacketPair rrPair) {
-
-            final var request = rrPair.requestData;
+        public Consumer<RequestResponsePacketPair>
+        onRequestReceived(IReplayContexts.@NonNull IReplayerHttpTransactionContext ctx,
+                                                                     @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             var allWorkFinishedForTransaction =
                     new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
                             ()->"waiting for work to be queued and run through TrafficStreamLimiter");
+            var requestPushFuture = new StringTrackableCompletableFuture<TransformedTargetRequestAndResponse>(
+                    new CompletableFuture<>(), () -> "Waiting to get response from target");
             var requestKey = ctx.getReplayerRequestKey();
-            liveTrafficStreamLimiter.queueWork(1, workItem -> {
-                var requestPushFuture = transformAndSendRequest(replayEngine, request, ctx);
-                requestPushFuture.map(f -> f.handle((v, t) -> {
-                            log.atInfo().setMessage(() -> "Done receiving captured stream for " + ctx +
-                                    ":" + rrPair.requestData).log();
-                            liveTrafficStreamLimiter.doneProcessing(workItem);
-                            log.atTrace().setMessage(() ->
-                                    "Summary response value for " + requestKey + " returned=" + v).log();
-                            return handleCompletedTransaction(ctx, rrPair, v, t);
-                        }), () -> "logging summary")
-                        .whenComplete((v,t)->{
-                            if (t != null) {
-                                allWorkFinishedForTransaction.future.completeExceptionally(t);
-                            } else {
-                                allWorkFinishedForTransaction.future.complete(null);
-                            }
-                        }, ()->"");
+            var workItem = liveTrafficStreamLimiter.queueWork(1, wi -> {
+                transformAndSendRequest(replayEngine, request, ctx).future.whenComplete((v,t)->{
+                    if (t != null) {
+                        requestPushFuture.future.completeExceptionally(t);
+                    } else {
+                        requestPushFuture.future.complete(v);
+                    }
+                });
             });
             if (!allWorkFinishedForTransaction.future.isDone()) {
                 log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
@@ -639,6 +626,23 @@ public class TrafficReplayer {
                     requestToFinalWorkFuturesMap.remove(requestKey);
                 }
             }
+
+            return rrPair ->
+                    requestPushFuture.map(f -> f.handle((v, t) -> {
+                                log.atInfo().setMessage(() -> "Done receiving captured stream for " + ctx +
+                                        ":" + rrPair.requestData).log();
+                                liveTrafficStreamLimiter.doneProcessing(workItem);
+                                log.atTrace().setMessage(() ->
+                                        "Summary response value for " + requestKey + " returned=" + v).log();
+                                return handleCompletedTransaction(ctx, rrPair, v, t);
+                            }), () -> "logging summary")
+                            .whenComplete((v,t)->{
+                                if (t != null) {
+                                    allWorkFinishedForTransaction.future.completeExceptionally(t);
+                                } else {
+                                    allWorkFinishedForTransaction.future.complete(null);
+                                }
+                            }, ()->"");
         }
 
         Void handleCompletedTransaction(@NonNull IReplayContexts.IReplayerHttpTransactionContext context,

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * This class consumes TrafficObservation objects, which will be predominated by reads and writes that
@@ -96,16 +97,18 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     @AllArgsConstructor
     private static class SpanWrappingAccumulationCallbacks {
         private final AccumulationCallbacks underlying;
-        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
-                                      @NonNull HttpMessageAndTimestamp request) {
+
+        public Consumer<RequestResponsePacketPair>
+        onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
+                                   @NonNull HttpMessageAndTimestamp request) {
             requestCtx.close();
-            underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
+            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
+            return rrpp -> {
+                rrpp.getResponseContext().close();
+                innerCallback.accept(rrpp);
+            };
         }
 
-        public void onFullDataReceived(@NonNull RequestResponsePacketPair rrpp) {
-            rrpp.getResponseContext().close();
-            underlying.onFullDataReceived(rrpp.getHttpTransactionContext(), rrpp);
-        }
 
         public void onConnectionClose(@NonNull Accumulation accum,
                                       RequestResponsePacketPair.ReconstructionStatus status,
@@ -399,7 +402,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         assert (!httpMessage.hasInProgressSegment());
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
-        listener.onRequestReceived(requestCtx, httpMessage);
+        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage);
+        rrPair.setFullDataContinuation(callbackTrackedData);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;
     }
@@ -408,7 +412,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         var rrPair = accumulation.getRrPair();
         rrPair.completionStatus = status;
-        listener.onFullDataReceived(rrPair);
+        rrPair.getFullDataContinuation().accept(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
     }

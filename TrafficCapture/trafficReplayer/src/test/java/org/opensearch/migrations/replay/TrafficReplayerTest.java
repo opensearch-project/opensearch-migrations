@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -156,18 +157,16 @@ class TrafficReplayerTest extends InstrumentationTest {
                 new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                          @NonNull HttpMessageAndTimestamp request) {
+                            public Consumer<RequestResponsePacketPair>
+                            onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                              @NonNull HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
-                            }
-
-                            @Override
-                            public void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                           @NonNull RequestResponsePacketPair fullPair) {
-                                var responseBytes = new ArrayList<byte[]>(fullPair.responseData.packetBytes);
-                                Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                                return fullPair -> {
+                                    var responseBytes = new ArrayList<byte[]>(fullPair.responseData.packetBytes);
+                                    Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                                };
                             }
 
                             @Override
@@ -213,18 +212,16 @@ class TrafficReplayerTest extends InstrumentationTest {
                                 "CapturedTrafficToHttpTransactionAccumulator that's being used in this unit test!",
                         new AccumulationCallbacks() {
                             @Override
-                            public void onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                            public Consumer<RequestResponsePacketPair>
+                            onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                           @NonNull HttpMessageAndTimestamp request) {
                                 var bytesList = request.stream().collect(Collectors.toList());
                                 byteArrays.add(bytesList);
                                 Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
-                            }
-
-                            @Override
-                            public void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                           @NonNull RequestResponsePacketPair fullPair) {
-                                var responseBytes = new ArrayList<byte[]>(fullPair.responseData.packetBytes);
-                                Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                                return fullPair -> {
+                                    var responseBytes = new ArrayList<byte[]>(fullPair.responseData.packetBytes);
+                                    Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(responseBytes));
+                                };
                             }
 
                             @Override
