@@ -17,7 +17,7 @@ public interface AccumulationCallbacks {
                                  @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
 
     void onConnectionClose(int channelInteractionNum,
-                           IReplayContexts.@NonNull IChannelKeyContext ctx, int channelSessionNumber,
+                           @NonNull IReplayContexts.IChannelKeyContext ctx, int channelSessionNumber,
                            RequestResponsePacketPair.ReconstructionStatus status,
                            @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
 

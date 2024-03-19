@@ -171,13 +171,13 @@ class TrafficReplayerTest extends InstrumentationTest {
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                IReplayContexts.@NonNull IChannelKeyContext ctx,
+                                                                @NonNull IReplayContexts.IChannelKeyContext ctx,
                                                                 @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
                             }
 
                             @Override
                             public void onConnectionClose(int channelInteractionNumber,
-                                                          IReplayContexts.@NonNull IChannelKeyContext ctx,
+                                                          @NonNull IReplayContexts.IChannelKeyContext ctx,
                                                           int channelSessionNumber,
                                                           RequestResponsePacketPair.ReconstructionStatus status,
                                                           @NonNull Instant when,

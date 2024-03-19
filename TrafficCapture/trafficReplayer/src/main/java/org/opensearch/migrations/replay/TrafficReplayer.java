@@ -600,8 +600,8 @@ public class TrafficReplayer {
 
         @Override
         public Consumer<RequestResponsePacketPair>
-        onRequestReceived(IReplayContexts.@NonNull IReplayerHttpTransactionContext ctx,
-                                                                     @NonNull HttpMessageAndTimestamp request) {
+        onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                          @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             var allWorkFinishedForTransaction =
@@ -691,7 +691,7 @@ public class TrafficReplayer {
 
         @Override
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                            IReplayContexts.@NonNull IChannelKeyContext ctx,
+                                            @NonNull IReplayContexts.IChannelKeyContext ctx,
                                             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             commitTrafficStreams(status, trafficStreamKeysBeingHeld);
         }
@@ -716,7 +716,7 @@ public class TrafficReplayer {
 
         @Override
         public void onConnectionClose(int channelInteractionNum,
-                                      IReplayContexts.@NonNull IChannelKeyContext ctx, int channelSessionNumber,
+                                      @NonNull IReplayContexts.IChannelKeyContext ctx, int channelSessionNumber,
                                       RequestResponsePacketPair.ReconstructionStatus status,
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);

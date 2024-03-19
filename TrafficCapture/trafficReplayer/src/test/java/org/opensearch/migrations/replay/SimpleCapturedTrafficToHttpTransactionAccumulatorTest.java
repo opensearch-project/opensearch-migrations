@@ -137,7 +137,7 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
 
                             @Override
                             public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
-                                                                IReplayContexts.@NonNull IChannelKeyContext ctx,
+                                                                @NonNull IReplayContexts.IChannelKeyContext ctx,
                                                                 @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {}
 
                             @Override
