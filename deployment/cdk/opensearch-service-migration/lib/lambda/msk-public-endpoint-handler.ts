@@ -1,6 +1,6 @@
 import {Context} from 'aws-lambda';
 import {DescribeClusterV2Command, UpdateConnectivityCommand, GetBootstrapBrokersCommand, KafkaClient} from "@aws-sdk/client-kafka";
-import {InvokeCommand, LambdaClient} from "@aws-sdk/client-lambda"
+import {InvokeCommand, InvokeCommandInput, LambdaClient} from "@aws-sdk/client-lambda"
 
 /**
  *
@@ -93,7 +93,7 @@ async function getBootstrapBrokers(): Promise<any> {
 
 async function invokeNextLambda(payload: any, functionName: string) {
     const lambdaClient = new LambdaClient({})
-    const params = {
+    const params : InvokeCommandInput = {
         FunctionName: functionName,
         Payload: payload,
         // Perform async request which does not wait on response
