@@ -55,7 +55,7 @@ export class NetworkStack extends Stack {
         }
         console.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
         if (uniqueAzPrivateSubnets.length < 2) {
-            throw new Error('Not enough AZs used for private subnets to meet 2 or 3 AZ requirement')
+            throw new Error(`Not enough AZs (${uniqueAzPrivateSubnets.length} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement`)
         }
     }
 

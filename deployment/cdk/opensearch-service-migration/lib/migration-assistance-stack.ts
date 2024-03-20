@@ -42,7 +42,7 @@ export class MigrationAssistanceStack extends Stack {
         }
     }
 
-    validateAndReturnVPCSubnets(vpc: IVpc, brokerNodeCount: number, azCount: number, specifiedSubnetIds?: string[]): string[] {
+    validateAndReturnVPCSubnetsForMSK(vpc: IVpc, brokerNodeCount: number, azCount: number, specifiedSubnetIds?: string[]): string[] {
         if (specifiedSubnetIds) {
             if (specifiedSubnetIds.length !== 2 && specifiedSubnetIds.length !== 3) {
                 throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected ${specifiedSubnetIds.length} subnet ids provided with 'mskSubnetIds'`)
@@ -73,7 +73,9 @@ export class MigrationAssistanceStack extends Stack {
         }
         let desiredSubnets
         if (uniqueAzPrivateSubnets.length >= azCount) {
-            desiredSubnets = uniqueAzPrivateSubnets.slice(0, azCount)
+            console.error(`Desired subnets are: ${uniqueAzPrivateSubnets.slice(0, azCount)}`)
+            desiredSubnets = uniqueAzPrivateSubnets.slice(0, azCount).sort()
+            console.error(`Desired subnets2 are: ${desiredSubnets}`)
         }
         else {
             throw new Error(`Not enough AZs available for private subnets in VPC to meet desired ${azCount} AZs. The AZ count can be specified with the 'mskAZCount' context option`)
@@ -98,7 +100,7 @@ export class MigrationAssistanceStack extends Stack {
 
         const brokerNodes = props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2
         const mskAZs = props.mskAZCount ? props.mskAZCount : 2
-        const subnets = this.validateAndReturnVPCSubnets(props.vpc, brokerNodes, mskAZs, props.mskSubnetIds)
+        const subnets = this.validateAndReturnVPCSubnetsForMSK(props.vpc, brokerNodes, mskAZs, props.mskSubnetIds)
 
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
