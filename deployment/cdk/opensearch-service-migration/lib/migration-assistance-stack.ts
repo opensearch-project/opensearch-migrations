@@ -73,7 +73,7 @@ export class MigrationAssistanceStack extends Stack {
         }
         let desiredSubnets
         if (uniqueAzPrivateSubnets.length >= azCount) {
-            desiredSubnets = uniqueAzPrivateSubnets.slice(0, azCount).sort()
+            desiredSubnets = uniqueAzPrivateSubnets.sort().slice(0, azCount)
         }
         else {
             throw new Error(`Not enough AZs available for private subnets in VPC to meet desired ${azCount} AZs. The AZ count can be specified with the 'mskAZCount' context option`)
