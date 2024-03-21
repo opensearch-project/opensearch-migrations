@@ -93,24 +93,25 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     @ResourceLock("TrafficReplayerRunner")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
-        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                response-> TestHttpServerContext.makeResponse(random, response));
-        var streamAndConsumer =
-                ExhaustiveTrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(), testSize, randomize);
-        var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
-        log.atInfo().setMessage(()->trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
-                .collect(Collectors.joining("\n"))).log();
+        try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+                response-> TestHttpServerContext.makeResponse(random, response))) {
+            var streamAndConsumer =
+                    ExhaustiveTrafficStreamGenerator.generateStreamAndSumOfItsTransactions(TestContext.noOtelTracking(), testSize, randomize);
+            var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
+            log.atInfo().setMessage(() -> trafficStreams.stream().map(TrafficStreamUtils::summarizeTrafficStream)
+                    .collect(Collectors.joining("\n"))).log();
 
-        loadStreamsToKafka(buildKafkaConsumer(),
-                Streams.concat(trafficStreams.stream(), Stream.of(SENTINEL_TRAFFIC_STREAM)));
-        TrafficReplayerRunner.runReplayer(streamAndConsumer.numHttpTransactions,
-                httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
-                () -> TestContext.noOtelTracking(),
-                rootContext -> new SentinelSensingTrafficSource(
-                        new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(), TEST_TOPIC_NAME,
-                                Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
-        httpServer.close();
-        log.info("done");
+            loadStreamsToKafka(buildKafkaConsumer(),
+                    Streams.concat(trafficStreams.stream(), Stream.of(SENTINEL_TRAFFIC_STREAM)));
+            TrafficReplayerRunner.runReplayer(streamAndConsumer.numHttpTransactions,
+                    httpServer.localhostEndpoint(), new CounterLimitedReceiverFactory(),
+                    () -> TestContext.noOtelTracking(),
+                    rootContext -> new SentinelSensingTrafficSource(
+                            new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(), TEST_TOPIC_NAME,
+                                    Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS))));
+            httpServer.close();
+            log.info("done");
+        }
     }
 
     @SneakyThrows

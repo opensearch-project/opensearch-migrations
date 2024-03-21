@@ -396,23 +396,25 @@ public class CapturedTrafficToHttpTransactionAccumulator {
      */
     private boolean handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
-        var rrPair = accumulation.getRrPair();
+        var rrPairWithCallback = accumulation.getRrPairWithCallback();
+        var rrPair = rrPairWithCallback.pair;
         var httpMessage = rrPair.requestData;
         assert (httpMessage != null);
         assert (!httpMessage.hasInProgressSegment());
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
         var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage);
-        rrPair.setFullDataContinuation(callbackTrackedData);
+        rrPairWithCallback.setFullDataContinuation(callbackTrackedData);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;
     }
 
     private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
-        var rrPair = accumulation.getRrPair();
+        var rrPairWithCallback = accumulation.getRrPairWithCallback();
+        var rrPair = rrPairWithCallback.pair;
         rrPair.completionStatus = status;
-        rrPair.getFullDataContinuation().accept(rrPair);
+        rrPairWithCallback.getFullDataContinuation().accept(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
     }

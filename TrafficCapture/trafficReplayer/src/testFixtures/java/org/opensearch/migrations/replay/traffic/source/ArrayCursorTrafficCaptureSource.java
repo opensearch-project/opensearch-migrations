@@ -16,61 +16,61 @@ import java.util.function.Supplier;
 
 @Slf4j
 public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSource {
-        final AtomicInteger readCursor;
-        final PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
-        Integer cursorHighWatermark;
-        ArrayCursorTrafficSourceContext arrayCursorTrafficSourceContext;
-        TestContext rootContext;
+    final AtomicInteger readCursor;
+    final PriorityQueue<TrafficStreamCursorKey> pQueue = new PriorityQueue<>();
+    Integer cursorHighWatermark;
+    ArrayCursorTrafficSourceContext arrayCursorTrafficSourceContext;
+    TestContext rootContext;
 
-        public ArrayCursorTrafficCaptureSource(TestContext rootContext,
-                                               ArrayCursorTrafficSourceContext arrayCursorTrafficSourceContext) {
-            var startingCursor = arrayCursorTrafficSourceContext.nextReadCursor.get();
-            log.info("startingCursor = "  + startingCursor);
-            this.readCursor = new AtomicInteger(startingCursor);
-            this.arrayCursorTrafficSourceContext = arrayCursorTrafficSourceContext;
-            cursorHighWatermark = startingCursor;
-            this.rootContext = rootContext;
-        }
-
-        @Override
-        public CompletableFuture<List<ITrafficStreamWithKey>>
-        readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
-            var idx = readCursor.getAndIncrement();
-            log.info("reading chunk from index="+idx);
-            if (arrayCursorTrafficSourceContext.trafficStreamsList.size() <= idx) {
-                return CompletableFuture.failedFuture(new EOFException());
-            }
-            var stream = arrayCursorTrafficSourceContext.trafficStreamsList.get(idx);
-            var key = new TrafficStreamCursorKey(rootContext, stream, idx);
-            synchronized (pQueue) {
-                pQueue.add(key);
-                cursorHighWatermark = idx;
-            }
-            return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamAndKey(stream, key)));
-        }
-
-        @Override
-        public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-            synchronized (pQueue) { // figure out if I need to do something more efficient later
-                log.info("Commit called for "+trafficStreamKey+" with pQueue.size="+pQueue.size());
-                var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;
-                int topCursor = pQueue.peek().arrayIndex;
-                var didRemove = pQueue.remove(trafficStreamKey);
-                if (!didRemove) {
-                    log.error("no item "+incomingCursor+" to remove from "+pQueue);
-                }
-                assert didRemove;
-                if (topCursor == incomingCursor) {
-                    topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex())
-                            .orElse(cursorHighWatermark+1); // most recent cursor was previously popped
-                    log.info("Commit called for "+trafficStreamKey+", and new topCursor="+topCursor);
-                    arrayCursorTrafficSourceContext.nextReadCursor.set(topCursor);
-                } else {
-                    log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
-                }
-            }
-            rootContext.channelContextManager.releaseContextFor(
-                    ((TrafficStreamCursorKey) trafficStreamKey).trafficStreamsContext.getChannelKeyContext());
-            return CommitResult.Immediate;
-        }
+    public ArrayCursorTrafficCaptureSource(TestContext rootContext,
+                                           ArrayCursorTrafficSourceContext arrayCursorTrafficSourceContext) {
+        var startingCursor = arrayCursorTrafficSourceContext.nextReadCursor.get();
+        log.info("startingCursor = "  + startingCursor);
+        this.readCursor = new AtomicInteger(startingCursor);
+        this.arrayCursorTrafficSourceContext = arrayCursorTrafficSourceContext;
+        cursorHighWatermark = startingCursor;
+        this.rootContext = rootContext;
     }
+
+    @Override
+    public CompletableFuture<List<ITrafficStreamWithKey>>
+    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
+        var idx = readCursor.getAndIncrement();
+        log.info("reading chunk from index="+idx);
+        if (arrayCursorTrafficSourceContext.trafficStreamsList.size() <= idx) {
+            return CompletableFuture.failedFuture(new EOFException());
+        }
+        var stream = arrayCursorTrafficSourceContext.trafficStreamsList.get(idx);
+        var key = new TrafficStreamCursorKey(rootContext, stream, idx);
+        synchronized (pQueue) {
+            pQueue.add(key);
+            cursorHighWatermark = idx;
+        }
+        return CompletableFuture.supplyAsync(()->List.of(new PojoTrafficStreamAndKey(stream, key)));
+    }
+
+    @Override
+    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
+        synchronized (pQueue) { // figure out if I need to do something more efficient later
+            log.info("Commit called for "+trafficStreamKey+" with pQueue.size="+pQueue.size());
+            var incomingCursor = ((TrafficStreamCursorKey)trafficStreamKey).arrayIndex;
+            int topCursor = pQueue.peek().arrayIndex;
+            var didRemove = pQueue.remove(trafficStreamKey);
+            if (!didRemove) {
+                log.error("no item "+incomingCursor+" to remove from "+pQueue);
+            }
+            assert didRemove;
+            if (topCursor == incomingCursor) {
+                topCursor = Optional.ofNullable(pQueue.peek()).map(k->k.getArrayIndex())
+                        .orElse(cursorHighWatermark+1); // most recent cursor was previously popped
+                log.info("Commit called for "+trafficStreamKey+", and new topCursor="+topCursor);
+                arrayCursorTrafficSourceContext.nextReadCursor.set(topCursor);
+            } else {
+                log.info("Commit called for "+trafficStreamKey+", but topCursor="+topCursor);
+            }
+        }
+        rootContext.channelContextManager.releaseContextFor(
+                ((TrafficStreamCursorKey) trafficStreamKey).trafficStreamsContext.getChannelKeyContext());
+        return CommitResult.Immediate;
+    }
+}

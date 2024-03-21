@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -7,6 +8,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 public class Accumulation {
 
@@ -20,8 +22,23 @@ public class Accumulation {
         ACCUMULATING_WRITES
     }
 
+    @AllArgsConstructor
+    static class RequestResponsePacketPairWithCallback {
+        @NonNull RequestResponsePacketPair pair;
+        private Consumer<RequestResponsePacketPair> fullDataContinuation = null;
+
+        void setFullDataContinuation(Consumer<RequestResponsePacketPair> v) {
+            assert fullDataContinuation == null;
+            fullDataContinuation = v;
+        }
+
+        Consumer<RequestResponsePacketPair> getFullDataContinuation() {
+            return fullDataContinuation;
+        }
+    }
+
     public final ITrafficStreamKey trafficChannelKey;
-    private RequestResponsePacketPair rrPair;
+    private RequestResponsePacketPairWithCallback rrPairWithCallback;
     AtomicLong newestPacketTimestampInMillis;
     State state;
     AtomicInteger numberOfResets;
@@ -56,13 +73,13 @@ public class Accumulation {
     }
 
     public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey,
-                                                                Instant originTimestamp) {
-        if (rrPair != null) {
-            return rrPair;
+                                                                            Instant originTimestamp) {
+        if (rrPairWithCallback != null) {
+            return rrPairWithCallback.pair;
         }
-        this.rrPair = new RequestResponsePacketPair(forTrafficStreamKey, originTimestamp,
+        var rrPair = new RequestResponsePacketPair(forTrafficStreamKey, originTimestamp,
                 startingSourceRequestIndex, getIndexOfCurrentRequest());
-        //this.rrPair.getRequestContext()
+        this.rrPairWithCallback = new RequestResponsePacketPairWithCallback(rrPair, null);
         return rrPair;
     }
 
@@ -71,7 +88,7 @@ public class Accumulation {
     }
 
     public boolean hasRrPair() {
-        return rrPair != null;
+        return rrPairWithCallback != null;
     }
 
     /**
@@ -80,8 +97,18 @@ public class Accumulation {
      * @return
      */
     public @NonNull RequestResponsePacketPair getRrPair() {
-        assert rrPair != null;
-        return rrPair;
+        assert rrPairWithCallback != null;
+        return rrPairWithCallback.pair;
+    }
+
+    /**
+     * It is illegal to call this when rrPair may be equal to null.  If the caller isn't sure,
+     * hasRrPair() should be called to first check.
+     * @return
+     */
+    public @NonNull RequestResponsePacketPairWithCallback getRrPairWithCallback() {
+        assert rrPairWithCallback != null;
+        return rrPairWithCallback;
     }
 
     public Instant getLastTimestamp() {
@@ -95,7 +122,7 @@ public class Accumulation {
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("Accumulation{");
-        sb.append("rrPair=").append(rrPair);
+        sb.append("rrPair=").append(rrPairWithCallback);
         sb.append(", state=").append(state);
         sb.append('}');
         return sb.toString();
@@ -115,7 +142,7 @@ public class Accumulation {
     public void resetForNextRequest() {
         numberOfResets.incrementAndGet();
         this.state = State.ACCUMULATING_READS;
-        this.rrPair = null;
+        this.rrPairWithCallback = null;
     }
 
     public void resetToIgnoreAndForgetCurrentRequest() {
@@ -123,6 +150,6 @@ public class Accumulation {
             --startingSourceRequestIndex;
         }
         this.state = State.WAITING_FOR_NEXT_READ_CHUNK;
-        this.rrPair = null;
+        this.rrPairWithCallback = null;
     }
 }

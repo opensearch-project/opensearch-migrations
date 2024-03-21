@@ -52,7 +52,7 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() throws Exception {
         underlyingSource.close();
     }
 }

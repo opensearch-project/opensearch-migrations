@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -50,7 +51,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     private final Semaphore readGate;
     @Getter
     private final Duration bufferTimeWindow;
-    private final Executor executorForBlockingActivity;
+    private final ExecutorService executorForBlockingActivity;
 
     public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying, Duration bufferTimeWindow) {
         this.underlyingSource = underlying;
@@ -186,8 +187,10 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() throws Exception {
         underlyingSource.close();
+        executorForBlockingActivity.shutdown();
+
     }
 
     @Override

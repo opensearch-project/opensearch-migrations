@@ -35,7 +35,6 @@ public class RequestResponsePacketPair {
     // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,
     // or just leave this null, in which case, the context from the trafficStreamKey should be used
     private IScopedInstrumentationAttributes requestOrResponseAccumulationContext;
-    private Consumer<RequestResponsePacketPair> fullDataContinuation = null;
 
     public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey, Instant sourceTimestamp,
                                      int startingSourceRequestIndex, int indexOfCurrentRequest) {
@@ -109,15 +108,6 @@ public class RequestResponsePacketPair {
                 trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size()-1)) {
             trafficStreamKeysBeingHeld.add(trafficStreamKey);
         }
-    }
-
-    void setFullDataContinuation(Consumer<RequestResponsePacketPair> v) {
-        assert fullDataContinuation == null;
-        fullDataContinuation = v;
-    }
-
-    Consumer<RequestResponsePacketPair> getFullDataContinuation() {
-        return fullDataContinuation;
     }
 
     private static final List<ITrafficStreamKey> emptyUnmodifiableList = List.of();

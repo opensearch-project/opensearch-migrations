@@ -98,7 +98,7 @@ public class ReplayEngine {
     // See the comment on totalCountOfScheduledTasksOutstanding.  We could do this on a per-thread basis and
     // join the results all via `networkSendOrchestrator.clientConnectionPool.eventLoopGroup`
     public boolean isWorkOutstanding() {
-        return totalCountOfScheduledTasksOutstanding.get() > 1;
+        return totalCountOfScheduledTasksOutstanding.get() > 0;
     }
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>

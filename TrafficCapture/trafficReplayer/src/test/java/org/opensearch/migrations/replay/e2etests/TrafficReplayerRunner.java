@@ -4,7 +4,6 @@ import com.google.common.base.Strings;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
@@ -20,7 +19,6 @@ import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
 import javax.net.ssl.SSLException;
 import java.net.URI;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Optional;
@@ -49,6 +47,17 @@ public class TrafficReplayerRunner {
                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
                                    Supplier<TestContext> rootContextSupplier,
                                    Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
+            throws Throwable {
+        runReplayer(numExpectedRequests, endpoint, tupleListenerSupplier, rootContextSupplier, trafficSourceFactory,
+                new TimeShifter(10 * 1000));
+    }
+
+    public static void runReplayer(int numExpectedRequests,
+                                   URI endpoint,
+                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
+                                   Supplier<TestContext> rootContextSupplier,
+                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
+                                   TimeShifter timeShifter)
             throws Throwable
     {
         runReplayer(numExpectedRequests,
@@ -62,14 +71,15 @@ public class TrafficReplayerRunner {
                         throw new RuntimeException(e);
                     }
                 },
-                tupleListenerSupplier, rootContextSupplier, trafficSourceFactory);
+                tupleListenerSupplier, rootContextSupplier, trafficSourceFactory, timeShifter);
     }
 
     public static void runReplayer(int numExpectedRequests,
                                    BiFunction<IRootReplayerContext, String, TrafficReplayer> trafficReplayerFactory,
                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
                                    Supplier<TestContext> rootContextSupplier,
-                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
+                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
+                                   TimeShifter timeShifter)
             throws Throwable {
         boolean skipFinally = false;
         AtomicInteger runNumberRef = new AtomicInteger();
@@ -84,8 +94,8 @@ public class TrafficReplayerRunner {
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
             String targetConnectionPoolPrefix = TrafficReplayer.TARGET_CONNECTION_POOL_NAME + " run: " + runNumber;
-            try (var rootContext = rootContextSupplier.get()) {
-                var trafficReplayer = trafficReplayerFactory.apply(rootContext, targetConnectionPoolPrefix);
+            try (var rootContext = rootContextSupplier.get();
+                var trafficReplayer = trafficReplayerFactory.apply(rootContext, targetConnectionPoolPrefix)) {
                 runTrafficReplayer(trafficReplayer, ()->trafficSourceFactory.apply(rootContext),
                         (t) -> {
                     if (runNumber != runNumberRef.get()) {
@@ -107,7 +117,7 @@ public class TrafficReplayerRunner {
 
                     var c = counter.incrementAndGet();
                     log.info("counter="+c+" totalUnique="+totalUnique+" runNum="+runNumber+" key="+key);
-                });
+                }, timeShifter);
                 // if this finished running without an exception, we need to stop the loop
                 break;
             } catch (TrafficReplayer.TerminationException e) {
@@ -175,14 +185,15 @@ public class TrafficReplayerRunner {
 
     private static void runTrafficReplayer(TrafficReplayer trafficReplayer,
                                            Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
-                                           Consumer<SourceTargetCaptureTuple> tupleReceiver) throws Exception {
+                                           Consumer<SourceTargetCaptureTuple> tupleReceiver,
+                                           TimeShifter timeShifter) throws Exception {
         log.info("Starting a new replayer and running it");
 
         try (var os = new NullOutputStream();
              var trafficSource = captureSourceSupplier.get();
              var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
             trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
-                    new TimeShifter(10 * 1000), tupleReceiver);
+                    timeShifter, tupleReceiver);
         }
     }
 

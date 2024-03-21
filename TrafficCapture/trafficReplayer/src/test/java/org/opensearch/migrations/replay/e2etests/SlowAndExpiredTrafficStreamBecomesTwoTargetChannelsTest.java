@@ -95,11 +95,11 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         var arraySource = new ArrayCursorTrafficCaptureSource(rc, new ArrayCursorTrafficSourceContext(trafficStreams));
         var trafficSource = new BlockingTrafficSource(arraySource, Duration.ofSeconds(SPACING_SECONDS));
 
-        try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200), responseTracker)) {
+        try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200), responseTracker);
             var replayer = new TrafficReplayer(rc, httpServer.localhostEndpoint(), null,
                     new StaticAuthTransformerFactory("TEST"), null,
                     true, 1, 1,
-                    "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest");
+                    "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest")) {
             new Thread(()->responseTracker.onCountDownFinished(Duration.ofSeconds(10),
                     ()->replayer.shutdown(null).join()));
             replayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofMillis(1),

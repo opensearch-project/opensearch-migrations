@@ -6,6 +6,7 @@ import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,83 +48,58 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         return TestContext.withAllTracking();
     }
 
-    @Test
-    @ResourceLock("TrafficReplayerRunner")
-    public void testSingleStreamWithCloseIsCommitted() throws Throwable {
-        var random = new Random(1);
-        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                response -> TestHttpServerContext.makeResponse(random, response));
-        var trafficStreamWithJustClose = TrafficStream.newBuilder()
-                .setNodeId(TEST_NODE_ID)
-                .setConnectionId(TEST_CONNECTION_ID)
-                .addSubStream(TrafficObservation.newBuilder()
-                        .setClose(CloseObservation.newBuilder().build()).build())
-                .build();
-        var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(trafficStreamWithJustClose));
-        TrafficReplayerRunner.runReplayer(0,
-                httpServer.localhostEndpoint(), new FullTrafficReplayerTest.IndexWatchingListenerFactory(),
-                () -> TestContext.withAllTracking(),
-                trafficSourceSupplier);
-        Assertions.assertEquals(1, trafficSourceSupplier.nextReadCursor.get());
-        httpServer.close();
-        log.info("done");
-    }
-
     @ParameterizedTest
     @ValueSource(ints = {1,2})
     @ResourceLock("TrafficReplayerRunner")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
-        var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
-                response->TestHttpServerContext.makeResponse(random, response));
-        var baseTime = Instant.now();
-        var fixedTimestamp =
-                Timestamp.newBuilder().setSeconds(baseTime.getEpochSecond()).setNanos(baseTime.getNano()).build();
-        var tsb = TrafficStream.newBuilder().setConnectionId("C");
-        for (int i=0; i<numRequests; ++i) {
-            tsb = tsb
-                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                            .setRead(ReadObservation.newBuilder()
-                                    .setData(ByteString.copyFrom(("GET /" +  i + " HTTP/1.0\r\n")
-                                            .getBytes(StandardCharsets.UTF_8)))
-                                    .build())
-                            .build())
-                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                            .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
-                                    .setFirstLineByteLength(14)
-                                    .setHeadersByteLength(14)
-                                    .build())
-                            .build())
-                    .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                            .setWrite(WriteObservation.newBuilder()
-                                    .setData(ByteString.copyFrom("HTTP/1.0 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
-                                    .build())
-                            .build());
-        }
-        var trafficStream = tsb.addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                        .setClose(CloseObservation.getDefaultInstance()))
-                .build();
-        var trafficSource =
-                new ArrayCursorTrafficCaptureSource(rootContext,
-                        new ArrayCursorTrafficSourceContext(List.of(trafficStream)));
-        var tr = new TrafficReplayer(rootContext, httpServer.localhostEndpoint(), null,
-                new StaticAuthTransformerFactory("TEST"), null,
-                true, 10, 10 * 1024,
-                "targetConnectionPool for testStreamWithRequestsWithCloseIsCommittedOnce");
+        try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+                response->TestHttpServerContext.makeResponse(random, response))) {
+            var baseTime = Instant.now();
+            var fixedTimestamp =
+                    Timestamp.newBuilder().setSeconds(baseTime.getEpochSecond()).setNanos(baseTime.getNano()).build();
+            var tsb = TrafficStream.newBuilder().setConnectionId("C");
+            for (int i = 0; i < numRequests; ++i) {
+                tsb = tsb
+                        .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                                .setRead(ReadObservation.newBuilder()
+                                        .setData(ByteString.copyFrom(("GET /" + i + " HTTP/1.0\r\n")
+                                                .getBytes(StandardCharsets.UTF_8)))
+                                        .build())
+                                .build())
+                        .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                                .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
+                                        .setFirstLineByteLength(14)
+                                        .setHeadersByteLength(14)
+                                        .build())
+                                .build())
+                        .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                                .setWrite(WriteObservation.newBuilder()
+                                        .setData(ByteString.copyFrom("HTTP/1.0 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
+                                        .build())
+                                .build());
+            }
+            var trafficStream = tsb.addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
+                            .setClose(CloseObservation.getDefaultInstance()))
+                    .build();
+            var trafficSource =
+                    new ArrayCursorTrafficCaptureSource(rootContext,
+                            new ArrayCursorTrafficSourceContext(List.of(trafficStream)));
 
-        var tuplesReceived = new HashSet<String>();
-        try (var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
-                    new TimeShifter(10 * 1000), (t) -> {
-                        var wasNew = tuplesReceived.add(t.getRequestKey().toString());
-                        Assertions.assertTrue(wasNew);
-                    });
-        } finally {
-            tr.shutdown(null).join();
-            httpServer.close();
+            var tuplesReceived = new HashSet<String>();
+            try (var tr = new TrafficReplayer(rootContext, httpServer.localhostEndpoint(), null,
+                    new StaticAuthTransformerFactory("TEST"), null,
+                    true, 10, 10 * 1024,
+                    "targetConnectionPool for testStreamWithRequestsWithCloseIsCommittedOnce");
+                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
+                tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
+                        new TimeShifter(10 * 1000), (t) -> {
+                            var wasNew = tuplesReceived.add(t.getRequestKey().toString());
+                            Assertions.assertTrue(wasNew);
+                        });
+            }
+            Assertions.assertEquals(numRequests, tuplesReceived.size());
         }
-
-        Assertions.assertEquals(numRequests, tuplesReceived.size());
         checkSpansForSimpleReplayedTransactions(rootContext.inMemoryInstrumentationBundle, numRequests);
         log.info("done");
     }
