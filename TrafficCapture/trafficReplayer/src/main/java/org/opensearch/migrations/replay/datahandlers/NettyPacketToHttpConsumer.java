@@ -13,7 +13,6 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
@@ -231,11 +230,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "C");
         pipeline.addLast(new HttpResponseDecoder());
-        addLoggingHandlerLast(pipeline, "D");
-        // TODO - switch this out to use less memory.
-        // We only need to know when the response has been fully received, not the contents
-        // since we're already logging those in the sniffer earlier in the pipeline.
-        pipeline.addLast(new HttpObjectAggregator(1024 * 1024));
         addLoggingHandlerLast(pipeline, "D");
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "E");
