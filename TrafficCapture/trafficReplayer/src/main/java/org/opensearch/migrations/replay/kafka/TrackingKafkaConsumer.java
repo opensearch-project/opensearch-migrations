@@ -127,7 +127,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         if (partitions.isEmpty()) {
-            log.atInfo().setMessage(() -> this + " revoked no partitions.").log();
+            log.atDebug().setMessage(() -> this + " revoked no partitions.").log();
             return;
         }
 
@@ -143,7 +143,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             kafkaRecordsLeftToCommitEventually.set(partitionToOffsetLifecycleTrackerMap.values().stream()
                     .mapToInt(OffsetLifecycleTracker::size).sum());
             kafkaRecordsReadyToCommit.set(!nextSetOfCommitsMap.values().isEmpty());
-            log.atInfo().setMessage(() -> this + " partitions revoked for " + partitions.stream()
+            log.atWarn().setMessage(() -> this + " partitions revoked for " + partitions.stream()
                     .map(String::valueOf).collect(Collectors.joining(","))).log();
         }
     }
