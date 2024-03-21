@@ -1,5 +1,5 @@
 import {Construct} from "constructs";
-import {RemovalPolicy, Stack, StackProps} from "aws-cdk-lib";
+import {Stack, StackProps} from "aws-cdk-lib";
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -182,7 +182,6 @@ export class StackComposer {
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
-
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
@@ -342,7 +341,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            this.addDependentStacks(otelCollectorStack, [networkStack])
+            this.addDependentStacks(otelCollectorStack, [networkStack, migrationStack])
             this.stacks.push(otelCollectorStack)
         }
 
