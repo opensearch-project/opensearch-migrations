@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.traffic.generator;
 
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
@@ -23,7 +23,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 @Slf4j
-public class TrafficStreamGenerator {
+public class ExhaustiveTrafficStreamGenerator {
 
     private static final int CLASSIFY_COMPONENT_INT_SHIFT = 255;
 
@@ -80,7 +80,7 @@ public class TrafficStreamGenerator {
         return ((ot1.intValue) * CLASSIFY_COMPONENT_INT_SHIFT) + ot2.intValue;
     }
 
-    static String classificationToString(int c) {
+    public static String classificationToString(int c) {
         int left = c;
         int end = c % CLASSIFY_COMPONENT_INT_SHIFT;
         left = left / CLASSIFY_COMPONENT_INT_SHIFT;
@@ -133,7 +133,7 @@ public class TrafficStreamGenerator {
         });
     }
 
-    static int classifyTrafficStream(HashSet<Integer> possibilitiesLeftToTest, TrafficStream[] trafficStreams) {
+    public static int classifyTrafficStream(HashSet<Integer> possibilitiesLeftToTest, TrafficStream[] trafficStreams) {
         int counter = 0;
         ObservationType previousObservationType = ObservationType.Read;
         for (var ts : trafficStreams) {
@@ -156,9 +156,9 @@ public class TrafficStreamGenerator {
     }
 
     private static void addCommands(Random r, double flushLikelihood, int numPacketCommands,
-                                    List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> outgoingCommands,
+                                    List<ObservationDirective> outgoingCommands,
                                     List<Integer> outgoingSizes,
-                                    Supplier<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> directiveSupplier) {
+                                    Supplier<ObservationDirective> directiveSupplier) {
         int aggregateBufferSize = 0;
         for (var cmdCount = new AtomicInteger(numPacketCommands); cmdCount.get()>0;) {
             var cmd = getFlushOrSupply(r, flushLikelihood, cmdCount, directiveSupplier);
@@ -168,11 +168,11 @@ public class TrafficStreamGenerator {
         outgoingSizes.add(aggregateBufferSize);
     }
 
-    private static SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective
+    private static ObservationDirective
     getFlushOrSupply(Random r, double flushLikelihood, AtomicInteger i,
-                     Supplier<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> supplier) {
+                     Supplier<ObservationDirective> supplier) {
         return supplyRandomly(r, flushLikelihood,
-                () -> SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.flush(),
+                () -> ObservationDirective.flush(),
                 () -> {
                     i.decrementAndGet();
                     return supplier.get();
@@ -185,26 +185,26 @@ public class TrafficStreamGenerator {
 
     private static void fillCommandsAndSizes(Random r, double cancelRequestLikelihood, double flushLikelihood,
                                              int bufferBound,
-                                             List<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands,
+                                             List<ObservationDirective> commands,
                                              List<Integer> sizes) {
         var numTransactions = r.nextInt(MAX_COMMANDS_IN_CONNECTION);
         for (int i=numTransactions; i>0; --i) {
             addCommands(r, flushLikelihood, r.nextInt(MAX_READS_IN_REQUEST)+1, commands, sizes,
-                    ()-> SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.read(r.nextInt(bufferBound)));
+                    ()-> ObservationDirective.read(r.nextInt(bufferBound)));
             if (r.nextDouble() <= cancelRequestLikelihood) {
-                commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.cancelOffload());
+                commands.add(ObservationDirective.cancelOffload());
                 ++i; // compensate to get the right number of requests in the loop
                 sizes.remove(sizes.size()-1); // This won't show up as a request, so don't propagate it
                 continue;
             }
             if (r.nextDouble() <= flushLikelihood) {
-                commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.flush());
+                commands.add(ObservationDirective.flush());
             }
-            commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.eom());
+            commands.add(ObservationDirective.eom());
             addCommands(r, flushLikelihood, r.nextInt(MAX_WRITES_IN_RESPONSE)+1, commands, sizes,
-                    ()-> SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.write(r.nextInt(bufferBound)));
+                    ()-> ObservationDirective.write(r.nextInt(bufferBound)));
             if (r.nextDouble() <= flushLikelihood) {
-                commands.add(SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective.flush());
+                commands.add(ObservationDirective.flush());
             }
         }
     }
@@ -212,7 +212,7 @@ public class TrafficStreamGenerator {
     @SneakyThrows
     private static TrafficStream[]
     fillCommandsAndSizesForSeed(TestContext rootContext, long rSeed, AtomicInteger uniqueIdCounter,
-                                ArrayList<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective> commands,
+                                ArrayList<ObservationDirective> commands,
                                 ArrayList<Integer> sizes) {
         var r2 = new Random(rSeed);
         var bufferSize = r2.nextInt(MAX_BUFFER_SIZE-MIN_BUFFER_SIZE) + MIN_BUFFER_SIZE;
@@ -223,7 +223,7 @@ public class TrafficStreamGenerator {
                 .log();
         var flushLikelihood = Math.pow(r2.nextDouble(),2.0);
         fillCommandsAndSizes(r2, flushLikelihood/4, flushLikelihood, bufferBound, commands, sizes);
-        return SimpleCapturedTrafficToHttpTransactionAccumulatorTest.makeTrafficStreams(bufferSize, (int) rSeed,
+        return TrafficStreamGenerator.makeTrafficStream(bufferSize, (int) rSeed,
                 uniqueIdCounter, commands, rootContext);
     }
 
@@ -231,7 +231,7 @@ public class TrafficStreamGenerator {
      * track all possibilities of start + end per a TrafficStream.
      * notice that one created sequence of streams may have a number of different classifications of streams
      */
-    static HashSet<Integer> getPossibleTests() {
+    public static HashSet<Integer> getPossibleTests() {
         // these transitions are impossible to do within one TrafficStream since segmented reads are only required
         // when the span multiple records
         var impossibleTransitions = Map.of(
@@ -268,7 +268,7 @@ public class TrafficStreamGenerator {
         public final int numHttpTransactions;
     }
 
-    static StreamAndExpectedSizes
+    public static StreamAndExpectedSizes
     generateStreamAndSumOfItsTransactions(TestContext rootContext, int count, boolean randomize) {
         var generatedCases = count > 0 ?
                 generateRandomTrafficStreamsAndSizes(rootContext, IntStream.range(0, count)) :
@@ -288,17 +288,29 @@ public class TrafficStreamGenerator {
         return new StreamAndExpectedSizes(aggregatedStreams, numExpectedRequests);
     }
 
+    @AllArgsConstructor
+    public static class TransactionSizesPair {
+        public final int[] requestSizes;
+        public final int[] responseSizes;
+    }
+
+    public static TransactionSizesPair unzipRequestResponseSizes(List<Integer> collatedList) {
+        return new TransactionSizesPair
+                (IntStream.range(0,collatedList.size()).filter(i->(i%2)==0).map(i->collatedList.get(i)).toArray(),
+                        IntStream.range(0,collatedList.size()).filter(i->(i%2)==1).map(i->collatedList.get(i)).toArray());
+    }
+
     public static Stream<RandomTrafficStreamAndTransactionSizes>
     generateRandomTrafficStreamsAndSizes(TestContext rootContext, IntStream seedStream) {
         var uniqueIdCounter = new AtomicInteger();
         return seedStream.mapToObj(rSeed->{
-            var commands = new ArrayList<SimpleCapturedTrafficToHttpTransactionAccumulatorTest.ObservationDirective>();
+            var commands = new ArrayList<ObservationDirective>();
             var sizes = new ArrayList<Integer>();
             var trafficStreams = fillCommandsAndSizesForSeed(rootContext, rSeed, uniqueIdCounter, commands, sizes);
 
-            var splitSizes = SimpleCapturedTrafficToHttpTransactionAccumulatorTest.unzipRequestResponseSizes(sizes);
+            var splitSizes = unzipRequestResponseSizes(sizes);
             return new RandomTrafficStreamAndTransactionSizes(rSeed, trafficStreams,
-                    splitSizes._1, splitSizes._2);
+                    splitSizes.requestSizes, splitSizes.responseSizes);
         }).filter(o->o!=null);
     }
 

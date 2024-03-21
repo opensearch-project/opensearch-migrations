@@ -1,12 +1,10 @@
 package org.opensearch.migrations.replay;
 
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.slf4j.event.Level;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -19,6 +17,7 @@ public class TimeShifter {
     private AtomicReference<Instant> systemTimeStart = new AtomicReference<>();
 
     private final double rateMultiplier;
+    private final Duration realtimeOffset;
 
 
     public TimeShifter() {
@@ -26,7 +25,12 @@ public class TimeShifter {
     }
 
     public TimeShifter(double rateMultiplier) {
+        this(rateMultiplier, Duration.ZERO);
+    }
+
+    public TimeShifter(double rateMultiplier, Duration realtimeOffset) {
         this.rateMultiplier = rateMultiplier;
+        this.realtimeOffset = realtimeOffset;
     }
 
     public void setFirstTimestamp(Instant sourceTime) {
@@ -44,18 +48,20 @@ public class TimeShifter {
         if (sourceTimeStart.get() == null) {
             throw new IllegalStateException("setFirstTimestamp has not yet been called");
         }
-        // realtime = systemTimeStart + ((sourceTime-sourceTimeStart) / rateMultiplier)
+        // realtime = systemTimeStart + ((sourceTime-sourceTimeStart) / rateMultiplier) + targetOffset
         return systemTimeStart.get()
-            .plus(Duration.ofMillis((long)
-                (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)));
+                .plus(Duration.ofMillis((long)
+                        (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)))
+                .plus(realtimeOffset);
     }
 
     Optional<Instant> transformRealTimeToSourceTime(Instant realTime) {
         return Optional.ofNullable(sourceTimeStart.get())
             .map(start ->
-                // sourceTime = sourceTimeStart + (realTime-systemTimeStart) * rateMultiplier
+                // sourceTime = sourceTimeStart + (realTime-systemTimeStart-targetOffset) * rateMultiplier
                 start.plus(Duration.ofMillis((long)
-                    (Duration.between(systemTimeStart.get(), realTime).toMillis() * rateMultiplier))));
+                    (Duration.between(systemTimeStart.get(),
+                            realTime.minus(realtimeOffset)).toMillis() * rateMultiplier))));
     }
 
     public double maxRateMultiplier() {

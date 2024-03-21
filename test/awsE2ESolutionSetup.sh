@@ -179,8 +179,6 @@ read -r -d '' cdk_context << EOM
     "engineVersion": "OS_2.9",
     "domainName": "opensearch-cluster-aws-integ",
     "dataNodeCount": 2,
-    "availabilityZoneCount": 2,
-    "mskBrokerNodeCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "trafficReplayerExtraArgs": "--speedup-factor 10.0",

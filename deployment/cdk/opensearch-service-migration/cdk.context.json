@@ -4,7 +4,6 @@
     "engineVersion": "OS_2.9",
     "domainName": "demo-opensearch-cluster",
     "dataNodeCount": 2,
-    "availabilityZoneCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "artifactBucketRemovalPolicy": "DESTROY",

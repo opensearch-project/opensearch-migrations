@@ -21,6 +21,8 @@ import java.util.function.Consumer;
  * data sets. or in cases where the worst-case performance (needing to hold space for all the items)
  * would be common.
  *
+ * TODO - replace this with a PriorityQueue
+ *
  * @param <T>
  */
 @Slf4j

@@ -15,6 +15,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+/**
+ * This class is responsible for managing the BufferedFlowController, which is responsible for releasing
+ * backpressure on the traffic source so that this class can schedule those requests to run on a
+ * RequestSenderOrchestrator at the appropriate time.  This class uses a TimeShifter, the current time,
+ * progress of tasks, and periods of inactivity, to move determine
+ * from the current time, what the frontier time value should be for the traffic source
+ */
 @Slf4j
 public class ReplayEngine {
     public static final int BACKPRESSURE_UPDATE_FREQUENCY = 8;
@@ -91,7 +98,7 @@ public class ReplayEngine {
     // See the comment on totalCountOfScheduledTasksOutstanding.  We could do this on a per-thread basis and
     // join the results all via `networkSendOrchestrator.clientConnectionPool.eventLoopGroup`
     public boolean isWorkOutstanding() {
-        return totalCountOfScheduledTasksOutstanding.get() > 1;
+        return totalCountOfScheduledTasksOutstanding.get() > 0;
     }
 
     private <T> DiagnosticTrackableCompletableFuture<String, T>
@@ -147,13 +154,14 @@ public class ReplayEngine {
 
     public DiagnosticTrackableCompletableFuture<String, Void>
     closeConnection(int channelInteractionNum,
-                    IReplayContexts.IChannelKeyContext ctx, Instant timestamp) {
+                    IReplayContexts.IChannelKeyContext ctx,
+                    int channelSessionNumber, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
         var channelKey = ctx.getChannelKey();
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
-        var future = networkSendOrchestrator.scheduleClose(ctx, channelInteractionNum, atTime);
+        var future = networkSendOrchestrator.scheduleClose(ctx, channelSessionNumber, channelInteractionNum, atTime);
         return hookWorkFinishingUpdates(future, timestamp, channelKey, label);
     }
 

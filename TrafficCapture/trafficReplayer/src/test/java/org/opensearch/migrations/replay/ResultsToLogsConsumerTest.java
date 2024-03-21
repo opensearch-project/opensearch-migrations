@@ -92,9 +92,6 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TestContext")
     public void testOutputterWithNulls() throws IOException {
-
-        var urk = new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
-                rootContext::createTrafficStreamContextForTest), 0, 0);
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {

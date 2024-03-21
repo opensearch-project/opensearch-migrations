@@ -11,7 +11,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
-public interface ITrafficCaptureSource extends Closeable {
+public interface ITrafficCaptureSource extends AutoCloseable {
 
     enum CommitResult {
         Immediate, AfterNextRead, BlockedByOtherCommits, Ignored
@@ -22,7 +22,7 @@ public interface ITrafficCaptureSource extends Closeable {
 
     CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
 
-    default void close() throws IOException {}
+    default void close() throws Exception {}
 
     /**
      * Keep-alive call to be used by the BlockingTrafficSource to keep this connection alive if

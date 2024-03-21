@@ -6,23 +6,20 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Consumer;
 
 public interface AccumulationCallbacks {
-    void onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                           @NonNull HttpMessageAndTimestamp request);
-
-    void onFullDataReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                            @NonNull RequestResponsePacketPair rrpp);
+    Consumer<RequestResponsePacketPair> onRequestReceived(@NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                                          @NonNull HttpMessageAndTimestamp request);
 
     void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
                                  @NonNull IReplayContexts.IChannelKeyContext ctx,
                                  @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
 
-    void onConnectionClose(int channelInteractionNumber,
-                           @NonNull IReplayContexts.IChannelKeyContext ctx,
+    void onConnectionClose(int channelInteractionNum,
+                           @NonNull IReplayContexts.IChannelKeyContext ctx, int channelSessionNumber,
                            RequestResponsePacketPair.ReconstructionStatus status,
-                           @NonNull Instant when,
-                           @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
+                           @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld);
 
     void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx);
 }

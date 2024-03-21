@@ -268,7 +268,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
-        messageContext.addException(cause);
+        messageContext.addCaughtException(cause);
         httpDecoderChannel.close();
         super.exceptionCaught(ctx, cause);
     }

@@ -1,8 +1,8 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ChannelTask;
@@ -13,6 +13,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.slf4j.event.Level;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -21,7 +22,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -38,7 +38,8 @@ public class RequestSenderOrchestrator {
     public <T> DiagnosticTrackableCompletableFuture<String, T>
     scheduleWork(IReplayContexts.IReplayerHttpTransactionContext ctx, Instant timestamp,
                  Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
-        var connectionSession = clientConnectionPool.getCachedSession(ctx.getChannelKeyContext(), false);
+        var connectionSession = clientConnectionPool.getCachedSession(ctx.getChannelKeyContext(),
+                ctx.getReplayerRequestKey().sourceRequestIndexSessionIdentifier);
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<T>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm processing work has finished");
@@ -71,13 +72,19 @@ public class RequestSenderOrchestrator {
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for final aggregated response");
         log.atDebug().setMessage(()->"Scheduling request for "+requestKey+" at start time "+start).log();
-        return asynchronouslyInvokeRunnableToSetupFuture(ctx.getLogicalEnclosingScope(),
+        // When a socket connection is attempted could be more precise.
+        // Ideally, we would match the relative timestamps of when connections were being initiated
+        // as well as the period between connection and the first bytes sent.  However, this code is a
+        // bit too cavalier.  It should be tightened at some point.
+        return asynchronouslyInvokeRunnable(ctx.getLogicalEnclosingScope(),
+                requestKey.sourceRequestIndexSessionIdentifier,
                 requestKey.getReplayerRequestIndex(), false, finalTunneledResponse,
-                channelFutureAndRequestSchedule-> scheduleSendOnConnectionReplaySession(ctx,
+                channelFutureAndRequestSchedule -> scheduleSendRequestOnConnectionReplaySession(ctx,
                         channelFutureAndRequestSchedule, finalTunneledResponse, start, interval, packets));
     }
 
     public StringTrackableCompletableFuture<Void> scheduleClose(IReplayContexts.IChannelKeyContext ctx,
+                                                                int sessionNumber,
                                                                 int channelInteractionNum,
                                                                 Instant timestamp) {
         var channelKey = ctx.getChannelKey();
@@ -85,8 +92,8 @@ public class RequestSenderOrchestrator {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
                         ()->"waiting for final signal to confirm close has finished");
-        log.atDebug().setMessage(()->"Scheduling CLOSE for "+channelInteraction+" at time "+timestamp).log();
-        asynchronouslyInvokeRunnableToSetupFuture(ctx, channelInteractionNum, true,
+        log.atDebug().setMessage(() -> "Scheduling CLOSE for " + channelInteraction + " at time " + timestamp).log();
+        asynchronouslyInvokeRunnable(ctx, sessionNumber, channelInteractionNum, true,
                 finalTunneledResponse,
                 channelFutureAndRequestSchedule->
                     scheduleOnConnectionReplaySession(ctx, channelInteractionNum,
@@ -99,73 +106,61 @@ public class RequestSenderOrchestrator {
         return finalTunneledResponse;
     }
 
+    /**
+     * This method sets up the onSessionCallback to run in the order defined by channeInteractionNumber.  The
+     * onSessionCallback task passed will be called only after all callbacks for previous channelInteractionNumbers
+     * have been called.  This method isn't concerned with scheduling items, that would be left up to the callback.
+     */
     private <T> DiagnosticTrackableCompletableFuture<String, T>
-    asynchronouslyInvokeRunnableToSetupFuture(IReplayContexts.IChannelKeyContext ctx, int channelInteractionNumber,
-                                              boolean ignoreIfChannelNotPresent,
-                                              DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
-                                              Consumer<ConnectionReplaySession> successFn) {
-        var channelFutureAndScheduleFuture =
-                clientConnectionPool.submitEventualSessionGet(ctx, ignoreIfChannelNotPresent);
-        channelFutureAndScheduleFuture.addListener(submitFuture->{
-            if (!submitFuture.isSuccess()) {
-                log.atError().setCause(submitFuture.cause())
-                        .setMessage(()->ctx + " unexpected issue found from a scheduled task").log();
-                finalTunneledResponse.future.completeExceptionally(submitFuture.cause());
-            } else {
-                log.atTrace().setMessage(()->ctx + " on the channel's thread... " +
-                        "getting a ConnectionReplaySession for it").log();
-                var channelFutureAndRequestSchedule = ((ConnectionReplaySession) submitFuture.get());
-                if (channelFutureAndRequestSchedule == null) {
-                    log.atWarn().setMessage(()->"channelFutureAndRequestSchedule returned==null.  " +
-                            "Not running the successFn for " + ctx).log();
-                    finalTunneledResponse.future.complete(null);
-                    return;
-                }
-                channelFutureAndRequestSchedule.getChannelFutureFuture()
-                        .map(channelFutureGetAttemptFuture->channelFutureGetAttemptFuture
-                                        .thenAccept(v->{
-                                            log.atTrace().setMessage(()->ctx + " in submitFuture(success) and " +
-                                                    "scheduling the task for " + finalTunneledResponse.toString()).log();
-                                            assert v.channel() ==
-                                                    channelFutureAndRequestSchedule.getChannelFutureFuture().future
-                                                            .getNow(null).channel();
-                                            runAfterChannelSetup(channelFutureAndRequestSchedule,
-                                                    finalTunneledResponse,
-                                                    replaySession -> {
-                                                        log.atTrace().setMessage(()->"adding work item at slot " +
-                                                                channelInteractionNumber + " for " + ctx + " with " +
-                                                                replaySession.scheduleSequencer).log();
-                                                        replaySession.scheduleSequencer.add(channelInteractionNumber,
-                                                                () -> successFn.accept(channelFutureAndRequestSchedule),
-                                                                Runnable::run);
-                                                        if (replaySession.scheduleSequencer.hasPending()) {
-                                                            log.atDebug().setMessage(()->"Sequencer for "+ctx+
-                                                                    " = "+replaySession.scheduleSequencer).log();
-                                                        }
-                                                    });
-                                        })
-                                        .exceptionally(t->{
-                                            log.atWarn().setCause(t).setMessage(()->ctx +
-                                                    " ChannelFuture creation threw an exception").log();
-                                            finalTunneledResponse.future.completeExceptionally(t);
-                                            return null;
-                                        }),
-                                ()->"waiting for channel future creation to happen");
-            }
+    asynchronouslyInvokeRunnable(IReplayContexts.IChannelKeyContext ctx, int sessionNumber,
+                                 int channelInteractionNumber,
+                                 boolean ignoreIfChannelNotActive,
+                                 DiagnosticTrackableCompletableFuture<String,T> finalTunneledResponse,
+                                 Consumer<ConnectionReplaySession> onSessionCallback) {
+        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
+        replaySession.eventLoop.submit(()->{
+                    log.atTrace().setMessage(() -> "adding work item at slot " +
+                            channelInteractionNumber + " for " + replaySession.getChannelKeyContext() + " with " +
+                            replaySession.scheduleSequencer).log();
+                    replaySession.scheduleSequencer.add(channelInteractionNumber,
+                            () -> onSessionCallback.accept(replaySession),
+                            Runnable::run);
+                    log.atLevel(replaySession.scheduleSequencer.hasPending() ? Level.DEBUG : Level.TRACE)
+                            .setMessage(() -> "Sequencer for " + replaySession.getChannelKeyContext() + " = " +
+                                    replaySession.scheduleSequencer).log();
         });
         return finalTunneledResponse;
     }
 
-    private <T> void scheduleOnConnectionReplaySession(IReplayContexts.IChannelKeyContext ctx, int channelInteractionIdx,
+    private void scheduleSendRequestOnConnectionReplaySession(IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                                              ConnectionReplaySession connectionReplaySession,
+                                                              StringTrackableCompletableFuture<AggregatedRawResponse>
+                                                                      responseFuture,
+                                                              Instant start,
+                                                              Duration interval,
+                                                              Stream<ByteBuf> packets) {
+        var eventLoop = connectionReplaySession.eventLoop;
+        var scheduledContext = ctx.createScheduledContext(start);
+        scheduleOnConnectionReplaySession(ctx.getLogicalEnclosingScope(),
+                ctx.getReplayerRequestKey().getSourceRequestIndex(), connectionReplaySession, responseFuture, start,
+                new ChannelTask(ChannelTaskType.TRANSMIT, ()->{
+                    scheduledContext.close();
+                    sendNextPartAndContinue(new NettyPacketToHttpConsumer(connectionReplaySession, ctx),
+                            eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
+                }));
+    }
+
+    private <T> void scheduleOnConnectionReplaySession(IReplayContexts.IChannelKeyContext ctx,
+                                                       int channelInteractionIdx,
                                                        ConnectionReplaySession channelFutureAndRequestSchedule,
                                                        StringTrackableCompletableFuture<T> futureToBeCompletedByTask,
-                                                       Instant atTime, ChannelTask task) {
-        var channelInteraction = new IndexedChannelInteraction(ctx.getChannelKey(),
-                channelInteractionIdx);
+                                                       Instant atTime,
+                                                       ChannelTask task) {
+        var channelInteraction = new IndexedChannelInteraction(ctx.getChannelKey(), channelInteractionIdx);
         log.atInfo().setMessage(()->channelInteraction + " scheduling " + task.kind + " at " + atTime).log();
 
         var schedule = channelFutureAndRequestSchedule.schedule;
-        var eventLoop = channelFutureAndRequestSchedule.getInnerChannelFuture().channel().eventLoop();
+        var eventLoop = channelFutureAndRequestSchedule.eventLoop;
 
         if (schedule.isEmpty()) {
             var scheduledFuture =
@@ -207,45 +202,6 @@ public class RequestSenderOrchestrator {
         }), ()->"");
     }
 
-    private void scheduleSendOnConnectionReplaySession(IReplayContexts.IReplayerHttpTransactionContext ctx,
-                                                       ConnectionReplaySession channelFutureAndRequestSchedule,
-                                                       StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture,
-                                                       Instant start, Duration interval, Stream<ByteBuf> packets) {
-        var eventLoop = channelFutureAndRequestSchedule.eventLoop;
-        var packetReceiverRef = new AtomicReference<NettyPacketToHttpConsumer>();
-        Runnable packetSender = () -> {
-            sendNextPartAndContinue(() ->
-                            memoizePacketConsumer(ctx, channelFutureAndRequestSchedule.getInnerChannelFuture(),
-                                    packetReceiverRef),
-                    eventLoop, packets.iterator(), start, interval, new AtomicInteger(), responseFuture);
-        };
-        var scheduledContext = ctx.createScheduledContext(start);
-        scheduleOnConnectionReplaySession(ctx.getLogicalEnclosingScope(),
-                ctx.getReplayerRequestKey().getSourceRequestIndex(),
-                channelFutureAndRequestSchedule, responseFuture, start,
-                new ChannelTask(ChannelTaskType.TRANSMIT, ()->{
-                    scheduledContext.close();
-                    packetSender.run();
-                }));
-    }
-
-    private <T> void runAfterChannelSetup(ConnectionReplaySession channelFutureAndItsFutureRequests,
-                                          DiagnosticTrackableCompletableFuture<String,T> responseFuture,
-                                          Consumer<ConnectionReplaySession> task) {
-        var cf = channelFutureAndItsFutureRequests.getInnerChannelFuture();
-        cf.addListener(f->{
-            log.atTrace().setMessage(()->"channel creation has finished initialized (success="+f.isSuccess()+")").log();
-            if (!f.isSuccess()) {
-                log.atWarn().setMessage(()->"setting up channel was not successful and not running the task for " +
-                        channelFutureAndItsFutureRequests.getChannelKeyContext()).log();
-                responseFuture.future.completeExceptionally(
-                        new IllegalStateException("channel was returned in a bad state", f.cause()));
-            } else {
-                task.accept(channelFutureAndItsFutureRequests);
-            }
-        });
-    }
-
     private Instant now() {
         return Instant.now();
     }
@@ -254,28 +210,18 @@ public class RequestSenderOrchestrator {
         return Math.max(0, Duration.between(now(), to).toMillis());
     }
 
-    private static NettyPacketToHttpConsumer
-    memoizePacketConsumer(IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext, ChannelFuture channelFuture,
-                          AtomicReference<NettyPacketToHttpConsumer> packetReceiver) {
-        if (packetReceiver.get() == null) {
-            packetReceiver.set(new NettyPacketToHttpConsumer(channelFuture, httpTransactionContext));
-        }
-        return packetReceiver.get();
-    }
-
     // TODO - rewrite this - the recursion (at least as it is) is terribly confusing
-    private void sendNextPartAndContinue(Supplier<NettyPacketToHttpConsumer> packetHandlerSupplier,
+    private void sendNextPartAndContinue(NettyPacketToHttpConsumer packetReceiver,
                                          EventLoop eventLoop, Iterator<ByteBuf> iterator,
                                          Instant start, Duration interval, AtomicInteger counter,
                                          StringTrackableCompletableFuture<AggregatedRawResponse> responseFuture) {
-        log.atTrace().setMessage(()->"sendNextPartAndContinue: counter=" + counter.get()).log();
-        var packetReceiver = packetHandlerSupplier.get();
+        final var oldCounter = counter.getAndIncrement();
+        log.atTrace().setMessage(()->"sendNextPartAndContinue: counter=" + oldCounter).log();
         assert iterator.hasNext() : "Should not have called this with no items to send";
 
         packetReceiver.consumeBytes(iterator.next());
         if (iterator.hasNext()) {
-            counter.incrementAndGet();
-            Runnable packetSender = () -> sendNextPartAndContinue(packetHandlerSupplier, eventLoop,
+            Runnable packetSender = () -> sendNextPartAndContinue(packetReceiver, eventLoop,
                     iterator, start, interval, counter, responseFuture);
             var delayMs = Duration.between(now(),
                     start.plus(interval.multipliedBy(counter.get()))).toMillis();

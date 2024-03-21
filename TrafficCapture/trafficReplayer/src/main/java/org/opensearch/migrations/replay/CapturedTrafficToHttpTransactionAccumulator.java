@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -20,6 +19,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * This class consumes TrafficObservation objects, which will be predominated by reads and writes that
@@ -97,17 +97,18 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     @AllArgsConstructor
     private static class SpanWrappingAccumulationCallbacks {
         private final AccumulationCallbacks underlying;
-        public void onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
-                                      @NonNull HttpMessageAndTimestamp request) {
+
+        public Consumer<RequestResponsePacketPair>
+        onRequestReceived(IReplayContexts.IRequestAccumulationContext requestCtx,
+                                   @NonNull HttpMessageAndTimestamp request) {
             requestCtx.close();
-            underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
+            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
+            return rrpp -> {
+                rrpp.getResponseContext().close();
+                innerCallback.accept(rrpp);
+            };
         }
 
-        public void onFullDataReceived(@NonNull UniqueReplayerRequestKey key,
-                                       @NonNull RequestResponsePacketPair rrpp) {
-            rrpp.getResponseContext().close();
-            underlying.onFullDataReceived(rrpp.getHttpTransactionContext(), rrpp);
-        }
 
         public void onConnectionClose(@NonNull Accumulation accum,
                                       RequestResponsePacketPair.ReconstructionStatus status,
@@ -115,7 +116,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                       @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             var tsCtx = accum.trafficChannelKey.getTrafficStreamsContext();
             underlying.onConnectionClose(accum.numberOfResets.get(), tsCtx.getLogicalEnclosingScope(),
-                    status, when, trafficStreamKeysBeingHeld);
+                    accum.startingSourceRequestIndex, status, when, trafficStreamKeysBeingHeld);
         }
 
         public void onTrafficStreamsExpired(RequestResponsePacketPair.ReconstructionStatus status,
@@ -125,7 +126,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
-            var tsCtx = tsk.getTrafficStreamsContext();
             underlying.onTrafficStreamIgnored(tsk.getTrafficStreamsContext());
         }
     };
@@ -396,23 +396,25 @@ public class CapturedTrafficToHttpTransactionAccumulator {
      */
     private boolean handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
-        var rrPair = accumulation.getRrPair();
+        var rrPairWithCallback = accumulation.getRrPairWithCallback();
+        var rrPair = rrPairWithCallback.pair;
         var httpMessage = rrPair.requestData;
         assert (httpMessage != null);
         assert (!httpMessage.hasInProgressSegment());
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
-        listener.onRequestReceived(requestCtx, httpMessage);
+        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage);
+        rrPairWithCallback.setFullDataContinuation(callbackTrackedData);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;
     }
 
     private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
-        var rrPair = accumulation.getRrPair();
-        var requestKey = rrPair.getHttpTransactionContext().getReplayerRequestKey();
+        var rrPairWithCallback = accumulation.getRrPairWithCallback();
+        var rrPair = rrPairWithCallback.pair;
         rrPair.completionStatus = status;
-        listener.onFullDataReceived(requestKey, rrPair);
+        rrPairWithCallback.getFullDataContinuation().accept(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
     }

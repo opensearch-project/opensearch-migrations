@@ -11,13 +11,22 @@ import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import lombok.Getter;
 import lombok.Lombok;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
+@Slf4j
 public class InMemoryInstrumentationBundle implements AutoCloseable {
 
     @Getter
@@ -83,4 +92,35 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
         });
     }
 
+    public List<MetricData> getMetricsUntil(String metricName, IntStream sleepTimes,
+                                            Predicate<List<MetricData>> untilPredicate) {
+        AtomicReference<List<MetricData>> matchingMetrics = new AtomicReference<>();
+        sleepTimes
+                .mapToObj(sleepAmount -> {
+                    matchingMetrics.set(getFinishedMetrics().stream()
+                            .filter(md -> md.getName().equals(metricName))
+                            .collect(Collectors.toList()));
+                    if (untilPredicate.test(matchingMetrics.get())) {
+                        return true;
+                    } else {
+                        try {
+                            log.atInfo().setMessage(()->"Waiting " + sleepAmount +
+                                    "ms for predicate to pass because the last test for metrics from " +
+                                    metricName + " on " + matchingMetrics.get() +
+                                    " did not").log();
+                            Thread.sleep(sleepAmount);
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
+                        return false;
+                    }
+                })
+                .takeWhile(x->!x)
+                .forEach(b->{});
+        if (matchingMetrics.get() == null) {
+            throw new NoSuchElementException("Could not find matching metrics.  Last metrics: " + matchingMetrics);
+        } else {
+            return matchingMetrics.get();
+        }
+    }
 }

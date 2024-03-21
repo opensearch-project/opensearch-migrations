@@ -118,7 +118,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             return sendFullyAsync(producer, kafkaRecord)
                 .whenComplete(((recordMetadata, throwable) -> {
                     if (throwable != null) {
-                        flushContext.addException(throwable);
+                        flushContext.addException(throwable, true);
                         log.error("Error sending producer record: {}", recordId, throwable);
                     } else {
                         log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",
@@ -128,7 +128,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 }));
         }
     }
-
+    
     // Producer Send will block on actions such as retrieving cluster metadata, allows running fully async
     public static <K, V> CompletableFuture<RecordMetadata> sendFullyAsync(Producer<K, V> producer, ProducerRecord<K, V> record) {
         CompletableFuture<RecordMetadata> completableFuture = new CompletableFuture<>();

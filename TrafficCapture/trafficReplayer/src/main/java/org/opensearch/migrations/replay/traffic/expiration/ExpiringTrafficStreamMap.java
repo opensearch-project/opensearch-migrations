@@ -30,7 +30,6 @@ import java.util.stream.Stream;
 public class ExpiringTrafficStreamMap {
 
     public static final int DEFAULT_NUM_TIMESTAMP_UPDATE_ATTEMPTS = 2;
-    public static final long ACCUMULATION_DEAD_SENTINEL = Long.MAX_VALUE;
     public static final int ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL = 0;
 
     protected final AccumulatorMap connectionAccumulationMap;
@@ -78,11 +77,11 @@ public class ExpiringTrafficStreamMap {
         // for expiration tracking purposes, push incoming packets' timestamps to be monotonic?
         var timestampMillis = new EpochMillis(Math.max(observedTimestampMillis.millis, expiringQueue.lastKey().millis));
 
-        var lastPacketTimestamp = new EpochMillis(accumulation.getNewestPacketTimestampInMillisReference().get());
-        if (lastPacketTimestamp.millis == ACCUMULATION_DEAD_SENTINEL) {
+        if (accumulation.hasBeenExpired()) {
             behavioralPolicy.onNewDataArrivingAfterItsAccumulationHadBeenRemoved(trafficStreamKey);
             return false;
         }
+        var lastPacketTimestamp = new EpochMillis(accumulation.getNewestPacketTimestampInMillisReference().get());
         if (timestampMillis.test(lastPacketTimestamp, (newTs, lastTs) -> newTs > lastTs)) {
             var witnessValue = accumulation.getNewestPacketTimestampInMillisReference().compareAndExchange(lastPacketTimestamp.millis,
                     timestampMillis.millis);
@@ -157,7 +156,7 @@ public class ExpiringTrafficStreamMap {
     public Accumulation remove(String partitionId, String id) {
         var accum = connectionAccumulationMap.remove(new ScopedConnectionIdKey(partitionId, id));
         if (accum != null) {
-            accum.getNewestPacketTimestampInMillisReference().set(ACCUMULATION_DEAD_SENTINEL);
+            accum.expire();
         }
         return accum;
         // Once the accumulations are gone from the connectionAccumulationMap map, upon the normal expiration
