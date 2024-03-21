@@ -123,6 +123,7 @@ export class StackComposer {
         let version: EngineVersion
 
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
+        const domainAZCount = this.getContextForType('domainAZCount', 'number', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
         const dataNodeCount = this.getContextForType('dataNodeCount', 'number', defaultValues, contextJSON)
         const dedicatedManagerNodeType = this.getContextForType('dedicatedManagerNodeType', 'string', defaultValues, contextJSON)
@@ -148,9 +149,9 @@ export class StackComposer {
         const vpcEnabled = this.getContextForType('vpcEnabled', 'boolean', defaultValues, contextJSON)
         const vpcSecurityGroupIds = this.getContextForType('vpcSecurityGroupIds', 'object', defaultValues, contextJSON)
         const vpcSubnetIds = this.getContextForType('vpcSubnetIds', 'object', defaultValues, contextJSON)
+        const vpcAZCount = this.getContextForType('vpcAZCount', 'number', defaultValues, contextJSON)
         const openAccessPolicyEnabled = this.getContextForType('openAccessPolicyEnabled', 'boolean', defaultValues, contextJSON)
         const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
-        const availabilityZoneCount = this.getContextForType('availabilityZoneCount', 'number', defaultValues, contextJSON)
         const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
         const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
         const mskEnablePublicEndpoints = this.getContextForType('mskEnablePublicEndpoints', 'boolean', defaultValues, contextJSON)
@@ -158,6 +159,7 @@ export class StackComposer {
         const mskRestrictPublicAccessType = this.getContextForType('mskRestrictPublicAccessType', 'string', defaultValues, contextJSON)
         const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
+        const mskAZCount = this.getContextForType('mskAZCount', 'number', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -181,14 +183,14 @@ export class StackComposer {
 
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
 
-        if (!stage) {
-            throw new Error("Required context field 'stage' is not present")
+        const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
+        for (let key in requiredFields) {
+            if (!requiredFields[key]) {
+                throw new Error(`Required CDK context field ${key} is not present`)
+            }
         }
         if (addOnMigrationDeployId && vpcId) {
             console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
-        }
-        if (!domainName) {
-            throw new Error("Domain name is not present and is a required field")
         }
         let targetEndpoint
         if (targetClusterEndpoint && osContainerServiceEnabled) {
@@ -230,7 +232,7 @@ export class StackComposer {
         if (vpcEnabled || addOnMigrationDeployId) {
             networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
-                availabilityZoneCount: availabilityZoneCount,
+                vpcAZCount: vpcAZCount,
                 targetClusterEndpoint: targetEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
@@ -277,7 +279,7 @@ export class StackComposer {
                 vpc: networkStack ? networkStack.vpc : undefined,
                 vpcSubnetIds: vpcSubnetIds,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
-                availabilityZoneCount: availabilityZoneCount,
+                domainAZCount: domainAZCount,
                 domainRemovalPolicy: domainRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
                 description: "This stack contains resources to create/manage an OpenSearch Service domain",
@@ -303,6 +305,7 @@ export class StackComposer {
                 mskRestrictPublicAccessType: mskRestrictPublicAccessType,
                 mskBrokerNodeCount: mskBrokerNodeCount,
                 mskSubnetIds: mskSubnetIds,
+                mskAZCount: mskAZCount,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,
@@ -344,7 +347,7 @@ export class StackComposer {
 
         let osContainerStack
         if (osContainerServiceEnabled && networkStack && migrationStack) {
-            osContainerStack = new OpenSearchContainerStack(scope, "opensearch-container-${deployId}", {
+            osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container-${deployId}`, {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchContainer`,
                 description: "This stack contains resources for the OpenSearch Container ECS service",

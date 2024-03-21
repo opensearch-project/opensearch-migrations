@@ -160,8 +160,7 @@ export class MigrationServiceCore extends Stack {
             desiredCount: props.taskInstanceCount,
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
-            // This should be confirmed to be a requirement for Service Connect communication, otherwise be Private
-            vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}),
+            vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
             serviceConnectConfiguration: {
                 namespace: `migration.${props.stage}.local`,
                 services: props.serviceConnectServices ? props.serviceConnectServices : undefined,

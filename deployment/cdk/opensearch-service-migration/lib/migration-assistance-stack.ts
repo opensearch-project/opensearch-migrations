@@ -20,7 +20,8 @@ export interface MigrationStackProps extends StackPropsExt {
     readonly mskRestrictPublicAccessTo?: string,
     readonly mskRestrictPublicAccessType?: string,
     readonly mskBrokerNodeCount?: number,
-    readonly mskSubnetIds?: string[]
+    readonly mskSubnetIds?: string[],
+    readonly mskAZCount?: number
 }
 
 
@@ -41,6 +42,45 @@ export class MigrationAssistanceStack extends Stack {
         }
     }
 
+    validateAndReturnVPCSubnetsForMSK(vpc: IVpc, brokerNodeCount: number, azCount: number, specifiedSubnetIds?: string[]): string[] {
+        if (specifiedSubnetIds) {
+            if (specifiedSubnetIds.length !== 2 && specifiedSubnetIds.length !== 3) {
+                throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected ${specifiedSubnetIds.length} subnet ids provided with 'mskSubnetIds'`)
+            }
+            if (brokerNodeCount < 2 || brokerNodeCount % specifiedSubnetIds.length !== 0) {
+                throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
+                    AZs (${specifiedSubnetIds.length} AZs inferred from provided 'mskSubnetIds'). The node count can be set with the 'mskBrokerNodeCount' context option.`)
+            }
+            const selectSubnets = vpc.selectSubnets({
+                subnetFilters: [SubnetFilter.byIds(specifiedSubnetIds)]
+            })
+            return selectSubnets.subnetIds
+        }
+        if (azCount !== 2 && azCount !== 3) {
+            throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected an AZ count of ${azCount} has been provided with 'mskAZCount'`)
+        }
+        if (brokerNodeCount < 2 || brokerNodeCount % azCount !== 0) {
+            throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
+                AZs (${azCount} AZs inferred from provided 'mskAZCount'). The node count can be set with the 'mskBrokerNodeCount' context option.`)
+        }
+
+        let uniqueAzPrivateSubnets: string[] = []
+        if (vpc.privateSubnets.length > 0) {
+            uniqueAzPrivateSubnets = vpc.selectSubnets({
+                subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+                onePerAz: true
+            }).subnetIds
+        }
+        let desiredSubnets
+        if (uniqueAzPrivateSubnets.length >= azCount) {
+            desiredSubnets = uniqueAzPrivateSubnets.sort().slice(0, azCount)
+        }
+        else {
+            throw new Error(`Not enough AZs available for private subnets in VPC to meet desired ${azCount} AZs. The AZ count can be specified with the 'mskAZCount' context option`)
+        }
+        return desiredSubnets
+    }
+
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
@@ -56,20 +96,15 @@ export class MigrationAssistanceStack extends Stack {
             retention: RetentionDays.THREE_MONTHS
         });
 
-        let subnets
-        if (props.mskSubnetIds) {
-            subnets = props.vpc.selectSubnets({
-                subnetFilters: [SubnetFilter.byIds(props.mskSubnetIds)]
-            }).subnetIds
-        } else {
-            subnets = props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}).subnetIds
-        }
+        const brokerNodes = props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2
+        const mskAZs = props.mskAZCount ? props.mskAZCount : 2
+        const subnets = this.validateAndReturnVPCSubnetsForMSK(props.vpc, brokerNodes, mskAZs, props.mskSubnetIds)
 
         // Create an MSK cluster
         const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
             kafkaVersion: '3.6.0',
-            numberOfBrokerNodes: props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2,
+            numberOfBrokerNodes: brokerNodes,
             brokerNodeGroupInfo: {
                 instanceType: 'kafka.m5.large',
                 clientSubnets: subnets,
