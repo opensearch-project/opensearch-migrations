@@ -25,7 +25,7 @@ public class SimpleHttpServer implements AutoCloseable {
     public final boolean useTls;
 
     public static SimpleHttpServer makeServer(boolean useTls,
-                                              Function<HttpFirstLine, SimpleHttpResponse> makeContext)
+                                              Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext)
             throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
@@ -38,12 +38,12 @@ public class SimpleHttpServer implements AutoCloseable {
         return testServerRef.get();
     }
 
-    public static class PojoHttpFirstLine implements HttpFirstLine {
+    public static class PojoHttpRequestFirstLine implements HttpRequestFirstLine {
         private final String verb;
         private final URI path;
         private final String version;
 
-        public PojoHttpFirstLine(String verb, URI path, String version) {
+        public PojoHttpRequestFirstLine(String verb, URI path, String version) {
             this.verb = verb;
             this.path = path;
             this.version = version;
@@ -95,14 +95,14 @@ public class SimpleHttpServer implements AutoCloseable {
      */
     public SimpleHttpServer(
             boolean useTls, int port,
-            Function<HttpFirstLine, SimpleHttpResponse> uriToContentMapper) throws Exception {
+            Function<HttpRequestFirstLine, SimpleHttpResponse> uriToContentMapper) throws Exception {
         var addr = new InetSocketAddress(LOCALHOST, port);
         this.useTls = useTls;
         httpServer = useTls ? createSecureServer(addr) :
                 HttpServer.create(addr, 0);
         httpServer.createContext("/", httpExchange -> {
             var requestToMatch =
-                    new PojoHttpFirstLine(httpExchange.getRequestMethod(),
+                    new PojoHttpRequestFirstLine(httpExchange.getRequestMethod(),
                             httpExchange.getRequestURI(),
                             httpExchange.getProtocol());
             var headersAndPayload = uriToContentMapper.apply(requestToMatch);

@@ -6,14 +6,14 @@ import lombok.Getter;
 @EqualsAndHashCode(callSuper = true)
 public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     public final ITrafficStreamKey trafficStreamKey;
-    public final int sourceRequestIndexOffsetAtStartOfAccumulation;
+    public final int sourceRequestIndexSessionIdentifier;
     @Getter
     public final int replayerRequestIndex;
 
     public UniqueReplayerRequestKey(ITrafficStreamKey streamKey, int sourceOffsetAtStartOfAccumulation,
                                     int replayerIndex) {
         this.trafficStreamKey = streamKey;
-        this.sourceRequestIndexOffsetAtStartOfAccumulation = sourceOffsetAtStartOfAccumulation;
+        this.sourceRequestIndexSessionIdentifier = sourceOffsetAtStartOfAccumulation;
         this.replayerRequestIndex = replayerIndex;
     }
 
@@ -24,7 +24,7 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
 
     @Override
     public int getSourceRequestIndex() {
-        return replayerRequestIndex + sourceRequestIndexOffsetAtStartOfAccumulation;
+        return replayerRequestIndex + sourceRequestIndexSessionIdentifier;
     }
 
     @Override
@@ -43,7 +43,7 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
         //
         // That code currently resides in CapturedTrafficToHttpTransactionAccumulator.
         return trafficStreamKey + "." + getSourceRequestIndex() +
-                (sourceRequestIndexOffsetAtStartOfAccumulation == 0 ? "" :
-                        "(offset: "+ sourceRequestIndexOffsetAtStartOfAccumulation +")");
+                (sourceRequestIndexSessionIdentifier == 0 ? "" :
+                        "(offset: "+ sourceRequestIndexSessionIdentifier +")");
     }
 }

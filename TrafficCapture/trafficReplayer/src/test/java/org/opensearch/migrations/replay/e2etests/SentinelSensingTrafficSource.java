@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.e2etests;
 
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -52,7 +52,7 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() throws Exception {
         underlyingSource.close();
     }
 }

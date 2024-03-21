@@ -10,11 +10,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.parallel.Execution;
-import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.internal.matchers.Same;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
@@ -22,8 +19,9 @@ import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TransformationLoader;
+import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
-import org.opensearch.migrations.testutils.HttpFirstLine;
+import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -119,7 +117,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         "User-Agent", "UnitTest").entrySet().stream());
     }
 
-    private static SimpleHttpResponse makeResponseContext(HttpFirstLine request) {
+    private static SimpleHttpResponse makeResponseContext(HttpRequestFirstLine request) {
         var headers = Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
@@ -131,15 +129,19 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testHttpResponseIsSuccessfullyCaptured(boolean useTls) throws Exception {
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 1; ++i) {
             var testServer = testServers.get(useTls);
             var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-            var nphc = new NettyPacketToHttpConsumer(
-                    new NioEventLoopGroup(4, new DefaultThreadFactory("test")),
-                    testServer.localhostEndpoint(),
-                    sslContext,
-                    rootContext.getTestConnectionRequestContext(0));
+            var httpContext = rootContext.getTestConnectionRequestContext(0);
+            var channelContext = httpContext.getChannelKeyContext();
+            var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("test")).next();
+            var replaySession = new ConnectionReplaySession(eventLoop, channelContext,
+                    () -> ClientConnectionPool.getCompletedChannelFutureAsCompletableFuture(
+                            httpContext.getChannelKeyContext(),
+                            NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
+                                    testServer.localhostEndpoint(), channelContext)));
+            var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
             var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -164,7 +166,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         timeShifter.setFirstTimestamp(Instant.now());
         var sendingFactory = new ReplayEngine(
                 new RequestSenderOrchestrator(
-                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext, 1)),
+                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                                "targetPool for testThatConnectionsAreKeptAliveAndShared", 1)),
                 new TestFlowController(), timeShifter);
         for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {

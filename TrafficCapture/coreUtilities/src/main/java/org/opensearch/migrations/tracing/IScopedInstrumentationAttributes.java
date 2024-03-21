@@ -7,6 +7,7 @@ import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.semconv.SemanticAttributes;
 import lombok.NonNull;
 import org.opensearch.migrations.Utils;
 
@@ -77,9 +78,14 @@ public interface IScopedInstrumentationAttributes
     }
 
     @Override
-    default void addException(Throwable e) {
-        IWithStartTimeAndAttributes.super.addException(e);
-        getCurrentSpan().recordException(e);
+    default void addException(Throwable e, boolean isPropagating) {
+        IWithStartTimeAndAttributes.super.addException(e, isPropagating);
+        final var span = getCurrentSpan();
+        if (isPropagating) {
+            span.recordException(e, Attributes.of(SemanticAttributes.EXCEPTION_ESCAPED, true));
+        } else {
+            span.recordException(e);
+        }
     }
 
     @Override

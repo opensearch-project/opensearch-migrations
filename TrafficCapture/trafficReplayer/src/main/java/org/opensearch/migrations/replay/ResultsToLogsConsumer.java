@@ -119,6 +119,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                 .add("SOURCE_LATENCY")
                 .add("TARGET_LATENCY")
                 .add("REQUEST_ID")
+                .add("ORIGINAL_TIMESTAMP")
                 .toString();
     }
 
@@ -137,6 +138,8 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                 .add(t.map(r->""+r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY)).orElse(MISSING_STR))
                 // REQUEST_ID
                 .add(formatUniqueRequestKey(tuple.getRequestKey()))
+                .add(Optional.ofNullable(tuple.sourcePair).map(sp->sp.requestData.getLastPacketTimestamp().toString())
+                        .orElse(MISSING_STR))
                 .toString();
     }
 

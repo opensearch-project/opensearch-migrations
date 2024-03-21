@@ -34,53 +34,54 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
     @Tag("longTest")
     @Execution(ExecutionMode.SAME_THREAD)
     public void testThatSchedulingWorks() throws Exception {
-        var httpServer = SimpleHttpServer.makeServer(false,
-                r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)));
-        var testServerUri = httpServer.localhostEndpoint();
-        var clientConnectionPool = new ClientConnectionPool(testServerUri, null, 1);
-        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
-        var baseTime = Instant.now();
-        Instant lastEndTime = baseTime;
-        var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>>();
-        for (int i = 0; i<NUM_REQUESTS_TO_SCHEDULE; ++i) {
-            var requestContext = rootContext.getTestConnectionRequestContext(i);
-            // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
-            var perPacketShift = Duration.ofMillis(10*i/NUM_REPEATS);
-            var startTimeForThisRequest = baseTime.plus(perPacketShift);
-            var requestPackets = makeRequest(i/NUM_REPEATS);
-            var arr = senderOrchestrator.scheduleRequest(requestContext.getReplayerRequestKey(), requestContext,
-                    startTimeForThisRequest, Duration.ofMillis(1), requestPackets.stream());
-            log.info("Scheduled item to run at " + startTimeForThisRequest);
-            scheduledItems.add(arr);
-            lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
-        }
-        var connectionCtx = rootContext.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
-        var closeFuture = senderOrchestrator.scheduleClose(
-                connectionCtx.getLogicalEnclosingScope(), NUM_REQUESTS_TO_SCHEDULE,
-                lastEndTime.plus(Duration.ofMillis(100)));
-
-        Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
-        for (int i=0; i<scheduledItems.size(); ++i) {
-            var cf = scheduledItems.get(i);
-            var arr = cf.get();
-            Assertions.assertNull(arr.error);
-            Assertions.assertTrue(arr.responseSizeInBytes > 0);
-            var httpMessage = HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
-                    arr.responsePackets.stream().map(kvp->Unpooled.wrappedBuffer(kvp.getValue())), false);
-            try {
-                var response = (FullHttpResponse) httpMessage;
-                Assertions.assertEquals(200, response.status().code());
-                var body = response.content();
-                Assertions.assertEquals(TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX +
-                                TestHttpServerContext.getUriForIthRequest(i / NUM_REPEATS),
-                        new String(body.duplicate().toString(StandardCharsets.UTF_8)));
-            } finally {
-                Optional.ofNullable((httpMessage instanceof ByteBufHolder)?(ByteBufHolder)httpMessage:null)
-                        .ifPresent(bbh-> bbh.content().release());
+        try (var httpServer = SimpleHttpServer.makeServer(false,
+                r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)))) {
+            var testServerUri = httpServer.localhostEndpoint();
+            var clientConnectionPool = new ClientConnectionPool(testServerUri, null,
+                    "targetConnectionPool for testThatSchedulingWorks", 1);
+            var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
+            var baseTime = Instant.now();
+            Instant lastEndTime = baseTime;
+            var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>>();
+            for (int i = 0; i < NUM_REQUESTS_TO_SCHEDULE; ++i) {
+                var requestContext = rootContext.getTestConnectionRequestContext(i);
+                // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
+                var perPacketShift = Duration.ofMillis(10 * i / NUM_REPEATS);
+                var startTimeForThisRequest = baseTime.plus(perPacketShift);
+                var requestPackets = makeRequest(i / NUM_REPEATS);
+                var arr = senderOrchestrator.scheduleRequest(requestContext.getReplayerRequestKey(), requestContext,
+                        startTimeForThisRequest, Duration.ofMillis(1), requestPackets.stream());
+                log.info("Scheduled item to run at " + startTimeForThisRequest);
+                scheduledItems.add(arr);
+                lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
             }
+            var connectionCtx = rootContext.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
+            var closeFuture = senderOrchestrator.scheduleClose(
+                    connectionCtx.getLogicalEnclosingScope(), NUM_REQUESTS_TO_SCHEDULE, 0,
+                    lastEndTime.plus(Duration.ofMillis(100)));
+
+            Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
+            for (int i = 0; i < scheduledItems.size(); ++i) {
+                var cf = scheduledItems.get(i);
+                var arr = cf.get();
+                Assertions.assertNull(arr.error);
+                Assertions.assertTrue(arr.responseSizeInBytes > 0);
+                var httpMessage = HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
+                        arr.responsePackets.stream().map(kvp -> Unpooled.wrappedBuffer(kvp.getValue())), false);
+                try {
+                    var response = (FullHttpResponse) httpMessage;
+                    Assertions.assertEquals(200, response.status().code());
+                    var body = response.content();
+                    Assertions.assertEquals(TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX +
+                                    TestHttpServerContext.getUriForIthRequest(i / NUM_REPEATS),
+                            new String(body.duplicate().toString(StandardCharsets.UTF_8)));
+                } finally {
+                    Optional.ofNullable((httpMessage instanceof ByteBufHolder) ? (ByteBufHolder) httpMessage : null)
+                            .ifPresent(bbh -> bbh.content().release());
+                }
+            }
+            closeFuture.get();
         }
-        closeFuture.get();
-        httpServer.close();
     }
 
     private List<ByteBuf> makeRequest(int i) {

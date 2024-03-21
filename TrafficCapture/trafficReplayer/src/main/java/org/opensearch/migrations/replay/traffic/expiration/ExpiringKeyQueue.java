@@ -107,8 +107,7 @@ class ExpiringKeyQueue extends
                     accumulation.getNewestPacketTimestampInMillisReference().get() < earlierTimesToPreserve.millis) {
                 var priorValue = connectionAccumulatorMap.remove(key);
                 if (priorValue != null) {
-                    priorValue.getNewestPacketTimestampInMillisReference()
-                            .set(ExpiringTrafficStreamMap.ACCUMULATION_DEAD_SENTINEL);
+                    priorValue.expire();
                     behavioralPolicy.onExpireAccumulation(partitionId, accumulation);
                 }
             }

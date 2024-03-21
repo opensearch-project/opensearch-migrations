@@ -51,8 +51,8 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
     }
 
     @Override
-    public void addException(Throwable e) {
-        IScopedInstrumentationAttributes.super.addException(e);
+    public void addException(Throwable e, boolean isPropagating) {
+        IScopedInstrumentationAttributes.super.addException(e, isPropagating);
         observedExceptionToIncludeInMetrics = e;
     }
 

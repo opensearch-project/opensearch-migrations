@@ -30,6 +30,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
@@ -237,7 +238,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void close() throws IOException {
-        trackingKafkaConsumer.close();
+    public void close() throws IOException, InterruptedException, ExecutionException {
+        kafkaExecutor.submit(trackingKafkaConsumer::close).get();
     }
 }
