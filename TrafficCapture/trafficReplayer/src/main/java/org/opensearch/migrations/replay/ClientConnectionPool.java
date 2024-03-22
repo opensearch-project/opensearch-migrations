@@ -118,7 +118,7 @@ public class ClientConnectionPool {
             closeClientConnectionChannel(connectionReplaySession);
             connectionId2ChannelCache.invalidate(connId);
         } else {
-            log.atTrace().setMessage(()->"No ChannelFuture for " + ctx +
+            log.atInfo().setMessage(()->"No ChannelFuture for " + ctx +
                     " in closeConnection.  The connection may have already been closed").log();
         }
     }
