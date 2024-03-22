@@ -1,4 +1,4 @@
-import {Stack} from "aws-cdk-lib";
+import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
@@ -10,6 +10,7 @@ import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
+import {parseRemovalPolicy} from "./common-utilities";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -21,7 +22,9 @@ export interface MigrationStackProps extends StackPropsExt {
     readonly mskRestrictPublicAccessType?: string,
     readonly mskBrokerNodeCount?: number,
     readonly mskSubnetIds?: string[],
-    readonly mskAZCount?: number
+    readonly mskAZCount?: number,
+    readonly replayerOutputEFSRemovalPolicy?: string
+    readonly artifactBucketRemovalPolicy?: string
 }
 
 
@@ -166,6 +169,9 @@ export class MigrationAssistanceStack extends Stack {
             throw new Error("The 'mskEnablePublicEndpoints' option requires both 'mskRestrictPublicAccessTo' and 'mskRestrictPublicAccessType' options to be provided")
         }
 
+        const bucketRemovalPolicy = parseRemovalPolicy('artifactBucketRemovalPolicy', props.artifactBucketRemovalPolicy)
+        const replayerEFSRemovalPolicy = parseRemovalPolicy('replayerOutputEFSRemovalPolicy', props.replayerOutputEFSRemovalPolicy)
+
         const streamingSecurityGroup = new SecurityGroup(this, 'trafficStreamSourceSG', {
             vpc: props.vpc,
             allowAllOutbound: false
@@ -196,7 +202,8 @@ export class MigrationAssistanceStack extends Stack {
         // Create an EFS file system for Traffic Replayer output
         const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
             vpc: props.vpc,
-            securityGroup: replayerOutputSG
+            securityGroup: replayerOutputSG,
+            removalPolicy: replayerEFSRemovalPolicy
         });
         new StringParameter(this, 'SSMParameterReplayerOutputEFSId', {
             description: 'OpenSearch migration parameter for Replayer output EFS filesystem id',
@@ -220,7 +227,9 @@ export class MigrationAssistanceStack extends Stack {
         const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
             bucketName: `migration-artifacts-${this.account}-${props.stage}-${this.region}`,
             encryption: BucketEncryption.S3_MANAGED,
-            enforceSSL: true
+            enforceSSL: true,
+            removalPolicy: bucketRemovalPolicy,
+            autoDeleteObjects: !!(props.artifactBucketRemovalPolicy && bucketRemovalPolicy === RemovalPolicy.DESTROY)
         });
         new StringParameter(this, 'SSMParameterArtifactS3Arn', {
             description: 'OpenSearch migration parameter for Artifact S3 bucket ARN',

@@ -10,6 +10,7 @@
   "domainAZCount": 2,
   "mskAZCount": 2,
   "migrationAssistanceEnabled": true,
+  "replayerOutputEFSRemovalPolicy": "DESTROY",
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": true,
   "otelCollectorEnabled": true,
