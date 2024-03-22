@@ -1,0 +1,31 @@
+name: CDK Tests
+
+on:
+  push:
+    paths:
+      - 'deployment/cdk/**'
+  pull_request:
+    paths:
+      - 'deployment/cdk/**'
+
+jobs:
+  cdk-tests:
+    strategy:
+      matrix:
+        node-version: ['18.x']
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ./deployment/cdk/opensearch-service-migration
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install NPM dependencies
+        run: npm ci
+      - name: Run CDK Jest Tests
+        run: npm test
