@@ -132,12 +132,12 @@ public class ClientConnectionPool {
                 () -> "Final shutdown for " + this.getClass().getSimpleName());
     }
 
-    public void closeConnection(IReplayContexts.IChannelKeyContext ctx) {
+    public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
         var connId = ctx.getConnectionId();
         log.atInfo().setMessage(() -> "closing connection for " + connId).log();
-        var channelsFuture = connectionId2ChannelCache.getIfPresent(connId);
-        if (channelsFuture != null) {
-            closeClientConnectionChannel(channelsFuture);
+        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
+        if (connectionReplaySession != null) {
+            closeClientConnectionChannel(connectionReplaySession);
             connectionId2ChannelCache.invalidate(connId);
         } else {
             log.atTrace().setMessage(()->"No ChannelFuture for " + ctx +
