@@ -181,6 +181,7 @@ read -r -d '' cdk_context << EOM
     "dataNodeCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
+    "artifactBucketRemovalPolicy": "DESTROY",
     "trafficReplayerExtraArgs": "--speedup-factor 10.0",
     "fetchMigrationEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",

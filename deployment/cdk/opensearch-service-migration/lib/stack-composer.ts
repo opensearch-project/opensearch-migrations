@@ -1,5 +1,5 @@
 import {Construct} from "constructs";
-import {RemovalPolicy, Stack, StackProps} from "aws-cdk-lib";
+import {Stack, StackProps} from "aws-cdk-lib";
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -17,7 +17,7 @@ import {KafkaStack} from "./service-stacks/kafka-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
-import {validateFargateCpuArch} from "./common-utilities";
+import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -160,6 +160,8 @@ export class StackComposer {
         const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
         const mskAZCount = this.getContextForType('mskAZCount', 'number', defaultValues, contextJSON)
+        const replayerOutputEFSRemovalPolicy = this.getContextForType('replayerOutputEFSRemovalPolicy', 'string', defaultValues, contextJSON)
+        const artifactBucketRemovalPolicy = this.getContextForType('artifactBucketRemovalPolicy', 'string', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -180,7 +182,6 @@ export class StackComposer {
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
-
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
@@ -212,10 +213,7 @@ export class StackComposer {
         }
 
         const domainRemovalPolicyName = this.getContextForType('domainRemovalPolicy', 'string', defaultValues, contextJSON)
-        const domainRemovalPolicy = domainRemovalPolicyName ? RemovalPolicy[domainRemovalPolicyName as keyof typeof RemovalPolicy] : undefined
-        if (domainRemovalPolicyName && !domainRemovalPolicy) {
-            throw new Error("Provided domainRemovalPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html")
-        }
+        const domainRemovalPolicy = parseRemovalPolicy("domainRemovalPolicy", domainRemovalPolicyName)
 
         let trafficReplayerCustomUserAgent
         if (props.customReplayerUserAgent && trafficReplayerUserAgentSuffix) {
@@ -306,6 +304,8 @@ export class StackComposer {
                 mskBrokerNodeCount: mskBrokerNodeCount,
                 mskSubnetIds: mskSubnetIds,
                 mskAZCount: mskAZCount,
+                replayerOutputEFSRemovalPolicy: replayerOutputEFSRemovalPolicy,
+                artifactBucketRemovalPolicy: artifactBucketRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,
@@ -341,7 +341,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            this.addDependentStacks(otelCollectorStack, [networkStack])
+            this.addDependentStacks(otelCollectorStack, [networkStack, migrationStack])
             this.stacks.push(otelCollectorStack)
         }
 
