@@ -7,7 +7,8 @@ s3_bucket_name=""
 if [ -n "$ECS_AGENT_URI" ]; then
     msk_auth_settings="--kafka-traffic-enable-msk-auth"
     kafka_command_settings="--command-config aws/msk-iam-auth.properties"
-    s3_bucket_name="migration-artifacts-$MIGRATION_STAGE-$AWS_REGION"
+    account_id=$(aws sts get-caller-identity --query Account --output text)
+    s3_bucket_name="migration-artifacts-$account_id-$MIGRATION_STAGE-$AWS_REGION"
 fi
 topic="logging-traffic-topic"
 timeout_seconds=60

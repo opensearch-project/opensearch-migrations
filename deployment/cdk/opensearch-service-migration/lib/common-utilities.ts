@@ -2,6 +2,7 @@ import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-i
 import {Construct} from "constructs";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
+import {RemovalPolicy} from "aws-cdk-lib";
 
 export function createOpenSearchIAMAccessPolicy(region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
@@ -139,4 +140,12 @@ export function validateFargateCpuArch(cpuArch?: string): CpuArchitecture {
             throw new Error(`Unsupported process cpu architecture detected: ${desiredArch}, CDK requires X64 or ARM64 for Docker image compatability`)
         }
     }
+}
+
+export function parseRemovalPolicy(optionName: string, policyNameString?: string): RemovalPolicy|undefined {
+    const policy = policyNameString ? RemovalPolicy[policyNameString as keyof typeof RemovalPolicy] : undefined
+    if (policyNameString && !policy) {
+        throw new Error(`Provided '${optionName}' with value '${policyNameString}' does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html`)
+    }
+    return policy
 }

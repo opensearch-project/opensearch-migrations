@@ -39,7 +39,7 @@ test('Test primary context options are mapped with standard data type', () => {
         vpcId: "vpc-123456789abcdefgh",
         vpcSubnetIds: ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"],
         vpcSecurityGroupIds: ["sg-123456789abcdefgh", "sg-223456789abcdefgh"],
-        availabilityZoneCount: 3,
+        domainAZCount: 3,
         domainRemovalPolicy: "DESTROY"
     }
 
@@ -83,7 +83,7 @@ test('Test primary context options are mapped with only string data type', () =>
         vpcId: "vpc-123456789abcdefgh",
         vpcSubnetIds: "[\"subnet-123456789abcdefgh\", \"subnet-223456789abcdefgh\"]",
         vpcSecurityGroupIds: "[\"sg-123456789abcdefgh\", \"sg-223456789abcdefgh\"]",
-        availabilityZoneCount: "3",
+        domainAZCount: "3",
         domainRemovalPolicy: "DESTROY"
     }
 
@@ -207,7 +207,7 @@ test( 'Test default stack is created when empty context options are provided for
         vpcId: "",
         vpcSubnetIds: "",
         vpcSecurityGroupIds: "",
-        availabilityZoneCount: "",
+        domainAZCount: "",
         openAccessPolicyEnabled: "",
         domainRemovalPolicy: ""
     }

@@ -1,5 +1,5 @@
 import {Construct} from "constructs";
-import {RemovalPolicy, Stack, StackProps} from "aws-cdk-lib";
+import {Stack, StackProps} from "aws-cdk-lib";
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -17,7 +17,7 @@ import {KafkaStack} from "./service-stacks/kafka-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
-import {validateFargateCpuArch} from "./common-utilities";
+import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -123,6 +123,7 @@ export class StackComposer {
         let version: EngineVersion
 
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
+        const domainAZCount = this.getContextForType('domainAZCount', 'number', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
         const dataNodeCount = this.getContextForType('dataNodeCount', 'number', defaultValues, contextJSON)
         const dedicatedManagerNodeType = this.getContextForType('dedicatedManagerNodeType', 'string', defaultValues, contextJSON)
@@ -148,9 +149,9 @@ export class StackComposer {
         const vpcEnabled = this.getContextForType('vpcEnabled', 'boolean', defaultValues, contextJSON)
         const vpcSecurityGroupIds = this.getContextForType('vpcSecurityGroupIds', 'object', defaultValues, contextJSON)
         const vpcSubnetIds = this.getContextForType('vpcSubnetIds', 'object', defaultValues, contextJSON)
+        const vpcAZCount = this.getContextForType('vpcAZCount', 'number', defaultValues, contextJSON)
         const openAccessPolicyEnabled = this.getContextForType('openAccessPolicyEnabled', 'boolean', defaultValues, contextJSON)
         const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
-        const availabilityZoneCount = this.getContextForType('availabilityZoneCount', 'number', defaultValues, contextJSON)
         const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
         const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
         const mskEnablePublicEndpoints = this.getContextForType('mskEnablePublicEndpoints', 'boolean', defaultValues, contextJSON)
@@ -158,6 +159,9 @@ export class StackComposer {
         const mskRestrictPublicAccessType = this.getContextForType('mskRestrictPublicAccessType', 'string', defaultValues, contextJSON)
         const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
+        const mskAZCount = this.getContextForType('mskAZCount', 'number', defaultValues, contextJSON)
+        const replayerOutputEFSRemovalPolicy = this.getContextForType('replayerOutputEFSRemovalPolicy', 'string', defaultValues, contextJSON)
+        const artifactBucketRemovalPolicy = this.getContextForType('artifactBucketRemovalPolicy', 'string', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -178,17 +182,16 @@ export class StackComposer {
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
-
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
 
-        if (!stage) {
-            throw new Error("Required context field 'stage' is not present")
+        const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
+        for (let key in requiredFields) {
+            if (!requiredFields[key]) {
+                throw new Error(`Required CDK context field ${key} is not present`)
+            }
         }
         if (addOnMigrationDeployId && vpcId) {
             console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
-        }
-        if (!domainName) {
-            throw new Error("Domain name is not present and is a required field")
         }
         let targetEndpoint
         if (targetClusterEndpoint && osContainerServiceEnabled) {
@@ -210,10 +213,7 @@ export class StackComposer {
         }
 
         const domainRemovalPolicyName = this.getContextForType('domainRemovalPolicy', 'string', defaultValues, contextJSON)
-        const domainRemovalPolicy = domainRemovalPolicyName ? RemovalPolicy[domainRemovalPolicyName as keyof typeof RemovalPolicy] : undefined
-        if (domainRemovalPolicyName && !domainRemovalPolicy) {
-            throw new Error("Provided domainRemovalPolicy does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html")
-        }
+        const domainRemovalPolicy = parseRemovalPolicy("domainRemovalPolicy", domainRemovalPolicyName)
 
         let trafficReplayerCustomUserAgent
         if (props.customReplayerUserAgent && trafficReplayerUserAgentSuffix) {
@@ -230,7 +230,7 @@ export class StackComposer {
         if (vpcEnabled || addOnMigrationDeployId) {
             networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
-                availabilityZoneCount: availabilityZoneCount,
+                vpcAZCount: vpcAZCount,
                 targetClusterEndpoint: targetEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
@@ -277,7 +277,7 @@ export class StackComposer {
                 vpc: networkStack ? networkStack.vpc : undefined,
                 vpcSubnetIds: vpcSubnetIds,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
-                availabilityZoneCount: availabilityZoneCount,
+                domainAZCount: domainAZCount,
                 domainRemovalPolicy: domainRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
                 description: "This stack contains resources to create/manage an OpenSearch Service domain",
@@ -303,6 +303,9 @@ export class StackComposer {
                 mskRestrictPublicAccessType: mskRestrictPublicAccessType,
                 mskBrokerNodeCount: mskBrokerNodeCount,
                 mskSubnetIds: mskSubnetIds,
+                mskAZCount: mskAZCount,
+                replayerOutputEFSRemovalPolicy: replayerOutputEFSRemovalPolicy,
+                artifactBucketRemovalPolicy: artifactBucketRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,
@@ -338,13 +341,13 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 ...props,
             })
-            this.addDependentStacks(otelCollectorStack, [networkStack])
+            this.addDependentStacks(otelCollectorStack, [networkStack, migrationStack])
             this.stacks.push(otelCollectorStack)
         }
 
         let osContainerStack
         if (osContainerServiceEnabled && networkStack && migrationStack) {
-            osContainerStack = new OpenSearchContainerStack(scope, "opensearch-container-${deployId}", {
+            osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container-${deployId}`, {
                 vpc: networkStack.vpc,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchContainer`,
                 description: "This stack contains resources for the OpenSearch Container ECS service",
