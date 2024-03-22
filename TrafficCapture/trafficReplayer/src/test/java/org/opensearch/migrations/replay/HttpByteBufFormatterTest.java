@@ -30,7 +30,6 @@ public class HttpByteBufFormatterTest {
                     "Connection: Keep-Alive\r\n" +
                     "Host: localhost\r\n" +
                     "User-Agent: UnitTest\r\n" +
-                    "Connection: Keep-Alive\r\n" +
                     "\r\n";
 
     final static String SAMPLE_REQUEST_AS_BLOCKS = "[G],[E],[T],[ ],[/],[ ],[H],[T],[T],[P],[/],[1],[.],[1],[\r" +
@@ -41,8 +40,6 @@ public class HttpByteBufFormatterTest {
             "],[\n" +
             "],[U],[s],[e],[r],[-],[A],[g],[e],[n],[t],[:],[ ],[U],[n],[i],[t],[T],[e],[s],[t],[\r" +
             "],[\n" +
-            "],[C],[o],[n],[n],[e],[c],[t],[i],[o],[n],[:],[ ],[K],[e],[e],[p],[-],[A],[l],[i],[v],[e],[\r" +
-            "],[\n" +
             "],[\r" +
             "],[\n" +
             "]";
@@ -50,7 +47,6 @@ public class HttpByteBufFormatterTest {
             "Connection: Keep-Alive\n" +
             "Host: localhost\n" +
             "User-Agent: UnitTest\n" +
-            "Connection: Keep-Alive\n" +
             "content-length: 0\n" +
             "\n";
 

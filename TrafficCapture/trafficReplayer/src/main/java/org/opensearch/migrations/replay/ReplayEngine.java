@@ -165,10 +165,6 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(future, timestamp, channelKey, label);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
-        return networkSendOrchestrator.clientConnectionPool.closeConnectionsAndShutdown();
-    }
-
     public void setFirstTimestamp(Instant firstPacketTimestamp) {
         timeShifter.setFirstTimestamp(firstPacketTimestamp);
     }

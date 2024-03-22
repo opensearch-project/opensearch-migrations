@@ -164,10 +164,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 new TransformationLoader().getTransformerFactoryLoader(null), null);
         var timeShifter = new TimeShifter();
         timeShifter.setFirstTimestamp(Instant.now());
-        var sendingFactory = new ReplayEngine(
-                new RequestSenderOrchestrator(
-                        new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                                "targetPool for testThatConnectionsAreKeptAliveAndShared", 1)),
+        var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
+        var sendingFactory = new ReplayEngine(new RequestSenderOrchestrator(clientConnectionPool),
                 new TestFlowController(), timeShifter);
         for (int j = 0; j < 2; ++j) {
             for (int i = 0; i < 2; ++i) {
@@ -187,7 +186,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                         normalizeMessage(responseAsString));
             }
         }
-        var stopFuture = sendingFactory.closeConnectionsAndShutdown();
+        var stopFuture = clientConnectionPool.shutdownNow();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
     }

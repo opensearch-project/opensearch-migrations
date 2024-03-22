@@ -96,7 +96,6 @@ public class TrafficReplayer implements AutoCloseable {
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
     private final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
-    private Future nettyShutdownFuture;
 
     public static class DualException extends Exception {
         public final Throwable originalCause;
@@ -502,10 +501,10 @@ public class TrafficReplayer implements AutoCloseable {
         }
     }
 
-    void setupRunAndWaitForReplay(Duration observedPacketConnectionTimeout,
-                                  BlockingTrafficSource trafficSource,
-                                  TimeShifter timeShifter,
-                                  Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
+    public void setupRunAndWaitForReplayToFinish(Duration observedPacketConnectionTimeout,
+                                                 BlockingTrafficSource trafficSource,
+                                                 TimeShifter timeShifter,
+                                                 Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws InterruptedException, ExecutionException {
 
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
@@ -578,7 +577,7 @@ public class TrafficReplayer implements AutoCloseable {
                                                            Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
     throws TerminationException, ExecutionException, InterruptedException {
         try {
-            setupRunAndWaitForReplay(observedPacketConnectionTimeout, trafficSource,
+            setupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, trafficSource,
                     timeShifter, resultTupleConsumer);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -591,7 +590,6 @@ public class TrafficReplayer implements AutoCloseable {
         }
         // if nobody has run shutdown yet, do so now so that we can tear down the netty resources
         shutdown(null).get(); // if somebody already HAD run shutdown, it will return the future already created
-        nettyShutdownFuture.sync();
     }
 
     @AllArgsConstructor
@@ -794,14 +792,6 @@ public class TrafficReplayer implements AutoCloseable {
         } finally {
             allRemainingWorkFutureOrShutdownSignalRef.set(null);
         }
-        allWorkFuture.getDeferredFutureThroughHandle((t, v) -> {
-                    log.info("stopping packetHandlerFactory's group");
-                    replayEngine.closeConnectionsAndShutdown();
-                    // squash exceptions for individual requests
-                    return StringTrackableCompletableFuture.completedFuture(null, () -> "finished all work");
-                }, () -> "TrafficReplayer.PacketHandlerFactory->stopGroup")
-                .get(); // allWorkFuture already completed - here we're just going to wait for the
-                        // rest of the cleanup to finish, as per the name of the function
     }
 
     private void handleAlreadySetFinishedSignal() throws InterruptedException, ExecutionException {
@@ -964,12 +954,13 @@ public class TrafficReplayer implements AutoCloseable {
         }
         stopReadingRef.set(true);
         liveTrafficStreamLimiter.close();
-        nettyShutdownFuture = clientConnectionPool.shutdownNow()
-                .addListener(f->{
-                    if (f.isSuccess()) {
-                        shutdownFutureRef.get().complete(null);
+
+        var nettyShutdownFuture = clientConnectionPool.shutdownNow();
+        nettyShutdownFuture.whenComplete((v,t) -> {
+                    if (t != null) {
+                        shutdownFutureRef.get().completeExceptionally(t);
                     } else {
-                        shutdownFutureRef.get().completeExceptionally(f.cause());
+                        shutdownFutureRef.get().complete(null);
                     }
                 });
         Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f->f.cancel(true));
