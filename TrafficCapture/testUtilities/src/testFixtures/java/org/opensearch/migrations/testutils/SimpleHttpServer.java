@@ -133,7 +133,7 @@ public class SimpleHttpServer implements AutoCloseable {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
         httpServer.stop(0);
     }
 }
