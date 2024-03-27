@@ -108,13 +108,12 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             throws IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException
     {
         for (var useTls : new boolean[]{false, true}) {
-            try (var client = new SimpleHttpClientForTesting(useTls)) {
-                try (var testServer = createTestServer(useTls, false)) {
+            try (var client = new SimpleHttpClientForTesting(useTls);
+                var testServer = createTestServer(useTls, false)) {
                     var endpoint = testServer.localhostEndpoint();
                     var response = makeTestRequestViaClient(client, endpoint);
                     Assertions.assertEquals(SERVER_RESPONSE_BODY,
                         new String(response.payloadBytes, StandardCharsets.UTF_8));
-                }
             }
         }
     }
