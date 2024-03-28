@@ -97,50 +97,28 @@ public class ClientConnectionPool {
         return clientConnectionChannelCreatedFuture;
     }
 
-    public Future shutdownNow() {
+    public CompletableFuture<Void> shutdownNow() {
+        CompletableFuture<Void> shutdownFuture = new CompletableFuture<>();
         connectionId2ChannelCache.invalidateAll();
-        return eventLoopGroup.shutdownGracefully();
-    }
-
-    public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
-        StringTrackableCompletableFuture<Void> eventLoopFuture =
-                new StringTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "all channels closed");
-        this.eventLoopGroup.submit(() -> {
-            try {
-                var channelClosedFuturesArray =
-                        connectionId2ChannelCache.asMap().values().stream()
-                                .map(this::closeClientConnectionChannel)
-                                .collect(Collectors.toList());
-                StringTrackableCompletableFuture.<Channel>allOf(channelClosedFuturesArray.stream(),
-                                () -> "all channels closed")
-                        .handle((v, t) -> {
-                                    if (t == null) {
-                                        eventLoopFuture.future.complete(v);
-                                    } else {
-                                        eventLoopFuture.future.completeExceptionally(t);
-                                    }
-                                    return null;
-                                },
-                                () -> "Waiting for all channels to close: Remaining=" +
-                                        (channelClosedFuturesArray.stream().filter(c -> !c.isDone()).count()));
-            } catch (Exception e) {
-                log.atError().setCause(e).setMessage("Caught error while closing cached connections").log();
-                eventLoopFuture.future.completeExceptionally(e);
+        eventLoopGroup.shutdownGracefully().addListener(f->{
+            if (f.isSuccess()) {
+                shutdownFuture.complete(null);
+            } else {
+                shutdownFuture.completeExceptionally(f.cause());
             }
         });
-        return eventLoopFuture.map(f -> f.whenComplete((c, t) -> shutdownNow()),
-                () -> "Final shutdown for " + this.getClass().getSimpleName());
+        return shutdownFuture;
     }
-
-    public void closeConnection(IReplayContexts.IChannelKeyContext ctx) {
+    
+    public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
         var connId = ctx.getConnectionId();
         log.atInfo().setMessage(() -> "closing connection for " + connId).log();
-        var channelsFuture = connectionId2ChannelCache.getIfPresent(connId);
-        if (channelsFuture != null) {
-            closeClientConnectionChannel(channelsFuture);
+        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
+        if (connectionReplaySession != null) {
+            closeClientConnectionChannel(connectionReplaySession);
             connectionId2ChannelCache.invalidate(connId);
         } else {
-            log.atTrace().setMessage(()->"No ChannelFuture for " + ctx +
+            log.atInfo().setMessage(()->"No ChannelFuture for " + ctx +
                     " in closeConnection.  The connection may have already been closed").log();
         }
     }

@@ -49,11 +49,11 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1,2})
+    @ValueSource(ints = {1, 2})
     @ResourceLock("TrafficReplayerRunner")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
-        try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+        try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMinutes(10),
                 response->TestHttpServerContext.makeResponse(random, response))) {
             var baseTime = Instant.now();
             var fixedTimestamp =
@@ -63,19 +63,21 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 tsb = tsb
                         .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                                 .setRead(ReadObservation.newBuilder()
-                                        .setData(ByteString.copyFrom(("GET /" + i + " HTTP/1.0\r\n")
+                                        .setData(ByteString.copyFrom(("GET /" + i + " HTTP/1.1\r\n" +
+                                                "Connection: Keep-Alive\r\n" +
+                                                "Host: localhost\r\n")
                                                 .getBytes(StandardCharsets.UTF_8)))
                                         .build())
                                 .build())
                         .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                                 .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
                                         .setFirstLineByteLength(14)
-                                        .setHeadersByteLength(14)
+                                        .setHeadersByteLength(58)
                                         .build())
                                 .build())
                         .addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
                                 .setWrite(WriteObservation.newBuilder()
-                                        .setData(ByteString.copyFrom("HTTP/1.0 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
+                                        .setData(ByteString.copyFrom("HTTP/1.1 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
                                         .build())
                                 .build());
             }
@@ -92,16 +94,18 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     true, 10, 10 * 1024,
                     "targetConnectionPool for testStreamWithRequestsWithCloseIsCommittedOnce");
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-                tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
-                        new TimeShifter(10 * 1000), (t) -> {
+                tr.setupRunAndWaitForReplayToFinish(Duration.ofSeconds(70), blockingTrafficSource,
+                        new TimeShifter(10 * 1000),
+                        t -> {
                             var wasNew = tuplesReceived.add(t.getRequestKey().toString());
                             Assertions.assertTrue(wasNew);
                         });
+                Assertions.assertEquals(numRequests, tuplesReceived.size());
+                Thread.sleep(1000);
+                checkSpansForSimpleReplayedTransactions(rootContext.inMemoryInstrumentationBundle, numRequests);
+                tr.shutdown(null).get();
             }
-            Assertions.assertEquals(numRequests, tuplesReceived.size());
         }
-        checkSpansForSimpleReplayedTransactions(rootContext.inMemoryInstrumentationBundle, numRequests);
-        log.info("done");
     }
 
     private static class TraceProcessor {
@@ -128,31 +132,10 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     private void checkSpansForSimpleReplayedTransactions(InMemoryInstrumentationBundle inMemoryBundle,
                                                          int numRequests) {
         var traceProcessor = new TraceProcessor(inMemoryBundle.getFinishedSpans());
-        for (int numTries=1; ; ++numTries) {
-            final String TCP_CONNECTION_SCOPE_NAME = "tcpConnection";
-            var numTraces = traceProcessor.getCountAndRemoveSpan(TCP_CONNECTION_SCOPE_NAME);
-            switch (numTraces) {
-                case 1:
-                    break;
-                case -1:
-                    traceProcessor = new TraceProcessor(inMemoryBundle.getFinishedSpans());
-                    if (numTries > 5) {
-                        Assertions.fail("Even after waiting/polling, no " + TCP_CONNECTION_SCOPE_NAME + " was found.");
-                    }
-                    try {
-                        Thread.sleep(250);
-                    } catch (InterruptedException e) {
-                        throw Lombok.sneakyThrow(e);
-                    }
-                    continue;
-                default:
-                    Assertions.fail("Found " + numTraces + " for " + TCP_CONNECTION_SCOPE_NAME);
-            }
-            break;
-        }
 
         Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("channel"));
         Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("trafficStreamLifetime"));
+        Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("tcpConnection"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("httpTransaction"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingRequest"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingResponse"));

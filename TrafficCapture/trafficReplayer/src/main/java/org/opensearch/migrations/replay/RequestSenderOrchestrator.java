@@ -100,7 +100,7 @@ public class RequestSenderOrchestrator {
                             channelFutureAndRequestSchedule, finalTunneledResponse, timestamp,
                             new ChannelTask(ChannelTaskType.CLOSE, () -> {
                                 log.trace("Closing client connection " + channelInteraction);
-                                clientConnectionPool.closeConnection(ctx);
+                                clientConnectionPool.closeConnection(ctx, sessionNumber);
                                 finalTunneledResponse.future.complete(null);
                             })));
         return finalTunneledResponse;
