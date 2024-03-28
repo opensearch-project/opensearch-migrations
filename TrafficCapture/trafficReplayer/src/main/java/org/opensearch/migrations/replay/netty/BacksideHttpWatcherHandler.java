@@ -1,15 +1,18 @@
 package org.opensearch.migrations.replay.netty;
 
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.util.ReferenceCountUtil;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
 
 @Slf4j
-public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<FullHttpResponse> {
+public class BacksideHttpWatcherHandler extends ChannelInboundHandlerAdapter {
 
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
     private boolean doneReadingRequest; // later, when connections are reused, switch this to a counter?
@@ -21,10 +24,16 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     }
 
     @Override
-    protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse msg) throws Exception {
-        doneReadingRequest = true;
-        triggerResponseCallbackAndRemoveCallback();
-        super.channelReadComplete(ctx);
+    public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
+        try {
+            if (msg instanceof LastHttpContent) {
+                doneReadingRequest = true;
+                triggerResponseCallbackAndRemoveCallback();
+                super.channelReadComplete(ctx);
+            }
+        } finally {
+            ReferenceCountUtil.release(msg);
+        }
     }
 
     @Override

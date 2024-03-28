@@ -11,7 +11,6 @@ import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonMetricInstruments;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import java.util.Collection;
@@ -59,15 +58,15 @@ public class KafkaConsumerContexts {
 
         public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
             meterIncrementEvent(getMetrics().kafkaPartitionsRevokedCounter);
-            onParitionsAssignedChanged(partitions.size());
+            onPartitionsAssignedChanged(-1 * partitions.size());
         }
 
         public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
             meterIncrementEvent(getMetrics().kafkaPartitionsAssignedCounter);
-            onParitionsAssignedChanged(partitions.size());
+            onPartitionsAssignedChanged(partitions.size());
         }
 
-        private void onParitionsAssignedChanged(int delta) {
+        private void onPartitionsAssignedChanged(int delta) {
             meterDeltaEvent(getMetrics().kafkaActivePartitionsCounter, delta);
         }
     }
