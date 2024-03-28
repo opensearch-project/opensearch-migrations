@@ -3,9 +3,11 @@ package org.opensearch.migrations.trafficcapture;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.Unpooled;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -18,9 +20,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializerTest.StreamManager.NullStreamManager;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -28,7 +32,6 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 @Slf4j
@@ -185,6 +188,22 @@ class StreamChannelConnectionCaptureSerializerTest {
         TrafficStream reconstitutedTrafficStream = TrafficStream.parseFrom(outputBuffersList.get(0));
         Assertions.assertEquals(0, reconstitutedTrafficStream.getSubStream(0).getWrite().getData().size());
         Assertions.assertEquals(0, reconstitutedTrafficStream.getSubStream(1).getWrite().getData().size());
+    }
+
+    @Test
+    public void testWithLimitlessCodedOutputStreamHolder()
+        throws IOException, ExecutionException, InterruptedException {
+
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_STREAM_ID_STRING,
+            new NullStreamManager());
+
+        var bb = Unpooled.buffer(0);
+        serializer.addWriteEvent(REFERENCE_TIMESTAMP, bb);
+        serializer.addWriteEvent(REFERENCE_TIMESTAMP, bb);
+        var future = serializer.flushCommitAndResetStream(true);
+        future.get();
+        bb.release();
     }
 
     @Test
@@ -359,6 +378,34 @@ class StreamChannelConnectionCaptureSerializerTest {
                     throw Lombok.sneakyThrow(e);
                 }
             }).thenApply(x -> null);
+        }
+
+        static class NullStreamManager implements StreamLifecycleManager<CodedOutputStreamHolder> {
+
+            @Override
+            public CodedOutputStreamHolder createStream() {
+                return new CodedOutputStreamHolder() {
+                    final CodedOutputStream nullOutputStream = CodedOutputStream.newInstance(
+                        OutputStream.nullOutputStream());
+
+                    @Override
+                    public int getOutputStreamBytesLimit() {
+                        return -1;
+                    }
+
+                    @Override
+                    public @NonNull CodedOutputStream getOutputStream() {
+                        return nullOutputStream;
+                    }
+                };
+            }
+
+            @Override
+            public CompletableFuture<CodedOutputStreamHolder> closeStream(CodedOutputStreamHolder outputStreamHolder,
+                int index) {
+                return CompletableFuture.completedFuture(null);
+            }
+
         }
     }
 }
