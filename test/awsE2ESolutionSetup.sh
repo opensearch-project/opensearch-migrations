@@ -211,7 +211,7 @@ cdk_context=$(echo $cdk_context | jq '@json')
 cdk_context=$(echo "${cdk_context/ /\\u0020}")
 echo $cdk_context
 
-cd ../../deployment/cdk/opensearch-service-migration
+cd ../../deployment/cdk/opensearch-service-migration || exit
 ./buildDockerImages.sh
 npm install
 cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
