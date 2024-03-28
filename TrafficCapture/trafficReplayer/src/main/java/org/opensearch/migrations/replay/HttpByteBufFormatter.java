@@ -12,9 +12,12 @@ import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.Callable;
@@ -23,13 +26,14 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+@Slf4j
 public class HttpByteBufFormatter {
 
     private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle =
             ThreadLocal.withInitial(Optional::empty);
 
     public enum PacketPrintFormat {
-        TRUNCATED, FULL_BYTES, PARSED_HTTP
+        TRUNCATED, FULL_BYTES, PARSED_HTTP, PARSED_HTTP_SORTED_HEADERS
     }
 
     public static <T> T setPrintStyleForCallable(PacketPrintFormat packetPrintFormat, Callable<T> r) throws Exception {
@@ -72,21 +76,23 @@ public class HttpByteBufFormatter {
             case FULL_BYTES:
                 return httpPacketBufsToString(byteBufStream, Long.MAX_VALUE, releaseByteBufs);
             case PARSED_HTTP:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, releaseByteBufs);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, releaseByteBufs);
+            case PARSED_HTTP_SORTED_HEADERS:
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, releaseByteBufs);
             default:
                 throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
     public static String httpPacketsToPrettyPrintedString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
-                                                          boolean releaseByteBufs) {
+                                                          boolean sortHeaders, boolean releaseByteBufs) {
         HttpMessage httpMessage = parseHttpMessageFromBufs(msgType, byteBufStream, releaseByteBufs);
         var holderOp = Optional.ofNullable((httpMessage instanceof ByteBufHolder) ? (ByteBufHolder) httpMessage : null);
         try {
             if (httpMessage instanceof FullHttpRequest) {
-                return prettyPrintNettyRequest((FullHttpRequest) httpMessage);
+                return prettyPrintNettyRequest((FullHttpRequest) httpMessage, sortHeaders);
             } else if (httpMessage instanceof FullHttpResponse) {
-                return prettyPrintNettyResponse((FullHttpResponse) httpMessage);
+                return prettyPrintNettyResponse((FullHttpResponse) httpMessage, sortHeaders);
             } else if (httpMessage == null) {
                 return "[NULL]";
             } else {
@@ -98,20 +104,24 @@ public class HttpByteBufFormatter {
         }
     }
 
-    public static String prettyPrintNettyRequest(FullHttpRequest msg) {
+    public static String prettyPrintNettyRequest(FullHttpRequest msg, boolean sortHeaders) {
         var sj = new StringJoiner("\n");
         sj.add(msg.method() + " " + msg.uri() + " " + msg.protocolVersion().text());
-        return prettyPrintNettyMessage(sj, msg, msg.content());
+        return prettyPrintNettyMessage(sj, sortHeaders, msg, msg.content());
     }
 
-    static String prettyPrintNettyResponse(FullHttpResponse msg) {
+    static String prettyPrintNettyResponse(FullHttpResponse msg, boolean sortHeaders) {
         var sj = new StringJoiner("\n");
         sj.add(msg.protocolVersion().text() + " " + msg.status().code() + " " + msg.status().reasonPhrase());
-        return prettyPrintNettyMessage(sj, msg, msg.content());
+        return prettyPrintNettyMessage(sj, sortHeaders, msg, msg.content());
     }
 
-    private static String prettyPrintNettyMessage(StringJoiner sj, HttpMessage msg, ByteBuf content) {
-        msg.headers().forEach(kvp -> sj.add(String.format("%s: %s", kvp.getKey(), kvp.getValue())));
+    private static String prettyPrintNettyMessage(StringJoiner sj, boolean sorted, HttpMessage msg, ByteBuf content) {
+        var h = msg.headers().entries().stream();
+        if (sorted) {
+            h = h.sorted(Map.Entry.comparingByKey());
+        }
+        h.forEach(kvp -> sj.add(String.format("%s: %s", kvp.getKey(), kvp.getValue())));
         sj.add("");
         sj.add(content.toString(StandardCharsets.UTF_8));
         return sj.toString();
@@ -133,8 +143,10 @@ public class HttpByteBufFormatter {
                 new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
         );
 
+        //log.warn("Beginning to parse bytes for parseHttpMessageFromBufs");
         byteBufStream.forEach(b -> {
             try {
+                //log.warn("processing bytes: " + b.toString(StandardCharsets.UTF_8));
                 channel.writeInbound(b.retainedDuplicate());
             } finally {
                 if (releaseByteBufs) {

@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.util.ReferenceCounted;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
@@ -115,7 +116,6 @@ public class ParsedHttpMessagesAsDicts {
     private static Map<String, Object> fillMap(LinkedHashMap<String, Object> map,
                                                HttpHeaders headers, ByteBuf content) {
         String base64body = Base64.getEncoder().encodeToString(getBytesFromByteBuf(content));
-        content.release();
         map.put("body", base64body);
         headers.entries().stream().forEach(kvp -> map.put(kvp.getKey(), kvp.getValue()));
         return map;
@@ -139,13 +139,17 @@ public class ParsedHttpMessagesAsDicts {
         return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
             var message = HttpByteBufFormatter.parseHttpRequestFromBufs(byteToByteBufStream(data), true);
-            map.put("Request-URI", message.uri());
-            map.put("Method", message.method().toString());
-            map.put("HTTP-Version", message.protocolVersion().toString());
-            context.setMethod(message.method().toString());
-            context.setEndpoint(message.uri());
-            context.setHttpVersion(message.protocolVersion().toString());
-            return fillMap(map, message.headers(), message.content());
+            try {
+                map.put("Request-URI", message.uri());
+                map.put("Method", message.method().toString());
+                map.put("HTTP-Version", message.protocolVersion().toString());
+                context.setMethod(message.method().toString());
+                context.setEndpoint(message.uri());
+                context.setHttpVersion(message.protocolVersion().toString());
+                return fillMap(map, message.headers(), message.content());
+            } finally {
+                Optional.ofNullable(message).ifPresent(ReferenceCounted::release);
+            }
         });
     }
 
@@ -154,11 +158,18 @@ public class ParsedHttpMessagesAsDicts {
         return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
             var message = HttpByteBufFormatter.parseHttpResponseFromBufs(byteToByteBufStream(data), true);
-            map.put("HTTP-Version", message.protocolVersion());
-            map.put(STATUS_CODE_KEY, message.status().code());
-            map.put("Reason-Phrase", message.status().reasonPhrase());
-            map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
-            return fillMap(map, message.headers(), message.content());
+            if (message == null) {
+                return Map.of("Exception", "Message couldn't be parsed as a full http message");
+            }
+            try {
+                map.put("HTTP-Version", message.protocolVersion());
+                map.put(STATUS_CODE_KEY, message.status().code());
+                map.put("Reason-Phrase", message.status().reasonPhrase());
+                map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
+                return fillMap(map, message.headers(), message.content());
+            } finally {
+                Optional.ofNullable(message).ifPresent(ReferenceCounted::release);
+            }
         });
     }
 }

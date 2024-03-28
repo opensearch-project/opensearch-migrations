@@ -1,18 +1,23 @@
 package org.opensearch.migrations.replay.netty;
 
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpObject;
+import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.util.ReferenceCountUtil;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import java.util.function.Consumer;
 
 @Slf4j
-public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<FullHttpResponse> {
+public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
-    private boolean doneReadingRequest; // later, when connections are reused, switch this to a counter?
+    private boolean doneReadingRequest;
     Consumer<AggregatedRawResponse> responseCallback;
 
     public BacksideHttpWatcherHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder) {
@@ -21,16 +26,28 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
     }
 
     @Override
-    protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse msg) throws Exception {
-        doneReadingRequest = true;
-        triggerResponseCallbackAndRemoveCallback();
-        super.channelReadComplete(ctx);
+    protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) throws Exception {
+        if (msg instanceof LastHttpContent) {
+            triggerResponseCallbackAndRemoveCallback();
+        }
     }
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         triggerResponseCallbackAndRemoveCallback();
         super.handlerRemoved(ctx);
+    }
+
+    @Override
+    public void channelInactive(@NonNull ChannelHandlerContext ctx) throws Exception {
+        triggerResponseCallbackAndRemoveCallback();
+        super.channelInactive(ctx);
+    }
+
+    @Override
+    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        triggerResponseCallbackAndRemoveCallback();
+        super.channelUnregistered(ctx);
     }
 
     @Override
@@ -42,6 +59,7 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
 
     private void triggerResponseCallbackAndRemoveCallback() {
         log.atTrace().setMessage(()->"triggerResponseCallbackAndRemoveCallback, callback="+this.responseCallback).log();
+        doneReadingRequest = true;
         if (this.responseCallback != null) {
             // this method may be re-entrant upon calling the callback, so make sure that we don't loop
             var originalResponseCallback = this.responseCallback;
@@ -63,13 +81,4 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Full
             this.responseCallback = callback;
         }
     }
-
-    @Override
-    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        doneReadingRequest = true;
-        log.trace("inactive channel - closing");
-        triggerResponseCallbackAndRemoveCallback();
-        super.channelInactive(ctx);
-    }
-
 }

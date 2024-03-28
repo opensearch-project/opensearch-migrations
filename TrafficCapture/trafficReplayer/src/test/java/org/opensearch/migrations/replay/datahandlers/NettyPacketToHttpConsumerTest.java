@@ -1,6 +1,9 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+import io.netty.buffer.Unpooled;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
@@ -11,10 +14,14 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.ClientConnectionPool;
+import org.opensearch.migrations.replay.HttpByteBufFormatter;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
+import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
@@ -25,13 +32,15 @@ import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
-import org.opensearch.migrations.testutils.SimpleHttpServer;
+import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
 import javax.net.ssl.SSLException;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
@@ -41,6 +50,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Optional;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -60,11 +72,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     "\r\n";
     public final static String EXPECTED_RESPONSE_STRING =
             "HTTP/1.1 200 OK\r\n" +
-                    "Content-transfer-encoding: chunked\r\n" +
-                    "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n" + // This should be OK since it's always the same length
-                    "Transfer-encoding: chunked\r\n" +
-                    "Content-type: text/plain\r\n" +
+                    "Content-Type: text/plain\r\n" +
                     "Funtime: checkIt!\r\n" +
+                    "transfer-encoding: chunked\r\n" +
                     "\r\n" +
                     "1e\r\n" +
                     "I should be decrypted tester!\n" +
@@ -72,13 +82,13 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     "0\r\n" +
                     "\r\n";
 
-    private static Map<Boolean, SimpleHttpServer> testServers;
+    private static Map<Boolean, SimpleNettyHttpServer> testServers;
 
     @BeforeAll
     public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         testServers = Map.of(
-                false, SimpleHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeResponseContext),
-                true, SimpleHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeResponseContext));
+                false, SimpleNettyHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeResponseContext),
+                true, SimpleNettyHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeResponseContext));
     }
 
     @AfterAll
@@ -118,10 +128,10 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     private static SimpleHttpResponse makeResponseContext(HttpRequestFirstLine request) {
-        var headers = Map.of(
+        var headers = new TreeMap(Map.of(
                 "Content-Type", "text/plain",
                 "Funtime", "checkIt!",
-                "Content-Transfer-Encoding", "chunked");
+                HttpHeaderNames.TRANSFER_ENCODING.toString(), HttpHeaderValues.CHUNKED.toString()));
         var payloadBytes = SERVER_RESPONSE_BODY.getBytes(StandardCharsets.UTF_8);
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
@@ -144,12 +154,48 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
             nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
             var aggregatedResponse = nphc.finalizeRequest().get();
-            var responseBytePackets = aggregatedResponse.getCopyOfPackets();
-            var responseAsString = Arrays.stream(responseBytePackets)
-                    .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
-                    .collect(Collectors.joining());
-            Assertions.assertEquals(normalizeMessage(EXPECTED_RESPONSE_STRING),
-                    normalizeMessage(responseAsString));
+            var responseAsString = getResponsePacketsAsString(aggregatedResponse);
+            Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "false, false",
+            "false, true",
+            "true, false",
+            "true, true"})
+    @WrapWithNettyLeakDetection(repetitions = 1)
+    public void testThatPeerResetTriggersFinalizeFuture(boolean useTls, boolean withServerReadTimeout) throws Exception {
+        try (var testServer = SimpleNettyHttpServer.makeServer(useTls,
+                withServerReadTimeout ? Duration.ofMillis(100) : null,
+                NettyPacketToHttpConsumerTest::makeResponseContext)) {
+            log.atError().setMessage("Got port " + testServer.port).log();
+            var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
+                    SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+            var timeShifter = new TimeShifter();
+            timeShifter.setFirstTimestamp(Instant.now());
+            var clientConnectionPool = new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
+
+
+            var reqCtx = rootContext.getTestConnectionRequestContext(1);
+            var nphc = new NettyPacketToHttpConsumer(clientConnectionPool
+                    .buildConnectionReplaySession(reqCtx.getChannelKeyContext()), reqCtx);
+            //nphc.consumeBytes("\r\n{\"\": \"\"}\r\n".getBytes(StandardCharsets.UTF_8));
+            nphc.consumeBytes("\r\nbadrequest\r\n".getBytes(StandardCharsets.UTF_8));
+            var result = nphc.finalizeRequest().get(Duration.ofSeconds(4));
+
+            try (var is = ReplayUtils.byteArraysToInputStream(Arrays.stream(result.getCopyOfPackets()));
+                 var isr = new InputStreamReader(is);
+                 var br = new BufferedReader(isr)) {
+                Assertions.assertEquals("", Optional.ofNullable(br.readLine()).orElse(""));
+                Assertions.assertEquals(0, result.getResponseSizeInBytes());
+            }
+            var stopFuture = clientConnectionPool.shutdownNow();
+            log.info("waiting for factory to shutdown: " + stopFuture);
+            stopFuture.get();
+            log.info("done shutting down");
         }
     }
 
@@ -178,17 +224,19 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var aggregatedResponse = requestFinishFuture.get();
                 log.debug("Got aggregated response=" + aggregatedResponse);
                 Assertions.assertNull(aggregatedResponse.getError());
-                var responseBytePackets = aggregatedResponse.getCopyOfPackets();
-                var responseAsString = Arrays.stream(responseBytePackets)
-                        .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
-                        .collect(Collectors.joining());
-                Assertions.assertEquals(normalizeMessage(EXPECTED_RESPONSE_STRING),
-                        normalizeMessage(responseAsString));
+                var responseAsString = getResponsePacketsAsString(aggregatedResponse);
+                Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
             }
         }
         var stopFuture = clientConnectionPool.shutdownNow();
         log.info("waiting for factory to shutdown: " + stopFuture);
         stopFuture.get();
+    }
+
+    private static String getResponsePacketsAsString(AggregatedRawResponse response) {
+        return Arrays.stream(response.getCopyOfPackets())
+                .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
+                .collect(Collectors.joining());
     }
 
     @ParameterizedTest
@@ -207,10 +255,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         Assertions.assertEquals(2, tcpOpenConnectionCount);
         Assertions.assertEquals(2, connectionsOpenedCount);
         Assertions.assertEquals(2, connectionsClosedCount);
-    }
-
-    private static String normalizeMessage(String s) {
-        return s.replaceAll("Date: .*", "Date: SOMETHING");
     }
 
     private class TestFlowController implements BufferedFlowController {

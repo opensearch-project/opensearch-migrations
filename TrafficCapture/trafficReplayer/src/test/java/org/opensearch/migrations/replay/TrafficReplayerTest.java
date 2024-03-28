@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
+import io.netty.handler.logging.LogLevel;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -18,6 +19,7 @@ import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
+import org.slf4j.event.Level;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -195,6 +197,9 @@ class TrafficReplayerTest extends InstrumentationTest {
                 try (var trafficSource = new InputStreamOfTraffic(rootContext, bais)) {
                     tr.pullCaptureFromSourceToAccumulator(trafficSource, trafficAccumulator);
                 }
+                trafficAccumulator.close();
+                tr.waitForRemainingWork(Level.INFO, Duration.ofSeconds(10));
+                log.info("done waiting");
             }
             Assertions.assertEquals(1, byteArrays.size());
             Assertions.assertTrue(byteArrays.stream().allMatch(ba -> ba.size() == 2));

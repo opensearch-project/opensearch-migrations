@@ -34,10 +34,12 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
@@ -46,7 +48,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
-    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.of(LogLevel.INFO);
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     public static final String CONNECTION_CLOSE_HANDLER_NAME = "CONNECTION_CLOSE_HANDLER";
@@ -100,6 +102,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     if (c.isActive()) {
                         this.channel = c;
                         initializeChannelPipeline();
+                        log.atDebug().setMessage(()->"Channel initialized for " + ctx + " signaling future").log();
                         initialFuture.future.complete(null);
                     } else {
                         // this may loop forever - until the event loop is shutdown
@@ -232,11 +235,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         addLoggingHandlerLast(pipeline, "C");
         pipeline.addLast(new HttpResponseDecoder());
         addLoggingHandlerLast(pipeline, "D");
-        // TODO - switch this out to use less memory.
-        // We only need to know when the response has been fully received, not the contents
-        // since we're already logging those in the sniffer earlier in the pipeline.
-        pipeline.addLast(new HttpObjectAggregator(1024 * 1024));
-        addLoggingHandlerLast(pipeline, "D");
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "E");
         log.atTrace().setMessage(() -> "Added handlers to the pipeline: " + pipeline).log();
@@ -275,13 +273,17 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         }
     }
 
+
     @Override
     public DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(ByteBuf packetData) {
         activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
             if (channelException == null) {
-                log.atTrace().setMessage(()->"outboundChannelFuture is ready writing packets (hash=" +
-                        System.identityHashCode(packetData) + ")").log();
-                return writePacketAndUpdateFuture(packetData);
+                log.atTrace().setMessage(()->"outboundChannelFuture is ready. Writing packets (hash=" +
+                        System.identityHashCode(packetData) + "): " + httpContext() + ": " +
+                        packetData.toString(StandardCharsets.UTF_8)).log();
+                return writePacketAndUpdateFuture(packetData).whenComplete((v2,t2)->{
+                    log.atInfo().setMessage(()->"finished writing " + httpContext() + " t=" + t2).log();
+                }, ()->"");
             } else {
                 log.atWarn().setMessage(()-> httpContext().getReplayerRequestKey() +
                         "outbound channel was not set up successfully, NOT writing bytes hash=" +
@@ -339,6 +341,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
+                    log.atDebug().setMessage(()->"finalization running since all prior work has completed for " +
+                            httpContext()).log();
                     if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
                         this.getCurrentRequestSpan().close();
                         this.setCurrentMessageContext(getParentContext().createWaitingForResponseContext());
@@ -363,8 +367,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         deactivateChannel();
                     }
                 }), ()->"clearing pipeline");
-        log.atTrace().setMessage(()->"Chaining finalization work off of " + activeChannelFuture +
-                ".  Returning finalization future="+ff).log();
+        log.atDebug().setMessage(()->"Chaining finalization work off of " + activeChannelFuture +
+                " for " + httpContext() + ".  Returning finalization future=" + ff).log();
         return ff;
     }
 }
