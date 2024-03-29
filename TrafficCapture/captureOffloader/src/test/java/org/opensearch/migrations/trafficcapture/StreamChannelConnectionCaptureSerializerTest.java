@@ -83,12 +83,18 @@ class StreamChannelConnectionCaptureSerializerTest {
 
     @Test
     public void testLargeReadPacketIsSplit() throws IOException, ExecutionException, InterruptedException {
+        var bufferSize = 1024 * 1024;
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
-        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 1024 * 1024);
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, bufferSize);
 
-        // Create over 1MB packet
-        String data = FAKE_READ_PACKET_DATA.repeat((1024 * 1024 / FAKE_READ_PACKET_DATA.length()) + 1);
+        double minGeneratedChunks = 2.2;
+        int dataRepeat = (int) Math.ceil((((double) bufferSize / FAKE_READ_PACKET_DATA.length()) * minGeneratedChunks));
+
+        String data = FAKE_READ_PACKET_DATA.repeat(dataRepeat);
         byte[] fakeDataBytes = data.getBytes(StandardCharsets.UTF_8);
+
+        int expectedChunks = (fakeDataBytes.length / bufferSize) + ((fakeDataBytes.length % bufferSize == 0) ? 0 : 1);
+
         var bb = Unpooled.wrappedBuffer(fakeDataBytes);
         serializer.addReadEvent(REFERENCE_TIMESTAMP, bb);
         var future = serializer.flushCommitAndResetStream(true);
@@ -98,17 +104,18 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersList = new ArrayList<>(outputBuffersCreated);
 
         var reconstitutedTrafficStreamsList = new ArrayList<TrafficStream>();
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < expectedChunks; ++i) {
             reconstitutedTrafficStreamsList.add(TrafficStream.parseFrom(outputBuffersList.get(i)));
         }
         reconstitutedTrafficStreamsList.sort(
             Comparator.comparingInt(StreamChannelConnectionCaptureSerializerTest::getIndexForTrafficStream));
         int totalSize = 0;
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < expectedChunks; ++i) {
             var reconstitutedTrafficStream = reconstitutedTrafficStreamsList.get(i);
             int dataSize = reconstitutedTrafficStream.getSubStream(0).getReadSegment().getData().size();
             totalSize += dataSize;
             Assertions.assertEquals(i + 1, getIndexForTrafficStream(reconstitutedTrafficStream));
+            Assertions.assertTrue(dataSize <= bufferSize);
         }
         Assertions.assertEquals(fakeDataBytes.length, totalSize);
     }
