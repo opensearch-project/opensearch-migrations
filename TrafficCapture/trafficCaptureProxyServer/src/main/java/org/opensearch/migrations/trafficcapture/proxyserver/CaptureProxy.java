@@ -7,6 +7,7 @@ import com.google.protobuf.CodedOutputStream;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import java.io.OutputStream;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -15,7 +16,6 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
-import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
@@ -190,7 +190,19 @@ public class CaptureProxy {
                 new StreamLifecycleManager<>() {
                     @Override
                     public CodedOutputStreamHolder createStream() {
-                        return () -> CodedOutputStream.newInstance(NullOutputStream.getInstance());
+                        return new CodedOutputStreamHolder() {
+                            final CodedOutputStream nullOutputStream = CodedOutputStream.newInstance(OutputStream.nullOutputStream());
+
+                            @Override
+                            public int getOutputStreamBytesLimit() {
+                                return -1;
+                            }
+
+                            @Override
+                            public @NonNull CodedOutputStream getOutputStream() {
+                                return nullOutputStream;
+                            }
+                        };
                     }
 
                     @Override

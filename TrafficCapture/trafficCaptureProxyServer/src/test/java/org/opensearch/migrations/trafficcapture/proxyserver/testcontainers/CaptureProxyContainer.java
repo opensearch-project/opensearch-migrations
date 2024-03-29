@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver.testcontainers;
 
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -42,6 +43,10 @@ public class CaptureProxyContainer
     this(() -> getUriFromContainer(destination), () -> getUriFromContainer(kafka));
   }
 
+  public CaptureProxyContainer(final Container<?> destination) {
+    this(() -> getUriFromContainer(destination), null);
+  }
+
   public static String getUriFromContainer(final Container<?> container) {
     return "http://" + container.getHost() + ":" + container.getFirstMappedPort();
   }
@@ -51,14 +56,22 @@ public class CaptureProxyContainer
     this.listeningPort = PortFinder.findOpenPort();
     serverThread = new Thread(() -> {
       try {
-        String[] args = {
-            "--kafkaConnection", kafkaUriSupplier.get(),
-            "--destinationUri", destinationUriSupplier.get(),
-            "--listenPort", String.valueOf(listeningPort),
-            "--insecureDestination"
-        };
+        List<String> argsList = new ArrayList<>();
 
-        CaptureProxy.main(args);
+        if (kafkaUriSupplier != null) {
+          argsList.add("--kafkaConnection");
+          argsList.add(kafkaUriSupplier.get());
+        } else {
+          argsList.add("--noCapture");
+        }
+
+        argsList.add("--destinationUri");
+        argsList.add(destinationUriSupplier.get());
+        argsList.add("--listenPort");
+        argsList.add(String.valueOf(listeningPort));
+        argsList.add("--insecureDestination");
+
+        CaptureProxy.main(argsList.toArray(new String[0]));
       } catch (Exception e) {
         throw new AssertionError("Should not have exception", e);
       }
