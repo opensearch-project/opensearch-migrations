@@ -22,6 +22,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-annotations:2.16.2'
     implementation 'com.fasterxml.jackson.core:jackson-core:2.16.2'
     implementation 'software.amazon.awssdk:s3:2.25.16'
+    implementation 'io.netty:netty-codec-http:4.1.108.Final'
 }
 
 application {
