@@ -16,4 +16,9 @@ standardReleasePipelineWithGenericTrigger(
                             sigType: '.sig',
                             sigOverwrite: true
                         )
+                        
+                        publishToMaven(
+                            signingArtifactsPath: "$WORKSPACE/",
+                            mavenArtifactsPath: "$WORKSPACE/"
+                        )
     }
