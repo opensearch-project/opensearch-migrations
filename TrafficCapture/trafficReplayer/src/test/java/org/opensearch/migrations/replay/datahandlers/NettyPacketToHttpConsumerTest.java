@@ -7,11 +7,9 @@ import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import lombok.Lombok;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -29,7 +27,6 @@ import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpRequestFirstLine;
-import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
@@ -62,6 +59,8 @@ import java.util.stream.Stream;
 public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
+    public static final int LARGE_RESPONSE_CONTENT_LENGTH = 2 * 1024 * 1024;
+    public static final int LARGE_RESPONSE_LENGTH = LARGE_RESPONSE_CONTENT_LENGTH + 107;
 
     final static String EXPECTED_REQUEST_STRING =
             "GET / HTTP/1.1\r\n" +
@@ -82,49 +81,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     "0\r\n" +
                     "\r\n";
 
-    private static Map<Boolean, SimpleNettyHttpServer> testServers;
-
-    @BeforeAll
-    public static void setupTestServer() throws PortFinder.ExceededMaxPortAssigmentAttemptException {
-        testServers = Map.of(
-                false, SimpleNettyHttpServer.makeServer(false, NettyPacketToHttpConsumerTest::makeResponseContext),
-                true, SimpleNettyHttpServer.makeServer(true, NettyPacketToHttpConsumerTest::makeResponseContext));
-    }
-
-    @AfterAll
-    public static void tearDownTestServer() throws Exception {
-        testServers.values().stream().forEach(s-> {
-            try {
-                s.close();
-            } catch (Exception e) {
-                throw Lombok.sneakyThrow(e);
-            }
-        });
-    }
-
     @Override
     protected TestContext makeInstrumentationContext() {
         return TestContext.withTracking(false, true);
-    }
-
-    @Test
-    public void testThatTestSetupIsCorrect()
-            throws IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException
-    {
-        for (var useTls : new boolean[]{false, true}) {
-            try (var client = new SimpleHttpClientForTesting(useTls)) {
-                var endpoint = testServers.get(useTls).localhostEndpoint();
-                var response = makeTestRequestViaClient(client, endpoint);
-                Assertions.assertEquals(SERVER_RESPONSE_BODY,
-                        new String(response.payloadBytes, StandardCharsets.UTF_8));
-            }
-        }
-    }
-
-    private SimpleHttpResponse makeTestRequestViaClient(SimpleHttpClientForTesting client, URI endpoint)
-            throws IOException {
-        return client.makeGetRequest(endpoint, Map.of("Host", "localhost",
-        "User-Agent", "UnitTest").entrySet().stream());
     }
 
     private static SimpleHttpResponse makeResponseContext(HttpRequestFirstLine request) {
@@ -136,28 +95,82 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testHttpResponseIsSuccessfullyCaptured(boolean useTls) throws Exception {
-        for (int i = 0; i < 1; ++i) {
-            var testServer = testServers.get(useTls);
-            var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
-                    SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-            var httpContext = rootContext.getTestConnectionRequestContext(0);
-            var channelContext = httpContext.getChannelKeyContext();
-            var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("test")).next();
-            var replaySession = new ConnectionReplaySession(eventLoop, channelContext,
-                    () -> ClientConnectionPool.getCompletedChannelFutureAsCompletableFuture(
-                            httpContext.getChannelKeyContext(),
-                            NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
-                                    testServer.localhostEndpoint(), channelContext)));
-            var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
-            nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
-            var aggregatedResponse = nphc.finalizeRequest().get();
-            var responseAsString = getResponsePacketsAsString(aggregatedResponse);
-            Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+    private static SimpleHttpResponse makeResponseContextLarge(HttpRequestFirstLine request) {
+        var headers = new TreeMap(Map.of(
+                "Content-Type", "text/plain",
+                "Funtime", "checkIt!",
+                HttpHeaderNames.TRANSFER_ENCODING.toString(), HttpHeaderValues.CHUNKED.toString()));
+
+        int size = 2 * 1024 * 1024;
+        byte[] payloadBytes = new byte[size];
+        Arrays.fill(payloadBytes, (byte) 'A');
+        return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
+    }
+
+    @SneakyThrows
+    private static SimpleNettyHttpServer createTestServer(boolean useTls, boolean largeResponse) {
+        return SimpleNettyHttpServer.makeServer(useTls,
+            largeResponse ? NettyPacketToHttpConsumerTest::makeResponseContextLarge
+                : NettyPacketToHttpConsumerTest::makeResponseContext);
+    }
+
+    @Test
+    public void testThatTestSetupIsCorrect() throws Exception {
+        for (var useTls : new boolean[]{false, true}) {
+            try (var client = new SimpleHttpClientForTesting(useTls);
+                var  testServer = createTestServer(useTls, false)) {
+                    var endpoint = testServer.localhostEndpoint();
+                    var response = makeTestRequestViaClient(client, endpoint);
+                    Assertions.assertEquals(SERVER_RESPONSE_BODY,
+                        new String(response.payloadBytes, StandardCharsets.UTF_8));
+            } catch (Throwable t) {
+                log.atError().setMessage(()->"Error=").setCause(t).log();
+            }
         }
     }
+
+    private SimpleHttpResponse makeTestRequestViaClient(SimpleHttpClientForTesting client, URI endpoint)
+            throws IOException {
+        return client.makeGetRequest(endpoint, Map.of("Host", "localhost",
+        "User-Agent", "UnitTest").entrySet().stream());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false, false",
+        "false, true",
+        "true, false",
+        "true, true"
+    })
+    public void testHttpResponseIsSuccessfullyCaptured(boolean useTls, boolean largeResponse) throws Exception {
+        try (var testServer = createTestServer(useTls, largeResponse)) {
+            for (int i = 0; i < 1; ++i) {
+                var sslContext = !testServer.localhostEndpoint().getScheme().toLowerCase().equals("https") ? null :
+                        SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+                var httpContext = rootContext.getTestConnectionRequestContext(0);
+                var channelContext = httpContext.getChannelKeyContext();
+                var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("test")).next();
+                var replaySession = new ConnectionReplaySession(eventLoop, channelContext,
+                        () -> ClientConnectionPool.getCompletedChannelFutureAsCompletableFuture(
+                                httpContext.getChannelKeyContext(),
+                                NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
+                                        testServer.localhostEndpoint(), channelContext)));
+                var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
+                nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
+                var aggregatedResponse = nphc.finalizeRequest().get();
+                var responseBytePackets = aggregatedResponse.getCopyOfPackets();
+                var responseAsString = getResponsePacketsAsString(aggregatedResponse);
+                if (!largeResponse) {
+                    Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+                } else {
+                    Assertions.assertEquals(LARGE_RESPONSE_LENGTH,
+                            responseAsString.getBytes(StandardCharsets.UTF_8).length);
+
+                }
+            }
+        }
+    }
+
 
     @ParameterizedTest
     @CsvSource({
@@ -200,37 +213,50 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testThatConnectionsAreKeptAliveAndShared(boolean useTls)
-            throws SSLException, ExecutionException, InterruptedException {
-        var testServer = testServers.get(useTls);
-        var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
+    @CsvSource({
+        "false, false",
+        "false, true",
+        "true, false",
+        "true, true"
+    })
+    public void testThatConnectionsAreKeptAliveAndShared(boolean useTls, boolean largeResponse)
+            throws Exception {
+        try (var testServer = SimpleNettyHttpServer.makeServer(useTls,
+            largeResponse ? NettyPacketToHttpConsumerTest::makeResponseContextLarge : NettyPacketToHttpConsumerTest::makeResponseContext)) {
+            var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
                 SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-        var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
+            var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
                 new TransformationLoader().getTransformerFactoryLoader(null), null);
-        var timeShifter = new TimeShifter();
-        timeShifter.setFirstTimestamp(Instant.now());
-        var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
-        var sendingFactory = new ReplayEngine(new RequestSenderOrchestrator(clientConnectionPool),
+            var timeShifter = new TimeShifter();
+            timeShifter.setFirstTimestamp(Instant.now());
+            var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
+            var sendingFactory = new ReplayEngine(new RequestSenderOrchestrator(clientConnectionPool),
                 new TestFlowController(), timeShifter);
-        for (int j = 0; j < 2; ++j) {
-            for (int i = 0; i < 2; ++i) {
-                var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
-                var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
+            for (int j = 0; j < 2; ++j) {
+                for (int i = 0; i < 2; ++i) {
+                    var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
+                    var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(),
                         () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-                log.info("requestFinishFuture=" + requestFinishFuture);
-                var aggregatedResponse = requestFinishFuture.get();
-                log.debug("Got aggregated response=" + aggregatedResponse);
-                Assertions.assertNull(aggregatedResponse.getError());
-                var responseAsString = getResponsePacketsAsString(aggregatedResponse);
-                Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+                    log.info("requestFinishFuture=" + requestFinishFuture);
+                    var aggregatedResponse = requestFinishFuture.get();
+                    log.debug("Got aggregated response=" + aggregatedResponse);
+                    Assertions.assertNull(aggregatedResponse.getError());
+                    var responseAsString = getResponsePacketsAsString(aggregatedResponse);
+                    if (!largeResponse) {
+                        Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+                    } else {
+                        Assertions.assertEquals(LARGE_RESPONSE_LENGTH,
+                            responseAsString.getBytes(StandardCharsets.UTF_8).length);
+
+                    }
+                }
             }
+            var stopFuture = clientConnectionPool.shutdownNow();
+            log.info("waiting for factory to shutdown: " + stopFuture);
+            stopFuture.get();
         }
-        var stopFuture = clientConnectionPool.shutdownNow();
-        log.info("waiting for factory to shutdown: " + stopFuture);
-        stopFuture.get();
     }
 
     private static String getResponsePacketsAsString(AggregatedRawResponse response) {
@@ -243,7 +269,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @ValueSource(booleans = {false, true})
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testMetricCountsFor_testThatConnectionsAreKeptAliveAndShared(boolean useTls) throws Exception {
-        testThatConnectionsAreKeptAliveAndShared(useTls);
+        testThatConnectionsAreKeptAliveAndShared(useTls, false);
         Thread.sleep(200); // let metrics settle down
         var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         long tcpOpenConnectionCount = allMetricData.stream().filter(md->md.getName().startsWith("tcpConnectionCount"))

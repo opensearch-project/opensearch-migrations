@@ -61,6 +61,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         private final CodedOutputStream codedOutputStream;
         private final ByteBuffer byteBuffer;
         @Override
+        public int getOutputStreamBytesLimit() {
+            return byteBuffer.limit();
+        }
+
+        @Override
         public @NonNull CodedOutputStream getOutputStream() {
             return codedOutputStream;
         }
