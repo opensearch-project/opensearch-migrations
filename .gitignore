@@ -8,3 +8,6 @@ __pycache__
 .python-version
 logs
 test/opensearch-cluster-cdk/
+RFS/.gradle/
+RFS/build/
+opensearch-cluster-cdk/
