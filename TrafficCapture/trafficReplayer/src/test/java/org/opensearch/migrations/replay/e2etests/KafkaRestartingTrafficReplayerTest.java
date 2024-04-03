@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -44,6 +45,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
+@WrapWithNettyLeakDetection(disableLeakChecks = true)
 @Tag("requiresDocker")
 public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
