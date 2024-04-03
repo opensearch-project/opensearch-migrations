@@ -14,6 +14,8 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 
 public class SnapshotMetadata {
+    // TODO: Turn into an ENUM when we know the other possible values
+    public static final String SNAPSHOT_SUCCEEDED = "SUCCESS";
 
     /**
     * Defines the behavior required to read a snapshot metadata as JSON and convert it into a Data object
@@ -70,6 +72,10 @@ public class SnapshotMetadata {
         public int getTotalShards();    
         public int getSuccessfulShards();
         public List<?> getFailures();
+
+        default boolean isSuccessful() {
+            return SNAPSHOT_SUCCEEDED.equals(getState());
+        }
     }
     
 }

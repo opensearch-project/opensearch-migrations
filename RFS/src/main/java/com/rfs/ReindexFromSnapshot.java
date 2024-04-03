@@ -29,7 +29,7 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"--snapshot-dir"}, description = "The absolute path to the source snapshot directory on local disk", required = false)
         public String snapshotDirPath = null;
 
-        @Parameter(names = {"--s3-local-dir"}, description = "The absolute path to the directory on local disk to write S3 files to", required = false)
+        @Parameter(names = {"--s3-local-dir"}, description = "The absolute path to the directory on local disk to download S3 files to", required = false)
         public String s3LocalDirPath = null;
 
         @Parameter(names = {"--s3-repo-uri"}, description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2", required = false)
@@ -50,10 +50,10 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"-p", "--target-password"}, description = "The target password", required = true)
         public String targetPass;
 
-        @Parameter(names = {"-s", "--source-version"}, description = "Source version", required = true, converter = ClusterVersion.ArgsConverter.class)
+        @Parameter(names = {"-s", "--source-version"}, description = "The source cluster's version (e.g. 'es_6_8')", required = true, converter = ClusterVersion.ArgsConverter.class)
         public ClusterVersion sourceVersion;
 
-        @Parameter(names = {"-t", "--target-version"}, description = "Target version", required = true, converter = ClusterVersion.ArgsConverter.class)
+        @Parameter(names = {"-t", "--target-version"}, description = "The target cluster's version (e.g. 'os_2_11')", required = true, converter = ClusterVersion.ArgsConverter.class)
         public ClusterVersion targetVersion;
 
         @Parameter(names = {"--movement-type"}, description = "What you want to move - everything, metadata, or data.  Default: 'everything'", required = false, converter = MovementType.ArgsConverter.class)
@@ -109,7 +109,7 @@ public class ReindexFromSnapshot {
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
             repo = new S3Repo(s3LocalDirPath, s3RepoUri, s3Region);
         } else {
-            throw new IllegalArgumentException("You must specify either a snapshot directory or an S3 URI");
+            throw new IllegalArgumentException("You must specify either a local snapshot directory or an S3 URI");
         }
 
         // Set the transformer
@@ -143,7 +143,7 @@ public class ReindexFromSnapshot {
             String snapshotIdString = repoDataProvider.getSnapshotId(snapshotName);
 
             if (snapshotIdString == null) {
-                logger.warn("Snapshot not found");
+                logger.error("Snapshot not found");
                 return;
             }
             SnapshotMetadata.Data snapshotMetadata;
@@ -158,8 +158,8 @@ public class ReindexFromSnapshot {
                 throw new IllegalArgumentException("Snapshot does not include global state, so we can't move metadata");
             }
 
-            if (!"SUCCESS".equals(snapshotMetadata.getState())){
-                throw new IllegalArgumentException("Snapshot state is " + snapshotMetadata.getState() + ", must be 'SUCCESS'");
+            if (!snapshotMetadata.isSuccessful()){
+                throw new IllegalArgumentException("Snapshot must be successful; its actual state is " + snapshotMetadata.getState());
             }
 
             // We might not actually get this far if the snapshot is the wrong version; we'll probably have failed to

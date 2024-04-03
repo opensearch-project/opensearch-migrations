@@ -31,7 +31,7 @@ public class RestClient {
         byte[] encodedAuth = Base64.getEncoder().encode(auth.getBytes(StandardCharsets.UTF_8));
         String authHeaderValue = "Basic " + new String(encodedAuth);
 
-        // Set the request method to PUT
+        // Set the request method
         conn.setRequestMethod("GET");
 
         // Set the necessary headers
@@ -78,7 +78,7 @@ public class RestClient {
         byte[] encodedAuth = Base64.getEncoder().encode(auth.getBytes(StandardCharsets.UTF_8));
         String authHeaderValue = "Basic " + new String(encodedAuth);
 
-        // Set the request method to PUT
+        // Set the request method
         conn.setRequestMethod("PUT");
 
         // Set the necessary headers
