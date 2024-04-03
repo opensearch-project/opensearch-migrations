@@ -47,7 +47,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
-    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.of(LogLevel.INFO);
+    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     public static final String CONNECTION_CLOSE_HANDLER_NAME = "CONNECTION_CLOSE_HANDLER";
@@ -281,7 +281,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         System.identityHashCode(packetData) + "): " + httpContext() + ": " +
                         packetData.toString(StandardCharsets.UTF_8)).log();
                 return writePacketAndUpdateFuture(packetData).whenComplete((v2,t2)->{
-                    log.atInfo().setMessage(()->"finished writing " + httpContext() + " t=" + t2).log();
+                    log.atDebug().setMessage(()->"finished writing " + httpContext() + " t=" + t2).log();
                 }, ()->"");
             } else {
                 log.atWarn().setMessage(()-> httpContext().getReplayerRequestKey() +

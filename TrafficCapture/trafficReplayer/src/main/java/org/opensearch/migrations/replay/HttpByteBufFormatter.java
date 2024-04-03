@@ -143,10 +143,8 @@ public class HttpByteBufFormatter {
                 new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
         );
 
-        //log.warn("Beginning to parse bytes for parseHttpMessageFromBufs");
         byteBufStream.forEach(b -> {
             try {
-                //log.warn("processing bytes: " + b.toString(StandardCharsets.UTF_8));
                 channel.writeInbound(b.retainedDuplicate());
             } finally {
                 if (releaseByteBufs) {

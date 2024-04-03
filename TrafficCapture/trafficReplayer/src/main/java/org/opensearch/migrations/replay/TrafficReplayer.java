@@ -275,7 +275,7 @@ public class TrafficReplayer implements AutoCloseable {
                 names = {"--max-concurrent-requests"},
                 arity = 1,
                 description = "Maximum number of requests at a time that can be outstanding")
-        int maxConcurrentRequests = 1;
+        int maxConcurrentRequests = 1024;
         @Parameter(required = false,
                 names = {"--num-client-threads"},
                 arity = 1,

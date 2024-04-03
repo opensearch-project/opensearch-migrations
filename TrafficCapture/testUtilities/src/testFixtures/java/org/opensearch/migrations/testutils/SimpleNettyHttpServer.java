@@ -167,9 +167,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                         }
                         pipeline.addLast(new HttpRequestDecoder());
                         pipeline.addLast(new HttpObjectAggregator(16*1024));
-                        pipeline.addLast(new LoggingHandler(LogLevel.INFO));
                         pipeline.addLast(new HttpResponseEncoder());
-                        pipeline.addLast(new LoggingHandler(LogLevel.WARN));
                         pipeline.addLast(makeHandlerFromResponseContext(responseBuilder));
                     }
                 });
