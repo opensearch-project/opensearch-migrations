@@ -195,7 +195,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var reqCtx = rootContext.getTestConnectionRequestContext(1);
             var nphc = new NettyPacketToHttpConsumer(clientConnectionPool
                     .buildConnectionReplaySession(reqCtx.getChannelKeyContext()), reqCtx);
-            //nphc.consumeBytes("\r\n{\"\": \"\"}\r\n".getBytes(StandardCharsets.UTF_8));
             nphc.consumeBytes("\r\nbadrequest\r\n".getBytes(StandardCharsets.UTF_8));
             var result = nphc.finalizeRequest().get(Duration.ofSeconds(4));
 
