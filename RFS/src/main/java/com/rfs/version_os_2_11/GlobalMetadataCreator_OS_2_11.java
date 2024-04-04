@@ -14,7 +14,7 @@ import com.rfs.common.RestClient;
 public class GlobalMetadataCreator_OS_2_11 {
     private static final Logger logger = LogManager.getLogger(GlobalMetadataCreator_OS_2_11.class);
 
-    public static void create(ObjectNode root, ConnectionDetails connectionDetails, String[] componentTemplateWhitelist, String[] indexTemplateWhitelist) throws Exception {
+    public static void create(ObjectNode root, ConnectionDetails connectionDetails, List<String> componentTemplateWhitelist, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Global Metadata");
 
         GlobalMetadataData_OS_2_11 globalMetadata = new GlobalMetadataData_OS_2_11(root);
@@ -23,7 +23,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         createIndexTemplates(globalMetadata, connectionDetails, indexTemplateWhitelist);
     }
 
-    public static void createTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, String[] indexTemplateWhitelist) throws Exception {
+    public static void createTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Legacy Templates");
         ObjectNode templates = globalMetadata.getTemplates();
 
@@ -59,7 +59,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    public static void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, String[] indexTemplateWhitelist) throws Exception {
+    public static void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Component Templates");
         ObjectNode templates = globalMetadata.getComponentTemplates();
 
@@ -95,7 +95,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    public static void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, String[] indexTemplateWhitelist) throws Exception {
+    public static void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Index Templates");
         ObjectNode templates = globalMetadata.getIndexTemplates();
 
