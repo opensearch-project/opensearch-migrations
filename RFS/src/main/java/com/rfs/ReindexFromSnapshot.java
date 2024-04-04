@@ -23,7 +23,7 @@ public class ReindexFromSnapshot {
     private static final Logger logger = LogManager.getLogger(ReindexFromSnapshot.class);
 
     public static class Args {
-        @Parameter(names = {"-n", "--snapshot-name"}, description = "The name of the snapshot to read", required = true)
+        @Parameter(names = {"-n", "--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
 
         @Parameter(names = {"--snapshot-dir"}, description = "The absolute path to the source snapshot directory on local disk", required = false)
@@ -41,14 +41,23 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"-l", "--lucene-dir"}, description = "The absolute path to the directory where we'll put the Lucene docs", required = true)
         public String luceneDirPath;
 
-        @Parameter(names = {"-h", "--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
+        @Parameter(names = {"--source-host"}, description = "The source host and port (e.g. http://localhost:9200)", required = false)
+        public String sourceHost = null;
+
+        @Parameter(names = {"--source-username"}, description = "The source username; if not provided, will assume no auth on source", required = false)
+        public String sourceUser = null;
+
+        @Parameter(names = {"--source-password"}, description = "The source password; if not provided, will assume no auth on source", required = false)
+        public String sourcePass = null;
+
+        @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
         public String targetHost;
 
-        @Parameter(names = {"-u", "--target-username"}, description = "The target username", required = true)
-        public String targetUser;
+        @Parameter(names = {"--target-username"}, description = "The target username; if not provided, will assume no auth on target", required = false)
+        public String targetUser = null;
 
-        @Parameter(names = {"-p", "--target-password"}, description = "The target password", required = true)
-        public String targetPass;
+        @Parameter(names = {"--target-password"}, description = "The target password; if not provided, will assume no auth on target", required = false)
+        public String targetPass = null;
 
         @Parameter(names = {"-s", "--source-version"}, description = "The source cluster's version (e.g. 'es_6_8')", required = true, converter = ClusterVersion.ArgsConverter.class)
         public ClusterVersion sourceVersion;
@@ -77,6 +86,9 @@ public class ReindexFromSnapshot {
         String s3RepoUri = arguments.s3RepoUri;
         String s3Region = arguments.s3Region;
         Path luceneDirPath = Paths.get(arguments.luceneDirPath);
+        String sourceHost = arguments.sourceHost;
+        String sourceUser = arguments.sourceUser;
+        String sourcePass = arguments.sourcePass;
         String targetHost = arguments.targetHost;
         String targetUser = arguments.targetUser;
         String targetPass = arguments.targetPass;
@@ -87,6 +99,7 @@ public class ReindexFromSnapshot {
 
         Logging.setLevel(logLevel);
 
+        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         // Should probably be passed in as an arguments
@@ -103,19 +116,50 @@ public class ReindexFromSnapshot {
             throw new IllegalArgumentException("Unsupported target version: " + sourceVersion);
         }
 
+        /*
+         * You have three options for providing the snapshot data
+         * 1. A local snapshot directory
+         * 2. A source host we'll take the snapshot from
+         * 3. An S3 URI of an existing snapshot in S3
+         * 
+         * If you provide the source host, you still need to provide the S3 URI, etc to write the snapshot to.
+         */
+        if (snapshotDirPath != null && (sourceHost != null || s3RepoUri != null)) {
+            throw new IllegalArgumentException("If you specify a local directory to take the snapshot from, you cannot specify a source host or S3 URI");
+        } else if (sourceHost != null && (s3RepoUri == null || s3Region == null || s3LocalDirPath == null)) {
+            throw new IllegalArgumentException("If you specify a source host, you must also specify the S3 details as well");
+        }
+
         SourceRepo repo;
         if (snapshotDirPath != null) {
             repo = new FilesystemRepo(snapshotDirPath);
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
             repo = new S3Repo(s3LocalDirPath, s3RepoUri, s3Region);
         } else {
-            throw new IllegalArgumentException("You must specify either a local snapshot directory or an S3 URI");
+            throw new IllegalArgumentException("Could not construct a source repo from the available, user-supplied arguments");
         }
 
         // Set the transformer
         Transformer transformer = TransformFunctions.getTransformer(sourceVersion, targetVersion, awarenessAttributeDimensionality);
 
         try {
+
+            if (sourceHost != null) {
+                // ==========================================================================================================
+                // Create the snapshot if necessary
+                // ==========================================================================================================            
+                logger.info("==================================================================");
+                logger.info("Attempting to create the snapshot...");
+                S3SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceConnection, s3RepoUri, s3Region);
+                snapshotCreator.registerRepo();
+                snapshotCreator.createSnapshot();
+                while (!snapshotCreator.isSnapshotFinished()) {
+                    logger.info("Snapshot not finished yet; sleeping for 5 seconds...");
+                    Thread.sleep(5000);
+                }
+                logger.info("Snapshot created successfully");
+            }
+
             // ==========================================================================================================
             // Read the Repo data file
             // ==========================================================================================================

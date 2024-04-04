@@ -137,11 +137,11 @@ public class GlobalMetadataCreator_OS_2_11 {
 
         // Confirm the index doesn't already exist, then create it
         RestClient client = new RestClient(connectionDetails);
-        int getResponseCode = client.get(path, true);
-        if (getResponseCode == HttpURLConnection.HTTP_NOT_FOUND) {
+        RestClient.Response response = client.get(path, true);
+        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             String bodyString = body.toString();
             client.put(path, bodyString, false);
-        } else if (getResponseCode == HttpURLConnection.HTTP_OK) {
+        } else if (response.code == HttpURLConnection.HTTP_OK) {
             logger.warn(entityName + " already exists. Skipping creation.");
         } else {
             logger.warn("Could not confirm that " + entityName + " does not already exist. Skipping creation.");
