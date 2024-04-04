@@ -28,7 +28,6 @@ services:
     image: 'opensearchproject/opensearch:2.11.1'
     environment:
       - discovery.type=single-node
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
     networks:
       - migrations
     ports:

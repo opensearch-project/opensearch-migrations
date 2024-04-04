@@ -70,8 +70,8 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"--movement-type"}, description = "What you want to move - everything, metadata, or data.  Default: 'everything'", required = false, converter = MovementType.ArgsConverter.class)
         public MovementType movementType = MovementType.EVERYTHING;
 
-        @Parameter(names = {"--index-template-whitelist"}, description = "List of index template names to migrate (e.g. 'posts_index_template1, posts_index_template2')", required = false)
-        public List<String> indexTemplateWhitelist;
+        @Parameter(names = {"--template-whitelist"}, description = "List of template names to migrate. Note: For ES 6.8 this refers to legacy templates and for ES 7.10 this is index templates (e.g. 'posts_index_template1, posts_index_template2')", required = false)
+        public List<String> templateWhitelist;
 
         @Parameter(names = {"--component-template-whitelist"}, description = "List of component template names to migrate (e.g. 'posts_template1, posts_template2')", required = false)
         public List<String> componentTemplateWhitelist;
@@ -105,7 +105,7 @@ public class ReindexFromSnapshot {
         String targetPass = arguments.targetPass;
         ClusterVersion sourceVersion = arguments.sourceVersion;
         ClusterVersion targetVersion = arguments.targetVersion;
-        List<String> indexTemplateWhitelist = arguments.indexTemplateWhitelist;
+        List<String> templateWhitelist = arguments.templateWhitelist;
         List<String> componentTemplateWhitelist = arguments.componentTemplateWhitelist;
         MovementType movementType = arguments.movementType;
         Level logLevel = arguments.logLevel;
@@ -246,11 +246,11 @@ public class ReindexFromSnapshot {
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
-                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, Collections.emptyList(), indexTemplateWhitelist);
+                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, Collections.emptyList(), templateWhitelist);
                 } else if (sourceVersion == ClusterVersion.ES_7_10) {
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
-                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, componentTemplateWhitelist, indexTemplateWhitelist);
+                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, componentTemplateWhitelist, templateWhitelist);
                 }
             }
 
