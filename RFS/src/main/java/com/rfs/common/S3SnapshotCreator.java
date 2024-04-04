@@ -25,6 +25,10 @@ public class S3SnapshotCreator {
         this.s3Region = s3Region;
     }
 
+    public String getRepoName() {
+        return "migration_assistant_s3_repo";
+    }
+
     public String getSnapshotName() {
         return snapshotName;
     }
@@ -59,7 +63,7 @@ public class S3SnapshotCreator {
 
     public void registerRepo() throws Exception {
         // Assemble the REST path
-        String targetName = "_snapshot/s3_repo";
+        String targetName = "_snapshot/" + getRepoName();
 
         // Assemble the request body
         ObjectNode settings = mapper.createObjectNode();
@@ -75,17 +79,17 @@ public class S3SnapshotCreator {
         RestClient client = new RestClient(connectionDetails);
         String bodyString = body.toString();
         RestClient.Response response = client.put(targetName, bodyString, false);
-        if (response.code == HttpURLConnection.HTTP_OK) {
+        if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
             logger.info("S3 Repo registration successful");
         } else {
             logger.error("S3 Repo registration failed");
-            throw new RepoRegistrationFailed("s3_repo");
+            throw new RepoRegistrationFailed(getRepoName());
         }
     }
 
     public void createSnapshot() throws Exception {
         // Assemble the REST path
-        String targetName = "_snapshot/s3_repo/" + getSnapshotName();
+        String targetName = "_snapshot/" + getRepoName() + "/" + getSnapshotName();
 
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
@@ -93,11 +97,11 @@ public class S3SnapshotCreator {
         body.put("ignore_unavailable", true);
         body.put("include_global_state", true);
 
-        // Register the repo; it's fine if it already exists
+        // Register the repo; idempotent operation
         RestClient client = new RestClient(connectionDetails);
         String bodyString = body.toString();
         RestClient.Response response = client.put(targetName, bodyString, false);
-        if (response.code == HttpURLConnection.HTTP_OK) {
+        if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
             logger.info("Snapshot " + getSnapshotName() + " creation successful");
         } else {
             logger.error("Snapshot " + getSnapshotName() + " creation failed");
@@ -107,7 +111,7 @@ public class S3SnapshotCreator {
 
     public boolean isSnapshotFinished() throws Exception {
         // Assemble the REST path
-        String targetName = "_snapshot/s3_repo/" + getSnapshotName();
+        String targetName = "_snapshot/" + getRepoName() + "/" + getSnapshotName();
 
         // Check if the snapshot has finished
         RestClient client = new RestClient(connectionDetails);
@@ -126,7 +130,7 @@ public class S3SnapshotCreator {
         } else if (state.equals("IN_PROGRESS")) {
             return false;
         } else {
-            logger.error("Snapshot " + getSnapshotName() + " has failed");
+            logger.error("Snapshot " + getSnapshotName() + " has failed with state " + state);
             throw new SnapshotCreationFailed(getSnapshotName());
         }
     }
