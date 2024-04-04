@@ -32,11 +32,11 @@ public class IndexCreator_OS_2_11 {
 
         // Confirm the index doesn't already exist, then create it
         RestClient client = new RestClient(connectionDetails);
-        int getResponseCode = client.get(targetName, true);
-        if (getResponseCode == HttpURLConnection.HTTP_NOT_FOUND) {
+        RestClient.Response response = client.get(targetName, true);
+        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             String bodyString = body.toString();
             client.put(targetName, bodyString, false);
-        } else if (getResponseCode == HttpURLConnection.HTTP_OK) {
+        } else if (response.code == HttpURLConnection.HTTP_OK) {
             logger.warn("Index " + targetName + " already exists. Skipping creation.");
         } else {
             logger.warn("Could not confirm that index " + targetName + " does not already exist. Skipping creation.");

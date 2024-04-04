@@ -60,6 +60,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -80,6 +81,7 @@ public class TrafficReplayer implements AutoCloseable {
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
 
     public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
+    public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     public static AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
@@ -265,10 +267,10 @@ public class TrafficReplayer implements AutoCloseable {
                         "than the original observations, provided that the replayer and target are able to keep up.")
         double speedupFactor = 1.0;
         @Parameter(required = false,
-                names = {"--lookahead-time-window"},
+                names = {LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME},
                 arity = 1,
                 description = "Number of seconds of data that will be buffered.")
-        int lookaheadTimeSeconds = 8;
+        int lookaheadTimeSeconds = 300;
         @Parameter(required = false,
                 names = {"--max-concurrent-requests"},
                 arity = 1,
@@ -381,9 +383,19 @@ public class TrafficReplayer implements AutoCloseable {
         try {
             uri = new URI(params.targetUriString);
         } catch (Exception e) {
-            System.err.println("Exception parsing "+params.targetUriString);
+            final var msg = "Exception parsing " + params.targetUriString;
+            System.err.println(msg);
             System.err.println(e.getMessage());
+            log.atError().setMessage(msg).setCause(e).log();
             System.exit(3);
+            return;
+        }
+        if (params.lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
+            String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME + "(" + params.lookaheadTimeSeconds + ") must be > " +
+                    PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + "(" + params.observedPacketConnectionTimeout + ")";
+            System.err.println(msg);
+            log.error(msg);
+            System.exit(4);
             return;
         }
         var topContext = new RootReplayerContext(RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint,
@@ -541,7 +553,7 @@ public class TrafficReplayer implements AutoCloseable {
                 break;
             }
             try {
-                waitForRemainingWork(logLevel, timeout, replayEngine);
+                waitForRemainingWork(logLevel, timeout);
                 break;
             } catch (TimeoutException e) {
                 log.atLevel(logLevel).log("Timed out while waiting for the remaining " +
@@ -610,8 +622,9 @@ public class TrafficReplayer implements AutoCloseable {
             var requestPushFuture = new StringTrackableCompletableFuture<TransformedTargetRequestAndResponse>(
                     new CompletableFuture<>(), () -> "Waiting to get response from target");
             var requestKey = ctx.getReplayerRequestKey();
-            var workItem = liveTrafficStreamLimiter.queueWork(1, wi -> {
+            var workItem = liveTrafficStreamLimiter.queueWork(1, ctx, wi -> {
                 transformAndSendRequest(replayEngine, request, ctx).future.whenComplete((v,t)->{
+                    liveTrafficStreamLimiter.doneProcessing(wi);
                     if (t != null) {
                         requestPushFuture.future.completeExceptionally(t);
                     } else {
@@ -631,7 +644,6 @@ public class TrafficReplayer implements AutoCloseable {
                     requestPushFuture.map(f -> f.handle((v, t) -> {
                                 log.atInfo().setMessage(() -> "Done receiving captured stream for " + ctx +
                                         ":" + rrPair.requestData).log();
-                                liveTrafficStreamLimiter.doneProcessing(workItem);
                                 log.atTrace().setMessage(() ->
                                         "Summary response value for " + requestKey + " returned=" + v).log();
                                 return handleCompletedTransaction(ctx, rrPair, v, t);
@@ -760,10 +772,18 @@ public class TrafficReplayer implements AutoCloseable {
         }
     }
 
-    private void waitForRemainingWork(Level logLevel,
-                                      @NonNull Duration timeout,
-                                      ReplayEngine replayEngine)
+    protected void waitForRemainingWork(Level logLevel, @NonNull Duration timeout)
             throws ExecutionException, InterruptedException, TimeoutException {
+
+        if (!liveTrafficStreamLimiter.isStopped()) {
+            var streamLimiterHasRunEverything = new CompletableFuture<Void>();
+            liveTrafficStreamLimiter.queueWork(1, null, wi -> {
+                streamLimiterHasRunEverything.complete(null);
+                liveTrafficStreamLimiter.doneProcessing(wi);
+            });
+            streamLimiterHasRunEverything.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
         Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
                 allRemainingWorkArray = requestToFinalWorkFuturesMap.entrySet().toArray(Map.Entry[]::new);
         writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
