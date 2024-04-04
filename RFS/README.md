@@ -288,5 +288,5 @@ curl -X POST "localhost:9200/another_alias/_doc" -H "Content-Type: application/j
 
 ## How to set up an OS 2.11 Target Cluster
 
-I've only tested the scripts going from ES 6.8 to OS 2.11.  For my test target, I just spun up an Amazon OpenSearch Service 2.11 cluster with a master user/password combo and otherwise default settings.
+The only target cluster version this has been tested agains is OpenSearch 2.11.  For my test target, I just spun up an Amazon OpenSearch Service 2.11 cluster with a master user/password combo and otherwise default settings.
 

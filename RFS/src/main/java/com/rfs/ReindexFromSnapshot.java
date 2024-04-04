@@ -23,7 +23,7 @@ public class ReindexFromSnapshot {
     private static final Logger logger = LogManager.getLogger(ReindexFromSnapshot.class);
 
     public static class Args {
-        @Parameter(names = {"-n", "--snapshot-name"}, description = "The name of the snapshot migrate", required = true)
+        @Parameter(names = {"-n", "--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
 
         @Parameter(names = {"--snapshot-dir"}, description = "The absolute path to the source snapshot directory on local disk", required = false)

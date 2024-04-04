@@ -9,7 +9,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     ./aws/install
 
 # Install our custom entrypoint script
-COPY ./container-start.sh .
+COPY ./container-start.sh /usr/share/elasticsearch/container-start.sh
 
 # Configure Elastic
 ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
