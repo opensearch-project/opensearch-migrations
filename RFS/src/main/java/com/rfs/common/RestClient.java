@@ -14,28 +14,36 @@ import org.apache.logging.log4j.Logger;
 
 public class RestClient {
     private static final Logger logger = LogManager.getLogger(RestClient.class);
+
+    public class Response {
+        public final int code;
+        public final String body;
+        public final String message;
+
+        public Response(int responseCode, String responseBody, String responseMessage) {
+            this.code = responseCode;
+            this.body = responseBody;
+            this.message = responseMessage;
+        }
+    }
+
     public final ConnectionDetails connectionDetails;
 
     public RestClient(ConnectionDetails connectionDetails) {
         this.connectionDetails = connectionDetails;
     }
 
-    public int get(String path, boolean quietLogging) throws Exception {
+    public Response get(String path, boolean quietLogging) throws Exception {
         String urlString = connectionDetails.host + "/" + path;
         
         URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
 
-        // Construct the basic auth header value
-        String auth = connectionDetails.username + ":" + connectionDetails.password;
-        byte[] encodedAuth = Base64.getEncoder().encode(auth.getBytes(StandardCharsets.UTF_8));
-        String authHeaderValue = "Basic " + new String(encodedAuth);
-
         // Set the request method
         conn.setRequestMethod("GET");
-
+        
         // Set the necessary headers
-        conn.setRequestProperty("Authorization", authHeaderValue);
+        setAuthHeader(conn);
 
         // Enable input and output streams
         conn.setDoOutput(true);
@@ -64,26 +72,21 @@ public class RestClient {
 
         conn.disconnect();
 
-        return responseCode;
+        return new Response(responseCode, responseBody, conn.getResponseMessage());
     }
     
-    public int put(String path, String body, boolean quietLogging) throws Exception {
+    public Response put(String path, String body, boolean quietLogging) throws Exception {
         String urlString = connectionDetails.host + "/" + path;
         
         URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-
-        // Construct the basic auth header value
-        String auth = connectionDetails.username + ":" + connectionDetails.password;
-        byte[] encodedAuth = Base64.getEncoder().encode(auth.getBytes(StandardCharsets.UTF_8));
-        String authHeaderValue = "Basic " + new String(encodedAuth);
 
         // Set the request method
         conn.setRequestMethod("PUT");
 
         // Set the necessary headers
         conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("Authorization", authHeaderValue);
+        setAuthHeader(conn);
 
         // Enable input and output streams
         conn.setDoOutput(true);
@@ -118,6 +121,15 @@ public class RestClient {
 
         conn.disconnect();
         
-        return responseCode;
+        return new Response(responseCode, responseBody, conn.getResponseMessage());
+    }
+
+    private void setAuthHeader(HttpURLConnection conn) {
+        if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
+            String auth = connectionDetails.username + ":" + connectionDetails.password;
+            byte[] encodedAuth = Base64.getEncoder().encode(auth.getBytes(StandardCharsets.UTF_8));
+            String authHeaderValue = "Basic " + new String(encodedAuth);
+            conn.setRequestProperty("Authorization", authHeaderValue);
+        }
     }
 }

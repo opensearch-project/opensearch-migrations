@@ -7,7 +7,31 @@ __pycache__
 *.egg-info*
 .python-version
 logs
-test/opensearch-cluster-cdk/
+.vscode/
+
+# Build files
+plugins/opensearch/loggable-transport-netty4/.gradle/
+
 RFS/.gradle/
+RFS/bin/
 RFS/build/
+
+TrafficCapture/captureKafkaOffloader/bin/
+TrafficCapture/captureOffloader/bin/
+TrafficCapture/captureProtobufs/bin/
+TrafficCapture/coreUtilities/bin/
+TrafficCapture/nettyWireLogging/bin/
+TrafficCapture/replayerPlugins/jsonMessageTransformers/jsonJMESPathMessageTransformer/bin/
+TrafficCapture/replayerPlugins/jsonMessageTransformers/jsonJMESPathMessageTransformerProvider/bin/
+TrafficCapture/replayerPlugins/jsonMessageTransformers/jsonJoltMessageTransformer/bin/
+TrafficCapture/replayerPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider/bin/
+TrafficCapture/replayerPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/bin/
+TrafficCapture/replayerPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/bin/
+TrafficCapture/testUtilities/bin/
+TrafficCapture/trafficCaptureProxyServer/bin/
+TrafficCapture/trafficCaptureProxyServerTest/bin/
+TrafficCapture/trafficReplayer/bin/
+
+# CDK files from end-to-end testing
 opensearch-cluster-cdk/
+test/opensearch-cluster-cdk/
