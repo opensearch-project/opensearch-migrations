@@ -136,9 +136,10 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     private boolean headerFieldsAreIdentical(HttpRequest request, HttpJsonMessageWithFaultingPayload httpJsonMessage) {
         if (!request.uri().equals(httpJsonMessage.path()) ||
                 !request.method().toString().equals(httpJsonMessage.method()) ||
-                request.headers().size() != httpJsonMessage.headers().strictHeadersMap.size()) {
+                request.headers().names().size() != httpJsonMessage.headers().strictHeadersMap.size()) {
             return false;
         }
+        // Depends on header size check above for correctness
         for (var headerName : httpJsonMessage.headers().keySet()) {
             if (!headerFieldIsIdentical(headerName, request, httpJsonMessage)) {
                 return false;
