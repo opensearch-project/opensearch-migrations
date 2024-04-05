@@ -3,7 +3,9 @@ package com.rfs;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -68,18 +70,27 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"--movement-type"}, description = "What you want to move - everything, metadata, or data.  Default: 'everything'", required = false, converter = MovementType.ArgsConverter.class)
         public MovementType movementType = MovementType.EVERYTHING;
 
+        @Parameter(names = {"--template-whitelist"}, description = "List of template names to migrate. Note: For ES 6.8 this refers to legacy templates and for ES 7.10 this is index templates (e.g. 'posts_index_template1, posts_index_template2')", required = false)
+        public List<String> templateWhitelist;
+
+        @Parameter(names = {"--component-template-whitelist"}, description = "List of component template names to migrate (e.g. 'posts_template1, posts_template2')", required = false)
+        public List<String> componentTemplateWhitelist;
+
+        @Parameter(names = {"--enable-persistent-run"}, description = "If enabled, the java process will continue in an idle mode after the migration is completed.  Default: false", arity=0, required = false)
+        public boolean enablePersistentRun;
+
         @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
         public Level logLevel = Level.INFO;
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
         // Grab out args
         Args arguments = new Args();
         JCommander.newBuilder()
             .addObject(arguments)
             .build()
             .parse(args);
-        
+
         String snapshotName = arguments.snapshotName;
         Path snapshotDirPath = (arguments.snapshotDirPath != null) ? Paths.get(arguments.snapshotDirPath) : null;
         Path s3LocalDirPath = (arguments.s3LocalDirPath != null) ? Paths.get(arguments.s3LocalDirPath) : null;
@@ -94,6 +105,8 @@ public class ReindexFromSnapshot {
         String targetPass = arguments.targetPass;
         ClusterVersion sourceVersion = arguments.sourceVersion;
         ClusterVersion targetVersion = arguments.targetVersion;
+        List<String> templateWhitelist = arguments.templateWhitelist;
+        List<String> componentTemplateWhitelist = arguments.componentTemplateWhitelist;
         MovementType movementType = arguments.movementType;
         Level logLevel = arguments.logLevel;
 
@@ -103,8 +116,6 @@ public class ReindexFromSnapshot {
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         // Should probably be passed in as an arguments
-        String[] templateWhitelist = {"posts_index_template"};
-        String[] componentTemplateWhitelist = {"posts_template"};
         int awarenessAttributeDimensionality = 3; // https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
 
         // Sanity checks
@@ -235,7 +246,7 @@ public class ReindexFromSnapshot {
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
-                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, new String[0], templateWhitelist);              
+                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, Collections.emptyList(), templateWhitelist);
                 } else if (sourceVersion == ClusterVersion.ES_7_10) {
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
@@ -337,6 +348,15 @@ public class ReindexFromSnapshot {
             
         } catch (Exception e) {
             e.printStackTrace();
+        }
+
+        // Optional temporary persistent runtime flag to continue Java process after steps have completed. This should get
+        // replaced as this app develops and becomes aware of determining work to be completed
+        if (arguments.enablePersistentRun) {
+            while (true) {
+                logger.info("Process is in idle mode, to retry migration please restart this app.");
+                Thread.sleep(TimeUnit.MINUTES.toMillis(5));
+            }
         }
     }
 }
