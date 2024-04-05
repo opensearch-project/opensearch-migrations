@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 @Slf4j
 public class HttpByteBufFormatter {
 
+    private static final String LINE_DELIMITER = "\r\n";
     private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle =
             ThreadLocal.withInitial(Optional::empty);
 
@@ -105,13 +106,13 @@ public class HttpByteBufFormatter {
     }
 
     public static String prettyPrintNettyRequest(FullHttpRequest msg, boolean sortHeaders) {
-        var sj = new StringJoiner("\n");
+        var sj = new StringJoiner(LINE_DELIMITER);
         sj.add(msg.method() + " " + msg.uri() + " " + msg.protocolVersion().text());
         return prettyPrintNettyMessage(sj, sortHeaders, msg, msg.content());
     }
 
     static String prettyPrintNettyResponse(FullHttpResponse msg, boolean sortHeaders) {
-        var sj = new StringJoiner("\n");
+        var sj = new StringJoiner(LINE_DELIMITER);
         sj.add(msg.protocolVersion().text() + " " + msg.status().code() + " " + msg.status().reasonPhrase());
         return prettyPrintNettyMessage(sj, sortHeaders, msg, msg.content());
     }
