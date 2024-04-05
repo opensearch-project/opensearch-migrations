@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
@@ -67,8 +68,14 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
         } else {
             // ByteBufs shouldn't come through, but in case there's a regression in
             // RequestPipelineOrchestrator.removeThisAndPreviousHandlers to remove the handlers
-            // in order rather in reverse order
-            super.channelRead(ctx, msg);
+            // in order rather in reverse order this will release the byte buffs and complete the channel
+            if (msg instanceof ByteBuf) {
+                ((ByteBuf) msg).release();
+                super.channelReadComplete(ctx);
+            }
+            else {
+                super.channelRead(ctx, msg);
+            }
         }
     }
 
