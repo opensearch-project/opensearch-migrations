@@ -27,23 +27,31 @@ public class HttpByteBufFormatterTest {
 
     final static String SAMPLE_REQUEST_STRING =
             "GET / HTTP/1.1\r\n" +
-                    "Connection: Keep-Alive\r\n" +
                     "Host: localhost\r\n" +
+                    "Connection: Keep-Alive\r\n" +
                     "User-Agent: UnitTest\r\n" +
                     "\r\n";
 
     final static String SAMPLE_REQUEST_AS_BLOCKS = "[G],[E],[T],[ ],[/],[ ],[H],[T],[T],[P],[/],[1],[.],[1],[\r" +
             "],[\n" +
-            "],[C],[o],[n],[n],[e],[c],[t],[i],[o],[n],[:],[ ],[K],[e],[e],[p],[-],[A],[l],[i],[v],[e],[\r" +
-            "],[\n" +
             "],[H],[o],[s],[t],[:],[ ],[l],[o],[c],[a],[l],[h],[o],[s],[t],[\r" +
+            "],[\n" +
+            "],[C],[o],[n],[n],[e],[c],[t],[i],[o],[n],[:],[ ],[K],[e],[e],[p],[-],[A],[l],[i],[v],[e],[\r" +
             "],[\n" +
             "],[U],[s],[e],[r],[-],[A],[g],[e],[n],[t],[:],[ ],[U],[n],[i],[t],[T],[e],[s],[t],[\r" +
             "],[\n" +
             "],[\r" +
             "],[\n" +
             "]";
+
     final static String SAMPLE_REQUEST_AS_PARSED_HTTP = "GET / HTTP/1.1\n" +
+            "Host: localhost\n" +
+            "Connection: Keep-Alive\n" +
+            "User-Agent: UnitTest\n" +
+            "content-length: 0\n" +
+            "\n";
+
+    final static String SAMPLE_REQUEST_AS_PARSED_HTTP_SORTED = "GET / HTTP/1.1\n" +
             "Connection: Keep-Alive\n" +
             "Host: localhost\n" +
             "User-Agent: UnitTest\n" +
@@ -147,11 +155,17 @@ public class HttpByteBufFormatterTest {
                         throw new IllegalStateException("Unknown BufferContent value: " + content);
                 }
             case PARSED_HTTP:
+            case PARSED_HTTP_SORTED_HEADERS:
                 switch (content) {
                     case Empty:
                         return "[NULL]";
                     case SimpleGetRequest:
-                        return SAMPLE_REQUEST_AS_PARSED_HTTP;
+                    switch (format) {
+                        case PARSED_HTTP:
+                            return SAMPLE_REQUEST_AS_PARSED_HTTP;
+                        case PARSED_HTTP_SORTED_HEADERS:
+                            return SAMPLE_REQUEST_AS_PARSED_HTTP_SORTED;
+                    }
                     default:
                         throw new IllegalStateException("Unknown BufferContent value: " + content);
                 }

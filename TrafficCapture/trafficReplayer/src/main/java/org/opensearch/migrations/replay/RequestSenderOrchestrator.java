@@ -71,7 +71,6 @@ public class RequestSenderOrchestrator {
         var finalTunneledResponse =
                 new StringTrackableCompletableFuture<AggregatedRawResponse>(new CompletableFuture<>(),
                         ()->"waiting for final aggregated response");
-        log.atDebug().setMessage(()->"Scheduling request for "+requestKey+" at start time "+start).log();
         // When a socket connection is attempted could be more precise.
         // Ideally, we would match the relative timestamps of when connections were being initiated
         // as well as the period between connection and the first bytes sent.  However, this code is a

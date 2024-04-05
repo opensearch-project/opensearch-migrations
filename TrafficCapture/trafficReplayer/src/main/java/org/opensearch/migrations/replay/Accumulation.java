@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -10,6 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
+@Slf4j
 public class Accumulation {
 
     enum State {
@@ -73,7 +75,7 @@ public class Accumulation {
     }
 
     public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey,
-                                                                            Instant originTimestamp) {
+                                                                Instant originTimestamp) {
         if (rrPairWithCallback != null) {
             return rrPairWithCallback.pair;
         }

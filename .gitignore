@@ -7,4 +7,17 @@ __pycache__
 *.egg-info*
 .python-version
 logs
+.vscode/
+
+# Build files
+plugins/opensearch/loggable-transport-netty4/.gradle/
+
+RFS/.gradle/
+RFS/bin/
+RFS/build/
+
+TrafficCapture/**/bin/
+
+# CDK files from end-to-end testing
+opensearch-cluster-cdk/
 test/opensearch-cluster-cdk/

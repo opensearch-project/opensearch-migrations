@@ -30,6 +30,11 @@ subprojects {
                     suppressPomMetadataWarningsFor('testFixturesRuntimeElements')
                 }
             }
+            repositories {
+                maven {
+                    url = "${rootProject.buildDir}/repository"
+                }
+            }
         }
     }
 }
