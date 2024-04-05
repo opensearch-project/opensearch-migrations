@@ -20,7 +20,6 @@ import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
-import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
@@ -36,6 +35,20 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
+
+    public final static String EXPECTED_RESPONSE_STRING =
+            "HTTP/1.1 200 OK\r\n" +
+                    "Content-transfer-encoding: chunked\r\n" +
+                    "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n" + // This should be OK since it's always the same length
+                    "Transfer-encoding: chunked\r\n" +
+                    "Content-type: text/plain\r\n" +
+                    "Funtime: checkIt!\r\n" +
+                    "\r\n" +
+                    "1e\r\n" +
+                    "I should be decrypted tester!\n" +
+                    "\r\n" +
+                    "0\r\n" +
+                    "\r\n";
 
     @Override
     protected TestContext makeInstrumentationContext() {
@@ -252,7 +265,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 0, 0);
         var rawRequestData = loadResourceAsBytes("/requests/raw/" + requestResourceName);
         sourcePair.addRequestData(Instant.EPOCH, rawRequestData);
-        var rawResponseData = NettyPacketToHttpConsumerTest.EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);
+        var rawResponseData = EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);
         sourcePair.addResponseData(Instant.EPOCH, rawResponseData);
 
         var targetRequest = new TransformedPackets();

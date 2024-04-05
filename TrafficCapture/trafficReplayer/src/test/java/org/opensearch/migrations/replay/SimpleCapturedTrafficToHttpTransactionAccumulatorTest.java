@@ -83,8 +83,9 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
     @MethodSource("loadSimpleCombinations")
     void generateAndTest(String testName, int bufferSize, int skipCount,
                          List<ObservationDirective> directives, List<Integer> expectedSizes) throws Exception {
-        var trafficStreams = Arrays.stream(TrafficStreamGenerator.makeTrafficStream(bufferSize, 0, new AtomicInteger(),
-                directives, rootContext)).skip(skipCount);
+        final var trafficStreamsArray = TrafficStreamGenerator.makeTrafficStream(bufferSize, 0, new AtomicInteger(),
+                directives, rootContext);
+        var trafficStreams = Arrays.stream(trafficStreamsArray).skip(skipCount);
         List<RequestResponsePacketPair> reconstructedTransactions = new ArrayList<>();
         AtomicInteger requestsReceived = new AtomicInteger(0);
         accumulateTrafficStreamsWithNewAccumulator(rootContext, trafficStreams, reconstructedTransactions,

@@ -148,6 +148,8 @@ public class ReplayEngine {
         var requestKey = ctx.getReplayerRequestKey();
         logStartOfWork(requestKey, newCount, start, label);
 
+        log.atDebug().setMessage(()->"Scheduling request for " + ctx + " to run from [" + start + ", " + end +
+                " with an interval of " + interval + " for " + numPackets + " packets").log();
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets);
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }

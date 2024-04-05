@@ -62,13 +62,6 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest extends I
         );
     }
 
-    private static String renderLeftToTest(HashSet<Integer> possibilitiesLeftToTest) {
-        return possibilitiesLeftToTest.size() + ": " +
-                possibilitiesLeftToTest.stream().map(c-> ExhaustiveTrafficStreamGenerator.classificationToString(c))
-                        .sorted()
-                        .collect(Collectors.joining("\n"));
-    }
-
     @ParameterizedTest(name="{0}.{1}")
     @MethodSource("generateTestCombinations")
     public void testAccumulatedSplit(String testName, int cutPoint,

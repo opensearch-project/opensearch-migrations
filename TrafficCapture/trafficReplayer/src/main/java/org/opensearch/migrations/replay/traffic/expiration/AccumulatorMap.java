@@ -4,5 +4,5 @@ import org.opensearch.migrations.replay.Accumulation;
 
 import java.util.concurrent.ConcurrentHashMap;
 
-class AccumulatorMap extends ConcurrentHashMap<ScopedConnectionIdKey, Accumulation> {
+public class AccumulatorMap extends ConcurrentHashMap<ScopedConnectionIdKey, Accumulation> {
 }
