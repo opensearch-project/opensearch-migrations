@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -14,6 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWrapper;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
@@ -51,11 +53,15 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             this(false, false);
         }
         public TestRootContext(boolean trackMetrics, boolean trackTraces) {
-            this(new InMemoryInstrumentationBundle(trackTraces, trackTraces));
+            this(trackMetrics, trackTraces, DO_NOTHING_TRACKER);
+        }
+        public TestRootContext(boolean trackMetrics, boolean trackTraces, @NonNull IContextTracker contextTracker) {
+            this(new InMemoryInstrumentationBundle(trackMetrics, trackTraces), contextTracker);
         }
 
-        public TestRootContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle) {
-            super(inMemoryInstrumentationBundle.openTelemetrySdk);
+        public TestRootContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle,
+                               IContextTracker contextTracker) {
+            super(inMemoryInstrumentationBundle.openTelemetrySdk, contextTracker);
             this.instrumentationBundle = inMemoryInstrumentationBundle;
         }
 

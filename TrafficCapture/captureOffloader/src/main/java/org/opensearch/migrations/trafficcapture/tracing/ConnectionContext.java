@@ -27,7 +27,7 @@ public class ConnectionContext extends BaseSpanContext<IRootOffloaderContext>
         super(rootInstrumentationScope);
         this.connectionId = connectionId;
         this.nodeId = nodeId;
-        initializeSpan();
+        initializeSpan(rootInstrumentationScope);
         meterDeltaEvent(getMetrics().activeConnectionsCounter, 1);
     }
 

@@ -748,7 +748,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         public void sendMeterEventsForEnd() {
             super.sendMeterEventsForEnd();
             AttributesBuilder attributesBuilderForAggregate = getSharedAttributes(Attributes.builder());
-            getCurrentSpan().setAllAttributes(attributesBuilderForAggregate.build());
+            setAllAttributes(attributesBuilderForAggregate.build());
             meterIncrementEvent(getMetrics().resultCounter, 1, attributesBuilderForAggregate);
         }
 
@@ -769,7 +769,7 @@ public abstract class ReplayContexts extends IReplayContexts {
          */
         @Override
         public void setEndpoint(String endpointUrl) {
-            getCurrentSpan().setAttribute(ENDPOINT_KEY, endpointUrl);
+            setAttribute(ENDPOINT_KEY, endpointUrl);
         }
 
         /**
@@ -779,7 +779,7 @@ public abstract class ReplayContexts extends IReplayContexts {
          */
         @Override
         public void setHttpVersion(String httpVersion) {
-            getCurrentSpan().setAttribute(HTTP_VERSION_KEY, httpVersion);
+            setAttribute(HTTP_VERSION_KEY, httpVersion);
         }
 
         @Override

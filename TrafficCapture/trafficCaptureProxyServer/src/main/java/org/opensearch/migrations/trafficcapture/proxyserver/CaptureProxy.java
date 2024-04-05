@@ -17,6 +17,9 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
@@ -315,7 +318,8 @@ public class CaptureProxy {
         var backsideUri = convertStringToUri(params.backsideUriString);
 
         var rootContext = new RootCaptureContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture"));
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture"),
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),

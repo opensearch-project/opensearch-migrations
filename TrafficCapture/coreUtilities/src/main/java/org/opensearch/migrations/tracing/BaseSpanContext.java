@@ -10,7 +10,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 public abstract class BaseSpanContext<S extends IInstrumentConstructor>
-        implements IScopedInstrumentationAttributes, IWithStartTimeAndAttributes, IHasRootInstrumentationScope<S>, AutoCloseable {
+        implements IScopedInstrumentationAttributes, IHasRootInstrumentationScope<S>, AutoCloseable {
     @Getter
     protected final S rootInstrumentationScope;
     @Getter
@@ -20,10 +20,9 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
     @Getter
     private Span currentSpan;
 
-    public BaseSpanContext(S rootScope) {
+    protected BaseSpanContext(S rootScope) {
         this.startNanoTime = System.nanoTime();
         this.rootInstrumentationScope = rootScope;
-        rootScope.onContextCreated(this);
     }
 
     protected static <T> AttributesBuilder addAttributeIfPresent(AttributesBuilder attributesBuilder,
@@ -32,27 +31,28 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
     }
 
     @Override
-    public void endSpan() {
-        IScopedInstrumentationAttributes.super.endSpan();
-        rootInstrumentationScope.onContextClosed(this);
+    public @NonNull IContextTracker getContextTracker() {
+        return rootInstrumentationScope;
     }
 
-    protected void initializeSpan() {
-        initializeSpanWithLinkedSpans(null);
+    protected void initializeSpan(@NonNull IInstrumentConstructor constructor) {
+        initializeSpanWithLinkedSpans(constructor, null);
     }
 
-    protected void initializeSpanWithLinkedSpans(Stream<Span> linkedSpans) {
-        initializeSpan(rootInstrumentationScope.buildSpan(this, getActivityName(), linkedSpans));
+    protected void initializeSpanWithLinkedSpans(@NonNull IInstrumentConstructor constructor,
+                                                 Stream<Span> linkedSpans) {
+        initializeSpan(constructor, rootInstrumentationScope.buildSpan(this, getActivityName(), linkedSpans));
     }
 
-    public void initializeSpan(@NonNull Span s) {
+    public void initializeSpan(@NonNull IInstrumentConstructor constructor, @NonNull Span s) {
         assert currentSpan == null : "only expect to set the current span once";
         currentSpan = s;
+        constructor.onContextCreated(this);
     }
 
     @Override
-    public void addException(Throwable e, boolean isPropagating) {
-        IScopedInstrumentationAttributes.super.addException(e, isPropagating);
+    public void addTraceException(Throwable e, boolean isPropagating) {
+        IScopedInstrumentationAttributes.super.addTraceException(e, isPropagating);
         observedExceptionToIncludeInMetrics = e;
     }
 

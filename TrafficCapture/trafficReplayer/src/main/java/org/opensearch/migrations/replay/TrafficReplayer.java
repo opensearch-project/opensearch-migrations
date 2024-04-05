@@ -27,6 +27,10 @@ import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.LoggingContextMonitor;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformer;
@@ -35,6 +39,8 @@ import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 import org.slf4j.spi.LoggingEventBuilder;
 import software.amazon.awssdk.arns.Arn;
@@ -386,10 +392,14 @@ public class TrafficReplayer implements AutoCloseable {
             System.exit(3);
             return;
         }
-        var topContext = new RootReplayerContext(RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint,
-                "replay"));
+        var contextTrackers = new CompositeContextTracker(
+                new ActiveContextTracker(),
+                new ActiveContextTrackerByActivityType());
+        var topContext = new RootReplayerContext(
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "replay"),
+                contextTrackers);
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
-                     Duration.ofSeconds(params.lookaheadTimeSeconds));
+                Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
         {
             String transformerConfig = getTransformerConfig(params);

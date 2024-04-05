@@ -64,7 +64,7 @@ class IInstrumentationAttributesTest {
 
     @Test
     public void getPopulatedAttributesAreOverrideCorrectly() {
-        var rootCtx = new RootOtelContext("test");
+        var rootCtx = new RootOtelContext("test", IContextTracker.DO_NOTHING_TRACKER);
         var aCtx = new AContext(rootCtx);
         var bCtx = new BContext(rootCtx, aCtx);
 
