@@ -14,6 +14,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
+import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -89,10 +91,12 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                             new ArrayCursorTrafficSourceContext(List.of(trafficStream)));
 
             var tuplesReceived = new HashSet<String>();
-            try (var tr = new TrafficReplayer(rootContext, httpServer.localhostEndpoint(), null,
-                    new StaticAuthTransformerFactory("TEST"), null,
+            var serverUri = httpServer.localhostEndpoint();
+            try (var tr = new TrafficReplayerTopLevel(rootContext, serverUri,
+                    new StaticAuthTransformerFactory("TEST"),
                     true, 10, 10 * 1024,
-                    "targetConnectionPool for testStreamWithRequestsWithCloseIsCommittedOnce");
+                    new TransformationLoader()
+                            .getTransformerFactoryLoader(serverUri.getHost()));
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
                 tr.setupRunAndWaitForReplayToFinish(Duration.ofSeconds(70), blockingTrafficSource,
                         new TimeShifter(10 * 1000),

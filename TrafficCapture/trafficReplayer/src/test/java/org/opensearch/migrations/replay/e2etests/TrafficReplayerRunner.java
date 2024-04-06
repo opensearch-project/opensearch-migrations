@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
+import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -63,9 +65,10 @@ public class TrafficReplayerRunner {
         runReplayer(numExpectedRequests,
                 (rootContext, targetConnectionPoolPrefix) -> {
                     try {
-                        return new TrafficReplayer(rootContext, endpoint, null,
-                                new StaticAuthTransformerFactory("TEST"), null,
+                        return new TrafficReplayerTopLevel(rootContext, endpoint,
+                                new StaticAuthTransformerFactory("TEST"),
                                 true, 10, 10*1024,
+                                new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()),
                                 targetConnectionPoolPrefix);
                     } catch (SSLException e) {
                         throw new RuntimeException(e);
@@ -75,7 +78,7 @@ public class TrafficReplayerRunner {
     }
 
     public static void runReplayer(int numExpectedRequests,
-                                   BiFunction<IRootReplayerContext, String, TrafficReplayer> trafficReplayerFactory,
+                                   BiFunction<IRootReplayerContext, String, TrafficReplayerTopLevel> trafficReplayerFactory,
                                    Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
                                    Supplier<TestContext> rootContextSupplier,
                                    Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
@@ -93,7 +96,7 @@ public class TrafficReplayerRunner {
             int runNumber = runNumberRef.get();
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
-            String targetConnectionPoolPrefix = TrafficReplayer.TARGET_CONNECTION_POOL_NAME + " run: " + runNumber;
+            String targetConnectionPoolPrefix = TrafficReplayerTopLevel.TARGET_CONNECTION_POOL_NAME + " run: " + runNumber;
             try (var rootContext = rootContextSupplier.get();
                 var trafficReplayer = trafficReplayerFactory.apply(rootContext, targetConnectionPoolPrefix)) {
                 runTrafficReplayer(trafficReplayer, ()->trafficSourceFactory.apply(rootContext),
@@ -183,7 +186,7 @@ public class TrafficReplayerRunner {
         Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
     }
 
-    private static void runTrafficReplayer(TrafficReplayer trafficReplayer,
+    private static void runTrafficReplayer(TrafficReplayerTopLevel trafficReplayer,
                                            Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver,
                                            TimeShifter timeShifter) throws Exception {

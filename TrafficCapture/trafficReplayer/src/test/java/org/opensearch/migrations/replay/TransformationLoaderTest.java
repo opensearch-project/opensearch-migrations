@@ -46,7 +46,7 @@ public class TransformationLoaderTest {
     @Test
     public void testThatNoConfigMeansNoThrow() throws Exception {
         var transformer = Assertions.assertDoesNotThrow(()->new TransformationLoader()
-                .getTransformerFactoryLoader("localhost", null, null));
+                .getTransformerFactoryLoader("localhost"));
         Assertions.assertNotNull(transformer);
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
         Assertions.assertNotNull(transformer.transformJson(origDoc));
