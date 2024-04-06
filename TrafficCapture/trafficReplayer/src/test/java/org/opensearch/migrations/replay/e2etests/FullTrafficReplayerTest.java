@@ -14,7 +14,6 @@ import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
@@ -44,11 +43,9 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -84,8 +81,8 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                                               IJsonTransformer jsonTransformer,
                                               String targetConnectionPoolName) throws SSLException {
             super(context, serverUri, authTransformerFactory,
-                    allowInsecureConnections, numSendingThreads, maxConcurrentOutstandingRequests,
-                    jsonTransformer, targetConnectionPoolName);
+                    jsonTransformer, allowInsecureConnections, numSendingThreads, maxConcurrentOutstandingRequests,
+                    targetConnectionPoolName);
             this.maxWaitTime = maxWaitTime;
         }
 

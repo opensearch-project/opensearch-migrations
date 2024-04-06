@@ -3,17 +3,13 @@ package org.opensearch.migrations.replay.e2etests;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import io.opentelemetry.sdk.trace.data.SpanData;
-import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
@@ -94,9 +90,9 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
             var serverUri = httpServer.localhostEndpoint();
             try (var tr = new TrafficReplayerTopLevel(rootContext, serverUri,
                     new StaticAuthTransformerFactory("TEST"),
-                    true, 10, 10 * 1024,
                     new TransformationLoader()
-                            .getTransformerFactoryLoader(serverUri.getHost()));
+                            .getTransformerFactoryLoader(serverUri.getHost()), true, 10, 10 * 1024
+            );
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
                 tr.setupRunAndWaitForReplayToFinish(Duration.ofSeconds(70), blockingTrafficSource,
                         new TimeShifter(10 * 1000),

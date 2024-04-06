@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
-import io.netty.handler.logging.LogLevel;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -209,8 +208,9 @@ class TrafficReplayerTest extends InstrumentationTest {
     @Test
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
         try (var tr = new TrafficReplayerTopLevel(rootContext,
-                new URI("http://localhost:9200"), null, false,
-                new TransformationLoader().getTransformerFactoryLoader("localhost"))) {
+                new URI("http://localhost:9200"), null,
+                new TransformationLoader().getTransformerFactoryLoader("localhost"), false
+        )) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
             var remainingAccumulations = new AtomicInteger();
             CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =

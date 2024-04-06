@@ -67,8 +67,7 @@ public class TrafficReplayerRunner {
                     try {
                         return new TrafficReplayerTopLevel(rootContext, endpoint,
                                 new StaticAuthTransformerFactory("TEST"),
-                                true, 10, 10*1024,
-                                new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()),
+                                new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()), true, 10, 10*1024,
                                 targetConnectionPoolPrefix);
                     } catch (SSLException e) {
                         throw new RuntimeException(e);

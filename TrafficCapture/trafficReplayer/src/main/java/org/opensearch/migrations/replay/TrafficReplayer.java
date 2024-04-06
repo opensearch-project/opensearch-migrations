@@ -284,8 +284,8 @@ public class TrafficReplayer {
                 log.atInfo().setMessage(()->"Transformations config string: " + transformerConfig).log();
             }
             var tr = new TrafficReplayerTopLevel(topContext, uri, authTransformer,
-                    params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests,
-                    new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig));
+                    new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig), params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests
+            );
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());
