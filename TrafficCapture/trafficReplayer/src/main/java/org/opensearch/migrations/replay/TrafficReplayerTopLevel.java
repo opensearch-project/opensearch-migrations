@@ -8,6 +8,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
@@ -24,6 +25,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -31,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 public class TrafficReplayerTopLevel extends TrafficReplayerCore implements AutoCloseable {
@@ -38,6 +41,42 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
 
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
+
+    public interface IStreamableWorkTracker extends IWorkTracker {
+        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, Void>>>
+        getRemainingItems();
+    }
+
+    static class ConcurrentHashMapWorkTracker implements IStreamableWorkTracker {
+        ConcurrentHashMap<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,Void>> map =
+                new ConcurrentHashMap<>();
+
+        @Override
+        public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
+                        DiagnosticTrackableCompletableFuture<String, Void> completableFuture) {
+            map.put(uniqueReplayerRequestKey, completableFuture);
+        }
+
+        @Override
+        public void remove(UniqueReplayerRequestKey uniqueReplayerRequestKey) {
+            map.remove(uniqueReplayerRequestKey);
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return map. isEmpty();
+        }
+
+        @Override
+        public int size() {
+            return map.size();
+        }
+
+        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,Void>>>
+        getRemainingItems() {
+            return map.entrySet().stream();
+        }
+    }
 
     private final AtomicReference<StringTrackableCompletableFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
     private final AtomicReference<Error> shutdownReasonRef;
@@ -52,26 +91,53 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         );
     }
 
-    public TrafficReplayerTopLevel(IRootReplayerContext context,
-                                   URI serverUri,
+    public TrafficReplayerTopLevel(IRootReplayerContext topContext,
+                                   URI uri,
                                    IAuthTransformerFactory authTransformerFactory,
                                    IJsonTransformer jsonTransformer,
                                    boolean allowInsecureConnections)
             throws SSLException {
-        this(context, serverUri, authTransformerFactory, jsonTransformer, allowInsecureConnections, 0,
+        this(topContext, uri, authTransformerFactory, jsonTransformer, allowInsecureConnections, 0,
                 1024);
     }
 
     public TrafficReplayerTopLevel(IRootReplayerContext topContext,
                                    URI uri,
                                    IAuthTransformerFactory authTransformer,
-                                   IJsonTransformer transformerFactoryLoader,
+                                   IJsonTransformer jsonTransformer,
                                    boolean allowInsecureConnections,
                                    int numClientThreads,
                                    int maxConcurrentRequests) throws SSLException {
-        this(topContext, uri, authTransformer, transformerFactoryLoader, allowInsecureConnections,
+        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections, 0,
+                1024, new ConcurrentHashMapWorkTracker());
+    }
+
+    public TrafficReplayerTopLevel(IRootReplayerContext topContext,
+                                   URI uri,
+                                   IAuthTransformerFactory authTransformer,
+                                   IJsonTransformer jsonTransformer,
+                                   boolean allowInsecureConnections,
+                                   int numClientThreads,
+                                   int maxConcurrentRequests,
+                                   IStreamableWorkTracker workTracker) throws SSLException {
+        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections,
                 numClientThreads, maxConcurrentRequests,
-                getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()));
+                getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
+                workTracker);
+    }
+
+    public TrafficReplayerTopLevel(IRootReplayerContext topContext,
+                                   URI uri,
+                                   IAuthTransformerFactory authTransformer,
+                                   IJsonTransformer jsonTransformer,
+                                   boolean allowInsecureConnections,
+                                   int numClientThreads,
+                                   int maxConcurrentRequests,
+                                   String connectionPoolName) throws SSLException {
+        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections,
+                numClientThreads, maxConcurrentRequests,
+                connectionPoolName,
+                new ConcurrentHashMapWorkTracker());
     }
 
     public TrafficReplayerTopLevel(IRootReplayerContext context,
@@ -81,11 +147,12 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                    boolean allowInsecureConnections,
                                    int numSendingThreads,
                                    int maxConcurrentOutstandingRequests,
-                                   String connectionPoolName) throws SSLException {
+                                   String connectionPoolName,
+                                   IStreamableWorkTracker workTracker) throws SSLException {
         this(context, serverUri, authTransformerFactory, jsonTransformer,
                 new ClientConnectionPool(serverUri,
                         loadSslContext(serverUri, allowInsecureConnections), connectionPoolName, numSendingThreads),
-                new TrafficStreamLimiter(maxConcurrentOutstandingRequests));
+                new TrafficStreamLimiter(maxConcurrentOutstandingRequests), workTracker);
     }
 
     public TrafficReplayerTopLevel(IRootReplayerContext context,
@@ -93,8 +160,10 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                    IAuthTransformerFactory authTransformerFactory,
                                    IJsonTransformer jsonTransformer,
                                    ClientConnectionPool clientConnectionPool,
-                                   TrafficStreamLimiter trafficStreamLimiter) throws SSLException {
-        super(context, serverUri, authTransformerFactory, jsonTransformer, clientConnectionPool, trafficStreamLimiter);
+                                   TrafficStreamLimiter trafficStreamLimiter,
+                                   IStreamableWorkTracker workTracker) throws SSLException {
+        super(context, serverUri, authTransformerFactory, jsonTransformer, clientConnectionPool,
+                trafficStreamLimiter, workTracker);
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
         shutdownFutureRef = new AtomicReference<>();
@@ -140,13 +209,12 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         } finally {
             trafficToHttpTransactionAccumulator.close();
             wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
-            assert shutdownFutureRef.get() != null || requestToFinalWorkFuturesMap.isEmpty() :
+            assert shutdownFutureRef.get() != null || requestWorkTracker.isEmpty() :
                     "expected to wait for all the in flight requests to fully flush and self destruct themselves";
         }
     }
 
     /**
-     *
      * @param replayEngine is not used here but might be of use to extensions of this class
      */
     protected void wrapUpWorkAndEmitSummary(ReplayEngine replayEngine,
@@ -169,11 +237,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 logLevel = secondaryLogLevel;
             }
         }
-        if (!requestToFinalWorkFuturesMap.isEmpty() || exceptionRequestCount.get() > 0) {
+        if (!requestWorkTracker.isEmpty() || exceptionRequestCount.get() > 0) {
             log.atWarn().setMessage("{} in-flight requests being dropped due to pending shutdown; " +
                             "{} requests to the target threw an exception; " +
                             "{} requests were successfully processed.")
-                    .addArgument(requestToFinalWorkFuturesMap.size())
+                    .addArgument(requestWorkTracker.size())
                     .addArgument(exceptionRequestCount.get())
                     .addArgument(successfulRequestCount.get())
                     .log();
@@ -224,8 +292,9 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             streamLimiterHasRunEverything.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         }
 
+        var workTracker = (IStreamableWorkTracker) requestWorkTracker;
         Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
-                allRemainingWorkArray = requestToFinalWorkFuturesMap.entrySet().toArray(Map.Entry[]::new);
+                allRemainingWorkArray = workTracker.getRemainingItems().toArray(Map.Entry[]::new);
         writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
 
         // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
@@ -277,10 +346,10 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     }
 
     protected static void writeStatusLogsForRemainingWork(Level logLevel,
-                                                        Map.Entry<UniqueReplayerRequestKey,
-                                                                DiagnosticTrackableCompletableFuture<String,
-                                                                        TransformedTargetRequestAndResponse>>[]
-                                                                allRemainingWorkArray) {
+                                                          Map.Entry<UniqueReplayerRequestKey,
+                                                                  DiagnosticTrackableCompletableFuture<String,
+                                                                          TransformedTargetRequestAndResponse>>[]
+                                                                  allRemainingWorkArray) {
         log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
         if (log.isInfoEnabled()) {
             LoggingEventBuilder loggingEventBuilderToUse = log.isTraceEnabled() ? log.atTrace() : log.atInfo();
@@ -295,7 +364,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
-    protected static String formatWorkItem(DiagnosticTrackableCompletableFuture<String,?> cf) {
+    protected static String formatWorkItem(DiagnosticTrackableCompletableFuture<String, ?> cf) {
         try {
             var resultValue = cf.get();
             if (resultValue instanceof TransformedTargetRequestAndResponse) {
@@ -313,10 +382,10 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     @SneakyThrows
     @Override
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
-        log.atWarn().setCause(error).setMessage(()->"Shutting down " + this).log();
+        log.atWarn().setCause(error).setMessage(() -> "Shutting down " + this).log();
         shutdownReasonRef.compareAndSet(null, error);
         if (!shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
-            log.atError().setMessage(()->"Shutdown was already signaled by {}.  " +
+            log.atError().setMessage(() -> "Shutdown was already signaled by {}.  " +
                             "Ignoring this shutdown request due to {}.")
                     .addArgument(shutdownReasonRef.get())
                     .addArgument(error)
@@ -327,17 +396,17 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         liveTrafficStreamLimiter.close();
 
         var nettyShutdownFuture = clientConnectionPool.shutdownNow();
-        nettyShutdownFuture.whenComplete((v,t) -> {
+        nettyShutdownFuture.whenComplete((v, t) -> {
             if (t != null) {
                 shutdownFutureRef.get().completeExceptionally(t);
             } else {
                 shutdownFutureRef.get().complete(null);
             }
         });
-        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f->f.cancel(true));
+        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f -> f.cancel(true));
         var shutdownWasSignalledFuture = error == null ?
-                StringTrackableCompletableFuture.<Void>completedFuture(null, ()->"TrafficReplayer shutdown") :
-                StringTrackableCompletableFuture.<Void>failedFuture(error, ()->"TrafficReplayer shutdown");
+                StringTrackableCompletableFuture.<Void>completedFuture(null, () -> "TrafficReplayer shutdown") :
+                StringTrackableCompletableFuture.<Void>failedFuture(error, () -> "TrafficReplayer shutdown");
         while (!allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, shutdownWasSignalledFuture)) {
             var otherRemainingWorkObj = allRemainingWorkFutureOrShutdownSignalRef.get();
             if (otherRemainingWorkObj != null) {
@@ -346,7 +415,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             }
         }
         var shutdownFuture = shutdownFutureRef.get();
-        log.atWarn().setMessage(()->"Shutdown setup has been initiated").log();
+        log.atWarn().setMessage(() -> "Shutdown setup has been initiated").log();
         return shutdownFuture;
     }
 

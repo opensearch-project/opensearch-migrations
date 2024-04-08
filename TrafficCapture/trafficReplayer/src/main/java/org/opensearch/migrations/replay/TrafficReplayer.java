@@ -5,17 +5,21 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.util.ActiveContextMonitor;
+import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.LoggingContextMonitor;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import software.amazon.awssdk.arns.Arn;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -27,12 +31,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 @Slf4j
 public class TrafficReplayer {
-    private static final String ALL_ACTIVE_CONTEXTS_MONITOR = "AllActiveContextsMonitor";
+    private static final String ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER = "AllActiveContextsMonitor";
 
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
@@ -41,6 +50,7 @@ public class TrafficReplayer {
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
+    private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30*1000;
 
     public static class DualException extends Exception {
         public final Throwable originalCause;
@@ -245,6 +255,7 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws Exception {
+        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         var params = parseArgs(args);
         URI uri;
         System.err.println("Starting Traffic Replayer");
@@ -267,25 +278,30 @@ public class TrafficReplayer {
             System.exit(4);
             return;
         }
-        var contextTrackers = new CompositeContextTracker(
-                new ActiveContextTracker(),
-                new ActiveContextTrackerByActivityType());
+        var globalContextTracker = new ActiveContextTracker();
+        var perContextTracker = new ActiveContextTrackerByActivityType();
+        var scheduledExecutorService = Executors.newScheduledThreadPool(1);
+        var contextTrackers = new CompositeContextTracker(globalContextTracker, perContextTracker);
         var topContext = new RootReplayerContext(
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "replay"),
                 contextTrackers);
+
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
                 Duration.ofSeconds(params.lookaheadTimeSeconds));
-             var authTransformer = buildAuthTransformerFactory(params);
-             var globalContextMonitor = new LoggingContextMonitor(LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR),
-                     Duration.ofSeconds(30)))
+             var authTransformer = buildAuthTransformerFactory(params))
         {
             String transformerConfig = getTransformerConfig(params);
             if (transformerConfig != null) {
                 log.atInfo().setMessage(()->"Transformations config string: " + transformerConfig).log();
             }
+            var orderedRequestTracker = new OrderedWorkerTracker();
             var tr = new TrafficReplayerTopLevel(topContext, uri, authTransformer,
-                    new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig), params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests
-            );
+                    new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig),
+                    params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests,
+                    orderedRequestTracker);
+            var activeContextMonitor = new ActiveContextMonitor(
+                    globalContextTracker, perContextTracker, orderedRequestTracker, 64, activeContextLogger);
+            scheduledExecutorService.schedule(activeContextMonitor, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());
@@ -293,6 +309,8 @@ public class TrafficReplayer {
             tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(params.observedPacketConnectionTimeout),
                     blockingTrafficSource, timeShifter, tupleWriter);
             log.info("Done processing TrafficStreams");
+        } finally {
+            scheduledExecutorService.shutdown();
         }
     }
 

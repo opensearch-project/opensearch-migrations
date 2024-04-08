@@ -22,7 +22,6 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
-import javax.net.ssl.SSLException;
 import java.io.EOFException;
 import java.net.URI;
 import java.time.Duration;
@@ -33,7 +32,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -46,25 +44,32 @@ import java.util.stream.Stream;
 @Slf4j
 public abstract class TrafficReplayerCore {
 
+    public interface IWorkTracker {
+        void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
+                 DiagnosticTrackableCompletableFuture<String, Void> completableFuture);
+        void remove(UniqueReplayerRequestKey uniqueReplayerRequestKey);
+        boolean isEmpty();
+        int size();
+    }
+
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
     protected final ClientConnectionPool clientConnectionPool;
     protected final TrafficStreamLimiter liveTrafficStreamLimiter;
     protected final AtomicInteger successfulRequestCount;
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
-    protected final ConcurrentHashMap<UniqueReplayerRequestKey,
-            DiagnosticTrackableCompletableFuture<String, Void>> requestToFinalWorkFuturesMap;
+    protected final IWorkTracker requestWorkTracker;
 
     protected final AtomicBoolean stopReadingRef;
     protected final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
 
-    public TrafficReplayerCore(IRootReplayerContext context,
-                               URI serverUri,
-                               IAuthTransformerFactory authTransformer,
-                               IJsonTransformer jsonTransformer,
-                               ClientConnectionPool clientConnectionPool,
-                               TrafficStreamLimiter trafficStreamLimiter)
-            throws SSLException
+    protected TrafficReplayerCore(IRootReplayerContext context,
+                                  URI serverUri,
+                                  IAuthTransformerFactory authTransformer,
+                                  IJsonTransformer jsonTransformer,
+                                  ClientConnectionPool clientConnectionPool,
+                                  TrafficStreamLimiter trafficStreamLimiter,
+                                  IWorkTracker requestWorkTracker)
     {
         this.topLevelContext = context;
         if (serverUri.getPort() < 0) {
@@ -78,8 +83,8 @@ public abstract class TrafficReplayerCore {
         }
         this.liveTrafficStreamLimiter = trafficStreamLimiter;
         this.clientConnectionPool = clientConnectionPool;
+        this.requestWorkTracker = requestWorkTracker;
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
-        requestToFinalWorkFuturesMap = new ConcurrentHashMap<>();
         successfulRequestCount = new AtomicInteger();
         exceptionRequestCount = new AtomicInteger();
         nextChunkFutureRef = new AtomicReference<>();
@@ -118,9 +123,9 @@ public abstract class TrafficReplayerCore {
             });
             if (!allWorkFinishedForTransaction.future.isDone()) {
                 log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
-                requestToFinalWorkFuturesMap.put(requestKey, allWorkFinishedForTransaction);
+                requestWorkTracker.put(requestKey, allWorkFinishedForTransaction);
                 if (allWorkFinishedForTransaction.future.isDone()) {
-                    requestToFinalWorkFuturesMap.remove(requestKey);
+                    requestWorkTracker.remove(requestKey);
                 }
             }
 
@@ -178,7 +183,7 @@ public abstract class TrafficReplayerCore {
                 throw e;
             } finally {
                 var requestKey = context.getReplayerRequestKey();
-                requestToFinalWorkFuturesMap.remove(requestKey);
+                requestWorkTracker.remove(requestKey);
                 log.trace("removed rrPair.requestData to " +
                         "targetTransactionInProgressMap for " +
                         requestKey);
