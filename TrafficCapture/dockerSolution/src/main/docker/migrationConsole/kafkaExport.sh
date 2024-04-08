@@ -29,7 +29,7 @@ usage() {
   echo "  --enable-s3                                 Option to store created archive on S3."
   echo "  --s3-bucket-name                            Option to specify a given S3 bucket to store archive on."
   echo "  --partition-offsets                         Option to specify partition offsets in the format 'partition_id:offset,partition_id:offset'. Behavior defaults to using first offset in partition."
-  echo "  --partition-limits                          Option to specify number of records to print per partition in the format 'partition_id:num_records,partition_id:num_records'. Acts as a lower bound on records and will stop polling once all limits are hit."
+  echo "  --partition-limits                          Option to specify number of records to print per partition in the format 'partition_id:num_records,partition_id:num_records'."
   echo ""
   exit 1
 }
@@ -113,7 +113,7 @@ fi
 
 # Execute the command
 set -o xtrace
-eval $runJavaCmd | gzip -c -9 > "dir_name/$archive_name"
+eval "$runJavaCmd" | gzip -c -9 > "$dir_name/$archive_name"
 set +o xtrace
 
 # Remove created consumer group

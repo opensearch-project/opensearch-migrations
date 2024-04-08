@@ -108,7 +108,7 @@ public class KafkaPrinter {
         boolean combinePartitionOutput;
         @Parameter(required = false,
             names = {"--partition-offsets"},
-            description = "Partition offsets to start consuming from. Format: 'topic_name:partition_id:offset,topic_name:partition_id:offset'")
+            description = "Partition offsets to start consuming from. Defaults to first offset in partition. Format: 'topic_name:partition_id:offset,topic_name:partition_id:offset'")
         List<String> partitionOffsets = new ArrayList<>();
 
     }
@@ -146,7 +146,6 @@ public class KafkaPrinter {
         Properties properties = new Properties();
         properties.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
         properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
         if (params.kafkaTrafficPropertyFile != null) {
             try (InputStream input = new FileInputStream(params.kafkaTrafficPropertyFile)) {
@@ -221,12 +220,33 @@ public class KafkaPrinter {
 
         try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties)) {
             consumer.subscribe(Collections.singleton(topic), new ConsumerRebalanceListener() {
+                private final Set<TopicPartition> partitionsAssignedAtSomeTime = new HashSet<>();
                 @Override
                 public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                    log.info("Partitions Assigned: {}", partitions);
+
+                    // Seek partitions assigned for the first time to the beginning
+                    var partitionsAssignedFirstTime = new HashSet<>(partitions);
+                    partitionsAssignedFirstTime.retainAll(partitionsAssignedAtSomeTime);
+                    consumer.seekToBeginning(partitionsAssignedFirstTime);
+                    partitionsAssignedAtSomeTime.addAll(partitionsAssignedFirstTime);
+
+                    // Seek partitions to provided offset if current reader is earlier
                     partitions.forEach(partition -> {
                         Long offset = startingOffsets.get(partition);
-                        if (offset != null && consumer.position(partition) < offset) {
-                            consumer.seek(partition, offset);
+                        var currentOffset = consumer.position(partition);
+                        if (offset == null) {
+                            log.info("Did not find specified startingOffset for partition {}", partition);
+                        }
+                        else if (currentOffset < offset) {
+                                consumer.seek(partition, offset);
+                            log.info("Found a specified startingOffset for partition {} that is greater than "
+                                      + "current offset {}. Seeking to {}", partition, currentOffset, offset);
+                        } else {
+                            log.info("Not changing fetch offsets because current offset is {} and startingOffset is {} "
+                                     + "for partition {}",
+                                currentOffset, offset, partition);
+
                         }
                     });
                 }
