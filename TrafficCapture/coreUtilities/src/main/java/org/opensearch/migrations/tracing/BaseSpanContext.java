@@ -6,6 +6,7 @@ import io.opentelemetry.api.trace.Span;
 import lombok.Getter;
 import lombok.NonNull;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -14,14 +15,17 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
     @Getter
     protected final S rootInstrumentationScope;
     @Getter
-    final long startNanoTime;
+    final long startTimeNano;
+    @Getter
+    final Instant startTimeInstant;
     @Getter
     Throwable observedExceptionToIncludeInMetrics;
     @Getter
     private Span currentSpan;
 
     protected BaseSpanContext(S rootScope) {
-        this.startNanoTime = System.nanoTime();
+        this.startTimeNano = System.nanoTime();
+        this.startTimeInstant = Instant.now();
         this.rootInstrumentationScope = rootScope;
     }
 
@@ -54,10 +58,6 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
     public void addTraceException(Throwable e, boolean isPropagating) {
         IScopedInstrumentationAttributes.super.addTraceException(e, isPropagating);
         observedExceptionToIncludeInMetrics = e;
-    }
-
-    public long getStartNanoTime() {
-        return this.startNanoTime;
     }
 
     public @NonNull Span getCurrentSpan() {

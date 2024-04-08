@@ -13,7 +13,7 @@ public class ActiveContextTracker implements IContextTracker {
 
     static ConcurrentSkipListSet<IScopedInstrumentationAttributes> makeScopeSkipList() {
         return new ConcurrentSkipListSet<>(Comparator
-                .comparingLong(IWithStartTimeAndAttributes::getStartNanoTime)
+                .comparingLong(IWithStartTimeAndAttributes::getStartTimeNano)
                 .thenComparingInt(System::identityHashCode));
     }
 
@@ -29,5 +29,9 @@ public class ActiveContextTracker implements IContextTracker {
 
     public Stream<IScopedInstrumentationAttributes> getActiveScopesByAge() {
         return orderedScopes.stream();
+    }
+
+    public long size() {
+        return orderedScopes.size();
     }
 }
