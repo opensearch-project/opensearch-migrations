@@ -28,8 +28,8 @@ usage() {
   echo "  --timeout-seconds                           Timeout for how long process will try to collect the Kafka records. Default is 60 seconds."
   echo "  --enable-s3                                 Option to store created archive on S3."
   echo "  --s3-bucket-name                            Option to specify a given S3 bucket to store archive on."
-  echo "  --partition-offsets                         Option to specify partition offsets in the format 'partition_id:offset,partition_id:offset'."
-  echo "  --partition-limits                          Option to specify partition limits in the format 'partition_id:num_records,partition_id:num_records'."
+  echo "  --partition-offsets                         Option to specify partition offsets in the format 'partition_id:offset,partition_id:offset'. Behavior defaults to using first offset in partition."
+  echo "  --partition-limits                          Option to specify number of records to print per partition in the format 'partition_id:num_records,partition_id:num_records'. Acts as a lower bound on records and will stop polling once all limits are hit."
   echo ""
   exit 1
 }
@@ -88,10 +88,10 @@ else
     partition_limits_with_topic=""
 fi
 
-partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
-comma_sep_partition_offsets=$(echo $partition_offsets | sed 's/ /,/g')
-echo "Collected offsets from current Kafka topic: "
-echo $comma_sep_partition_offsets
+all_consumers_partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
+comma_sep_all_consumers_partition_offsets="${all_consumers_partition_offsets// /,}"
+echo "Existing offsets from current Kafka topic across all consumer groups: "
+echo "$comma_sep_all_consumers_partition_offsets"
 
 epoch_ts=$(date +%s)
 dir_name="kafka_export_$epoch_ts"
