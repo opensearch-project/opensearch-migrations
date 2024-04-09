@@ -50,7 +50,6 @@ pipeline {
                                 )
                                 String assetUrl = null
                                 def parsedJson = readJSON text: assets
-                                def assetName = arguments.downloadReleaseAssetName ?: 'artifacts.tar.gz'
                                 parsedJson.each { item ->
                                     if(item.name == 'artifacts.tar.gz') {
                                         echo "Downloading artifacts from ${item.url}"
@@ -80,7 +79,8 @@ pipeline {
                         
                         publishToMaven(
                             signingArtifactsPath: "$WORKSPACE/repository/",
-                            mavenArtifactsPath: "$WORKSPACE/repository/"
+                            mavenArtifactsPath: "$WORKSPACE/repository/",
+                            autoPublish: true
                         )
                     }
                 }
