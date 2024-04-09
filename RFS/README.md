@@ -80,7 +80,7 @@ Also built into this Docker/Gradle support is the ability to spin up a testing R
 
 This environment can be spun up with the Gradle command, and use the optional `-Pdataset` flag to preload a defined dataset from `docker/TestSource_ES_7_10/test-resources`
 ```shell
-./gradlew composeUp -Pdataset='small-benchmark-single-node-indexed'
+./gradlew composeUp -Pdataset='small-benchmark-single-node.tar.gz'
 
 ```
 And deleted with the Gradle command
@@ -99,9 +99,13 @@ curl http://localhost:29200/_cat/indices?v
 
 To kick off RFS:
 ```shell
-docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name test-snapshot --snapshot-local-repo-dir /snapshots --lucene-dir '/lucene' --source-host http://elasticsearchsource:9200 --target-host http://opensearchtarget:9200 --source-version es_7_10 --target-version os_2_11"
+docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name test-snapshot --snapshot-local-repo-dir /snapshots --min-replicas 0 --lucene-dir '/lucene' --source-host http://elasticsearchsource:9200 --target-host http://opensearchtarget:9200 --source-version es_7_10 --target-version os_2_11"
 ```
 
+To get an accurate document count after an RFS migration, be sure to perform a refresh
+```shell
+curl http://localhost:29200/_refresh
+```
 
 ### Handling auth
 

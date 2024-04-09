@@ -14,10 +14,13 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     unzip awscliv2.zip && \
     ./aws/install
 
-ARG EXISTING_DATA="no-data"
+ARG EXISTING_DATA="no-data.tar.gz"
 
 RUN mkdir /snapshots && chown elasticsearch /snapshots
-COPY --chown=elasticsearch ./test-resources/${EXISTING_DATA} /usr/share/elasticsearch/data
+COPY ./test-resources/${EXISTING_DATA} /usr/share/elasticsearch
+RUN tar -xzf /usr/share/elasticsearch/${EXISTING_DATA} -C /usr/share/elasticsearch/data && \
+    chown -R elasticsearch /usr/share/elasticsearch/data && \
+    rm /usr/share/elasticsearch/${EXISTING_DATA}
 
 # Install our custom entrypoint script
 COPY ./container-start.sh /usr/share/elasticsearch/container-start.sh

@@ -40,7 +40,7 @@ clean.doFirst {
 }
 
 ext {
-    dataset = findProperty('dataset') ?: 'no-data'
+    dataset = findProperty('dataset') ?: 'no-data.tar.gz'
 }
 
 task demoPrintOutSnapshot (type: JavaExec) {

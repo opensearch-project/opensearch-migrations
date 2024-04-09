@@ -73,6 +73,10 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"--movement-type"}, description = "What you want to move - everything, metadata, or data.  Default: 'everything'", required = false, converter = MovementType.ArgsConverter.class)
         public MovementType movementType = MovementType.EVERYTHING;
 
+        //https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
+        @Parameter(names = {"--min-replicas"}, description = "The minimum number of replicas configured for migrated indices on the target. This can be useful for migrating to targets which use zonal deployments and require additional replicas to meet zone requirements", required = true)
+        public int minNumberOfReplicas;
+
         @Parameter(names = {"--template-whitelist"}, description = "List of template names to migrate. Note: For ES 6.8 this refers to legacy templates and for ES 7.10 this is index templates (e.g. 'posts_index_template1, posts_index_template2')", required = false)
         public List<String> templateWhitelist;
 
@@ -107,6 +111,7 @@ public class ReindexFromSnapshot {
         String targetHost = arguments.targetHost;
         String targetUser = arguments.targetUser;
         String targetPass = arguments.targetPass;
+        int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
         ClusterVersion sourceVersion = arguments.sourceVersion;
         ClusterVersion targetVersion = arguments.targetVersion;
         List<String> templateWhitelist = arguments.templateWhitelist;
@@ -118,9 +123,6 @@ public class ReindexFromSnapshot {
 
         ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
-
-        // Should probably be passed in as an arguments
-        int awarenessAttributeDimensionality = 3; // https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
 
         // Sanity checks
         if (!((sourceVersion == ClusterVersion.ES_6_8) || (sourceVersion == ClusterVersion.ES_7_10))) {
@@ -165,7 +167,7 @@ public class ReindexFromSnapshot {
         }
 
         // Set the transformer
-        Transformer transformer = TransformFunctions.getTransformer(sourceVersion, targetVersion, awarenessAttributeDimensionality);
+        Transformer transformer = TransformFunctions.getTransformer(sourceVersion, targetVersion, awarenessDimensionality);
 
         try {
 
