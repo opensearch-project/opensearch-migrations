@@ -88,6 +88,7 @@ else
     partition_limits_with_topic=""
 fi
 
+# Printing existing offsets in topic
 all_consumers_partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
 comma_sep_all_consumers_partition_offsets="${all_consumers_partition_offsets// /,}"
 echo "Existing offsets from current Kafka topic across all consumer groups: "
