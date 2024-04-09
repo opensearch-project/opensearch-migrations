@@ -27,7 +27,6 @@ subprojects {
 
                     // support -Dbuild.snapshot=false, but default to true
                     if (System.getProperty("build.snapshot", "true") == "true") {
-                        println "Add Snapshot"
                         version += "-SNAPSHOT"
                     }
 
