@@ -42,18 +42,18 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
 
-    public interface IStreamableWorkTracker extends IWorkTracker {
-        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, Void>>>
+    public interface IStreamableWorkTracker<T> extends IWorkTracker<T> {
+        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, T>>>
         getRemainingItems();
     }
 
-    static class ConcurrentHashMapWorkTracker implements IStreamableWorkTracker {
-        ConcurrentHashMap<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,Void>> map =
+    static class ConcurrentHashMapWorkTracker<T> implements IStreamableWorkTracker<T> {
+        ConcurrentHashMap<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,T>> map =
                 new ConcurrentHashMap<>();
 
         @Override
         public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
-                        DiagnosticTrackableCompletableFuture<String, Void> completableFuture) {
+                        DiagnosticTrackableCompletableFuture<String, T> completableFuture) {
             map.put(uniqueReplayerRequestKey, completableFuture);
         }
 
@@ -72,7 +72,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             return map.size();
         }
 
-        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,Void>>>
+        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,T>>>
         getRemainingItems() {
             return map.entrySet().stream();
         }
@@ -292,7 +292,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             streamLimiterHasRunEverything.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         }
 
-        var workTracker = (IStreamableWorkTracker) requestWorkTracker;
+        var workTracker = (IStreamableWorkTracker<Object>) requestWorkTracker;
         Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
                 allRemainingWorkArray = workTracker.getRemainingItems().toArray(Map.Entry[]::new);
         writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
@@ -364,7 +364,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
-    protected static String formatWorkItem(DiagnosticTrackableCompletableFuture<String, ?> cf) {
+    static String formatWorkItem(DiagnosticTrackableCompletableFuture<String, ?> cf) {
         try {
             var resultValue = cf.get();
             if (resultValue instanceof TransformedTargetRequestAndResponse) {

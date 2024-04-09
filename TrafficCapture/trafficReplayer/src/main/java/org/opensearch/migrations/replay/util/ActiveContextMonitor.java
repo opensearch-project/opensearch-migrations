@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
@@ -14,13 +15,13 @@ import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -29,31 +30,38 @@ import java.util.stream.Stream;
 public class ActiveContextMonitor implements Runnable {
 
     static final String INDENT = "  ";
+    public static final String OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE = "Oldest of ";
 
     private final BiConsumer<Level, Supplier<String>> logger;
     private final ActiveContextTracker globalContextTracker;
     private final ActiveContextTrackerByActivityType perActivityContextTracker;
-    private final OrderedWorkerTracker orderedRequestTracker;
+    private final OrderedWorkerTracker<Object> orderedRequestTracker;
     private final int totalItemsToOutputLimit;
+    private final Function<DiagnosticTrackableCompletableFuture<String,Object>,String> formatWorkItem;
 
+    private final Predicate<Level> logLevelIsEnabled;
     private final TreeMap<Duration,Level> ageToLevelEdgeMap;
 
     public ActiveContextMonitor(ActiveContextTracker globalContextTracker,
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
-                                OrderedWorkerTracker orderedRequestTracker,
+                                OrderedWorkerTracker<Object> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
+                                Function<DiagnosticTrackableCompletableFuture<String, Object>, String> formatWorkItem,
                                 Logger logger) {
         this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit,
-                (level,supplier)->logger.atLevel(level).setMessage(supplier).log());
+                formatWorkItem, (level, supplier)->logger.atLevel(level).setMessage(supplier).log(),
+                logger::isEnabledForLevel);
     }
 
     public ActiveContextMonitor(ActiveContextTracker globalContextTracker,
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
-                                OrderedWorkerTracker orderedRequestTracker,
+                                OrderedWorkerTracker<Object> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
-                                BiConsumer<Level, Supplier<String>> logger) {
-        this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit, logger,
-                Map.of(
+                                Function<DiagnosticTrackableCompletableFuture<String, Object>, String> formatWorkItem,
+                                BiConsumer<Level, Supplier<String>> logger,
+                                Predicate<Level> logLevelIsEnabled) {
+        this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit,
+                formatWorkItem, logger, logLevelIsEnabled, Map.of(
                         Level.ERROR, Duration.ofSeconds(600),
                         Level.WARN, Duration.ofSeconds(60),
                         Level.INFO, Duration.ofSeconds(30),
@@ -63,9 +71,11 @@ public class ActiveContextMonitor implements Runnable {
 
     public ActiveContextMonitor(ActiveContextTracker globalContextTracker,
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
-                                OrderedWorkerTracker orderedRequestTracker,
+                                OrderedWorkerTracker<Object> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
+                                Function<DiagnosticTrackableCompletableFuture<String, Object>, String> formatWorkItem,
                                 BiConsumer<Level, Supplier<String>> logger,
+                                Predicate<Level> logLevelIsEnabled,
                                 Map<Level,Duration> levelShowsAgeOlderThanMap) {
 
         this.globalContextTracker = globalContextTracker;
@@ -73,6 +83,8 @@ public class ActiveContextMonitor implements Runnable {
         this.orderedRequestTracker = orderedRequestTracker;
         this.totalItemsToOutputLimit = totalItemsToOutputLimit;
         this.logger = logger;
+        this.formatWorkItem = formatWorkItem;
+        this.logLevelIsEnabled = logLevelIsEnabled;
         ageToLevelEdgeMap = levelShowsAgeOlderThanMap.entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey,
                         (x,y) -> { throw Lombok.sneakyThrow(new IllegalStateException("Shouldn't have any merges")); },
@@ -87,24 +99,43 @@ public class ActiveContextMonitor implements Runnable {
      * Try to print out the most valuable details at the end, assuming that a user is tailing a file that's
      * constantly being appended, and therefore could be harder to home in on the start of a block.
      */
-    private void logContexts() {
-        logActiveItems(globalContextTracker.getActiveScopesByAge(), globalContextTracker.size(),
+    public void logTopOpenActivities() {
+        logRequests().ifPresent(ll->logger.accept(ll, ()->"\n"));
+        logTopActiveScopes().ifPresent(ll->logger.accept(ll, ()->"\n"));
+        logTopActiveScopesByType().ifPresent(ll->logger.accept(ll, ()->"\n"));
+    }
+
+    public Optional<Level> logTopActiveScopesByType() {
+        return perActivityContextTracker.getActiveScopeTypes().map(c->
+                        gatherActivities(perActivityContextTracker.getOldestActiveScopes(c),
+                                perActivityContextTracker.numScopesFor(c),
+                                this::getLogLevelForActiveContext))
+                .sorted(Comparator.comparingDouble(ActivitiesAndDepthsForLogging::getAverageContextDepth))
+                .map(cad-> {
+                    if (cad.items.isEmpty()) { return Optional.<Level>empty(); }
+                    final var sample = cad.items.get(0);
+                    logger.accept(sample.getValue(), () ->
+                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + cad.totalScopes + " scopes for " +
+                                    "'" + sample.getKey().getActivityName() + "'");
+                    cad.items.forEach(kvp->logger.accept(kvp.getValue(), ()->activityToString(kvp.getKey())));
+                    return (Optional<Level>) Optional.of(cad.items.get(0).getValue());
+                })
+                .collect(Utils.foldLeft(Optional.<Level>empty(), (aOuter, bOuter) ->
+                        aOuter.map(a-> bOuter.filter(b -> a.toInt() <= b.toInt()).orElse(a))
+                                .or(()->bOuter)));
+    }
+
+    public Optional<Level> logRequests() {
+        var orderedItems = orderedRequestTracker.orderedSet;
+        return logActiveItems(orderedItems.stream(), orderedItems.size(), " outstanding requests",
+                tkaf->getLogLevelForActiveContext(tkaf.nanoTimeKey),
+                tkaf -> activityToString(tkaf, INDENT));
+    }
+
+    public Optional<Level> logTopActiveScopes() {
+        return logActiveItems(globalContextTracker.getActiveScopesByAge(), globalContextTracker.size(), " GLOBAL scopes",
                 this::getLogLevelForActiveContext,
                 this::activityToString);
-
-        perActivityContextTracker.getActiveScopeTypes().map(c->
-                gatherActivities(perActivityContextTracker.getOldestActiveScopes(c),
-                        perActivityContextTracker.numScopesFor(c),
-                        this::getLogLevelForActiveContext))
-                .sorted(Comparator.comparingDouble(ActivitiesAndDepthsForLogging::getAverageContextDepth))
-                        .forEach(cad-> {
-                            if (cad.items.isEmpty()) { return; }
-                            final var sample = cad.items.get(0);
-                            logger.accept(sample.getValue(), () ->
-                                    "Oldest of " + cad.totalScopes + " scopes for " +
-                                            "'" + sample.getKey().getActivityName() + "'");
-                            cad.items.forEach(kvp->logger.accept(kvp.getValue(), ()->activityToString(kvp.getKey())));
-                        });
     }
 
     @AllArgsConstructor
@@ -152,6 +183,11 @@ public class ActiveContextMonitor implements Runnable {
         return activityToString(context, INDENT);
     }
 
+    private String activityToString(OrderedWorkerTracker.TimeKeyAndFuture tkaf, String indent) {
+        var timeStr = "age=" + getAge(tkaf.nanoTimeKey);
+        return indent + timeStr + " " + formatWorkItem.apply(tkaf.future);
+    }
+
     private String activityToString(IScopedInstrumentationAttributes context, String indent) {
         if (context == null) {
             return null;
@@ -166,25 +202,35 @@ public class ActiveContextMonitor implements Runnable {
     }
 
     private Optional<Level> getLogLevelForActiveContext(IScopedInstrumentationAttributes activeContext) {
-        var age = getAge(activeContext.getStartTimeNano());
-        var floorElement = ageToLevelEdgeMap.floorEntry(age);
-        return Optional.ofNullable(floorElement).map(Map.Entry::getValue);
+        return getLogLevelForActiveContext(activeContext.getStartTimeNano());
     }
 
-    private <T> void logActiveItems(Stream<T> activeScopeStream, long totalScopes,
-                                    Function<T, Optional<Level>> getLevel,
-                                    Function<T, String> getActiveLoggingMessage) {
+    private Optional<Level> getLogLevelForActiveContext(long nanoTime) {
+        var age = getAge(nanoTime);
+        var floorElement = ageToLevelEdgeMap.floorEntry(age);
+        return Optional.ofNullable(floorElement).map(Map.Entry::getValue).filter(logLevelIsEnabled);
+    }
+
+    private <T> Optional<Level>
+    logActiveItems(Stream<T> activeScopeStream, long totalScopes, String trailingGroupLabel,
+                   Function<T, Optional<Level>> getLevel,
+                   Function<T, String> getActiveLoggingMessage) {
         int numOutput = 0;
+        Optional<Level> firstLevel = Optional.empty();
         try {
             var activeScopeIterator = activeScopeStream.iterator();
             while ((++numOutput <= totalItemsToOutputLimit) && activeScopeIterator.hasNext()) {
                 final var activeScope = activeScopeIterator.next();
-                Optional<Level> levelForElementOp = getLevel.apply(activeScope);
+                var levelForElementOp = getLevel.apply(activeScope);
                 if (levelForElementOp.isEmpty()) {
                     break;
                 }
+                if (firstLevel.isEmpty()) {
+                    firstLevel = levelForElementOp;
+                }
                 if (numOutput == 1) {
-                    logger.accept(levelForElementOp.get(), () -> "Oldest of " + totalScopes + " GLOBAL scopes");
+                    logger.accept(levelForElementOp.get(), () ->
+                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + totalScopes + trailingGroupLabel);
 
                 }
                 logger.accept(levelForElementOp.get(),()->getActiveLoggingMessage.apply(activeScope));
@@ -195,10 +241,11 @@ public class ActiveContextMonitor implements Runnable {
                 log.trace("No active work found, not outputting them to the active context logger");
             } // else, we're done
         }
+        return firstLevel;
     }
 
     @Override
     public void run() {
-        logContexts();
+        logTopOpenActivities();
     }
 }

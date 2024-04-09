@@ -44,9 +44,9 @@ import java.util.stream.Stream;
 @Slf4j
 public abstract class TrafficReplayerCore {
 
-    public interface IWorkTracker {
+    public interface IWorkTracker<T> {
         void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
-                 DiagnosticTrackableCompletableFuture<String, Void> completableFuture);
+                 DiagnosticTrackableCompletableFuture<String, T> completableFuture);
         void remove(UniqueReplayerRequestKey uniqueReplayerRequestKey);
         boolean isEmpty();
         int size();

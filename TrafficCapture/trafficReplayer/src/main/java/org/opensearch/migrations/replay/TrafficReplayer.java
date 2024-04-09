@@ -300,7 +300,8 @@ public class TrafficReplayer {
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests,
                     orderedRequestTracker);
             var activeContextMonitor = new ActiveContextMonitor(
-                    globalContextTracker, perContextTracker, orderedRequestTracker, 64, activeContextLogger);
+                    globalContextTracker, perContextTracker, orderedRequestTracker, 64,
+                    TrafficReplayerTopLevel::formatWorkItem, activeContextLogger);
             scheduledExecutorService.schedule(activeContextMonitor, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);

@@ -12,20 +12,21 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.stream.Stream;
 
-public class OrderedWorkerTracker implements TrafficReplayerTopLevel.IStreamableWorkTracker {
+public class OrderedWorkerTracker<T> implements TrafficReplayerTopLevel.IStreamableWorkTracker<T> {
     @AllArgsConstructor
-    static class TimeKeyAndFuture {
+    static class TimeKeyAndFuture<U> {
         @Getter
-        final long timeKey;
-        final DiagnosticTrackableCompletableFuture<String,Void> future;
+        final long nanoTimeKey;
+        final DiagnosticTrackableCompletableFuture<String,U> future;
     }
-    ConcurrentHashMap<UniqueReplayerRequestKey, TimeKeyAndFuture> primaryMap = new ConcurrentHashMap<>();
-    ConcurrentSkipListSet<TimeKeyAndFuture> orderedSet =
-            new ConcurrentSkipListSet<>(Comparator.comparingLong(TimeKeyAndFuture::getTimeKey)
+    ConcurrentHashMap<UniqueReplayerRequestKey, TimeKeyAndFuture<T>> primaryMap = new ConcurrentHashMap<>();
+    ConcurrentSkipListSet<TimeKeyAndFuture<T>> orderedSet =
+            new ConcurrentSkipListSet<>(Comparator.comparingLong(TimeKeyAndFuture<T>::getNanoTimeKey)
                     .thenComparingLong(i->System.identityHashCode(i)));
 
     @Override
-    public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, Void> completableFuture) {
+    public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
+                    DiagnosticTrackableCompletableFuture<String, T> completableFuture) {
         var timedValue = new TimeKeyAndFuture(System.nanoTime(), completableFuture);
         primaryMap.put(uniqueReplayerRequestKey, timedValue);
         orderedSet.add(timedValue);
@@ -48,7 +49,7 @@ public class OrderedWorkerTracker implements TrafficReplayerTopLevel.IStreamable
         return primaryMap.size();
     }
 
-    public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,Void>>>
+    public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,T>>>
     getRemainingItems() {
         return primaryMap.entrySet().stream().map(kvp->Map.entry(kvp.getKey(), kvp.getValue().future));
     }
