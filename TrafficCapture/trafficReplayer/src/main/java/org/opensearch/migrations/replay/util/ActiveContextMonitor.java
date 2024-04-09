@@ -35,18 +35,18 @@ public class ActiveContextMonitor implements Runnable {
     private final BiConsumer<Level, Supplier<String>> logger;
     private final ActiveContextTracker globalContextTracker;
     private final ActiveContextTrackerByActivityType perActivityContextTracker;
-    private final OrderedWorkerTracker<Object> orderedRequestTracker;
+    private final OrderedWorkerTracker<Void> orderedRequestTracker;
     private final int totalItemsToOutputLimit;
-    private final Function<DiagnosticTrackableCompletableFuture<String,Object>,String> formatWorkItem;
+    private final Function<DiagnosticTrackableCompletableFuture<String,Void>,String> formatWorkItem;
 
     private final Predicate<Level> logLevelIsEnabled;
     private final TreeMap<Duration,Level> ageToLevelEdgeMap;
 
     public ActiveContextMonitor(ActiveContextTracker globalContextTracker,
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
-                                OrderedWorkerTracker<Object> orderedRequestTracker,
+                                OrderedWorkerTracker<Void> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
-                                Function<DiagnosticTrackableCompletableFuture<String, Object>, String> formatWorkItem,
+                                Function<DiagnosticTrackableCompletableFuture<String, Void>, String> formatWorkItem,
                                 Logger logger) {
         this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit,
                 formatWorkItem, (level, supplier)->logger.atLevel(level).setMessage(supplier).log(),
@@ -55,9 +55,9 @@ public class ActiveContextMonitor implements Runnable {
 
     public ActiveContextMonitor(ActiveContextTracker globalContextTracker,
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
-                                OrderedWorkerTracker<Object> orderedRequestTracker,
+                                OrderedWorkerTracker<Void> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
-                                Function<DiagnosticTrackableCompletableFuture<String, Object>, String> formatWorkItem,
+                                Function<DiagnosticTrackableCompletableFuture<String, Void>, String> formatWorkItem,
                                 BiConsumer<Level, Supplier<String>> logger,
                                 Predicate<Level> logLevelIsEnabled) {
         this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit,
@@ -71,9 +71,9 @@ public class ActiveContextMonitor implements Runnable {
 
     public ActiveContextMonitor(ActiveContextTracker globalContextTracker,
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
-                                OrderedWorkerTracker<Object> orderedRequestTracker,
+                                OrderedWorkerTracker<Void> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
-                                Function<DiagnosticTrackableCompletableFuture<String, Object>, String> formatWorkItem,
+                                Function<DiagnosticTrackableCompletableFuture<String, Void>, String> formatWorkItem,
                                 BiConsumer<Level, Supplier<String>> logger,
                                 Predicate<Level> logLevelIsEnabled,
                                 Map<Level,Duration> levelShowsAgeOlderThanMap) {
@@ -114,26 +114,31 @@ public class ActiveContextMonitor implements Runnable {
                 .map(cad-> {
                     if (cad.items.isEmpty()) { return Optional.<Level>empty(); }
                     final var sample = cad.items.get(0);
-                    logger.accept(sample.getValue(), () ->
-                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + cad.totalScopes + " scopes for " +
-                                    "'" + sample.getKey().getActivityName() + "'");
+                    logger.accept(getHigherLevel(Optional.of(sample.getValue()), Optional.of(Level.INFO)).get(), () ->
+                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + cad.totalScopes + " scopes that are past " +
+                                    "thresholds for '" + sample.getKey().getActivityName() + "'");
                     cad.items.forEach(kvp->logger.accept(kvp.getValue(), ()->activityToString(kvp.getKey())));
                     return (Optional<Level>) Optional.of(cad.items.get(0).getValue());
                 })
-                .collect(Utils.foldLeft(Optional.<Level>empty(), (aOuter, bOuter) ->
-                        aOuter.map(a-> bOuter.filter(b -> a.toInt() <= b.toInt()).orElse(a))
-                                .or(()->bOuter)));
+                .collect(Utils.foldLeft(Optional.<Level>empty(), ActiveContextMonitor::getHigherLevel));
+    }
+
+    private static Optional<Level> getHigherLevel(Optional<Level> aOuter, Optional<Level> bOuter) {
+        return aOuter.map(a -> bOuter.filter(b -> a.toInt() <= b.toInt()).orElse(a))
+                .or(() -> bOuter);
     }
 
     public Optional<Level> logRequests() {
         var orderedItems = orderedRequestTracker.orderedSet;
-        return logActiveItems(orderedItems.stream(), orderedItems.size(), " outstanding requests",
-                tkaf->getLogLevelForActiveContext(tkaf.nanoTimeKey),
+        return logActiveItems(orderedItems.stream(), orderedItems.size(),
+                " outstanding requests that are past thresholds",
+                tkaf -> getLogLevelForActiveContext(tkaf.nanoTimeKey),
                 tkaf -> activityToString(tkaf, INDENT));
     }
 
     public Optional<Level> logTopActiveScopes() {
-        return logActiveItems(globalContextTracker.getActiveScopesByAge(), globalContextTracker.size(), " GLOBAL scopes",
+        return logActiveItems(globalContextTracker.getActiveScopesByAge(), globalContextTracker.size(),
+                " GLOBAL scopes that are past thresholds",
                 this::getLogLevelForActiveContext,
                 this::activityToString);
     }
@@ -183,7 +188,7 @@ public class ActiveContextMonitor implements Runnable {
         return activityToString(context, INDENT);
     }
 
-    private String activityToString(OrderedWorkerTracker.TimeKeyAndFuture tkaf, String indent) {
+    private String activityToString(OrderedWorkerTracker.TimeKeyAndFuture<Void> tkaf, String indent) {
         var timeStr = "age=" + getAge(tkaf.nanoTimeKey);
         return indent + timeStr + " " + formatWorkItem.apply(tkaf.future);
     }
@@ -212,16 +217,16 @@ public class ActiveContextMonitor implements Runnable {
     }
 
     private <T> Optional<Level>
-    logActiveItems(Stream<T> activeScopeStream, long totalScopes, String trailingGroupLabel,
+    logActiveItems(Stream<T> activeItemStream, long totalItems, String trailingGroupLabel,
                    Function<T, Optional<Level>> getLevel,
                    Function<T, String> getActiveLoggingMessage) {
         int numOutput = 0;
         Optional<Level> firstLevel = Optional.empty();
         try {
-            var activeScopeIterator = activeScopeStream.iterator();
-            while ((++numOutput <= totalItemsToOutputLimit) && activeScopeIterator.hasNext()) {
-                final var activeScope = activeScopeIterator.next();
-                var levelForElementOp = getLevel.apply(activeScope);
+            var activeItemIterator = activeItemStream.iterator();
+            while ((++numOutput <= totalItemsToOutputLimit) && activeItemIterator.hasNext()) {
+                final var activeItem = activeItemIterator.next();
+                var levelForElementOp = getLevel.apply(activeItem);
                 if (levelForElementOp.isEmpty()) {
                     break;
                 }
@@ -229,11 +234,11 @@ public class ActiveContextMonitor implements Runnable {
                     firstLevel = levelForElementOp;
                 }
                 if (numOutput == 1) {
-                    logger.accept(levelForElementOp.get(), () ->
-                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + totalScopes + trailingGroupLabel);
+                    logger.accept(getHigherLevel(levelForElementOp, Optional.of(Level.INFO)).get(), () ->
+                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + totalItems + trailingGroupLabel);
 
                 }
-                logger.accept(levelForElementOp.get(),()->getActiveLoggingMessage.apply(activeScope));
+                logger.accept(levelForElementOp.get(),()->getActiveLoggingMessage.apply(activeItem));
             }
         } catch (NoSuchElementException e) {
             if (numOutput == 0) {

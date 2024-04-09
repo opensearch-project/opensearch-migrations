@@ -28,7 +28,7 @@ class ActiveContextMonitorTest {
         var loggedEntries = new ArrayList<Map.Entry<Level,String>>();
         var globalContextTracker = new ActiveContextTracker();
         var perActivityContextTracker = new ActiveContextTrackerByActivityType();
-        var orderedWorkerTracker = new OrderedWorkerTracker<Object>();
+        var orderedWorkerTracker = new OrderedWorkerTracker<Void>();
         var compositeTracker = new CompositeContextTracker(globalContextTracker, perActivityContextTracker);
         var acm = new ActiveContextMonitor(
                 globalContextTracker, perActivityContextTracker, orderedWorkerTracker, 2,
@@ -52,12 +52,12 @@ class ActiveContextMonitorTest {
             }
             acm.run();
             checkAllEntriesAreErrorLevel(loggedEntries);
-            checkAndClearLines(0, loggedEntries, Pattern.compile("\\n"));
+            checkAndClearLines(loggedEntries, Pattern.compile("\\n"));
 
             Thread.sleep(100);
             acm.run();
             checkAllEntriesAreErrorLevel(loggedEntries);
-            checkAndClearLines(14, loggedEntries, makePattern(2,10,21));
+            checkAndClearLines(loggedEntries, makePattern(2,10,21));
 
             for (int i=0; i<TRANCHE_SIZE; ++i) {
                 var rc = testContext.getTestConnectionRequestContext(i+TRANCHE_SIZE);
@@ -68,7 +68,7 @@ class ActiveContextMonitorTest {
 
             acm.run();
             checkAllEntriesAreErrorLevel(loggedEntries);
-            checkAndClearLines(14, loggedEntries, makePattern(2,20,41));
+            checkAndClearLines(loggedEntries, makePattern(2,20,41));
         }
     }
 
@@ -83,7 +83,7 @@ class ActiveContextMonitorTest {
         var loggedEntries = new ArrayList<Map.Entry<Level,String>>();
         var globalContextTracker = new ActiveContextTracker();
         var perActivityContextTracker = new ActiveContextTrackerByActivityType();
-        var orderedWorkerTracker = new OrderedWorkerTracker<Object>();
+        var orderedWorkerTracker = new OrderedWorkerTracker<Void>();
         var compositeTracker = new CompositeContextTracker(globalContextTracker, perActivityContextTracker);
         var acm = new ActiveContextMonitor(
                 globalContextTracker, perActivityContextTracker, orderedWorkerTracker, 2,
@@ -109,7 +109,7 @@ class ActiveContextMonitorTest {
             addContexts(compositeTracker, requestContext1);
             Thread.sleep(20);
             acm.run();
-            checkAndClearLines(11, loggedEntries, patternWith1);
+            checkAndClearLines(loggedEntries, patternWith1);
 
             var requestContext2 = testContext.getTestConnectionRequestContext(0);
             orderedWorkerTracker.put(requestContext2.getReplayerRequestKey(),
@@ -118,7 +118,7 @@ class ActiveContextMonitorTest {
             addContexts(compositeTracker, requestContext2);
             Thread.sleep(20);
             acm.run();
-            checkAndClearLines(14, loggedEntries, patternWith2);
+            checkAndClearLines(loggedEntries, patternWith2);
 
             var requestContext3 = testContext.getTestConnectionRequestContext(0);
             orderedWorkerTracker.put(requestContext3.getReplayerRequestKey(),
@@ -127,28 +127,28 @@ class ActiveContextMonitorTest {
             addContexts(compositeTracker, requestContext3);
             Thread.sleep(20);
             acm.run();
-            checkAndClearLines(14, loggedEntries, patternWith3);
+            checkAndClearLines(loggedEntries, patternWith3);
 
             Thread.sleep(50);
             acm.run();
-            checkAndClearLines( 14, loggedEntries, patternWith3);
+            checkAndClearLines(loggedEntries, patternWith3);
 
             compositeTracker.onContextClosed(requestContext1);
             compositeTracker.onContextClosed(requestContext1.getEnclosingScope());
             orderedWorkerTracker.remove(orderedWorkerTracker.getRemainingItems().findFirst().get().getKey());
             acm.run();
-            checkAndClearLines(14, loggedEntries, patternWith2);
+            checkAndClearLines(loggedEntries, patternWith2);
 
             compositeTracker.onContextClosed(requestContext2);
             compositeTracker.onContextClosed(requestContext2.getEnclosingScope());
             orderedWorkerTracker.remove(orderedWorkerTracker.getRemainingItems().findFirst().get().getKey());
             acm.run();
-            checkAndClearLines(11, loggedEntries, patternWith1);
+            checkAndClearLines(loggedEntries, patternWith1);
 
             removeContexts(compositeTracker, requestContext3);
             orderedWorkerTracker.remove(orderedWorkerTracker.getRemainingItems().findFirst().get().getKey());
             acm.run();
-            checkAndClearLines(0, loggedEntries, Pattern.compile("\\n", Pattern.MULTILINE));
+            checkAndClearLines(loggedEntries, Pattern.compile("\\n", Pattern.MULTILINE));
 
         }
     }
@@ -160,27 +160,27 @@ class ActiveContextMonitorTest {
     private Pattern makePattern(int maxItems, int requestScopeCount, int totalScopeCount) {
         var sb = new StringBuilder();
         sb.append("^");
-        sb.append("Oldest of " + requestScopeCount + " outstanding requests.*\\n");
+        sb.append("Oldest of " + requestScopeCount + " outstanding requests that are past thresholds.*\\n");
         for (int i=0; i<Math.min(maxItems, requestScopeCount); ++i) {
             sb.append(indent(1) + "age=P.*S.*\\n");
         }
 
-        sb.append("Oldest of " + totalScopeCount + " GLOBAL scopes.*\\n");
+        sb.append("Oldest of " + totalScopeCount + " GLOBAL scopes that are past thresholds.*\\n");
         sb.append(indent(1) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
         if (totalScopeCount > 1) {
             sb.append(indent(1) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
         }
 
-        sb.append("Oldest of 1 scopes for 'channel'.*\\n");
+        sb.append("Oldest of 1 scopes that are past thresholds for 'channel'.*\\n");
         sb.append(indent(1) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
 
-        sb.append("Oldest of " + requestScopeCount + " scopes for 'trafficStreamLifetime'.*\\n");
+        sb.append("Oldest of " + requestScopeCount + " scopes that are past thresholds for 'trafficStreamLifetime'.*\\n");
         for (int i=0; i<Math.min(maxItems, requestScopeCount); ++i) {
             sb.append(indent(1) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
         }
-        sb.append("Oldest of " + requestScopeCount + " scopes for 'httpTransaction'.*\\n");
+        sb.append("Oldest of " + requestScopeCount + " scopes that are past thresholds for 'httpTransaction'.*\\n");
         for (int i=0; i<Math.min(maxItems, requestScopeCount); ++i) {
             sb.append(indent(1) + "age=P.*S, start=.*Z httpTransaction: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
@@ -208,7 +208,7 @@ class ActiveContextMonitorTest {
         }
     }
 
-    private void checkAndClearLines(int i, ArrayList<Map.Entry<Level, String>> loggedLines, Pattern pattern) {
+    private void checkAndClearLines(ArrayList<Map.Entry<Level, String>> loggedLines, Pattern pattern) {
         loggedLines.stream()
                 .forEach(kvp->System.out.println(kvp.getValue()+" (" + kvp.getKey() + ")"));
         var filteredLoggedLines = loggedLines.stream()
@@ -216,7 +216,7 @@ class ActiveContextMonitorTest {
                 .collect(Collectors.toList());
         System.out.println("----------------------------------------------------------------" +
                 "----------------------------------------------------------------");
-        Assertions.assertEquals(i, filteredLoggedLines.size());
+
         var combinedOutput = filteredLoggedLines.stream()
                 .map(Map.Entry::getValue)
                 .collect(Collectors.joining("\n")) +

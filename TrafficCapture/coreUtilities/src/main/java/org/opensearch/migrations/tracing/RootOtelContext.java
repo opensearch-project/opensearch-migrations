@@ -93,6 +93,16 @@ public class RootOtelContext implements IRootOtelContext {
                 });
     }
 
+    @Override
+    public void onContextCreated(IScopedInstrumentationAttributes newScopedContext) {
+        contextTracker.onContextCreated(newScopedContext);
+    }
+
+    @Override
+    public void onContextClosed(IScopedInstrumentationAttributes newScopedContext) {
+        contextTracker.onContextClosed(newScopedContext);
+    }
+
     public static class MetricInstruments extends CommonMetricInstruments {
         public MetricInstruments(Meter meter, String activityName) {
             super(meter, activityName);

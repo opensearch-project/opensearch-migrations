@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -41,7 +42,7 @@ import java.util.function.Function;
 
 @Slf4j
 public class TrafficReplayer {
-    private static final String ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER = "AllActiveContextsMonitor";
+    private static final String ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER = "AllActiveWorkMonitor";
 
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
@@ -280,7 +281,8 @@ public class TrafficReplayer {
         }
         var globalContextTracker = new ActiveContextTracker();
         var perContextTracker = new ActiveContextTrackerByActivityType();
-        var scheduledExecutorService = Executors.newScheduledThreadPool(1);
+        var scheduledExecutorService = Executors.newScheduledThreadPool(1,
+                new DefaultThreadFactory("activeWorkMonitorThread"));
         var contextTrackers = new CompositeContextTracker(globalContextTracker, perContextTracker);
         var topContext = new RootReplayerContext(
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "replay"),
@@ -294,15 +296,16 @@ public class TrafficReplayer {
             if (transformerConfig != null) {
                 log.atInfo().setMessage(()->"Transformations config string: " + transformerConfig).log();
             }
-            var orderedRequestTracker = new OrderedWorkerTracker();
+            var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             var tr = new TrafficReplayerTopLevel(topContext, uri, authTransformer,
                     new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig),
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests,
                     orderedRequestTracker);
             var activeContextMonitor = new ActiveContextMonitor(
                     globalContextTracker, perContextTracker, orderedRequestTracker, 64,
-                    TrafficReplayerTopLevel::formatWorkItem, activeContextLogger);
-            scheduledExecutorService.schedule(activeContextMonitor, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
+                    cf->cf.formatAsString(TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
+            scheduledExecutorService.scheduleAtFixedRate(activeContextMonitor,
+                    ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());

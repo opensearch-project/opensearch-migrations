@@ -58,7 +58,7 @@ public abstract class TrafficReplayerCore {
     protected final AtomicInteger successfulRequestCount;
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
-    protected final IWorkTracker requestWorkTracker;
+    protected final IWorkTracker<Void> requestWorkTracker;
 
     protected final AtomicBoolean stopReadingRef;
     protected final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
@@ -69,7 +69,7 @@ public abstract class TrafficReplayerCore {
                                   IJsonTransformer jsonTransformer,
                                   ClientConnectionPool clientConnectionPool,
                                   TrafficStreamLimiter trafficStreamLimiter,
-                                  IWorkTracker requestWorkTracker)
+                                  IWorkTracker<Void> requestWorkTracker)
     {
         this.topLevelContext = context;
         if (serverUri.getPort() < 0) {
@@ -107,7 +107,7 @@ public abstract class TrafficReplayerCore {
 
             var allWorkFinishedForTransaction =
                     new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
-                            ()->"waiting for work to be queued and run through TrafficStreamLimiter");
+                            ()->"waiting for " + ctx + " to be queued and run through TrafficStreamLimiter");
             var requestPushFuture = new StringTrackableCompletableFuture<TransformedTargetRequestAndResponse>(
                     new CompletableFuture<>(), () -> "Waiting to get response from target");
             var requestKey = ctx.getReplayerRequestKey();

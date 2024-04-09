@@ -87,8 +87,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                    IAuthTransformerFactory authTransformerFactory,
                                    boolean allowInsecureConnections)
             throws SSLException {
-        this(context, serverUri, authTransformerFactory, new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost()), allowInsecureConnections
-        );
+        this(context, serverUri, authTransformerFactory,
+                new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost()), allowInsecureConnections);
     }
 
     public TrafficReplayerTopLevel(IRootReplayerContext topContext,
@@ -108,8 +108,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                    boolean allowInsecureConnections,
                                    int numClientThreads,
                                    int maxConcurrentRequests) throws SSLException {
-        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections, 0,
-                1024, new ConcurrentHashMapWorkTracker());
+        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections, numClientThreads,
+                maxConcurrentRequests, new ConcurrentHashMapWorkTracker<>());
     }
 
     public TrafficReplayerTopLevel(IRootReplayerContext topContext,
@@ -119,7 +119,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                    boolean allowInsecureConnections,
                                    int numClientThreads,
                                    int maxConcurrentRequests,
-                                   IStreamableWorkTracker workTracker) throws SSLException {
+                                   IStreamableWorkTracker<Void> workTracker) throws SSLException {
         this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections,
                 numClientThreads, maxConcurrentRequests,
                 getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
@@ -137,7 +137,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections,
                 numClientThreads, maxConcurrentRequests,
                 connectionPoolName,
-                new ConcurrentHashMapWorkTracker());
+                new ConcurrentHashMapWorkTracker<>());
     }
 
     public TrafficReplayerTopLevel(IRootReplayerContext context,
@@ -148,7 +148,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                    int numSendingThreads,
                                    int maxConcurrentOutstandingRequests,
                                    String connectionPoolName,
-                                   IStreamableWorkTracker workTracker) throws SSLException {
+                                   IStreamableWorkTracker<Void> workTracker) throws SSLException {
         this(context, serverUri, authTransformerFactory, jsonTransformer,
                 new ClientConnectionPool(serverUri,
                         loadSslContext(serverUri, allowInsecureConnections), connectionPoolName, numSendingThreads),
@@ -161,7 +161,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                    IJsonTransformer jsonTransformer,
                                    ClientConnectionPool clientConnectionPool,
                                    TrafficStreamLimiter trafficStreamLimiter,
-                                   IStreamableWorkTracker workTracker) throws SSLException {
+                                   IStreamableWorkTracker<Void> workTracker) {
         super(context, serverUri, authTransformerFactory, jsonTransformer, clientConnectionPool,
                 trafficStreamLimiter, workTracker);
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
@@ -292,7 +292,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             streamLimiterHasRunEverything.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         }
 
-        var workTracker = (IStreamableWorkTracker<Object>) requestWorkTracker;
+        var workTracker = (IStreamableWorkTracker<Void>) requestWorkTracker;
         Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
                 allRemainingWorkArray = workTracker.getRemainingItems().toArray(Map.Entry[]::new);
         writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
