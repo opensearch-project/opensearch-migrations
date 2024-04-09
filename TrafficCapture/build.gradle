@@ -23,7 +23,33 @@ subprojects {
                     from components.java
 
                     group = 'org.opensearch.migrations.trafficcapture'
-                    version = '0.1.0-SNAPSHOT'
+                    version = '0.1.0'
+
+                    // support -Dbuild.snapshot=false, but default to true
+                    if (System.getProperty("build.snapshot", "true") == "true") {
+                        println "Add Snapshot"
+                        version += "-SNAPSHOT"
+                    }
+
+
+                    pom {
+                        name = project.name
+                        description = 'Everything opensearch migrations'
+                        url = 'http://github.com/opensearch-project/opensearch-migrations'
+
+                        licenses {
+                            license {
+                                name = 'The Apache License, Version 2.0'
+                                url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                            }
+                        }
+                        developers {
+                            developer {
+                                name = "OpenSearch"
+                                url = "https://github.com/opensearch-project/opensearch-migrations"
+                            }
+                        }
+                    }
 
                     // Suppress POM metadata warnings for test fixtures
                     suppressPomMetadataWarningsFor('testFixturesApiElements')
@@ -31,8 +57,10 @@ subprojects {
                 }
             }
             repositories {
+                maven { url = "${rootProject.buildDir}/repository"}
                 maven {
-                    url = "${rootProject.buildDir}/repository"
+                    url "https://aws.oss.sonatype.org/content/repositories/snapshots"
+                    name = 'staging'
                 }
             }
         }
