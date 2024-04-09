@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -40,7 +41,7 @@ public class ActiveContextMonitor implements Runnable {
     private final Function<DiagnosticTrackableCompletableFuture<String,Void>,String> formatWorkItem;
 
     private final Predicate<Level> logLevelIsEnabled;
-    private final TreeMap<Duration,Level> ageToLevelEdgeMap;
+    private final AtomicReference<TreeMap<Duration,Level>> ageToLevelEdgeMapRef;
 
     public ActiveContextMonitor(ActiveContextTracker globalContextTracker,
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
@@ -85,10 +86,15 @@ public class ActiveContextMonitor implements Runnable {
         this.logger = logger;
         this.formatWorkItem = formatWorkItem;
         this.logLevelIsEnabled = logLevelIsEnabled;
-        ageToLevelEdgeMap = levelShowsAgeOlderThanMap.entrySet().stream()
+        ageToLevelEdgeMapRef = new AtomicReference<>();
+        setAgeToLevelMap(levelShowsAgeOlderThanMap);
+    }
+
+    public void setAgeToLevelMap(Map<Level, Duration> levelShowsAgeOlderThanMap) {
+        ageToLevelEdgeMapRef.set(levelShowsAgeOlderThanMap.entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey,
                         (x,y) -> { throw Lombok.sneakyThrow(new IllegalStateException("Shouldn't have any merges")); },
-                        TreeMap::new));
+                        TreeMap::new)));
     }
 
     Duration getAge(long recordedNanoTime) {
@@ -212,6 +218,7 @@ public class ActiveContextMonitor implements Runnable {
 
     private Optional<Level> getLogLevelForActiveContext(long nanoTime) {
         var age = getAge(nanoTime);
+        var ageToLevelEdgeMap = ageToLevelEdgeMapRef.get();
         var floorElement = ageToLevelEdgeMap.floorEntry(age);
         return Optional.ofNullable(floorElement).map(Map.Entry::getValue).filter(logLevelIsEnabled);
     }
@@ -224,7 +231,7 @@ public class ActiveContextMonitor implements Runnable {
         Optional<Level> firstLevel = Optional.empty();
         try {
             var activeItemIterator = activeItemStream.iterator();
-            while ((++numOutput <= totalItemsToOutputLimit) && activeItemIterator.hasNext()) {
+            while (activeItemIterator.hasNext() && (numOutput < totalItemsToOutputLimit)) {
                 final var activeItem = activeItemIterator.next();
                 var levelForElementOp = getLevel.apply(activeItem);
                 if (levelForElementOp.isEmpty()) {
@@ -233,7 +240,7 @@ public class ActiveContextMonitor implements Runnable {
                 if (firstLevel.isEmpty()) {
                     firstLevel = levelForElementOp;
                 }
-                if (numOutput == 1) {
+                if (numOutput++ == 0) {
                     logger.accept(getHigherLevel(levelForElementOp, Optional.of(Level.INFO)).get(), () ->
                             OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + totalItems + trailingGroupLabel);
 

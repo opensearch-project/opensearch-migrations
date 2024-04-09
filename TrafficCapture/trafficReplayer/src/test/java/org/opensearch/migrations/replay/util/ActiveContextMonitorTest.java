@@ -12,6 +12,7 @@ import org.slf4j.event.Level;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -30,17 +31,17 @@ class ActiveContextMonitorTest {
         var perActivityContextTracker = new ActiveContextTrackerByActivityType();
         var orderedWorkerTracker = new OrderedWorkerTracker<Void>();
         var compositeTracker = new CompositeContextTracker(globalContextTracker, perActivityContextTracker);
+        var durationLevelMap = new HashMap<>(Map.of(
+                Level.ERROR, Duration.ofMillis(1000),
+                Level.WARN, Duration.ofMillis(4),
+                Level.INFO, Duration.ofMillis(3),
+                Level.DEBUG, Duration.ofMillis(2),
+                Level.TRACE, Duration.ofMillis(1)));
         var acm = new ActiveContextMonitor(
                 globalContextTracker, perActivityContextTracker, orderedWorkerTracker, 2,
                 dtfc -> "",
                 (Level level, Supplier<String> msgSupplier) -> loggedEntries.add(Map.entry(level, msgSupplier.get())),
-                level->level==Level.ERROR,
-                Map.of(
-                        Level.ERROR, Duration.ofMillis(100),
-                        Level.WARN, Duration.ofMillis(4),
-                        Level.INFO, Duration.ofMillis(3),
-                        Level.DEBUG, Duration.ofMillis(2),
-                        Level.TRACE, Duration.ofMillis(1)));
+                level->level==Level.ERROR, durationLevelMap);
         try (var testContext = TestContext.noOtelTracking()) {
             for (int i=0; i<TRANCHE_SIZE; ++i) {
                 var rc = testContext.getTestConnectionRequestContext(i);
@@ -48,16 +49,18 @@ class ActiveContextMonitorTest {
                 final var idx = i;
                 orderedWorkerTracker.put(rc.getReplayerRequestKey(),
                         new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "dummy #" + idx));
-                Thread.sleep(2);
             }
+            var startTime = System.nanoTime();
             acm.run();
             checkAllEntriesAreErrorLevel(loggedEntries);
             checkAndClearLines(loggedEntries, Pattern.compile("\\n"));
 
-            Thread.sleep(100);
+            Thread.sleep(10);
+            durationLevelMap.put(Level.ERROR, Duration.ofNanos(System.nanoTime()-startTime));
+            acm.setAgeToLevelMap(durationLevelMap);
             acm.run();
             checkAllEntriesAreErrorLevel(loggedEntries);
-            checkAndClearLines(loggedEntries, makePattern(2,10,21));
+            checkAndClearLines(loggedEntries, makePattern(2, 10, 2,21));
 
             for (int i=0; i<TRANCHE_SIZE; ++i) {
                 var rc = testContext.getTestConnectionRequestContext(i+TRANCHE_SIZE);
@@ -68,13 +71,15 @@ class ActiveContextMonitorTest {
 
             acm.run();
             checkAllEntriesAreErrorLevel(loggedEntries);
-            checkAndClearLines(loggedEntries, makePattern(2,20,41));
+            checkAndClearLines(loggedEntries, makePattern(2,20, 2,41));
         }
     }
 
     private static void checkAllEntriesAreErrorLevel(ArrayList<Map.Entry<Level, String>> loggedEntries) {
-        Assertions.assertEquals("", loggedEntries.stream().filter(kvp->kvp.getKey()!=Level.ERROR)
-                .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()),
+        Assertions.assertEquals("", loggedEntries.stream()
+                        .filter(kvp->!kvp.getValue().startsWith("Oldest of "))
+                        .filter(kvp->kvp.getKey()!=Level.ERROR)
+                        .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()),
                 "expected all levels to be ERROR and for them to be filtered out in this check");
     }
 
@@ -96,9 +101,10 @@ class ActiveContextMonitorTest {
                         Level.DEBUG, Duration.ofMillis(40),
                         Level.TRACE, Duration.ofMillis(20)));
 
-        var patternWith1 = makePattern(2, 1, 3);
-        var patternWith2 = makePattern(2, 2, 5);
-        var patternWith3 = makePattern(2, 3, 7);
+        var patternWith0 = makePattern(0, 0, 0, 0);
+        var patternWith1 = makePattern(1, 1, 3,3);
+        var patternWith2 = makePattern(2, 2, 5, 5);
+        var patternWith3 = makePattern(2, 3, 7, 7);
 
 
         try (var testContext = TestContext.noOtelTracking()) {
@@ -157,17 +163,18 @@ class ActiveContextMonitorTest {
         return IntStream.range(0, i).mapToObj(ignored->ActiveContextMonitor.INDENT).collect(Collectors.joining());
     }
 
-    private Pattern makePattern(int maxItems, int requestScopeCount, int totalScopeCount) {
+    private Pattern makePattern(int visibleRequestCount, int requestScopeCount,
+                                int visibleScopeCount, int totalScopeCount) {
         var sb = new StringBuilder();
         sb.append("^");
         sb.append("Oldest of " + requestScopeCount + " outstanding requests that are past thresholds.*\\n");
-        for (int i=0; i<Math.min(maxItems, requestScopeCount); ++i) {
+        for (int i=0; i<visibleRequestCount; ++i) {
             sb.append(indent(1) + "age=P.*S.*\\n");
         }
 
         sb.append("Oldest of " + totalScopeCount + " GLOBAL scopes that are past thresholds.*\\n");
         sb.append(indent(1) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
-        if (totalScopeCount > 1) {
+        if (visibleScopeCount > 1) {
             sb.append(indent(1) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
         }
@@ -176,12 +183,12 @@ class ActiveContextMonitorTest {
         sb.append(indent(1) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
 
         sb.append("Oldest of " + requestScopeCount + " scopes that are past thresholds for 'trafficStreamLifetime'.*\\n");
-        for (int i=0; i<Math.min(maxItems, requestScopeCount); ++i) {
+        for (int i=0; i<visibleRequestCount; ++i) {
             sb.append(indent(1) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
         }
         sb.append("Oldest of " + requestScopeCount + " scopes that are past thresholds for 'httpTransaction'.*\\n");
-        for (int i=0; i<Math.min(maxItems, requestScopeCount); ++i) {
+        for (int i=0; i<visibleRequestCount; ++i) {
             sb.append(indent(1) + "age=P.*S, start=.*Z httpTransaction: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
             sb.append(indent(3) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
@@ -210,7 +217,7 @@ class ActiveContextMonitorTest {
 
     private void checkAndClearLines(ArrayList<Map.Entry<Level, String>> loggedLines, Pattern pattern) {
         loggedLines.stream()
-                .forEach(kvp->System.out.println(kvp.getValue()+" (" + kvp.getKey() + ")"));
+                .forEach(kvp->System.out.println(kvp.getValue()+" (" + kvp.getKey().toString().toLowerCase() + ")"));
         var filteredLoggedLines = loggedLines.stream()
                 .filter(kvp->!kvp.getValue().equals("\n"))
                 .collect(Collectors.toList());

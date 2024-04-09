@@ -304,7 +304,10 @@ public class TrafficReplayer {
             var activeContextMonitor = new ActiveContextMonitor(
                     globalContextTracker, perContextTracker, orderedRequestTracker, 64,
                     cf->cf.formatAsString(TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
-            scheduledExecutorService.scheduleAtFixedRate(activeContextMonitor,
+            scheduledExecutorService.scheduleAtFixedRate(()->{
+                activeContextLogger.atInfo().setMessage(()->"Total requests outstanding: " + tr.requestWorkTracker.size()).log();
+                activeContextMonitor.run();
+                },
                     ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
