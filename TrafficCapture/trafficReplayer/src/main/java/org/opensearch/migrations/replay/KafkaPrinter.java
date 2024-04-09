@@ -8,6 +8,7 @@ import lombok.Lombok;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
@@ -21,7 +22,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -106,6 +106,10 @@ public class KafkaPrinter {
             arity=0,
             description = "Creates a single output file with output from all partitions combined. Requires '--output-directory' to be specified.")
         boolean combinePartitionOutput;
+        @Parameter(required = false,
+            names = {"--partition-offsets"},
+            description = "Partition offsets to start consuming from. Defaults to first offset in partition. Format: 'topic_name:partition_id:offset,topic_name:partition_id:offset'")
+        List<String> partitionOffsets = new ArrayList<>();
 
     }
 
@@ -142,7 +146,6 @@ public class KafkaPrinter {
         Properties properties = new Properties();
         properties.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
         properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
         if (params.kafkaTrafficPropertyFile != null) {
             try (InputStream input = new FileInputStream(params.kafkaTrafficPropertyFile)) {
@@ -177,6 +180,19 @@ public class KafkaPrinter {
             }
         }
 
+        Map<TopicPartition, Long> startingOffsets = new HashMap<>();
+        if (!params.partitionOffsets.isEmpty()) {
+            for (String partitionOffset : params.partitionOffsets) {
+                String[] elements = partitionOffset.split(":");
+                if (elements.length != 3) {
+                    throw new ParameterException("Partition offset provided does not match the expected format: topic_name:partition_id:offset, actual value: " + partitionOffset);
+                }
+                TopicPartition partition = new TopicPartition(elements[0], Integer.parseInt(elements[1]));
+                long offset = Long.parseLong(elements[2]);
+                startingOffsets.put(partition, offset);
+            }
+        }
+
         String baseOutputPath = params.outputDirectoryPath == null ? "./" : params.outputDirectoryPath;
         baseOutputPath = !baseOutputPath.endsWith("/") ? baseOutputPath + "/" : baseOutputPath;
         String uuid = UUID.randomUUID().toString();
@@ -203,7 +219,42 @@ public class KafkaPrinter {
         }
 
         try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties)) {
-            consumer.subscribe(Collections.singleton(topic));
+            consumer.subscribe(Collections.singleton(topic), new ConsumerRebalanceListener() {
+                private final Set<TopicPartition> partitionsAssignedAtSomeTime = new HashSet<>();
+                @Override
+                public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                    log.info("Partitions Assigned: {}", partitions);
+
+                    // Seek partitions assigned for the first time to the beginning
+                    var partitionsAssignedFirstTime = new HashSet<>(partitions);
+                    partitionsAssignedFirstTime.retainAll(partitionsAssignedAtSomeTime);
+                    consumer.seekToBeginning(partitionsAssignedFirstTime);
+                    partitionsAssignedAtSomeTime.addAll(partitionsAssignedFirstTime);
+
+                    // Seek partitions to provided offset if current reader is earlier
+                    partitions.forEach(partition -> {
+                        Long offset = startingOffsets.get(partition);
+                        var currentOffset = consumer.position(partition);
+                        if (offset == null) {
+                            log.info("Did not find specified startingOffset for partition {}", partition);
+                        }
+                        else if (currentOffset < offset) {
+                                consumer.seek(partition, offset);
+                            log.info("Found a specified startingOffset for partition {} that is greater than "
+                                      + "current offset {}. Seeking to {}", partition, currentOffset, offset);
+                        } else {
+                            log.info("Not changing fetch offsets because current offset is {} and startingOffset is {} "
+                                     + "for partition {}",
+                                currentOffset, offset, partition);
+
+                        }
+                    });
+                }
+
+                @Override
+                public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                }
+            });
             pipeRecordsToProtoBufDelimited(consumer, getDelimitedProtoBufOutputter(capturedRecords, partitionOutputStreams, separatePartitionOutputs),
                 params.timeoutSeconds, capturedRecords);
         } catch (WakeupException e) {

@@ -3,11 +3,71 @@ lib = library(identifier: 'jenkins@5.9.1', retriever: modernSCM([
     remote: 'https://github.com/opensearch-project/opensearch-build-libraries.git',
 ]))
 
-standardReleasePipelineWithGenericTrigger(
-    tokenIdCredential: 'jenkins-opensearch-migrations-generic-webhook-token',
-    causeString: 'A tag was cut on opensearch-project/opensearch-migrations repository causing this workflow to run',
-    downloadReleaseAsset: true,
-    publishRelease: true) {
+pipeline {
+        agent
+        {
+            docker {
+                label 'Jenkins-Agent-AL2-X64-C54xlarge-Docker-Host'
+                image 'opensearchstaging/ci-runner:release-centos7-clients-v4'
+                args '-e JAVA_HOME=/opt/java/openjdk-11'
+                alwaysPull true
+            }
+        }
+        options {
+            timeout(time: 1, unit: 'HOURS')
+        }
+        triggers {
+            GenericTrigger(
+                genericVariables: [
+                    [key: 'ref', value: '$.release.tag_name'],
+                    [key: 'repository', value: '$.repository.html_url'],
+                    [key: 'action', value: '$.action'],
+                    [key: 'isDraft', value: '$.release.draft'],
+                    [key: 'release_url', value: '$.release.url'],
+                    [key: 'assets_url', value: '$.release.assets_url']
+                ],
+                tokenCredentialId: 'jenkins-opensearch-migrations-generic-webhook-token',
+                causeString: 'A tag was cut on opensearch-project/opensearch-migrations repository causing this workflow to run',
+                printContributedVariables: false,
+                printPostContent: false,
+                regexpFilterText: '$isDraft $action',
+                regexpFilterExpression: '^true created$'
+            )
+        }
+        environment {
+            tag = "$ref"
+            repository = "$repository"
+        }
+        stages {
+            stage('Download artifacts') {
+                steps {
+                    script {
+                        if ("$assets_url" != '') {
+                            withCredentials([usernamePassword(credentialsId: 'jenkins-github-bot-token', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                                String assets = sh(
+                                    script: "curl -H 'Accept: application/vnd.github+json' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${assets_url}",
+                                    returnStdout: true
+                                )
+                                String assetUrl = null
+                                def parsedJson = readJSON text: assets
+                                parsedJson.each { item ->
+                                    if(item.name == 'artifacts.tar.gz') {
+                                        echo "Downloading artifacts from ${item.url}"
+                                        sh "curl -J -L -H 'Accept: application/octet-stream' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${item.url} -o artifacts.tar.gz && tar -xvf artifacts.tar.gz"
+                                        }
+                                    if(item.name == 'traffic-capture-artifacts.tar.gz') {
+                                        echo "Downloading artifacts from ${item.url}"
+                                        sh "curl -J -L -H 'Accept: application/octet-stream' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${item.url} -o traffic-capture-artifacts.tar.gz && tar -xvf traffic-capture-artifacts.tar.gz"
+                                        }
+                                    }
+                            }
+                        }
+                    }
+                }
+            }
+            stage('Release') {
+                steps {
+                    script {
                         publishToArtifactsProdBucket(
                             assumedRoleName: 'opensearch-migrations-upload-role',
                             source: "${WORKSPACE}/artifacts.tar.gz",
@@ -16,4 +76,31 @@ standardReleasePipelineWithGenericTrigger(
                             sigType: '.sig',
                             sigOverwrite: true
                         )
+                        
+                        publishToMaven(
+                            signingArtifactsPath: "$WORKSPACE/repository/",
+                            mavenArtifactsPath: "$WORKSPACE/repository/",
+                            autoPublish: true
+                        )
+                    }
+                }
+            }
+        }
+        post {
+            success {
+                script {
+                    if (arguments.publishRelease && release_url != null) {
+                        withCredentials([usernamePassword(credentialsId: 'jenkins-github-bot-token', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                            sh "curl -X PATCH -H 'Accept: application/vnd.github+json' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${release_url} -d '{\"tag_name\":\"${tag}\",\"draft\":false,\"prerelease\":false}'"
+                        }
+                    }
+                }
+            }
+            always {
+                script {
+                    postCleanup()
+                }
+            }
+        }
     }
+    

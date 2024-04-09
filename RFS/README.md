@@ -1,5 +1,20 @@
 # reindex-from-snapshot
 
+### Table of Contents (Generated)
+- [reindex-from-snapshot](#reindex-from-snapshot)
+    - [How to run](#how-to-run)
+        - [Using a local snapshot directory](#using-a-local-snapshot-directory)
+        - [Using an existing S3 snapshot](#using-an-existing-s3-snapshot)
+        - [Using a source cluster](#using-a-source-cluster)
+        - [Using Docker](#using-docker)
+        - [Handling auth](#handling-auth)
+    - [How to set up an ES 6.8 Source Cluster w/ an attached debugger](#how-to-set-up-an-es-68-source-cluster-w-an-attached-debugger)
+    - [How to set up an ES 7.10 Source Cluster running in Docker](#how-to-set-up-an-es-710-source-cluster-running-in-docker)
+        - [Providing AWS permissions for S3 snapshot creation](#providing-aws-permissions-for-s3-snapshot-creation)
+        - [Setting up the Cluster w/ some sample docs](#setting-up-the-cluster-w-some-sample-docs)
+    - [How to set up an OS 2.11 Target Cluster](#how-to-set-up-an-os-211-target-cluster)
+
+
 ## How to run
 
 RFS provides a number of different options for running it.  We'll look at some of them below.  
@@ -35,7 +50,7 @@ gradle build
 gradle run --args='-n global_state_snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri $S3_REPO_URI --s3-region $S3_REGION -l /tmp/lucene_files --target-host $TARGET_HOST --target-username $TARGET_USERNAME --target-password $TARGET_PASSWORD -s es_6_8 -t os_2_11 --movement-type everything'
 ```
 
-### Using an source cluster
+### Using a source cluster
 
 In this scenario, you have a source cluster, and don't yet have a snapshot.  RFS will need to first make a snapshot of your source cluster, send it to S3, and then begin reindexing.  In this scenario, you'll supply the source cluster-related args (`--source-host`, `--source-username`, `--source-password`) and the S3-related args (`--s3-local-dir`, `--s3-repo-uri`, `--s3-region`), but not the `--snapshot-dir` one.
 
@@ -55,6 +70,37 @@ gradle build
 
 gradle run --args='-n global_state_snapshot --source-host $SOURCE_HOST --source-username $SOURCE_USERNAME --source-password $SOURCE_PASSWORD --s3-local-dir /tmp/s3_files --s3-repo-uri $S3_REPO_URI --s3-region $S3_REGION -l /tmp/lucene_files --target-host $TARGET_HOST --target-username $TARGET_USERNAME --target-password $TARGET_PASSWORD -s es_6_8 -t os_2_11 --movement-type everything'
 ```
+
+### Using Docker
+RFS has support for packaging its java application as a Docker image by using the Dockerfile located in the `RFS/docker` directory. This support is directly built into Gradle as well so that a user can perform the below action, and generate a fresh Docker image (`migrations/reindex_from_snapshot:latest`) with the latest local code changes available.
+```shell
+./gradlew buildDockerImages
+```
+Also built into this Docker/Gradle support is the ability to spin up a testing RFS environment using Docker compose. This compose file can be seen [here](./docker/docker-compose.yml) and includes the RFS container, a source cluster container, and a target cluster container.
+
+This environment can be spun up with the Gradle command
+```shell
+./gradlew composeUp
+```
+And deleted with the Gradle command
+```shell
+./gradlew composeDown
+```
+
+After the Docker compose containers are created the elasticsearch/opensearch source and target clusters can be interacted with like normal. For RFS testing, a user should load templates/indices/documents into the source cluster and take a snapshot before kicking off RFS.
+```shell
+# To check indices on the source cluster
+curl https://localhost:19200/_cat/indices?v --insecure -u admin:admin
+
+# To check indices on the target cluster
+curl https://localhost:29200/_cat/indices?v --insecure -u admin:admin
+```
+
+Once the user is ready, they can kick off the RFS migration by running the RFS java command with the proper arguments on the RFS container like below:
+```shell
+docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name <snapshot-name> --snapshot-dir <snapshot-dir> --lucene-dir '/lucene' --target-host https://opensearchtarget:9200 --target-username admin --target-password admin --source-version es_7_10 --target-version os_2_11"
+```
+
 
 ### Handling auth
 
