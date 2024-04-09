@@ -25,7 +25,7 @@ import java.nio.charset.StandardCharsets;
  * responsibility to serialize that for the final HTTP Request.
  *
  * Notice that this class will emit ByteBufs and the next handler in the pipeline,
- * @NettyJsonToByteBufHandler will simply pass those ByteBufs through, while repackaging HttpContent
+ * NettyJsonToByteBufHandler will simply pass those ByteBufs through, while repackaging HttpContent
  * messages, seemingly similar to what this class does!  However, these two handlers have slightly
  * calling contexts.  This handler will only be utilized when there needed to be a material change
  * on the incoming HttpContent objects from the original request.  The next handler will be called
