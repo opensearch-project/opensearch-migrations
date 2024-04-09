@@ -19,41 +19,47 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
         ObjectNode newRoot = mapper.createObjectNode();
 
         // Transform the legacy templates
-        ObjectNode templatesRoot = (ObjectNode) root.get("templates").deepCopy();
-        templatesRoot.fieldNames().forEachRemaining(templateName -> {
-            ObjectNode template = (ObjectNode) templatesRoot.get(templateName);
-            logger.info("Transforming template: " + templateName);
-            logger.debug("Original template: " + template.toString());
-            TransformFunctions.removeIntermediateIndexSettingsLevel(template); // run before fixNumberOfReplicas
-            TransformFunctions.fixReplicasForDimensionality(templatesRoot, awarenessAttributeDimensionality);
-            logger.debug("Transformed template: " + template.toString());
-            templatesRoot.set(templateName, template);
-        });
-        newRoot.set("templates", templatesRoot);
+        if (root.get("templates") != null) {
+            ObjectNode templatesRoot = (ObjectNode) root.get("templates").deepCopy();
+            templatesRoot.fieldNames().forEachRemaining(templateName -> {
+                ObjectNode template = (ObjectNode) templatesRoot.get(templateName);
+                logger.info("Transforming template: " + templateName);
+                logger.debug("Original template: " + template.toString());
+                TransformFunctions.removeIntermediateIndexSettingsLevel(template); // run before fixNumberOfReplicas
+                TransformFunctions.fixReplicasForDimensionality(templatesRoot, awarenessAttributeDimensionality);
+                logger.debug("Transformed template: " + template.toString());
+                templatesRoot.set(templateName, template);
+            });
+            newRoot.set("templates", templatesRoot);
+        }
 
         // Transform the index templates
-        ObjectNode indexTemplatesRoot = (ObjectNode) root.get("index_template").deepCopy();
-        ObjectNode indexTemplateValuesRoot = (ObjectNode) indexTemplatesRoot.get("index_template");
-        indexTemplateValuesRoot.fieldNames().forEachRemaining(templateName -> {
-            ObjectNode template = (ObjectNode) indexTemplateValuesRoot.get(templateName);
-            ObjectNode templateSubRoot = (ObjectNode) template.get("template");
+        if (root.get("index_template") != null) {
+            ObjectNode indexTemplatesRoot = (ObjectNode) root.get("index_template").deepCopy();
+            ObjectNode indexTemplateValuesRoot = (ObjectNode) indexTemplatesRoot.get("index_template");
+            indexTemplateValuesRoot.fieldNames().forEachRemaining(templateName -> {
+                ObjectNode template = (ObjectNode) indexTemplateValuesRoot.get(templateName);
+                ObjectNode templateSubRoot = (ObjectNode) template.get("template");
 
-            if (templateSubRoot == null) {
-                return;
-            }
+                if (templateSubRoot == null) {
+                    return;
+                }
 
-            logger.info("Transforming template: " + templateName);
-            logger.debug("Original template: " + template.toString());
-            TransformFunctions.removeIntermediateIndexSettingsLevel(templateSubRoot); // run before fixNumberOfReplicas
-            TransformFunctions.fixReplicasForDimensionality(templateSubRoot, awarenessAttributeDimensionality);
-            logger.debug("Transformed template: " + template.toString());
-            indexTemplateValuesRoot.set(templateName, template);
-        });
-        newRoot.set("index_template", indexTemplatesRoot);
+                logger.info("Transforming template: " + templateName);
+                logger.debug("Original template: " + template.toString());
+                TransformFunctions.removeIntermediateIndexSettingsLevel(templateSubRoot); // run before fixNumberOfReplicas
+                TransformFunctions.fixReplicasForDimensionality(templateSubRoot, awarenessAttributeDimensionality);
+                logger.debug("Transformed template: " + template.toString());
+                indexTemplateValuesRoot.set(templateName, template);
+            });
+            newRoot.set("index_template", indexTemplatesRoot);
+        }
 
         // Transform the component templates
-        ObjectNode componentTemplatesRoot = (ObjectNode) root.get("component_template").deepCopy();
-        newRoot.set("component_template", componentTemplatesRoot);
+        if (root.get("component_template") != null) {
+            ObjectNode componentTemplatesRoot = (ObjectNode) root.get("component_template").deepCopy();
+            newRoot.set("component_template", componentTemplatesRoot);
+        }
 
         return newRoot;
     }

@@ -18,10 +18,20 @@ public class GlobalMetadataData_OS_2_11 implements com.rfs.common.GlobalMetadata
     }
 
     public ObjectNode getIndexTemplates() throws Exception {
-        return (ObjectNode) root.get("index_template").get("index_template");
+        if (root.get("index_template") != null) {
+            return (ObjectNode) root.get("index_template").get("index_template");
+        }
+        else {
+            return null;
+        }
     }
 
     public ObjectNode getComponentTemplates() throws Exception {
-        return (ObjectNode) root.get("component_template").get("component_template");
+        if (root.get("component_template") != null) {
+            return (ObjectNode) root.get("component_template").get("component_template");
+        }
+        else {
+            return null;
+        }
     }
 }

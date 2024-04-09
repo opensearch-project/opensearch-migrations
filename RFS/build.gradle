@@ -3,6 +3,7 @@ plugins {
     id 'java'
     id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
+    id 'io.freefair.lombok' version '8.6'
 }
 
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
@@ -38,6 +39,10 @@ clean.doFirst {
     delete project.file("./docker/build")
 }
 
+ext {
+    dataset = findProperty('dataset') ?: 'no-data'
+}
+
 task demoPrintOutSnapshot (type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.rfs.DemoPrintOutSnapshot'
@@ -56,6 +61,26 @@ task copyDockerRuntimeJars (type: Copy) {
     include '*.jar'
 }
 
+def dockerFilesInternalServices = [
+        "reindexFromSnapshot": "reindex_from_snapshot",
+        "elasticsearchRFSSource": "elasticsearch_rfs_source"
+]
+
+dockerFilesInternalServices.forEach { projectName, dockerImageName ->
+    task "buildDockerImage_${projectName}" (type: DockerBuildImage) {
+        if (projectName == "reindexFromSnapshot") {
+            dependsOn copyDockerRuntimeJars
+            inputDir = project.file("./docker")
+        }
+        if (projectName == "elasticsearchRFSSource") {
+            inputDir = project.file("./docker/TestSource_ES_7_10")
+            buildArgs = ['EXISTING_DATA': "${project.ext.dataset}"]
+        }
+        images.add("migrations/${dockerImageName}:${version}")
+        images.add("migrations/${dockerImageName}:latest")
+    }
+}
+
 // ./gradlew composeUp
 // ./gradlew composeDown
 dockerCompose {
@@ -64,12 +89,9 @@ dockerCompose {
 }
 
 // ./gradlew buildDockerImages
-task buildDockerImages (type: DockerBuildImage) {
-    dependsOn copyDockerRuntimeJars
-    def dockerImageName = "reindex_from_snapshot"
-    inputDir = project.file("./docker")
-    images.add("migrations/${dockerImageName}:${version}")
-    images.add("migrations/${dockerImageName}:latest")
+task buildDockerImages {
+    dependsOn buildDockerImage_reindexFromSnapshot
+    dependsOn buildDockerImage_elasticsearchRFSSource
 }
 
 tasks.getByName('composeUp')
