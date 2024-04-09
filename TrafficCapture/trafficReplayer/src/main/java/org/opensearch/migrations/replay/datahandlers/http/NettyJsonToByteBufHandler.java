@@ -157,7 +157,7 @@ public class NettyJsonToByteBufHandler extends ChannelInboundHandlerAdapter {
             var chunkSizeIterator = headerChunkSizes.iterator();
             while (index < buf.writerIndex()) {
                 if (!chunkSizeIterator.hasNext()) {
-                    throw Lombok.sneakyThrow(new RuntimeException("Ran out of input chunks for mapping"));
+                    throw Lombok.sneakyThrow(new IllegalStateException("Ran out of input chunks for mapping"));
                 }
                 var inputChunkSize =  chunkSizeIterator.next();
                 var scaledChunkSize = (int) (((long) buf.writerIndex() * inputChunkSize) + (initialSize - 1)) / initialSize;

@@ -15,7 +15,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,7 +28,10 @@ import java.util.stream.Stream;
 @Slf4j
 public class HttpByteBufFormatter {
 
-    private static final String LINE_DELIMITER = "\r\n";
+    public static final String CRLF_LINE_DELIMITER = "\r\n";
+    public static final String LF_LINE_DELIMITER = "\n";
+    private static final String DEFAULT_LINE_DELIMITER = CRLF_LINE_DELIMITER;
+
     private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle =
             ThreadLocal.withInitial(Optional::empty);
 
@@ -59,41 +61,56 @@ public class HttpByteBufFormatter {
     public enum HttpMessageType { REQUEST, RESPONSE }
 
     public static String httpPacketBytesToString(HttpMessageType msgType, List<byte[]> byteArrStream) {
-        return httpPacketBytesToString(msgType,
-                Optional.ofNullable(byteArrStream).map(p -> p.stream()).orElse(Stream.of()));
+        return httpPacketBytesToString(msgType, byteArrStream, DEFAULT_LINE_DELIMITER);
     }
 
     public static String httpPacketBytesToString(HttpMessageType msgType, Stream<byte[]> byteArrStream) {
-        // This isn't memory efficient,
-        // but stringifying byte bufs through a full parse and reserializing them was already really slow!
-        return httpPacketBufsToString(msgType, byteArrStream.map(Unpooled::wrappedBuffer), true);
+        return httpPacketBytesToString(msgType, byteArrStream, DEFAULT_LINE_DELIMITER);
     }
 
     public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
-                                                boolean releaseByteBufs) {
+        boolean releaseByteBufs) {
+        return httpPacketBufsToString(msgType, byteBufStream, releaseByteBufs, DEFAULT_LINE_DELIMITER);
+    }
+
+    public static String httpPacketBytesToString(HttpMessageType msgType, List<byte[]> byteArrStream, String lineDelimiter) {
+        return httpPacketBytesToString(msgType,
+                Optional.ofNullable(byteArrStream).map(p -> p.stream()).orElse(Stream.of()), lineDelimiter);
+    }
+
+    public static String httpPacketBytesToString(HttpMessageType msgType, Stream<byte[]> byteArrStream, String lineDelimiter) {
+        // This isn't memory efficient,
+        // but stringifying byte bufs through a full parse and reserializing them was already really slow!
+        return httpPacketBufsToString(msgType, byteArrStream.map(Unpooled::wrappedBuffer), true, lineDelimiter);
+    }
+
+    public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
+                                                boolean releaseByteBufs, String lineDelimiter) {
         switch (printStyle.get().orElse(PacketPrintFormat.TRUNCATED)) {
             case TRUNCATED:
                 return httpPacketBufsToString(byteBufStream, Utils.MAX_BYTES_SHOWN_FOR_TO_STRING, releaseByteBufs);
             case FULL_BYTES:
                 return httpPacketBufsToString(byteBufStream, Long.MAX_VALUE, releaseByteBufs);
             case PARSED_HTTP:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, releaseByteBufs);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, releaseByteBufs,
+                    lineDelimiter);
             case PARSED_HTTP_SORTED_HEADERS:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, releaseByteBufs);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, releaseByteBufs,
+                    lineDelimiter);
             default:
                 throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
     public static String httpPacketsToPrettyPrintedString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
-                                                          boolean sortHeaders, boolean releaseByteBufs) {
+                                                          boolean sortHeaders, boolean releaseByteBufs, String lineDelimiter) {
         HttpMessage httpMessage = parseHttpMessageFromBufs(msgType, byteBufStream, releaseByteBufs);
         var holderOp = Optional.ofNullable((httpMessage instanceof ByteBufHolder) ? (ByteBufHolder) httpMessage : null);
         try {
             if (httpMessage instanceof FullHttpRequest) {
-                return prettyPrintNettyRequest((FullHttpRequest) httpMessage, sortHeaders);
+                return prettyPrintNettyRequest((FullHttpRequest) httpMessage, sortHeaders, lineDelimiter);
             } else if (httpMessage instanceof FullHttpResponse) {
-                return prettyPrintNettyResponse((FullHttpResponse) httpMessage, sortHeaders);
+                return prettyPrintNettyResponse((FullHttpResponse) httpMessage, sortHeaders, lineDelimiter);
             } else if (httpMessage == null) {
                 return "[NULL]";
             } else {
@@ -105,14 +122,14 @@ public class HttpByteBufFormatter {
         }
     }
 
-    public static String prettyPrintNettyRequest(FullHttpRequest msg, boolean sortHeaders) {
-        var sj = new StringJoiner(LINE_DELIMITER);
+    public static String prettyPrintNettyRequest(FullHttpRequest msg, boolean sortHeaders, String lineDelimiter) {
+        var sj = new StringJoiner(lineDelimiter);
         sj.add(msg.method() + " " + msg.uri() + " " + msg.protocolVersion().text());
         return prettyPrintNettyMessage(sj, sortHeaders, msg, msg.content());
     }
 
-    static String prettyPrintNettyResponse(FullHttpResponse msg, boolean sortHeaders) {
-        var sj = new StringJoiner(LINE_DELIMITER);
+    public static String prettyPrintNettyResponse(FullHttpResponse msg, boolean sortHeaders, String lineDelimiter) {
+        var sj = new StringJoiner(lineDelimiter);
         sj.add(msg.protocolVersion().text() + " " + msg.status().code() + " " + msg.status().reasonPhrase());
         return prettyPrintNettyMessage(sj, sortHeaders, msg, msg.content());
     }

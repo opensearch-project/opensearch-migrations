@@ -146,7 +146,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     }
 
     public static List<byte[]> sliceRandomChunks(byte[] bytes, int numChunks) {
-        Random random = new Random();
+        Random random = new Random(0);
         List<Integer> chunkSizes = new ArrayList<>(numChunks);
         int totalSizeRemaining = bytes.length;
         for (int i = 0; i < numChunks - 1; i++) {
