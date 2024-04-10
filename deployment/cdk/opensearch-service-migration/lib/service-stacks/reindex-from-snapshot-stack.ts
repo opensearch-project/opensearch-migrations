@@ -33,9 +33,9 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const artifactS3AnyObjectPath = `${artifactS3Arn}/*`
         const artifactS3PublishPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [artifactS3AnyObjectPath],
+            resources: [artifactS3Arn, artifactS3AnyObjectPath],
             actions: [
-                "s3:GetObject"
+                "s3:*"
             ]
         })
 
@@ -44,7 +44,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy]
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
-        let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name rfs-snapshot --min-replicas 0 --lucene-dir '/lucene' --source-host http://elasticsearchsource:9200 --target-host ${osClusterEndpoint} --source-version es_7_10 --target-version os_2_11`
+        const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`
+        let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${props.env?.region} --snapshot-name rfs-snapshot --min-replicas 1 --enable-persistent-run --lucene-dir '/lucene' --source-host ${props.sourceEndpoint} --target-host ${osClusterEndpoint} --source-version es_7_10 --target-version os_2_11`
         rfsCommand = props.extraArgs ? rfsCommand.concat(` ${props.extraArgs}`) : rfsCommand
 
         this.createService({
