@@ -23,6 +23,9 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     private final AtomicInteger numFinalizations;
     @Getter
     private byte[] bytesCaptured;
+
+    @Getter
+    private final AtomicInteger numConsumes;
     private final AggregatedRawResponse dummyAggregatedResponse;
     ByteArrayOutputStream byteArrayOutputStream;
 
@@ -30,12 +33,14 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
                                           @NonNull AggregatedRawResponse dummyAggregatedResponse) {
         this.consumeDuration = consumeDuration;
         this.numFinalizations = new AtomicInteger();
+        this.numConsumes = new AtomicInteger();
         this.dummyAggregatedResponse = dummyAggregatedResponse;
         byteArrayOutputStream = new ByteArrayOutputStream();
     }
 
     @Override
     public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+        numConsumes.incrementAndGet();
         log.info("incoming buffer refcnt="+nextRequestPacket.refCnt());
         var duplicatedPacket = nextRequestPacket.duplicate().retain();
         return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.runAsync(() -> {

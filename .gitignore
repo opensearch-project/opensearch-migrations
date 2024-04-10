@@ -11,6 +11,7 @@ logs
 
 # Build files
 plugins/opensearch/loggable-transport-netty4/.gradle/
+TrafficCapture/**/out/
 
 RFS/.gradle/
 RFS/bin/
