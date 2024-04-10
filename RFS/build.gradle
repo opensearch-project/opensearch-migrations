@@ -7,9 +7,18 @@ plugins {
 }
 
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import groovy.transform.Canonical
 
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
+
+@Canonical
+class DockerServiceProps {
+    String projectName = ""
+    String dockerImageName = ""
+    String inputDir = ""
+    Map<String, String> buildArgs = [:]
+}
 
 repositories {
     mavenCentral()
@@ -61,23 +70,26 @@ task copyDockerRuntimeJars (type: Copy) {
     include '*.jar'
 }
 
-def dockerFilesInternalServices = [
-        "reindexFromSnapshot": "reindex_from_snapshot",
-        "elasticsearchRFSSource": "elasticsearch_rfs_source"
-]
+DockerServiceProps[] dockerServices = [
+        new DockerServiceProps([projectName:"reindexFromSnapshot",
+                                dockerImageName:"reindex_from_snapshot",
+                                inputDir:"./docker"]),
+        new DockerServiceProps([projectName:"elasticsearchRFSSource",
+                                dockerImageName:"elasticsearch_rfs_source",
+                                inputDir:"./docker/TestSource_ES_7_10",
+                                buildArgs:['EXISTING_DATA': "${project.ext.dataset}"]]),
+] as DockerServiceProps[]
 
-dockerFilesInternalServices.forEach { projectName, dockerImageName ->
-    task "buildDockerImage_${projectName}" (type: DockerBuildImage) {
-        if (projectName == "reindexFromSnapshot") {
-            dependsOn copyDockerRuntimeJars
-            inputDir = project.file("./docker")
+
+for (dockerService in dockerServices) {
+    task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
+        if (dockerService.projectName == "reindexFromSnapshot") {
+            dependsOn "copyDockerRuntimeJars"
         }
-        if (projectName == "elasticsearchRFSSource") {
-            inputDir = project.file("./docker/TestSource_ES_7_10")
-            buildArgs = ['EXISTING_DATA': "${project.ext.dataset}"]
-        }
-        images.add("migrations/${dockerImageName}:${version}")
-        images.add("migrations/${dockerImageName}:latest")
+        inputDir = project.file(dockerService.inputDir)
+        buildArgs = dockerService.buildArgs
+        images.add("migrations/${dockerService.dockerImageName}:${version}")
+        images.add("migrations/${dockerService.dockerImageName}:latest")
     }
 }
 
@@ -90,8 +102,9 @@ dockerCompose {
 
 // ./gradlew buildDockerImages
 task buildDockerImages {
-    dependsOn buildDockerImage_reindexFromSnapshot
-    dependsOn buildDockerImage_elasticsearchRFSSource
+    for (dockerService in dockerServices) {
+        dependsOn "buildDockerImage_${dockerService.projectName}"
+    }
 }
 
 tasks.getByName('composeUp')

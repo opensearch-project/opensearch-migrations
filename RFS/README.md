@@ -102,11 +102,6 @@ To kick off RFS:
 docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name test-snapshot --snapshot-local-repo-dir /snapshots --min-replicas 0 --lucene-dir '/lucene' --source-host http://elasticsearchsource:9200 --target-host http://opensearchtarget:9200 --source-version es_7_10 --target-version os_2_11"
 ```
 
-To get an accurate document count after an RFS migration, be sure to perform a refresh
-```shell
-curl http://localhost:29200/_refresh
-```
-
 ### Handling auth
 
 RFS currently supports both basic auth (username/password) and no auth for both the source and target clusters.  To use the no-auth approach, just neglect the username/password arguments.
