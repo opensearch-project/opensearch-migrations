@@ -35,6 +35,7 @@ services:
       - "3000:3000"
     volumes:
       - ./grafana_data:/var/lib/grafana
+      - ./grafana_datasources.yaml:/usr/share/grafana/conf/provisioning/datasources/datasources.yaml
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
