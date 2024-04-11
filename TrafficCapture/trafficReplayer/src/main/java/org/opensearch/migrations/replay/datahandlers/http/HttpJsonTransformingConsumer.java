@@ -119,6 +119,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                     .log();
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, e);
         } finally {
+            channel.finishAndReleaseAll();
             var cf = channel.close();
             if (cf.cause() != null) {
                 log.atInfo().setCause(cf.cause()).setMessage("Exception encountered during write").log();
