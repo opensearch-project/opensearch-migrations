@@ -23,6 +23,66 @@ import java.util.stream.IntStream;
 @Slf4j
 class ActiveContextMonitorTest {
 
+    private Pattern makeSuppressDedupedPattern(int visibleRequestCount, int requestScopeCount,
+                                int visibleScopeCount, int totalScopeCount) {
+        var sb = new StringBuilder();
+        sb.append("^");
+        sb.append("Oldest of " + requestScopeCount + " outstanding requests that are past thresholds.*\\n");
+        for (int i=0; i<visibleRequestCount; ++i) {
+            sb.append(indent(1) + "age=P.*S.*\\n");
+        }
+
+        sb.append("Oldest of " + totalScopeCount + " GLOBAL scopes that are past thresholds.*\\n");
+        sb.append(indent(1) + "age=P.*S, start=.*Z id=<<.*>> httpTransaction: attribs=\\{.*\\}.*\\n");
+
+        sb.append("Oldest of " + requestScopeCount + " scopes.*'trafficStreamLifetime'.*\\n");
+        sb.append(indent(1) + "age=P.*S, start=.*Z id=<<.*>> trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
+
+        sb.append("Oldest of " + requestScopeCount + " scopes .* 'httpTransaction'.*\\n");
+        for (int i=0; i<visibleRequestCount; ++i) {
+            sb.append(indent(1) + "age=P.*S, start=.*Z id=<<.*>> httpTransaction: attribs=\\{.*\\}.*\\n");
+            sb.append(indent(2) + "age=P.*S, start=.*Z id=<<.*>> trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
+        }
+        sb.append(indent(3) + "age=P.*S, start=.*Z id=<<.*>> channel: attribs=\\{.*\\}.*\\n");
+
+        sb.append("$");
+
+        return Pattern.compile(sb.toString(), Pattern.MULTILINE);
+    }
+    
+    @Test
+    void testThatCommonAncestorsAreShownJustEnough() throws Exception {
+        var loggedEntries = new ArrayList<Map.Entry<Level, String>>();
+        var globalContextTracker = new ActiveContextTracker();
+        var perActivityContextTracker = new ActiveContextTrackerByActivityType();
+        var orderedWorkerTracker = new OrderedWorkerTracker<Void>();
+        var compositeTracker = new CompositeContextTracker(globalContextTracker, perActivityContextTracker);
+        var durationLevelMap = new HashMap<>(Map.of(
+                Level.ERROR, Duration.ofMillis(5),
+                Level.WARN, Duration.ofMillis(4),
+                Level.INFO, Duration.ofMillis(3),
+                Level.DEBUG, Duration.ofMillis(2),
+                Level.TRACE, Duration.ofMillis(1)));
+        var acm = new ActiveContextMonitor(
+                globalContextTracker, perActivityContextTracker, orderedWorkerTracker, 2,
+                dtfc -> "",
+                (Level level, Supplier<String> msgSupplier) -> loggedEntries.add(Map.entry(level, msgSupplier.get())),
+                level -> level == Level.ERROR, durationLevelMap);
+        try (var testContext = TestContext.noOtelTracking()) {
+            for (int i = 0; i < 3; ++i) {
+                var rc = testContext.getTestConnectionRequestContext("connection-0", i);
+                addContexts(compositeTracker, rc);
+                final var idx = i;
+                orderedWorkerTracker.put(rc.getReplayerRequestKey(),
+                        new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "dummy #" + idx));
+            }
+            Thread.sleep(10);
+            acm.run();
+            checkAllEntriesAreErrorLevel(loggedEntries);
+            checkAndClearLines(loggedEntries, makeSuppressDedupedPattern(2, 3, 1, 7));
+        }
+    }
+
     @Test
     void testThatNewerItemsArentInspected() throws Exception {
         final var TRANCHE_SIZE = 10;
@@ -51,14 +111,14 @@ class ActiveContextMonitorTest {
                         new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "dummy #" + idx));
             }
             var startTime = System.nanoTime();
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAllEntriesAreErrorLevel(loggedEntries);
             checkAndClearLines(loggedEntries, Pattern.compile("\\n"));
 
             Thread.sleep(10);
             durationLevelMap.put(Level.ERROR, Duration.ofNanos(System.nanoTime()-startTime));
             acm.setAgeToLevelMap(durationLevelMap);
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAllEntriesAreErrorLevel(loggedEntries);
             checkAndClearLines(loggedEntries, makePattern(2, 10, 2,21));
 
@@ -69,7 +129,7 @@ class ActiveContextMonitorTest {
                         new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "dummy obj"));
             }
 
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAllEntriesAreErrorLevel(loggedEntries);
             checkAndClearLines(loggedEntries, makePattern(2,20, 2,41));
         }
@@ -114,7 +174,7 @@ class ActiveContextMonitorTest {
 
             addContexts(compositeTracker, requestContext1);
             Thread.sleep(20);
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAndClearLines(loggedEntries, patternWith1);
 
             var requestContext2 = testContext.getTestConnectionRequestContext(0);
@@ -123,7 +183,7 @@ class ActiveContextMonitorTest {
 
             addContexts(compositeTracker, requestContext2);
             Thread.sleep(20);
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAndClearLines(loggedEntries, patternWith2);
 
             var requestContext3 = testContext.getTestConnectionRequestContext(0);
@@ -132,28 +192,28 @@ class ActiveContextMonitorTest {
 
             addContexts(compositeTracker, requestContext3);
             Thread.sleep(20);
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAndClearLines(loggedEntries, patternWith3);
 
             Thread.sleep(50);
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAndClearLines(loggedEntries, patternWith3);
 
             compositeTracker.onContextClosed(requestContext1);
             compositeTracker.onContextClosed(requestContext1.getEnclosingScope());
             orderedWorkerTracker.remove(orderedWorkerTracker.getRemainingItems().findFirst().get().getKey());
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAndClearLines(loggedEntries, patternWith2);
 
             compositeTracker.onContextClosed(requestContext2);
             compositeTracker.onContextClosed(requestContext2.getEnclosingScope());
             orderedWorkerTracker.remove(orderedWorkerTracker.getRemainingItems().findFirst().get().getKey());
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAndClearLines(loggedEntries, patternWith1);
 
             removeContexts(compositeTracker, requestContext3);
             orderedWorkerTracker.remove(orderedWorkerTracker.getRemainingItems().findFirst().get().getKey());
-            acm.run();
+            acm.logTopOpenActivities(false);
             checkAndClearLines(loggedEntries, Pattern.compile("\\n", Pattern.MULTILINE));
 
         }
@@ -163,11 +223,11 @@ class ActiveContextMonitorTest {
         return IntStream.range(0, i).mapToObj(ignored->ActiveContextMonitor.INDENT).collect(Collectors.joining());
     }
 
-    private Pattern makePattern(int visibleRequestCount, int requestScopeCount,
+    private Pattern makePattern(int visibleRequestCount, int totalRequestCount,
                                 int visibleScopeCount, int totalScopeCount) {
         var sb = new StringBuilder();
         sb.append("^");
-        sb.append("Oldest of " + requestScopeCount + " outstanding requests that are past thresholds.*\\n");
+        sb.append("Oldest of " + totalRequestCount + " outstanding requests that are past thresholds.*\\n");
         for (int i=0; i<visibleRequestCount; ++i) {
             sb.append(indent(1) + "age=P.*S.*\\n");
         }
@@ -179,15 +239,15 @@ class ActiveContextMonitorTest {
             sb.append(indent(2) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
         }
 
-        sb.append("Oldest of 1 scopes that are past thresholds for 'channel'.*\\n");
+        sb.append("Oldest of 1 scopes .* 'channel'.*\\n");
         sb.append(indent(1) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
 
-        sb.append("Oldest of " + requestScopeCount + " scopes that are past thresholds for 'trafficStreamLifetime'.*\\n");
+        sb.append("Oldest of " + totalRequestCount + " scopes .* 'trafficStreamLifetime'.*\\n");
         for (int i=0; i<visibleRequestCount; ++i) {
             sb.append(indent(1) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z channel: attribs=\\{.*\\}.*\\n");
         }
-        sb.append("Oldest of " + requestScopeCount + " scopes that are past thresholds for 'httpTransaction'.*\\n");
+        sb.append("Oldest of " + totalRequestCount + " scopes .* 'httpTransaction'.*\\n");
         for (int i=0; i<visibleRequestCount; ++i) {
             sb.append(indent(1) + "age=P.*S, start=.*Z httpTransaction: attribs=\\{.*\\}.*\\n");
             sb.append(indent(2) + "age=P.*S, start=.*Z trafficStreamLifetime: attribs=\\{.*\\}.*\\n");
