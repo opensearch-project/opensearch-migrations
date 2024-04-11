@@ -23,6 +23,7 @@ import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
@@ -235,7 +236,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             for (int j = 0; j < 2; ++j) {
                 for (int i = 0; i < 2; ++i) {
                     var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
-                    var requestFinishFuture = TrafficReplayer.transformAndSendRequest(transformingHttpHandlerFactory,
+                    var requestFinishFuture = TrafficReplayerTopLevel.transformAndSendRequest(transformingHttpHandlerFactory,
                         sendingFactory, ctx, Instant.now(), Instant.now(),
                         () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                     log.info("requestFinishFuture=" + requestFinishFuture);

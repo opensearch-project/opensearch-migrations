@@ -29,7 +29,7 @@ public class TestRootKafkaOffloaderContext extends RootOtelContext implements IR
     }
 
     public TestRootKafkaOffloaderContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle) {
-        super("tests", inMemoryInstrumentationBundle == null ? null :
+        super("tests", DO_NOTHING_TRACKER, inMemoryInstrumentationBundle == null ? null :
                 inMemoryInstrumentationBundle.openTelemetrySdk);
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
         final var meter = getMeterProvider().get("test");

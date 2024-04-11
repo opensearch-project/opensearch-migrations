@@ -14,7 +14,8 @@ import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
+import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -42,11 +43,9 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -68,22 +67,21 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     public static final String TEST_CONNECTION_ID = "testConnectionId";
     public static final String DUMMY_URL_THAT_WILL_NEVER_BE_CONTACTED = "http://localhost:9999/";
 
-    protected static class TrafficReplayerWithWaitOnClose extends TrafficReplayer {
+    protected static class TrafficReplayerWithWaitOnClose extends TrafficReplayerTopLevel {
 
         private final Duration maxWaitTime;
 
         public TrafficReplayerWithWaitOnClose(Duration maxWaitTime,
                                               IRootReplayerContext context,
                                               URI serverUri,
-                                              String fullTransformerConfig,
                                               IAuthTransformerFactory authTransformerFactory,
-                                              String userAgent,
                                               boolean allowInsecureConnections,
                                               int numSendingThreads,
                                               int maxConcurrentOutstandingRequests,
+                                              IJsonTransformer jsonTransformer,
                                               String targetConnectionPoolName) throws SSLException {
-            super(context, serverUri, fullTransformerConfig, authTransformerFactory, userAgent,
-                    allowInsecureConnections, numSendingThreads, maxConcurrentOutstandingRequests,
+            super(context, serverUri, authTransformerFactory,
+                    jsonTransformer, allowInsecureConnections, numSendingThreads, maxConcurrentOutstandingRequests,
                     targetConnectionPoolName);
             this.maxWaitTime = maxWaitTime;
         }
@@ -145,9 +143,11 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     (rc, threadPrefix) -> {
                         try {
                             return new TrafficReplayerWithWaitOnClose(Duration.ofSeconds(600),
-                                    rc, httpServer.localhostEndpoint(), null,
-                                    new StaticAuthTransformerFactory("TEST"), null,
-                                    true, 1, 1, threadPrefix);
+                                    rc, httpServer.localhostEndpoint(),
+                                    new StaticAuthTransformerFactory("TEST"),
+                                    true, 1, 1,
+                                    new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                                    threadPrefix);
                         } catch (SSLException e) {
                             throw new RuntimeException(e);
                         }
@@ -179,10 +179,12 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     0,
                     (rc, threadPrefix) -> {
                         try {
-                            return new TrafficReplayerWithWaitOnClose(Duration.ofSeconds(10),
-                                    rc, httpServer.localhostEndpoint(), null,
-                                    new StaticAuthTransformerFactory("TEST"), null,
-                                    true, 1, 1, threadPrefix);
+                            return new TrafficReplayerWithWaitOnClose(Duration.ofSeconds(600),
+                                    rc, httpServer.localhostEndpoint(),
+                                    new StaticAuthTransformerFactory("TEST"),
+                                    true, 1, 1,
+                                    new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                                    threadPrefix);
                         } catch (SSLException e) {
                             throw new RuntimeException(e);
                         }
@@ -238,9 +240,12 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     numExpectedRequests,
                     (rc, threadPrefix) -> {
                         try {
-                            return new TrafficReplayer(rc, httpServer.localhostEndpoint(), null,
-                                    new StaticAuthTransformerFactory("TEST"), null,
-                                    true, 1, 1, threadPrefix);
+                            return new TrafficReplayerWithWaitOnClose(Duration.ofSeconds(600),
+                                    rc, httpServer.localhostEndpoint(),
+                                    new StaticAuthTransformerFactory("TEST"),
+                                    true, 1, 1,
+                                    new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                                    threadPrefix);
                         } catch (SSLException e) {
                             throw new RuntimeException(e);
                         }
@@ -264,7 +269,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     throw new RuntimeException(e);
                 }
             }
-        }, TrafficReplayer.TARGET_CONNECTION_POOL_NAME + " Just to break a test");
+        }, TrafficReplayerTopLevel.TARGET_CONNECTION_POOL_NAME + " Just to break a test");
         imposterThread.start();
 
         try {

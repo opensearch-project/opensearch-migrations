@@ -5,6 +5,7 @@ import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
+import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
 @Getter
@@ -36,8 +37,8 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final ReplayContexts.TupleHandlingContext.MetricInstruments tupleHandlingInstruments;
     public final ReplayContexts.SocketContext.MetricInstruments socketInstruments;
 
-    public RootReplayerContext(OpenTelemetry sdk) {
-        super(SCOPE_NAME, sdk);
+    public RootReplayerContext(OpenTelemetry sdk, IContextTracker contextTracker) {
+        super(SCOPE_NAME, contextTracker, sdk);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
         asyncListeningInstruments = KafkaConsumerContexts.AsyncListeningContext.makeMetrics(meter);

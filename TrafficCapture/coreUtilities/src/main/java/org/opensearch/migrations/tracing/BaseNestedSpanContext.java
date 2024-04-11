@@ -1,15 +1,5 @@
 package org.opensearch.migrations.tracing;
 
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.common.Attributes;
-import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.trace.Span;
-import lombok.Getter;
-import lombok.NonNull;
-
-import java.util.Optional;
-import java.util.stream.Stream;
-
 public abstract class BaseNestedSpanContext
         <S extends IInstrumentConstructor, T extends IScopedInstrumentationAttributes>
         extends BaseSpanContext<S>
@@ -19,6 +9,10 @@ public abstract class BaseNestedSpanContext
     protected BaseNestedSpanContext(S rootScope, T enclosingScope) {
         super(rootScope);
         this.enclosingScope = enclosingScope;
+    }
+
+    protected void initializeSpan() {
+        initializeSpan(rootInstrumentationScope);
     }
 
     @Override

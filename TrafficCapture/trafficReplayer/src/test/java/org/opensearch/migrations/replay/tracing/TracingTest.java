@@ -66,7 +66,7 @@ public class TracingTest extends InstrumentationTest {
         checkSpans(recordedSpans);
         checkMetrics(recordedMetrics);
 
-        Assertions.assertTrue(rootContext.contextTracker.getAllRemainingActiveScopes().isEmpty());
+        Assertions.assertTrue(rootContext.getBacktracingContextTracker().getAllRemainingActiveScopes().isEmpty());
     }
 
     private void checkMetrics(Collection<MetricData> recordedMetrics) {

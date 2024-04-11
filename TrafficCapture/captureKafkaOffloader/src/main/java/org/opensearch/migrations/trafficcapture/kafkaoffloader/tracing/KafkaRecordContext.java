@@ -30,7 +30,7 @@ public class KafkaRecordContext extends
         this.topic = topic;
         this.recordId = recordId;
         initializeSpan();
-        getCurrentSpan().setAttribute(RECORD_SIZE_ATTR, recordSize);
+        this.setTraceAttribute(RECORD_SIZE_ATTR, recordSize);
     }
 
     public static class MetricInstruments extends CommonScopedMetricInstruments {

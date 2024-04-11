@@ -113,7 +113,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     }
                 } else {
                     ctx.addFailedChannelCreation();
-                    ctx.addException(channelFuture.cause(), true);
+                    ctx.addTraceException(channelFuture.cause(), true);
                     log.atWarn().setMessage(()->"error creating channel, not retrying")
                             .setCause(connectFuture.cause()).log();
                     initialFuture.future.completeExceptionally(connectFuture.cause());

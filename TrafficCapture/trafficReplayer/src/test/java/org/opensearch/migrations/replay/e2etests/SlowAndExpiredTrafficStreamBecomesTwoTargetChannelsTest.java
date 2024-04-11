@@ -8,7 +8,8 @@ import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
+import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -96,9 +97,9 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         var trafficSource = new BlockingTrafficSource(arraySource, Duration.ofSeconds(SPACING_SECONDS));
 
         try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200), responseTracker);
-            var replayer = new TrafficReplayer(rc, httpServer.localhostEndpoint(), null,
-                    new StaticAuthTransformerFactory("TEST"), null,
-                    true, 1, 1,
+            var replayer = new TrafficReplayerTopLevel(rc, httpServer.localhostEndpoint(),
+                    new StaticAuthTransformerFactory("TEST"),
+                    new TransformationLoader().getTransformerFactoryLoader("localhost"), true, 1, 1,
                     "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest")) {
             new Thread(()->responseTracker.onCountDownFinished(Duration.ofSeconds(10),
                     ()->replayer.shutdown(null).join()));

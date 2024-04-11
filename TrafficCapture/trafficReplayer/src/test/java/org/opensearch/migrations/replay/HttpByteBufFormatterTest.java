@@ -32,31 +32,25 @@ public class HttpByteBufFormatterTest {
                     "User-Agent: UnitTest\r\n" +
                     "\r\n";
 
-    final static String SAMPLE_REQUEST_AS_BLOCKS = "[G],[E],[T],[ ],[/],[ ],[H],[T],[T],[P],[/],[1],[.],[1],[\r" +
-            "],[\n" +
-            "],[H],[o],[s],[t],[:],[ ],[l],[o],[c],[a],[l],[h],[o],[s],[t],[\r" +
-            "],[\n" +
-            "],[C],[o],[n],[n],[e],[c],[t],[i],[o],[n],[:],[ ],[K],[e],[e],[p],[-],[A],[l],[i],[v],[e],[\r" +
-            "],[\n" +
-            "],[U],[s],[e],[r],[-],[A],[g],[e],[n],[t],[:],[ ],[U],[n],[i],[t],[T],[e],[s],[t],[\r" +
-            "],[\n" +
-            "],[\r" +
-            "],[\n" +
-            "]";
+    final static String SAMPLE_REQUEST_AS_BLOCKS = "[G],[E],[T],[ ],[/],[ ],[H],[T],[T],[P],[/],[1],[.],[1]," + "[\r],[\n]," +
+            "[H],[o],[s],[t],[:],[ ],[l],[o],[c],[a],[l],[h],[o],[s],[t]," + "[\r],[\n]," +
+            "[C],[o],[n],[n],[e],[c],[t],[i],[o],[n],[:],[ ],[K],[e],[e],[p],[-],[A],[l],[i],[v],[e]," + "[\r],[\n]," +
+            "[U],[s],[e],[r],[-],[A],[g],[e],[n],[t],[:],[ ],[U],[n],[i],[t],[T],[e],[s],[t]," + "[\r],[\n]," +
+            "[\r],[\n]";
 
-    final static String SAMPLE_REQUEST_AS_PARSED_HTTP = "GET / HTTP/1.1\n" +
-            "Host: localhost\n" +
-            "Connection: Keep-Alive\n" +
-            "User-Agent: UnitTest\n" +
-            "content-length: 0\n" +
-            "\n";
+    final static String SAMPLE_REQUEST_AS_PARSED_HTTP = "GET / HTTP/1.1\r\n" +
+            "Host: localhost\r\n" +
+            "Connection: Keep-Alive\r\n" +
+            "User-Agent: UnitTest\r\n" +
+            "content-length: 0\r\n" +
+            "\r\n";
 
-    final static String SAMPLE_REQUEST_AS_PARSED_HTTP_SORTED = "GET / HTTP/1.1\n" +
-            "Connection: Keep-Alive\n" +
-            "Host: localhost\n" +
-            "User-Agent: UnitTest\n" +
-            "content-length: 0\n" +
-            "\n";
+    final static String SAMPLE_REQUEST_AS_PARSED_HTTP_SORTED = "GET / HTTP/1.1\r\n" +
+            "Connection: Keep-Alive\r\n" +
+            "Host: localhost\r\n" +
+            "User-Agent: UnitTest\r\n" +
+            "content-length: 0\r\n" +
+            "\r\n";
 
     enum BufferType {
         BYTE_ARRAY, UNPOOLED_BYTEBUF, POOLED_BYTEBUF
@@ -98,7 +92,22 @@ public class HttpByteBufFormatterTest {
         String outputString =
                 HttpByteBufFormatter.setPrintStyleFor(format, ()->
                         prettyPrint(byteArrays, HttpByteBufFormatter.HttpMessageType.REQUEST, bufferType));
-        Assertions.assertEquals(getExpectedResult(format, contentDirective), outputString);
+        Assertions.assertEquals(getExpectedResult(format, contentDirective), outputString,
+            "Strings did not match, after escaping, showing expected and actual on different lines: \n" +
+            escapeSpecialCharacters(getExpectedResult(format, contentDirective)) + "\n" +
+            escapeSpecialCharacters(outputString));
+    }
+
+    public static String escapeSpecialCharacters(String input) {
+        return input
+            .replace("\\", "\\\\")
+            .replace("\b", "\\b")
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+            .replace("\f", "\\f")
+            .replace("\r", "\\r")
+            .replace("\"", "\\\"")
+            .replace("'", "\\'");
     }
 
     @Test

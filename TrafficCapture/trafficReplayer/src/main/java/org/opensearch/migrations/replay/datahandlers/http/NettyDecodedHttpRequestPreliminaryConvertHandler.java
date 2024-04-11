@@ -65,9 +65,8 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
         } else if (msg instanceof HttpContent) {
             ctx.fireChannelRead(msg);
         } else {
-            // ByteBufs shouldn't come through, but in case there's a regression in
-            // RequestPipelineOrchestrator.removeThisAndPreviousHandlers to remove the handlers
-            // in order rather in reverse order
+            assert false: "Only HttpRequest and HttpContent should come through here as per RequestPipelineOrchestrator";
+            // In case message comes through, pass downstream
             super.channelRead(ctx, msg);
         }
     }
@@ -101,13 +100,15 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
         } else if (headerFieldsAreIdentical(request, httpJsonMessage)) {
             log.info(diagnosticLabel + "Transformation isn't necessary.  " +
                     "Resetting the processing pipeline to let the caller send the original network bytes as-is.");
-            while (pipeline.first() != null) {
-                pipeline.removeFirst();
-            }
+            RequestPipelineOrchestrator.removeAllHandlers(pipeline);
+
         } else if (headerFieldIsIdentical("content-encoding", request, httpJsonMessage) &&
                 headerFieldIsIdentical("transfer-encoding", request, httpJsonMessage)) {
             log.info(diagnosticLabel + "There were changes to the headers that require the message to be reformatted " +
                     "but the payload doesn't need to be transformed.");
+            // By adding the baseline handlers and removing this and previous handlers in reverse order,
+            // we will cause the upstream handlers to flush their in-progress accumulated ByteBufs downstream
+            // to be processed accordingly
             requestPipelineOrchestrator.addBaselineHandlers(pipeline);
             ctx.fireChannelRead(httpJsonMessage);
             RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
@@ -136,9 +137,10 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     private boolean headerFieldsAreIdentical(HttpRequest request, HttpJsonMessageWithFaultingPayload httpJsonMessage) {
         if (!request.uri().equals(httpJsonMessage.path()) ||
                 !request.method().toString().equals(httpJsonMessage.method()) ||
-                request.headers().size() != httpJsonMessage.headers().strictHeadersMap.size()) {
+                request.headers().names().size() != httpJsonMessage.headers().strictHeadersMap.size()) {
             return false;
         }
+        // Depends on header size check above for correctness
         for (var headerName : httpJsonMessage.headers().keySet()) {
             if (!headerFieldIsIdentical(headerName, request, httpJsonMessage)) {
                 return false;

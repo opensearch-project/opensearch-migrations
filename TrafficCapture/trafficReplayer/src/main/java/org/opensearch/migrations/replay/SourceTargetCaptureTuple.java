@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+import static org.opensearch.migrations.replay.HttpByteBufFormatter.LF_LINE_DELIMITER;
+
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
@@ -52,9 +54,9 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             if (targetResponseDuration != null) { sj.add("targetResponseDuration=").add(targetResponseDuration+""); }
             Optional.ofNullable(targetRequestData).ifPresent(d-> sj.add("targetRequestData=")
                     .add(d.isClosed() ? "CLOSED" : HttpByteBufFormatter.httpPacketBufsToString(
-                            HttpByteBufFormatter.HttpMessageType.REQUEST, d.streamUnretained(), false)));
+                            HttpByteBufFormatter.HttpMessageType.REQUEST, d.streamUnretained(), false, LF_LINE_DELIMITER)));
             Optional.ofNullable(targetResponseData).filter(d->!d.isEmpty()).ifPresent(d -> sj.add("targetResponseData=")
-                    .add(HttpByteBufFormatter.httpPacketBytesToString(HttpByteBufFormatter.HttpMessageType.RESPONSE, d)));
+                    .add(HttpByteBufFormatter.httpPacketBytesToString(HttpByteBufFormatter.HttpMessageType.RESPONSE, d, LF_LINE_DELIMITER)));
             sj.add("transformStatus=").add(transformationStatus+"");
             sj.add("errorCause=").add(errorCause == null ? "none" : errorCause.toString());
             return sj.toString();

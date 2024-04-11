@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
+import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.KafkaRecordContext;
 import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
@@ -13,12 +14,12 @@ public class RootCaptureContext extends RootWireLoggingContext implements IRootK
     @Getter
     public final KafkaRecordContext.MetricInstruments kafkaOffloadingInstruments;
 
-    public RootCaptureContext(OpenTelemetry openTelemetry) {
-        this(openTelemetry, SCOPE_NAME);
+    public RootCaptureContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {
+        this(openTelemetry, contextTracker, SCOPE_NAME);
     }
 
-    public RootCaptureContext(OpenTelemetry openTelemetry, String scopeName) {
-        super(openTelemetry, scopeName);
+    public RootCaptureContext(OpenTelemetry openTelemetry, IContextTracker contextTracker, String scopeName) {
+        super(openTelemetry, contextTracker, scopeName);
         var meter = this.getMeterProvider().get(scopeName);
         kafkaOffloadingInstruments = KafkaRecordContext.makeMetrics(meter);
     }

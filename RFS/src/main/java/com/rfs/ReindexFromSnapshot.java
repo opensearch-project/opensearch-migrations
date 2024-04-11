@@ -362,6 +362,10 @@ public class ReindexFromSnapshot {
                 }
 
                 logger.info("Documents reindexed successfully");
+
+                logger.info("Refreshing newly added documents");
+                DocumentReindexer.refreshAllDocuments(targetConnection);
+                logger.info("Refresh complete");
             }
             
         } catch (Exception e) {
