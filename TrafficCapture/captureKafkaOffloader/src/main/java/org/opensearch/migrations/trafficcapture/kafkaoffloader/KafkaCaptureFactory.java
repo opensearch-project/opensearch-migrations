@@ -85,7 +85,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
         @Override
         public CodedOutputStreamWrapper createStream() {
-            telemetryContext.getCurrentSpan().addEvent("streamCreated");
+            telemetryContext.addEvent("streamCreated");
 
             ByteBuffer bb = ByteBuffer.allocate(bufferSize);
             return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb);
@@ -123,7 +123,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             return sendFullyAsync(producer, kafkaRecord)
                 .whenComplete(((recordMetadata, throwable) -> {
                     if (throwable != null) {
-                        flushContext.addException(throwable, true);
+                        flushContext.addTraceException(throwable, true);
                         log.error("Error sending producer record: {}", recordId, throwable);
                     } else {
                         log.debug("Kafka producer record: {} has finished sending for topic: {} and partition {}",

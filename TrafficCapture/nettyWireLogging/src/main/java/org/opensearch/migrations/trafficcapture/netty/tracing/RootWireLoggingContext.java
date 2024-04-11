@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.netty.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
+import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
 @Getter
@@ -14,12 +15,12 @@ public class RootWireLoggingContext extends RootOtelContext implements IRootWire
     public final WireCaptureContexts.WaitingForResponseContext.MetricInstruments waitingForResponseInstruments;
     public final WireCaptureContexts.ResponseContext.MetricInstruments responseInstruments;
 
-    public RootWireLoggingContext(OpenTelemetry openTelemetry) {
-        this(openTelemetry, SCOPE_NAME);
+    public RootWireLoggingContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {
+        this(openTelemetry, contextTracker, SCOPE_NAME);
     }
 
-    public RootWireLoggingContext(OpenTelemetry openTelemetry, String scopeName) {
-        super(scopeName, openTelemetry);
+    public RootWireLoggingContext(OpenTelemetry openTelemetry, IContextTracker contextTracker, String scopeName) {
+        super(scopeName, contextTracker, openTelemetry);
         var meter = this.getMeterProvider().get(scopeName);
         connectionInstruments = WireCaptureContexts.ConnectionContext.makeMetrics(meter);
         requestInstruments = WireCaptureContexts.RequestContext.makeMetrics(meter);

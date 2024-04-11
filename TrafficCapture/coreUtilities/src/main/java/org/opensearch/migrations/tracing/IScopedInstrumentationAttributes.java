@@ -1,5 +1,6 @@
 package org.opensearch.migrations.tracing;
 
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.DoubleHistogram;
@@ -13,8 +14,7 @@ import org.opensearch.migrations.Utils;
 
 import java.util.ArrayDeque;
 
-public interface IScopedInstrumentationAttributes
-        extends IWithStartTimeAndAttributes, AutoCloseable {
+public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttributes, AutoCloseable {
 
     String getActivityName();
 
@@ -26,6 +26,8 @@ public interface IScopedInstrumentationAttributes
 
     @NonNull Span getCurrentSpan();
 
+    @NonNull IContextTracker getContextTracker();
+
     default Attributes getPopulatedSpanAttributes() {
         return getPopulatedSpanAttributesBuilder().build();
     }
@@ -35,9 +37,7 @@ public interface IScopedInstrumentationAttributes
         // reverse the order so that the lowest attribute scopes will overwrite the upper ones if there were conflicts
         var stack = new ArrayDeque<IScopedInstrumentationAttributes>();
         while (currentObj != null) {
-            if (currentObj instanceof IScopedInstrumentationAttributes) {
-                stack.addFirst((IScopedInstrumentationAttributes) currentObj);
-            }
+            stack.addFirst((IScopedInstrumentationAttributes) currentObj);
             currentObj = currentObj.getEnclosingScope();
         }
         var builder = stack.stream()
@@ -61,10 +61,11 @@ public interface IScopedInstrumentationAttributes
         return getMetrics().contextDuration;
     }
 
-    default void endSpan() {
+    default void endSpan(IContextTracker contextTracker) {
         var span = getCurrentSpan();
         span.setAllAttributes(getPopulatedSpanAttributes());
         span.end();
+        contextTracker.onContextClosed(this);
     }
 
     default void sendMeterEventsForEnd() {
@@ -73,13 +74,13 @@ public interface IScopedInstrumentationAttributes
     }
 
     default void close() {
-        endSpan();
+        endSpan(getContextTracker());
         sendMeterEventsForEnd();
     }
 
     @Override
-    default void addException(Throwable e, boolean isPropagating) {
-        IWithStartTimeAndAttributes.super.addException(e, isPropagating);
+    default void addTraceException(Throwable e, boolean isPropagating) {
+        IWithStartTimeAndAttributes.super.addTraceException(e, isPropagating);
         final var span = getCurrentSpan();
         if (isPropagating) {
             span.recordException(e, Attributes.of(SemanticAttributes.EXCEPTION_ESCAPED, true));
@@ -114,5 +115,21 @@ public interface IScopedInstrumentationAttributes
         try (var scope = new NullableExemplarScope(getCurrentSpan())) {
             IWithStartTimeAndAttributes.super.meterHistogram(histogram, value, attributesBuilder);
         }
+    }
+
+    default void addEvent(String eventName) {
+        getCurrentSpan().addEvent(eventName);
+    }
+
+    default void setTraceAttribute(AttributeKey<Long> attributeKey, long attributeValue) {
+        getCurrentSpan().setAttribute(attributeKey, attributeValue);
+    }
+
+    default void setAttribute(AttributeKey<String> attributeKey, String attributeValue) {
+        getCurrentSpan().setAttribute(attributeKey, attributeValue);
+    }
+
+    default void setAllAttributes(Attributes allAttributes) {
+        getCurrentSpan().setAllAttributes(allAttributes);
     }
 }
