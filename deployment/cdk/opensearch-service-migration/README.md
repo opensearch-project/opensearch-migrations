@@ -196,6 +196,18 @@ With the [required setup](#importing-target-clusters) on the target cluster havi
 The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
 Please note that it will be base64 encoded.
 
+## Kicking off Reindex from Snapshot (RFS)
+
+When the RFS service gets deployed, it does not start running immediately. This is by design to put the needed infrastructure in place, and then allow the user to control when the historical data migration should occur.
+
+The following command can be run from the Migration Console to initiate the RFS historical data migration
+```shell
+aws ecs update-service --cluster migration-<STAGE>-ecs-cluster --service migration-<STAGE>-rfs --desired-count 1
+```
+
+Currently, the RFS service will enter an idle state upon completion and can be cleaned up by using the same command with `--desired-count 0`
+
+
 ## Monitoring Progress via Instrumentation
 
 The replayer and capture proxy (if started with the `--otelCollectorEndpoint` argument) emit metrics through an 
