@@ -1,7 +1,5 @@
 package org.opensearch.migrations.tracing;
 
-import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -16,12 +14,11 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     public static final String TEST_NODE_ID = "testNodeId";
     public static final String DEFAULT_TEST_CONNECTION = "testConnection";
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
-    public final ContextTracker contextTracker = new ContextTracker();
     public final ChannelContextManager channelContextManager = new ChannelContextManager(this);
     private final Object channelContextManagerLock = new Object();
 
     public static TestContext withTracking(boolean tracing, boolean metrics) {
-        return new TestContext(new InMemoryInstrumentationBundle(tracing, metrics));
+        return new TestContext(new InMemoryInstrumentationBundle(tracing, metrics), new BacktracingContextTracker());
     }
 
     public static TestContext withAllTracking() {
@@ -29,22 +26,12 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     }
 
     public static TestContext noOtelTracking() {
-        return new TestContext(new InMemoryInstrumentationBundle(null, null));
+        return new TestContext(new InMemoryInstrumentationBundle(null, null), new BacktracingContextTracker());
     }
 
-    public TestContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle) {
-        super(inMemoryInstrumentationBundle.openTelemetrySdk);
+    public TestContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle, IContextTracker contextTracker) {
+        super(inMemoryInstrumentationBundle.openTelemetrySdk, contextTracker);
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
-    }
-
-    @Override
-    public void onContextCreated(IScopedInstrumentationAttributes newScopedContext) {
-        contextTracker.onCreated(newScopedContext);
-    }
-
-    @Override
-    public void onContextClosed(IScopedInstrumentationAttributes newScopedContext) {
-        contextTracker.onClosed(newScopedContext);
     }
 
     public IReplayContexts.ITrafficStreamsLifecycleContext createTrafficStreamContextForTest(ITrafficStreamKey tsk) {
@@ -53,12 +40,16 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
         }
     }
 
+    public BacktracingContextTracker getBacktracingContextTracker() {
+        return (BacktracingContextTracker) getContextTracker();
+    }
+
     @Override
     public void close() {
-        contextTracker.close();
-        inMemoryInstrumentationBundle.close();
 //        Assertions.assertEquals("", contextTracker.getAllRemainingActiveScopes().entrySet().stream()
 //                .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()));
+        getBacktracingContextTracker().close();
+        inMemoryInstrumentationBundle.close();
     }
 
 

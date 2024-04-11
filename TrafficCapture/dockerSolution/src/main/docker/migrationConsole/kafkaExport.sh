@@ -4,6 +4,8 @@ broker_endpoints="${MIGRATION_KAFKA_BROKER_ENDPOINTS}"
 msk_auth_settings=""
 kafka_command_settings=""
 s3_bucket_name=""
+partition_offsets=""
+partition_limits=""
 if [ -n "$ECS_AGENT_URI" ]; then
     msk_auth_settings="--kafka-traffic-enable-msk-auth"
     kafka_command_settings="--command-config aws/msk-iam-auth.properties"
@@ -25,7 +27,9 @@ usage() {
   echo "Options:"
   echo "  --timeout-seconds                           Timeout for how long process will try to collect the Kafka records. Default is 60 seconds."
   echo "  --enable-s3                                 Option to store created archive on S3."
-  echo "  --s3-bucket-name                            Option to specify a given S3 bucket to store archive on".
+  echo "  --s3-bucket-name                            Option to specify a given S3 bucket to store archive on."
+  echo "  --partition-offsets                         Option to specify partition offsets in the format 'partition_id:offset,partition_id:offset'. Behavior defaults to using first offset in partition."
+  echo "  --partition-limits                          Option to specify number of records to print per partition in the format 'partition_id:num_records,partition_id:num_records'."
   echo ""
   exit 1
 }
@@ -47,6 +51,16 @@ while [[ $# -gt 0 ]]; do
             shift
             shift
             ;;
+        --partition-offsets)
+            partition_offsets="$2"
+            shift
+            shift
+            ;;
+        --partition-limits)
+            partition_limits="$2"
+            shift
+            shift
+            ;;
         -h|--h|--help)
             usage
             ;;
@@ -60,25 +74,48 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
-comma_sep_partition_offsets=$(echo $partition_offsets | sed 's/ /,/g')
-echo "Collected offsets from current Kafka topic: "
-echo $comma_sep_partition_offsets
+if [ -n "$partition_offsets" ]; then
+    # Prepend the topic name to each partition offset
+    partition_offsets_with_topic=$(echo "$partition_offsets" | awk -v topic="$topic" 'BEGIN{RS=",";ORS=","}{print topic ":" $0}' | sed 's/,$//')
+else
+    partition_offsets_with_topic=""
+fi
+
+if [ -n "$partition_limits" ]; then
+    # Prepend the topic name to each partition limit
+    partition_limits_with_topic=$(echo "$partition_limits" | awk -v topic="$topic" 'BEGIN{RS=",";ORS=","}{print topic ":" $0}' | sed 's/,$//')
+else
+    partition_limits_with_topic=""
+fi
+
+# Printing existing offsets in topic
+all_consumers_partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
+comma_sep_all_consumers_partition_offsets="${all_consumers_partition_offsets// /,}"
+echo "Existing offsets from current Kafka topic across all consumer groups: "
+echo "$comma_sep_all_consumers_partition_offsets"
 
 epoch_ts=$(date +%s)
 dir_name="kafka_export_$epoch_ts"
 mkdir -p $dir_name
-archive_name="kafka_export_from_migration_console_$epoch_ts.tar.gz"
+archive_name="kafka_export_from_migration_console_$epoch_ts.proto.gz"
 group="exportFromMigrationConsole_$(hostname -s)_$$_$epoch_ts"
 echo "Group name: $group"
 
-set -o xtrace
-./runJavaWithClasspath.sh org.opensearch.migrations.replay.KafkaPrinter --kafka-traffic-brokers "$broker_endpoints" --kafka-traffic-topic "$topic" --kafka-traffic-group-id "$group" $(echo "$msk_auth_settings") --timeout-seconds "$timeout_seconds" --partition-limits "$comma_sep_partition_offsets" --output-directory "./$dir_name"
-set +o xtrace
+# Construct the command dynamically
+runJavaCmd="./runJavaWithClasspath.sh org.opensearch.migrations.replay.KafkaPrinter --kafka-traffic-brokers \"$broker_endpoints\" --kafka-traffic-topic \"$topic\" --kafka-traffic-group-id \"$group\" $msk_auth_settings --timeout-seconds \"$timeout_seconds\""
 
-cd $dir_name
-tar -czvf "$archive_name" *.proto && rm *.proto
-cd ..
+if [ -n "$partition_offsets_with_topic" ]; then
+    runJavaCmd+=" --partition-offsets \"$partition_offsets_with_topic\""
+fi
+
+if [ -n "$partition_limits_with_topic" ]; then
+    runJavaCmd+=" --partition-limits \"$partition_limits_with_topic\""
+fi
+
+# Execute the command
+set -o xtrace
+eval "$runJavaCmd" | gzip -c -9 > "$dir_name/$archive_name"
+set +o xtrace
 
 # Remove created consumer group
 ./kafka/bin/kafka-consumer-groups.sh --bootstrap-server "$broker_endpoints" --timeout 100000 --delete --group "$group" $(echo "$kafka_command_settings")

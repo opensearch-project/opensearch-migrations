@@ -34,6 +34,8 @@ public class RootOtelContext implements IRootOtelContext {
     private final String scopeName;
     @Getter
     private final MetricInstruments metrics;
+    @Getter
+    private final IContextTracker contextTracker;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
                                                                     @NonNull String serviceName) {
@@ -91,24 +93,36 @@ public class RootOtelContext implements IRootOtelContext {
                 });
     }
 
+    @Override
+    public void onContextCreated(IScopedInstrumentationAttributes newScopedContext) {
+        contextTracker.onContextCreated(newScopedContext);
+    }
+
+    @Override
+    public void onContextClosed(IScopedInstrumentationAttributes newScopedContext) {
+        contextTracker.onContextClosed(newScopedContext);
+    }
+
     public static class MetricInstruments extends CommonMetricInstruments {
         public MetricInstruments(Meter meter, String activityName) {
             super(meter, activityName);
         }
     }
 
-    public RootOtelContext(String scopeName) {
-        this(scopeName, null);
+    public RootOtelContext(String scopeName, IContextTracker contextTracker) {
+        this(scopeName, contextTracker, null);
     }
 
-    public RootOtelContext(String scopeName, String collectorEndpoint, String serviceName) {
-        this(scopeName, initializeOpenTelemetryWithCollectorOrAsNoop(collectorEndpoint, serviceName));
+    public RootOtelContext(String scopeName, IContextTracker contextTracker,
+                           String collectorEndpoint, String serviceName) {
+        this(scopeName, contextTracker, initializeOpenTelemetryWithCollectorOrAsNoop(collectorEndpoint, serviceName));
     }
 
-    public RootOtelContext(String scopeName, OpenTelemetry sdk) {
+    public RootOtelContext(String scopeName, IContextTracker contextTracker, OpenTelemetry sdk) {
         openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetryWithCollectorOrAsNoop(null, null);
         this.scopeName = scopeName;
-        metrics = new MetricInstruments(this.getMeterProvider().get(scopeName), "root");
+        this.metrics = new MetricInstruments(this.getMeterProvider().get(scopeName), "root");
+        this.contextTracker = contextTracker;
     }
 
     @Override
@@ -121,7 +135,7 @@ public class RootOtelContext implements IRootOtelContext {
         return null;
     }
 
-    OpenTelemetry getOpenTelemetry() {
+    private OpenTelemetry getOpenTelemetry() {
         return openTelemetryImpl;
     }
 

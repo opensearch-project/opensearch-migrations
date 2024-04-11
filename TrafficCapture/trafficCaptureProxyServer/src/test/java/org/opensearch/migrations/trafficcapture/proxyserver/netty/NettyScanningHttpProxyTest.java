@@ -10,6 +10,7 @@ import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
+import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
@@ -90,7 +91,8 @@ class NettyScanningHttpProxyTest {
         var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024*1024,
                 () -> interactionsCapturedCountdown.countDown());
         var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
-        var rootCtx = new RootWireLoggingContext(inMemoryInstrumentationBundle.openTelemetrySdk);
+        var rootCtx = new RootWireLoggingContext(inMemoryInstrumentationBundle.openTelemetrySdk,
+                IContextTracker.DO_NOTHING_TRACKER);
         var servers = startServers(rootCtx, captureFactory);
 
         try (var client = new SimpleHttpClientForTesting()) {

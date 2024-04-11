@@ -8,7 +8,7 @@ import java.util.WeakHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class ContextTracker implements AutoCloseable {
+public class BacktracingContextTracker implements IContextTracker, AutoCloseable {
     private static class ExceptionForStackTracingOnly extends Exception {
     }
 
@@ -32,8 +32,15 @@ public class ContextTracker implements AutoCloseable {
             if (isClosed) {
                 return;
             }
-            var oldItem = scopedContextToCallDetails.putIfAbsent(ctx, new CallDetails());
-            assert oldItem == null;
+            var priorValue = scopedContextToCallDetails.putIfAbsent(ctx, new CallDetails());
+            if (priorValue != null) {
+                var priorKey = scopedContextToCallDetails.entrySet().stream().findFirst().get().getKey();
+                if (priorKey.equals(ctx)) {
+                    log.atError().setMessage(()->"Trying to re-add the same context (" + ctx +
+                            ") back into this context tracker").log();
+                }
+            }
+            assert priorValue == null;
         }
     }
 

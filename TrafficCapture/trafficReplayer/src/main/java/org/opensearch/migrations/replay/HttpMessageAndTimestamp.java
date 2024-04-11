@@ -65,7 +65,8 @@ public class HttpMessageAndTimestamp {
     }
 
     public String format(Optional<HttpByteBufFormatter.HttpMessageType> messageTypeOp) {
-        var packetBytesAsStr = messageTypeOp.map(mt-> HttpByteBufFormatter.httpPacketBytesToString(mt, packetBytes))
+        var packetBytesAsStr = messageTypeOp.map(mt-> HttpByteBufFormatter.httpPacketBytesToString(mt, packetBytes,
+                HttpByteBufFormatter.LF_LINE_DELIMITER))
                 .orElseGet(()-> HttpByteBufFormatter.httpPacketBufsToString(
                         packetBytes.stream().map(Unpooled::wrappedBuffer),
                         Utils.MAX_PAYLOAD_SIZE_TO_PRINT, true));

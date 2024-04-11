@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import io.netty.channel.ChannelFuture;
-import io.netty.channel.ConnectTimeoutException;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
 import lombok.NonNull;
@@ -91,7 +90,7 @@ public class ConnectionReplaySession {
                     eventLoopFuture.future.complete(v);
                 }
             } else if (t != null) {
-                channelKeyContext.addException(t, true);
+                channelKeyContext.addTraceException(t, true);
                 eventLoopFuture.future.completeExceptionally(t);
             } else {
                 eventLoopFuture.future.complete(v);

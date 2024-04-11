@@ -73,6 +73,12 @@ public class RequestPipelineOrchestrator<R> {
         }
     }
 
+    static void removeAllHandlers(ChannelPipeline pipeline) {
+        while (pipeline.first() != null) {
+            pipeline.removeLast();
+        }
+    }
+
     void addContentRepackingHandlers(ChannelHandlerContext ctx,
                                      IAuthTransformer.StreamingFullMessageTransformer authTransfomer) {
         addContentParsingHandlers(ctx, null, authTransfomer);
