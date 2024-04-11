@@ -41,7 +41,7 @@ public class OrderedWorkerTracker<T> implements TrafficReplayerTopLevel.IStreama
 
     @Override
     public boolean isEmpty() {
-        return primaryMap. isEmpty();
+        return primaryMap.isEmpty();
     }
 
     @Override

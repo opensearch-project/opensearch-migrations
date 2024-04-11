@@ -7,7 +7,16 @@ import java.time.Duration;
 import java.time.Instant;
 
 public interface IWithStartTimeAndAttributes extends IInstrumentationAttributes {
+    /**
+     * This is used to calculate the precise duration of the span.  System.nanoTime() is guaranteed to be monotonic
+     * and not susceptible to clock fluctuations due to system time resets
+     */
     long getStartTimeNano();
+    /**
+     * This is by some ContextTrackers to log the recorded wall-time so that it can be easier to find the event
+     * within logs. Notice that if the system clock is reset (which should be rare), there could be duplicated
+     * values at different points in time.
+     */
     Instant getStartTimeInstant();
 
     default Duration getSpanDuration() {

@@ -64,7 +64,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
         @Override
         public boolean isEmpty() {
-            return map. isEmpty();
+            return map.isEmpty();
         }
 
         @Override

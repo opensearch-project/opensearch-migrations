@@ -2,8 +2,6 @@ package org.opensearch.migrations.replay.util;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.Lombok;
-import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -35,7 +33,6 @@ import java.util.stream.Stream;
 public class ActiveContextMonitor implements Runnable {
 
     static final String INDENT = "  ";
-    public static final String OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE = "Oldest of ";
 
     private final BiConsumer<Level, Supplier<String>> logger;
     private final ActiveContextTracker globalContextTracker;
@@ -94,11 +91,13 @@ public class ActiveContextMonitor implements Runnable {
         setAgeToLevelMap(levelShowsAgeOlderThanMap);
     }
 
+    /**
+     * Supply new level-age edge values and convert them into the internal data structure for this class to use.
+     * @param levelShowsAgeOlderThanMap
+     */
     public void setAgeToLevelMap(Map<Level, Duration> levelShowsAgeOlderThanMap) {
-        ageToLevelEdgeMapRef.set(levelShowsAgeOlderThanMap.entrySet().stream()
-                .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey,
-                        (x,y) -> { throw Lombok.sneakyThrow(new IllegalStateException("Shouldn't have any merges")); },
-                        TreeMap::new)));
+        ageToLevelEdgeMapRef.set(new TreeMap<>(levelShowsAgeOlderThanMap.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey))));
     }
 
     Duration getAge(long recordedNanoTime) {
@@ -126,7 +125,7 @@ public class ActiveContextMonitor implements Runnable {
                     if (cad.items.isEmpty()) { return Optional.<Level>empty(); }
                     final var sample = cad.items.get(0);
                     logger.accept(getHigherLevel(Optional.of(sample.getLevel()), Optional.of(Level.INFO)).get(), () ->
-                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + cad.totalScopes +
+                            "Oldest of " + cad.totalScopes +
                                     " scopes for '" + sample.getScope().getActivityName() + "'" +
                                     " that are past thresholds that are not otherwise reported below ");
                     final var numItems = cad.items.size();
@@ -301,7 +300,7 @@ public class ActiveContextMonitor implements Runnable {
                 }
                 if (numOutput++ == 0) {
                     logger.accept(getHigherLevel(levelForElementOp, Optional.of(Level.INFO)).get(), () ->
-                            OLDEST_ITEMS_FROM_GROUP_LABEL_PREAMBLE + totalItems + trailingGroupLabel);
+                            "Oldest of " + totalItems + trailingGroupLabel);
                 }
                 logger.accept(levelForElementOp.get(), () -> getActiveLoggingMessage.apply(activeItem));
             }

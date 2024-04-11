@@ -32,14 +32,15 @@ public class BacktracingContextTracker implements IContextTracker, AutoCloseable
             if (isClosed) {
                 return;
             }
-            var oldItem = scopedContextToCallDetails.putIfAbsent(ctx, new CallDetails());
-            if (oldItem != null) {
-                var oldCtx = scopedContextToCallDetails.entrySet().stream().findFirst().get().getKey();
-                if (oldCtx.equals(ctx)) {
-                    log.error("check");
+            var priorValue = scopedContextToCallDetails.putIfAbsent(ctx, new CallDetails());
+            if (priorValue != null) {
+                var priorKey = scopedContextToCallDetails.entrySet().stream().findFirst().get().getKey();
+                if (priorKey.equals(ctx)) {
+                    log.atError().setMessage(()->"Trying to re-add the same context (" + ctx +
+                            ") back into this context tracker").log();
                 }
             }
-            assert oldItem == null;
+            assert priorValue == null;
         }
     }
 
