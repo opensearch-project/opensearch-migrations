@@ -1,10 +1,29 @@
-FROM docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+FROM docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2 AS base
+
+# Configure Elastic
+ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
+# Prevents ES from complaining about nodes count
+RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
+ENV PATH=${PATH}:/usr/share/elasticsearch/jdk/bin/
 
 RUN cd /etc/yum.repos.d/ && \
     sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
-    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* && \
-    yum install -y python3.9 vim git && \
-    pip3 install opensearch-benchmark
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+RUN yum install -y gcc python3.9 python39-devel vim git less
+RUN pip3 install opensearch-benchmark
+
+
+FROM base AS generateDatasetStage
+
+ARG SHOULD_GENERATE_DATA=false
+COPY generateDataset.sh /root
+RUN chmod ug+x /root/generateDataset.sh
+
+RUN /root/generateDataset.sh ${SHOULD_GENERATE_DATA} &&  \
+    cd /usr/share/elasticsearch/data && tar -cvzf esDataFiles.tgz nodes
+
+
+FROM base
 
 # Install the S3 Repo Plugin
 RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install repository-s3
@@ -14,21 +33,12 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     unzip awscliv2.zip && \
     ./aws/install
 
-ARG EXISTING_DATA="no-data.tar.gz"
-
 RUN mkdir /snapshots && chown elasticsearch /snapshots
-COPY ./test-resources/${EXISTING_DATA} /usr/share/elasticsearch
-RUN tar -xzf /usr/share/elasticsearch/${EXISTING_DATA} -C /usr/share/elasticsearch/data && \
-    chown -R elasticsearch /usr/share/elasticsearch/data && \
-    rm /usr/share/elasticsearch/${EXISTING_DATA}
 
+COPY --from=generateDatasetStage /usr/share/elasticsearch/data/esDataFiles.tgz /root/esDataFiles.tgz
 # Install our custom entrypoint script
 COPY ./container-start.sh /usr/share/elasticsearch/container-start.sh
 
-# Configure Elastic
-ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
-# Prevents ES from complaining about nodes coun
-RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
-ENV PATH=${PATH}:/usr/share/elasticsearch/jdk/bin/
+RUN tar -xzf /root/esDataFiles.tgz -C /usr/share/elasticsearch/data
 
 CMD /usr/share/elasticsearch/container-start.sh

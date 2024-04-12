@@ -50,7 +50,7 @@ clean.doFirst {
 }
 
 ext {
-    dataset = findProperty('dataset') ?: 'no-data.tar.gz'
+    dataset = findProperty('shouldGenerateData') ?: 'false'
 }
 
 task demoPrintOutSnapshot (type: JavaExec) {
@@ -79,7 +79,7 @@ DockerServiceProps[] dockerServices = [
         new DockerServiceProps([projectName:"elasticsearchRFSSource",
                                 dockerImageName:"elasticsearch_rfs_source",
                                 inputDir:"./docker/TestSource_ES_7_10",
-                                buildArgs:['EXISTING_DATA': "${project.ext.dataset}"]]),
+                                buildArgs:['SHOULD_GENERATE_DATA': "${project.ext.dataset}"]]),
 ] as DockerServiceProps[]
 
 
