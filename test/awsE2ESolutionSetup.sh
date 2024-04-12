@@ -197,7 +197,7 @@ read -r -d '' cdk_context << EOM
     "artifactBucketRemovalPolicy": "DESTROY",
     "trafficReplayerExtraArgs": "--speedup-factor 10.0",
     "fetchMigrationEnabled": true,
-    "rfsServiceEnabled": true,
+    "reindexFromSnapshotServiceEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
     "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml"
 }

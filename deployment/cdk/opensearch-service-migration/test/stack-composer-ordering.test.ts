@@ -33,7 +33,7 @@ test('Test all migration services with MSK get created when enabled', () => {
         "elasticsearchServiceEnabled": true,
         "otelCollectorEnabled": true,
         "osContainerServiceEnabled": true,
-        "rfsServiceEnabled": true
+        "reindexFromSnapshotServiceEnabled": true
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -66,7 +66,7 @@ test('Test all migration services with Kafka container get created when enabled'
         "kafkaBrokerServiceEnabled": true,
         "otelCollectorEnabled": true,
         "osContainerServiceEnabled": true,
-        "rfsServiceEnabled": true
+        "reindexFromSnapshotServiceEnabled": true
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -99,7 +99,7 @@ test('Test no migration services get deployed when disabled', () => {
         "kafkaBrokerServiceEnabled": false,
         "otelCollectorEnabled": false,
         "osContainerServiceEnabled": false,
-        "rfsServiceEnabled": false
+        "reindexFromSnapshotServiceEnabled": false
     }
 
     const stacks = createStackComposer(contextOptions)

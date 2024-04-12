@@ -49,7 +49,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         rfsCommand = props.extraArgs ? rfsCommand.concat(` ${props.extraArgs}`) : rfsCommand
 
         this.createService({
-            serviceName: 'rfs',
+            serviceName: 'reindex-from-snapshot',
             taskInstanceCount: 0,
             dockerDirectoryPath: join(__dirname, "../../../../../", "RFS/docker"),
             dockerImageCommand: ['/bin/sh', '-c', rfsCommand],

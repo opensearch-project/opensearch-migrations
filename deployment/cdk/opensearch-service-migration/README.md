@@ -198,14 +198,14 @@ Please note that it will be base64 encoded.
 
 ## Kicking off Reindex from Snapshot (RFS)
 
-When the RFS service gets deployed, it does not start running immediately. This is by design to put the needed infrastructure in place, and then allow the user to control when the historical data migration should occur.
+When the RFS service gets deployed, it does not start running immediately. Instead, the user controls when they want to kick off a historical data migration.
 
 The following command can be run from the Migration Console to initiate the RFS historical data migration
 ```shell
-aws ecs update-service --cluster migration-<STAGE>-ecs-cluster --service migration-<STAGE>-rfs --desired-count 1
+aws ecs update-service --cluster migration-<STAGE>-ecs-cluster --service migration-<STAGE>-reindex-from-snapshot --desired-count 1
 ```
 
-Currently, the RFS service will enter an idle state upon completion and can be cleaned up by using the same command with `--desired-count 0`
+Currently, the RFS application will enter an idle state with the ECS container still running upon completion. This can be cleaned up by using the same command with `--desired-count 0`
 
 
 ## Monitoring Progress via Instrumentation

@@ -184,8 +184,8 @@ export class StackComposer {
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
-        const rfsServiceEnabled = this.getContextForType('rfsServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const rfsExtraArgs = this.getContextForType('rfsExtraArgs', 'string', defaultValues, contextJSON)
+        const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
         for (let key in requiredFields) {
@@ -397,21 +397,21 @@ export class StackComposer {
             this.stacks.push(fetchMigrationStack)
         }
 
-        let rfsStack
-        if (rfsServiceEnabled && networkStack && migrationStack) {
-            rfsStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
+        let reindexFromSnapshotStack
+        if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
+            reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
                 sourceEndpoint: sourceClusterEndpoint,
-                extraArgs: rfsExtraArgs,
+                extraArgs: reindexFromSnapshotExtraArgs,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
-                description: "This stack contains resources to assist migrating historical data, via RFS, to a target cluster",
+                description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 ...props,
             })
-            this.addDependentStacks(rfsStack, [migrationStack, openSearchStack, osContainerStack])
-            this.stacks.push(rfsStack)
+            this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
+            this.stacks.push(reindexFromSnapshotStack)
         }
 
         let captureProxyESStack
