@@ -13,7 +13,7 @@ dependencies {
     implementation project(':captureOffloader')
     implementation project(':coreUtilities')
     api            group: 'io.netty', name: 'netty-buffer', version: '4.1.100.Final'
-    api            group: 'io.netty', name: 'netty-codec-http', version: '4.1.100.Final'
+    api            group: 'io.netty', name: 'netty-codec-http', version: '4.1.108.Final'
     api            group: 'io.netty', name: 'netty-handler', version: '4.1.100.Final'
 
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
