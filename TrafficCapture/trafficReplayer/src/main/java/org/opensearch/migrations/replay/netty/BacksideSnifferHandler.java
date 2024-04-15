@@ -30,9 +30,4 @@ public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
         bb.resetReaderIndex();
         ctx.fireChannelRead(msg);
     }
-
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        log.atWarn().setCause(cause).setMessage("Caught exception").log();
-    }
 }

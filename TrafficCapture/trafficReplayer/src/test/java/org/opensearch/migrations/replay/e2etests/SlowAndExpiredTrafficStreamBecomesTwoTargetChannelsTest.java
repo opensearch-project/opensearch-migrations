@@ -8,7 +8,7 @@ import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
+import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
@@ -97,12 +97,14 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         var trafficSource = new BlockingTrafficSource(arraySource, Duration.ofSeconds(SPACING_SECONDS));
 
         try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200), responseTracker);
-            var replayer = new TrafficReplayerTopLevel(rc, httpServer.localhostEndpoint(),
+            var replayer = new RootReplayerConstructorExtensions(rc, httpServer.localhostEndpoint(),
                     new StaticAuthTransformerFactory("TEST"),
-                    new TransformationLoader().getTransformerFactoryLoader("localhost"), true, 1, 1,
-                    "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest")) {
+                    new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                    RootReplayerConstructorExtensions.makeClientConnectionPool(httpServer.localhostEndpoint(), true,
+                            0, "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest",
+                            Duration.ofSeconds(30)))) {
             new Thread(()->responseTracker.onCountDownFinished(Duration.ofSeconds(10),
-                    ()->replayer.shutdown(null).join()));
+                        ()->replayer.shutdown(null).join()));
             replayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofMillis(1),
                     trafficSource, new TimeShifter(TIME_SPEEDUP_FACTOR), t->{});
         }

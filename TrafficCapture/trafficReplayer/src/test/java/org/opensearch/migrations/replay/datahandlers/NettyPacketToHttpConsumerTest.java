@@ -1,28 +1,27 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import io.netty.buffer.Unpooled;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.ClientConnectionPool;
-import org.opensearch.migrations.replay.HttpByteBufFormatter;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
 import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
@@ -35,29 +34,26 @@ import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
-import javax.net.ssl.SSLException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.security.KeyManagementException;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
-import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
 @WrapWithNettyLeakDetection
 public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
+
+    public static final Duration REGULAR_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
 
     public static final String SERVER_RESPONSE_BODY = "I should be decrypted tester!\n";
     public static final int LARGE_RESPONSE_CONTENT_LENGTH = 2 * 1024 * 1024;
@@ -155,7 +151,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                         () -> ClientConnectionPool.getCompletedChannelFutureAsCompletableFuture(
                                 httpContext.getChannelKeyContext(),
                                 NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
-                                        testServer.localhostEndpoint(), channelContext)));
+                                        testServer.localhostEndpoint(), channelContext, REGULAR_RESPONSE_TIMEOUT)));
                 var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
                 nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
                 var aggregatedResponse = nphc.finalizeRequest().get();
@@ -179,36 +175,69 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             "false, true",
             "true, false",
             "true, true"})
+    @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testThatPeerResetTriggersFinalizeFuture(boolean useTls, boolean withServerReadTimeout) throws Exception {
+        final var RESPONSE_TIMEOUT_FOR_HUNG_TEST = Duration.ofMillis(500);
+        testPeerResets(useTls, withServerReadTimeout, RESPONSE_TIMEOUT_FOR_HUNG_TEST,
+                RESPONSE_TIMEOUT_FOR_HUNG_TEST.plus(Duration.ofMillis(250)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @Tag("longTest")
+    @WrapWithNettyLeakDetection(repetitions = 1)
+    public void testThatWithBigResponseReadTimeoutResponseWouldHang(boolean useTls) throws Exception {
+        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofMillis(1250));
+    }
+
+    private void testPeerResets(boolean useTls, boolean withServerReadTimeout,
+                                Duration readTimeout, Duration resultWaitTimeout) throws Exception {
+        ClientConnectionPool clientConnectionPool = null;
         try (var testServer = SimpleNettyHttpServer.makeServer(useTls,
                 withServerReadTimeout ? Duration.ofMillis(100) : null,
                 NettyPacketToHttpConsumerTest::makeResponseContext)) {
             log.atError().setMessage("Got port " + testServer.port).log();
-            var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
+            var sslContext = !useTls ? null :
                     SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
-            var clientConnectionPool = new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
-
+            clientConnectionPool = new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1,
+                    readTimeout);
 
             var reqCtx = rootContext.getTestConnectionRequestContext(1);
             var nphc = new NettyPacketToHttpConsumer(clientConnectionPool
                     .buildConnectionReplaySession(reqCtx.getChannelKeyContext()), reqCtx);
-            nphc.consumeBytes("\r\nbadrequest\r\n".getBytes(StandardCharsets.UTF_8));
-            var result = nphc.finalizeRequest().get(Duration.ofSeconds(4));
+            // purposefully send ONLY the beginning of a request
+            nphc.consumeBytes("GET ".getBytes(StandardCharsets.UTF_8));
+            if (resultWaitTimeout.minus(readTimeout).isNegative()) {
+                Assertions.assertThrows(TimeoutException.class, ()->nphc.finalizeRequest().get(resultWaitTimeout));
+                return;
+            }
 
+            var result = nphc.finalizeRequest().get(resultWaitTimeout);
             try (var is = ReplayUtils.byteArraysToInputStream(Arrays.stream(result.getCopyOfPackets()));
                  var isr = new InputStreamReader(is);
                  var br = new BufferedReader(isr)) {
                 Assertions.assertEquals("", Optional.ofNullable(br.readLine()).orElse(""));
                 Assertions.assertEquals(0, result.getResponseSizeInBytes());
             }
-            var stopFuture = clientConnectionPool.shutdownNow();
-            log.info("waiting for factory to shutdown: " + stopFuture);
-            stopFuture.get();
-            log.info("done shutting down");
+            if (withServerReadTimeout) {
+                log.trace("An empty response is all that we'll get.  " +
+                        "There won't be any packets coming back, so nothing will be accumulated and eventually " +
+                        "the connection closes - so the above checks are sufficient");
+            } else {
+                Assertions.assertInstanceOf(ReadTimeoutException.class, result.getError());
+            }
+        } finally {
+            if (clientConnectionPool != null) {
+                var stopFuture = clientConnectionPool.shutdownNow();
+                log.info("waiting for factory to shutdown: " + stopFuture);
+                stopFuture.get();
+                log.info("done shutting down");
+            }
+
         }
     }
 
@@ -230,7 +259,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
             var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1, REGULAR_RESPONSE_TIMEOUT);
             var sendingFactory = new ReplayEngine(new RequestSenderOrchestrator(clientConnectionPool),
                 new TestFlowController(), timeShifter);
             for (int j = 0; j < 2; ++j) {
