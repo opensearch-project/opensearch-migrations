@@ -135,12 +135,13 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     }
     
     // Producer Send will block on actions such as retrieving cluster metadata, allows running fully async
-    public static <K, V> CompletableFuture<RecordMetadata> sendFullyAsync(Producer<K, V> producer, ProducerRecord<K, V> record) {
+    public static <K, V> CompletableFuture<RecordMetadata> sendFullyAsync(Producer<K, V> producer,
+                                                                          ProducerRecord<K, V> kafkaRecord) {
         CompletableFuture<RecordMetadata> completableFuture = new CompletableFuture<>();
 
         ForkJoinPool.commonPool().execute(() -> {
             try {
-                producer.send(record, (metadata, exception) -> {
+                producer.send(kafkaRecord, (metadata, exception) -> {
                     if (exception != null) {
                         completableFuture.completeExceptionally(exception);
                     }

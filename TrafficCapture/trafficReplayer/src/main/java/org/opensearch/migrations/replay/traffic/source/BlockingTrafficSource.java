@@ -18,7 +18,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
@@ -179,7 +178,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
         var commitResult = underlyingSource.commitTrafficStream(trafficStreamKey);
-        if (commitResult == CommitResult.AfterNextRead) {
+        if (commitResult == CommitResult.AFTER_NEXT_READ) {
             readGate.drainPermits();
             readGate.release();
         }

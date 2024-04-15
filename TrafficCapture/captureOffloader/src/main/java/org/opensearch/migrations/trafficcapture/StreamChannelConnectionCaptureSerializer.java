@@ -4,6 +4,8 @@ import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
+
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -131,9 +133,9 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
     }
 
-    public CompletableFuture<T> flushIfNeeded(Supplier<Integer> requiredSize) throws IOException {
+    public CompletableFuture<T> flushIfNeeded(IntSupplier requiredSize) throws IOException {
         var spaceLeft = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
-        if (spaceLeft != -1 && spaceLeft < requiredSize.get()) {
+        if (spaceLeft != -1 && spaceLeft < requiredSize.getAsInt()) {
             return flushCommitAndResetStream(false);
         }
         return CompletableFuture.completedFuture(null);

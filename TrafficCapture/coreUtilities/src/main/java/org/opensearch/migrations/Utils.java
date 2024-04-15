@@ -6,6 +6,8 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 public class Utils {
+    private Utils() {}
+
     /**
      * See https://en.wikipedia.org/wiki/Fold_(higher-order_function)
      */
