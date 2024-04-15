@@ -28,7 +28,7 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
 
   grafana:
-    image: grafana/grafana:latest
+    image: 'migrations/grafana:latest'
     networks:
       - migrations
     ports:

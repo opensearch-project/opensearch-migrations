@@ -288,6 +288,7 @@ public class TrafficReplayer {
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "replay"),
                 contextTrackers);
 
+        ActiveContextMonitor activeContextMonitor = null;
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
                 Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
@@ -301,13 +302,14 @@ public class TrafficReplayer {
                     new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig),
                     params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests,
                     orderedRequestTracker);
-            var activeContextMonitor = new ActiveContextMonitor(
+            activeContextMonitor = new ActiveContextMonitor(
                     globalContextTracker, perContextTracker, orderedRequestTracker, 64,
                     cf->cf.formatAsString(TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
-            scheduledExecutorService.scheduleAtFixedRate(()->{
-                activeContextLogger.atInfo().setMessage(()->"Total requests outstanding: " + tr.requestWorkTracker.size()).log();
-                activeContextMonitor.run();
-                },
+            ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
+            scheduledExecutorService.scheduleAtFixedRate(() -> {
+                        activeContextLogger.atInfo().setMessage(() -> "Total requests outstanding: " + tr.requestWorkTracker.size()).log();
+                        finalActiveContextMonitor.run();
+                    },
                     ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
@@ -318,6 +320,13 @@ public class TrafficReplayer {
             log.info("Done processing TrafficStreams");
         } finally {
             scheduledExecutorService.shutdown();
+            if (activeContextMonitor != null) {
+                var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent() ?
+                        Level.ERROR : Level.INFO;
+                activeContextLogger.atLevel(acmLevel).setMessage(()->"Outstanding work after shutdown...").log();
+                activeContextMonitor.run();
+                activeContextLogger.atLevel(acmLevel).setMessage(()->"[end of run]]").log();
+            }
         }
     }
 
