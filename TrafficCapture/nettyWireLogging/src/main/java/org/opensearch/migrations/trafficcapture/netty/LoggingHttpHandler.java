@@ -192,6 +192,15 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         super.handlerRemoved(ctx);
     }
 
+    /**
+     * This provides a callback that subclasses can use to override the default behavior of cycling the
+     * instrumentation context and continuing to read.  Subclasses may determine if additional processing
+     * or triggers should occur before proceeding, given the current context.
+     * @param ctx the instrumentation context for this request
+     * @param msg the original message, which is likely a ByteBuf, that helped to form the httpRequest
+     * @param shouldCapture false if the current request has been determined to be ignorable
+     * @param httpRequest the request that has just been fully received (excluding its body)
+     */
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, boolean shouldCapture,
                                                        HttpRequest httpRequest) throws Exception {
         messageContext = messageContext.createWaitingForResponseContext();
@@ -199,7 +208,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+    public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
         IWireCaptureContexts.IRequestContext requestContext;
         if (!(messageContext instanceof IWireCaptureContexts.IRequestContext)) {
             messageContext = requestContext = messageContext.createNextRequestContext();

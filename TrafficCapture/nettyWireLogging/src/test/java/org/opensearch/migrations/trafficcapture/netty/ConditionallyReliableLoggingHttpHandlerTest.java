@@ -189,7 +189,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     // This test doesn't work yet, but this is an optimization.  Getting connections with only a
     // close observation is already a common occurrence.  This is nice to have, so it's good to
     // keep this warm and ready, but we don't need the feature for correctness.
-    @Disabled
+    @Disabled("This is for an optimization that isn't functional yet")
     @Test
     @ValueSource(booleans = {false, true})
     public void testThatSuppressedCaptureWorks() throws Exception {

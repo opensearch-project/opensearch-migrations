@@ -128,7 +128,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
             underlying.onTrafficStreamIgnored(tsk.getTrafficStreamsContext());
         }
-    };
+    }
 
     public int numberOfConnectionsCreated() { return liveStreams.numberOfConnectionsCreated(); }
     public int numberOfRequestsOnReusedConnections() { return reusedKeepAliveCounter.get(); }
@@ -361,7 +361,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private void handleDroppedRequestForAccumulation(Accumulation accum) {
         if (accum.hasRrPair()) {
             var rrPair = accum.getRrPair();
-            rrPair.getTrafficStreamsHeld().forEach(tsk->listener.onTrafficStreamIgnored(tsk));
+            rrPair.getTrafficStreamsHeld().forEach(listener::onTrafficStreamIgnored);
         }
         log.atTrace().setMessage(()->"resetting to forget "+ accum.trafficChannelKey).log();
         accum.resetToIgnoreAndForgetCurrentRequest();

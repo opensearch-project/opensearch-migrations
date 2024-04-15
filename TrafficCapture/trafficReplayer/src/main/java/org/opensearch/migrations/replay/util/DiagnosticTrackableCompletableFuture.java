@@ -83,7 +83,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
     }
 
-    public <U> DiagnosticTrackableCompletableFuture<D, Void>
+    public DiagnosticTrackableCompletableFuture<D, Void>
     thenAccept(Consumer<T> fn, @NonNull Supplier<D> diagnosticSupplier) {
         return this.map(dcf->dcf.thenAccept(fn), diagnosticSupplier);
     }
@@ -95,7 +95,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
 
     public DiagnosticTrackableCompletableFuture<D, T>
     whenComplete(BiConsumer<? super T, Throwable> fn, @NonNull Supplier<D> diagnosticSupplier) {
-        return map(cf->cf.whenComplete((v,t)->fn.accept(v,t)), diagnosticSupplier);
+        return map(cf->cf.whenComplete(fn::accept), diagnosticSupplier);
     }
 
     public <U> DiagnosticTrackableCompletableFuture<D, U>

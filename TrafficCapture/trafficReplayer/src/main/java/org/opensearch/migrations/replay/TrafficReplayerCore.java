@@ -111,7 +111,7 @@ public abstract class TrafficReplayerCore {
             var requestPushFuture = new StringTrackableCompletableFuture<TransformedTargetRequestAndResponse>(
                     new CompletableFuture<>(), () -> "Waiting to get response from target");
             var requestKey = ctx.getReplayerRequestKey();
-            liveTrafficStreamLimiter.queueWork(1, ctx, wi -> {
+            liveTrafficStreamLimiter.queueWork(1, ctx, wi ->
                 transformAndSendRequest(replayEngine, request, ctx).future.whenComplete((v,t)->{
                     liveTrafficStreamLimiter.doneProcessing(wi);
                     if (t != null) {
@@ -119,8 +119,7 @@ public abstract class TrafficReplayerCore {
                     } else {
                         requestPushFuture.future.complete(v);
                     }
-                });
-            });
+                }));
             if (!allWorkFinishedForTransaction.future.isDone()) {
                 log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
                 requestWorkTracker.put(requestKey, allWorkFinishedForTransaction);
@@ -222,9 +221,8 @@ public abstract class TrafficReplayerCore {
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
-            cf.map(f->f.whenComplete((v,t)->{
-                commitTrafficStreams(status, trafficStreamKeysBeingHeld);
-            }), ()->"closing the channel in the ReplayEngine");
+            cf.map(f->f.whenComplete((v,t) -> commitTrafficStreams(status, trafficStreamKeysBeingHeld)),
+                    ()->"closing the channel in the ReplayEngine");
         }
 
         @Override

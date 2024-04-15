@@ -38,8 +38,7 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        log.atError().setCause(cause).setMessage("Caught error").log();
-        String channelId = ctx.channel().id().asLongText();
+        log.atError().setCause(cause).setMessage("Caught error for channel: " + ctx.channel().id().asLongText()).log();
         FrontsideHandler.closeAndFlush(ctx.channel());
     }
 }

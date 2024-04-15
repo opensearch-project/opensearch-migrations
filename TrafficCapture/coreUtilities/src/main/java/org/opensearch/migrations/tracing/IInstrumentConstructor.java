@@ -1,6 +1,5 @@
 package org.opensearch.migrations.tracing;
 
-import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
 

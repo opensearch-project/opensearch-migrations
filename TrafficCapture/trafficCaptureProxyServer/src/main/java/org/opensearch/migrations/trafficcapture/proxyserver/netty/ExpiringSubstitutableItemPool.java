@@ -41,11 +41,9 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
 
         @Override
         public String toString() {
-            final StringBuilder sb = new StringBuilder("Entry{");
-            sb.append("timestamp=").append(timestamp);
-            sb.append(", value=").append(future);
-            sb.append('}');
-            return sb.toString();
+            return "Entry{" + "timestamp=" + timestamp +
+                    ", value=" + future +
+                    '}';
         }
     }
 
@@ -150,8 +148,8 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     private final Consumer<F> onExpirationConsumer;
     @Getter
     private final EventLoop eventLoop;
-    private Duration inactivityTimeout;
-    private GenericFutureListener<F> shuffleInProgressToReady;
+    private final Duration inactivityTimeout;
+    private final GenericFutureListener<F> shuffleInProgressToReady;
     private final Stats stats;
     private int poolSize;
 
@@ -305,7 +303,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     @Override
     @SneakyThrows
     public String toString() {
-        return eventLoop.submit(() -> toStringOnThread()).get();
+        return eventLoop.submit(this::toStringOnThread).get();
     }
 
     private String toStringOnThread() {

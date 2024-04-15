@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import lombok.EqualsAndHashCode;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -20,5 +19,14 @@ public class RawPackets extends ArrayList<byte[]> {
             }
         }
         return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = 29;
+        for (byte[] array : this) {
+            result = 31 * result + Arrays.hashCode(array);
+        }
+        return result;
     }
 }
