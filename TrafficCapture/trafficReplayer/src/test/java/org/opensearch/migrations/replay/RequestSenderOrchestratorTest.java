@@ -37,8 +37,9 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         try (var httpServer = SimpleHttpServer.makeServer(false,
                 r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)))) {
             var testServerUri = httpServer.localhostEndpoint();
-            var clientConnectionPool = new ClientConnectionPool(testServerUri, null,
-                    "targetConnectionPool for testThatSchedulingWorks", 1);
+            var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(testServerUri, false,
+                    1, "targetConnectionPool for testThatSchedulingWorks",
+                    Duration.ofSeconds(30));
             var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
             var baseTime = Instant.now();
             Instant lastEndTime = baseTime;
