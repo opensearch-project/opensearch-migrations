@@ -105,45 +105,46 @@ public abstract class TrafficReplayerCore {
                           @NonNull HttpMessageAndTimestamp request) {
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
-            var allWorkFinishedForTransaction =
-                    new StringTrackableCompletableFuture<Void>(new CompletableFuture<>(),
-                            ()->"waiting for " + ctx + " to be queued and run through TrafficStreamLimiter");
-            var requestPushFuture = new StringTrackableCompletableFuture<TransformedTargetRequestAndResponse>(
-                    new CompletableFuture<>(), () -> "Waiting to get response from target");
             var requestKey = ctx.getReplayerRequestKey();
-            liveTrafficStreamLimiter.queueWork(1, ctx, wi -> {
-                transformAndSendRequest(replayEngine, request, ctx).future.whenComplete((v,t)->{
-                    liveTrafficStreamLimiter.doneProcessing(wi);
-                    if (t != null) {
-                        requestPushFuture.future.completeExceptionally(t);
-                    } else {
-                        requestPushFuture.future.complete(v);
-                    }
-                });
-            });
-            if (!allWorkFinishedForTransaction.future.isDone()) {
-                log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
-                requestWorkTracker.put(requestKey, allWorkFinishedForTransaction);
-                if (allWorkFinishedForTransaction.future.isDone()) {
-                    requestWorkTracker.remove(requestKey);
-                }
-            }
 
-            return rrPair ->
-                    requestPushFuture.map(f -> f.handle((v, t) -> {
-                                log.atInfo().setMessage(() -> "Done receiving captured stream for " + ctx +
-                                        ":" + rrPair.requestData).log();
-                                log.atTrace().setMessage(() ->
-                                        "Summary response value for " + requestKey + " returned=" + v).log();
-                                return handleCompletedTransaction(ctx, rrPair, v, t);
-                            }), () -> "logging summary")
-                            .whenComplete((v,t)->{
-                                if (t != null) {
-                                    allWorkFinishedForTransaction.future.completeExceptionally(t);
-                                } else {
-                                    allWorkFinishedForTransaction.future.complete(null);
-                                }
-                            }, ()->"");
+            var finishedAccumulatingResponseFuture =
+                    new StringTrackableCompletableFuture<RequestResponsePacketPair>(
+                            ()->"waiting for response to be accumulated for " + ctx);
+            finishedAccumulatingResponseFuture.future.whenComplete((v,t)-> log.atInfo()
+                    .setMessage(() -> "Done receiving captured stream for " + ctx + ":" + v.requestData).log());
+
+            var allWorkFinishedForTransactionFuture = sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey)
+                    .getDeferredFutureThroughHandle((arr,httpRequestException) -> finishedAccumulatingResponseFuture
+                            .thenCompose(rrPair->
+                                    StringTrackableCompletableFuture.completedFuture(
+                                            handleCompletedTransaction(ctx, rrPair, arr, httpRequestException),
+                                            ()->"Synchronously committed results"),
+                                    () -> "logging summary"),
+                            ()->"waiting for accumulation to combine with target response");
+
+            assert !allWorkFinishedForTransactionFuture.future.isDone();
+            log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
+            requestWorkTracker.put(requestKey, allWorkFinishedForTransactionFuture);
+
+            return finishedAccumulatingResponseFuture.future::complete;
+        }
+
+        private DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>
+        sendRequestAfterGoingThroughWorkQueue(IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                              HttpMessageAndTimestamp request,
+                                              UniqueReplayerRequestKey requestKey) {
+            var workDequeuedByLimiterFuture =
+                    new StringTrackableCompletableFuture<TrafficStreamLimiter.WorkItem>(
+                            ()->"waiting for " + ctx + " to be queued and run through TrafficStreamLimiter");
+            var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
+            var httpSentRequestFuture = workDequeuedByLimiterFuture
+                    .thenCompose(ignored -> transformAndSendRequest(replayEngine, request, ctx),
+                            ()->"Waiting to get response from target")
+                    .whenComplete((v,t)-> liveTrafficStreamLimiter.doneProcessing(wi),
+                            ()->"releasing work item for the traffic limiter");
+            httpSentRequestFuture.future.whenComplete((v,t)->log.atTrace().setMessage(() ->
+                    "Summary response value for " + requestKey + " returned=" + v).log());
+            return httpSentRequestFuture;
         }
 
         Void handleCompletedTransaction(@NonNull IReplayContexts.IReplayerHttpTransactionContext context,

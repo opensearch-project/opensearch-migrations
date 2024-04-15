@@ -88,6 +88,11 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         return this.map(dcf->dcf.thenAccept(fn), diagnosticSupplier);
     }
 
+    public <U> DiagnosticTrackableCompletableFuture<D, U>
+    thenApply(Function<T,U> fn, @NonNull Supplier<D> diagnosticSupplier) {
+        return this.map(dcf->dcf.thenApply(fn), diagnosticSupplier);
+    }
+
     public DiagnosticTrackableCompletableFuture<D, T>
     exceptionally(Function<Throwable, T> fn, @NonNull Supplier<D> diagnosticSupplier) {
         return this.map(cf->cf.exceptionally(fn), diagnosticSupplier);

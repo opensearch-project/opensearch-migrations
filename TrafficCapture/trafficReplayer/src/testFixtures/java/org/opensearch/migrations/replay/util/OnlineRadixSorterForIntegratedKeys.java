@@ -10,7 +10,7 @@ import java.util.function.ToIntFunction;
  *
  * @param <T>
  */
-public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter<T> {
+public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter {
 
     ToIntFunction<T> radixResolver;
 
@@ -19,7 +19,9 @@ public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter<T> 
         this.radixResolver = radixResolver;
     }
 
-    public void add(T item, Consumer<T> sortedItemVisitor) {
-        super.add(radixResolver.applyAsInt(item), item, sortedItemVisitor);
+    public void add(T item, Runnable sortedItemVisitor) {
+        super.addFutureForWork(radixResolver.applyAsInt(item), signalFuture->signalFuture.map(
+                f->f.whenComplete((v,t)->sortedItemVisitor.run()),
+                ()->"OnlineRadixSorterForIntegratedKeys.add"));
     }
 }

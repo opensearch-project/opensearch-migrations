@@ -83,7 +83,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var parentContext = ctx.createTargetRequestContext();
         this.setCurrentMessageContext(parentContext.createHttpSendingContext());
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
-        this.activeChannelFuture = new StringTrackableCompletableFuture<>(new CompletableFuture<>(),
+        this.activeChannelFuture = new StringTrackableCompletableFuture<>(
                 () -> "incoming connection is ready for " + replaySession);
         var initialFuture = this.activeChannelFuture;
 

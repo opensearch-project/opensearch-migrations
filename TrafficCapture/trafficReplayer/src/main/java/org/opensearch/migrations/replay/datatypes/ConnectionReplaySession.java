@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.datatypes;
 
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -12,8 +13,13 @@ import org.opensearch.migrations.replay.util.OnlineRadixSorter;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.io.IOException;
+import java.util.Comparator;
+import java.util.Map;
+import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -34,10 +40,10 @@ public class ConnectionReplaySession {
      * EventLoop so that we can route all calls for this object into that loop/thread.
      */
     public final EventLoop eventLoop;
+    public final OnlineRadixSorter scheduleSequencer;
     @Getter
     private Supplier<DiagnosticTrackableCompletableFuture<String, ChannelFuture>> channelFutureFutureFactory;
     private ChannelFuture cachedChannel; // only can be accessed from the eventLoop thread
-    public final OnlineRadixSorter<Runnable> scheduleSequencer;
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
@@ -49,7 +55,7 @@ public class ConnectionReplaySession {
     {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
-        this.scheduleSequencer = new OnlineRadixSorter<>(0);
+        this.scheduleSequencer = new OnlineRadixSorter(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
         this.channelFutureFutureFactory = channelFutureFutureFactory;
     }
@@ -57,7 +63,7 @@ public class ConnectionReplaySession {
     public DiagnosticTrackableCompletableFuture<String, ChannelFuture>
     getFutureThatReturnsChannelFuture(boolean requireActiveChannel) {
         StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture =
-                new StringTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "procuring a connection");
+                new StringTrackableCompletableFuture<>("procuring a connection");
         eventLoop.submit(() -> {
             if (!requireActiveChannel || (cachedChannel != null && cachedChannel.channel().isActive())) {
                 eventLoopFuture.future.complete(cachedChannel);
@@ -103,10 +109,10 @@ public class ConnectionReplaySession {
     }
 
     public boolean hasWorkRemaining() {
-        return scheduleSequencer.hasPending() || schedule.hasPendingTransmissions();
+        return !scheduleSequencer.isEmpty() || schedule.hasPendingTransmissions();
     }
 
     public long calculateSizeSlowly() {
-        return schedule.calculateSizeSlowly() + scheduleSequencer.numPending();
+        return schedule.calculateSizeSlowly() + scheduleSequencer.size();
     }
 }

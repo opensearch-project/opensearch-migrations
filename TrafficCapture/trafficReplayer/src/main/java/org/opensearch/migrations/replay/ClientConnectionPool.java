@@ -83,8 +83,7 @@ public class ClientConnectionPool {
     getCompletedChannelFutureAsCompletableFuture(IReplayContexts.IChannelKeyContext connectionContext,
                                                  ChannelFuture channelFuture) {
         var clientConnectionChannelCreatedFuture =
-                new StringTrackableCompletableFuture<ChannelFuture>(new CompletableFuture<>(),
-                        () -> "waiting for createClientConnection to finish");
+                new StringTrackableCompletableFuture<ChannelFuture>("waiting for createClientConnection to finish");
         channelFuture.addListener(f -> {
             log.atInfo().setMessage(()->
                     "New network connection result for " + connectionContext + "=" + f.isSuccess()).log();
@@ -136,8 +135,7 @@ public class ClientConnectionPool {
     private DiagnosticTrackableCompletableFuture<String, Channel>
     closeClientConnectionChannel(ConnectionReplaySession channelAndFutureWork) {
         var channelClosedFuture =
-                new StringTrackableCompletableFuture<Channel>(new CompletableFuture<>(),
-                        ()->"Waiting for closeFuture() on channel");
+                new StringTrackableCompletableFuture<Channel>("Waiting for closeFuture() on channel");
 
         channelAndFutureWork.getFutureThatReturnsChannelFuture(false)
                 .thenAccept(channelFuture-> {

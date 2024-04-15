@@ -9,8 +9,21 @@ import java.util.stream.Stream;
 
 public class StringTrackableCompletableFuture<T>
         extends DiagnosticTrackableCompletableFuture<String, T> {
+
+    public StringTrackableCompletableFuture(String diagnosticLabel) {
+        this(new CompletableFuture<>(), () -> diagnosticLabel);
+    }
+
+    public StringTrackableCompletableFuture(Supplier<String> diagnosticSupplier) {
+        this(new CompletableFuture<>(), diagnosticSupplier);
+    }
+
     public StringTrackableCompletableFuture(@NonNull CompletableFuture<T> future, Supplier<String> diagnosticSupplier) {
         super(future, diagnosticSupplier);
+    }
+
+    public StringTrackableCompletableFuture(@NonNull CompletableFuture<T> future, String diagnosticLabel) {
+        super(future, () -> diagnosticLabel);
     }
 
     public static <T> StringTrackableCompletableFuture<T>

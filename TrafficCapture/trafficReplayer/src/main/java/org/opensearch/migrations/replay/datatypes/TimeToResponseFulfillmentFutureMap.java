@@ -1,23 +1,38 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+
 import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.ArrayDeque;
+import java.util.Collection;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.TreeMap;
 
 public class TimeToResponseFulfillmentFutureMap {
 
-    TreeMap<Instant, ArrayDeque<ChannelTask>> timeToRunnableMap = new TreeMap<>();
-
-    public void appendTask(Instant start, ChannelTask task) {
-        assert timeToRunnableMap.keySet().stream().allMatch(t->!t.isAfter(start));
-        var existing = timeToRunnableMap.computeIfAbsent(start, k->new ArrayDeque<>());
-        existing.offer(task);
+    public static class FutureWorkPoint {
+        public final DiagnosticTrackableCompletableFuture<String, Void> scheduleFuture;
+        private final ChannelTaskType channelTaskType;
+        public FutureWorkPoint(Instant forTime, ChannelTaskType taskType) {
+            scheduleFuture = new StringTrackableCompletableFuture<>("scheduled start for " + forTime);
+            channelTaskType = taskType;
+        }
     }
 
-    public Map.Entry<Instant, ChannelTask> peekFirstItem() {
+    TreeMap<Instant, ArrayDeque<FutureWorkPoint>> timeToRunnableMap = new TreeMap<>();
+
+    public FutureWorkPoint appendTaskTrigger(Instant start, ChannelTaskType taskType) {
+        assert timeToRunnableMap.keySet().stream().allMatch(t->!t.isAfter(start));
+        var existing = timeToRunnableMap.computeIfAbsent(start, k->new ArrayDeque<>());
+        var fpp = new FutureWorkPoint(start, taskType);
+        existing.offer(fpp);
+        return fpp;
+    }
+
+    public Map.Entry<Instant, FutureWorkPoint> peekFirstItem() {
         var e = timeToRunnableMap.firstEntry();
         return e == null ? null : new AbstractMap.SimpleEntry<>(e.getKey(), e.getValue().peek());
     }
@@ -45,9 +60,8 @@ public class TimeToResponseFulfillmentFutureMap {
             return false;
         } else {
             return timeToRunnableMap.values().stream()
-                    .flatMap(d->d.stream())
-                    .filter(ct->ct.kind==ChannelTaskType.TRANSMIT)
-                    .findAny().isPresent();
+                    .flatMap(Collection::stream)
+                    .anyMatch(fwp->fwp.channelTaskType==ChannelTaskType.TRANSMIT);
         }
     }
 
@@ -72,5 +86,4 @@ public class TimeToResponseFulfillmentFutureMap {
                     .toString();
         }
     }
-
 }
