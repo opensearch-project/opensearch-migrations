@@ -18,10 +18,14 @@ generate_data_requests() {
   opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host=$endpoint --workload=nyc_taxis --pipeline=benchmark-only --test-mode --kill-running-processes --workload-params "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1" --client-options=$client_options
 }
 
-should_generate_data=$1
+dataset=$1
 
-if [[ "$should_generate_data" == true ]]; then
+if [[ "$dataset" == "default_osb_test_workloads" ]]; then
    /usr/local/bin/docker-entrypoint.sh eswrapper & echo $! > /tmp/esWrapperProcess.pid && sleep 10 && generate_data_requests
-else
+elif [[ "$dataset" == "skip_dataset" ]]; then
+   echo "Skipping data generation step"
    mkdir -p /usr/share/elasticsearch/data/nodes
+else
+   echo "Unknown dataset provided: ${dataset}"
+   exit 1;
 fi

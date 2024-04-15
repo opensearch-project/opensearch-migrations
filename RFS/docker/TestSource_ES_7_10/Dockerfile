@@ -15,12 +15,11 @@ RUN pip3 install opensearch-benchmark
 
 FROM base AS generateDatasetStage
 
-ARG SHOULD_GENERATE_DATA=false
+ARG DATASET="skip_dataset"
 COPY generateDataset.sh /root
 RUN chmod ug+x /root/generateDataset.sh
 
-RUN /root/generateDataset.sh ${SHOULD_GENERATE_DATA} &&  \
-    cd /usr/share/elasticsearch/data && tar -cvzf esDataFiles.tgz nodes
+RUN /root/generateDataset.sh ${DATASET}
 
 
 FROM base
@@ -35,10 +34,10 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 
 RUN mkdir /snapshots && chown elasticsearch /snapshots
 
-COPY --from=generateDatasetStage /usr/share/elasticsearch/data/esDataFiles.tgz /root/esDataFiles.tgz
+COPY --from=generateDatasetStage /usr/share/elasticsearch/data/nodes /usr/share/elasticsearch/data/nodes
+RUN chown -R elasticsearch /usr/share/elasticsearch/data
+
 # Install our custom entrypoint script
 COPY ./container-start.sh /usr/share/elasticsearch/container-start.sh
-
-RUN tar -xzf /root/esDataFiles.tgz -C /usr/share/elasticsearch/data
 
 CMD /usr/share/elasticsearch/container-start.sh
