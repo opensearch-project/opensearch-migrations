@@ -11,6 +11,7 @@ import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -161,9 +162,21 @@ public class HttpByteBufFormatter {
                 new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
         );
 
+        final Throwable[] throwable = {null};
         byteBufStream.forEach(b -> {
             try {
-                channel.writeInbound(b.retainedDuplicate());
+                if(throwable[0] == null) {
+                    channel.writeInbound(b.retainedDuplicate());
+                }
+            } catch (Throwable t) {
+                if (!releaseByteBufs) {
+                    throw t;
+                }
+                // Delay throw if releaseByteBufs
+                if (throwable[0] == null) {
+                    log.atError().setMessage("Exception in parseHttpMessageFromBufs").setCause(t).log();
+                    throwable[0] = t;
+                }
             } finally {
                 if (releaseByteBufs) {
                     b.release();
@@ -172,6 +185,9 @@ public class HttpByteBufFormatter {
         });
 
         try {
+            if (throwable[0] != null) {
+                throw Lombok.sneakyThrow(throwable[0]);
+            }
             return channel.readInbound();
         } finally {
             channel.finishAndReleaseAll();
@@ -191,20 +207,39 @@ public class HttpByteBufFormatter {
         if (byteBufStream == null) {
             return "null";
         }
-        return byteBufStream.map(originalByteBuf -> {
+        final Throwable[] throwable = {null};
+        var string = byteBufStream.map(originalByteBuf -> {
                     try {
-                        var bb = originalByteBuf.duplicate();
-                        var length = bb.readableBytes();
-                        var str = IntStream.range(0, length).map(idx -> bb.readByte())
-                                .limit(maxBytesToShow)
-                                .mapToObj(b -> "" + (char) b)
-                                .collect(Collectors.joining());
-                        return "[" + (length > maxBytesToShow ? str + "..." : str) + "]";
-                    } finally {
+                        if (throwable[0] == null) {
+                            var bb = originalByteBuf.duplicate();
+                            var length = bb.readableBytes();
+                            var str = IntStream.range(0, length).map(idx -> bb.readByte())
+                                    .limit(maxBytesToShow)
+                                    .mapToObj(b -> "" + (char) b)
+                                    .collect(Collectors.joining());
+                            return "[" + (length > maxBytesToShow ? str + "..." : str) + "]";    
+                        }
+                        return "";
+                    } catch (Throwable t) {
+                        if (!releaseByteBufs) {
+                            throw t;
+                        }
+                        // Delay throw if releaseByteBufs
+                        if (throwable[0] == null) {
+                            log.atError().setMessage("Exception in httpPacketBufsToString").setCause(t).log();
+                            throwable[0] = t;
+                        }
+                        return "";
+                    }
+                    finally {
                         if (releaseByteBufs) {
                             originalByteBuf.release();
                         }
                     }})
                 .collect(Collectors.joining(","));
+        if (throwable[0] != null) {
+            throw Lombok.sneakyThrow(throwable[0]);
+        }
+        return string;
     }
 }
