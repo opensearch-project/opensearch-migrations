@@ -18,6 +18,7 @@ import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
+import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -183,6 +184,8 @@ export class StackComposer {
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
+        const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
         for (let key in requiredFields) {
@@ -377,7 +380,6 @@ export class StackComposer {
             this.stacks.push(kafkaBrokerStack)
         }
 
-        // Currently, placing a requirement on a VPC for a fetch migration stack but this can be revisited
         let fetchMigrationStack
         if (fetchMigrationEnabled && networkStack && migrationStack) {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
@@ -393,6 +395,23 @@ export class StackComposer {
             })
             this.addDependentStacks(fetchMigrationStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(fetchMigrationStack)
+        }
+
+        let reindexFromSnapshotStack
+        if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
+            reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
+                vpc: networkStack.vpc,
+                sourceEndpoint: sourceClusterEndpoint,
+                extraArgs: reindexFromSnapshotExtraArgs,
+                stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
+                description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
+                ...props,
+            })
+            this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
+            this.stacks.push(reindexFromSnapshotStack)
         }
 
         let captureProxyESStack

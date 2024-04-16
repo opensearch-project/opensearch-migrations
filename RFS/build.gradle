@@ -18,6 +18,7 @@ class DockerServiceProps {
     String dockerImageName = ""
     String inputDir = ""
     Map<String, String> buildArgs = [:]
+    List<String> taskDependencies = []
 }
 
 repositories {
@@ -49,7 +50,7 @@ clean.doFirst {
 }
 
 ext {
-    dataset = findProperty('dataset') ?: 'no-data.tar.gz'
+    dataset = findProperty('dataset') ?: 'skip_dataset'
 }
 
 task demoPrintOutSnapshot (type: JavaExec) {
@@ -73,18 +74,19 @@ task copyDockerRuntimeJars (type: Copy) {
 DockerServiceProps[] dockerServices = [
         new DockerServiceProps([projectName:"reindexFromSnapshot",
                                 dockerImageName:"reindex_from_snapshot",
-                                inputDir:"./docker"]),
+                                inputDir:"./docker",
+                                taskDependencies:["copyDockerRuntimeJars"]]),
         new DockerServiceProps([projectName:"elasticsearchRFSSource",
                                 dockerImageName:"elasticsearch_rfs_source",
                                 inputDir:"./docker/TestSource_ES_7_10",
-                                buildArgs:['EXISTING_DATA': "${project.ext.dataset}"]]),
+                                buildArgs:['DATASET': "${project.ext.dataset}"]]),
 ] as DockerServiceProps[]
 
 
 for (dockerService in dockerServices) {
     task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
-        if (dockerService.projectName == "reindexFromSnapshot") {
-            dependsOn "copyDockerRuntimeJars"
+        for (dep in dockerService.taskDependencies) {
+            dependsOn dep
         }
         inputDir = project.file(dockerService.inputDir)
         buildArgs = dockerService.buildArgs

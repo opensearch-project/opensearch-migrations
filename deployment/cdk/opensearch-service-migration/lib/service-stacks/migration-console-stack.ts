@@ -91,10 +91,12 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const allReplayerServiceArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:service/migration-${props.stage}-ecs-cluster/migration-${props.stage}-traffic-replayer*`
+        const ecsClusterArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:service/migration-${props.stage}-ecs-cluster`
+        const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
+        const reindexFromSnapshotServiceArn = `${ecsClusterArn}/migration-${props.stage}-reindex-from-snapshot`
         const updateReplayerServicePolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [allReplayerServiceArn],
+            resources: [allReplayerServiceArn, reindexFromSnapshotServiceArn],
             actions: [
                 "ecs:UpdateService"
             ]
