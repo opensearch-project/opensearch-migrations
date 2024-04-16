@@ -60,11 +60,12 @@ class CommonUtils {
             }
 
             copyFile("jars", "/jars")
+            def jvmParams = "-XX:MaxRAMPercentage=80.0 -XX:+ExitOnOutOfMemoryError"
             // can't set the environment variable from the runtimeClasspath because the Dockerfile is
             // constructed in the configuration phase and the classpath won't be realized until the
             // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
             // and it's simplest to pack that up into a helper script.
-            runCommand("printf \"#!/bin/sh\\njava -XX:MaxRAMPercentage=80.0 -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
+            runCommand("printf \"#!/bin/sh\\njava ${jvmParams} -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
             runCommand("chmod +x /runJavaWithClasspath.sh")
             // container stay-alive
             defaultCommand('tail', '-f', '/dev/null')
