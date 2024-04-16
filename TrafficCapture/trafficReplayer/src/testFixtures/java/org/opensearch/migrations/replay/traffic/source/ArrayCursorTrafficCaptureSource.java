@@ -71,6 +71,6 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
         }
         rootContext.channelContextManager.releaseContextFor(
                 ((TrafficStreamCursorKey) trafficStreamKey).trafficStreamsContext.getChannelKeyContext());
-        return CommitResult.Immediate;
+        return CommitResult.IMMEDIATE;
     }
 }

@@ -115,7 +115,7 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         @Override
         public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             // do nothing
-            return CommitResult.Immediate;
+            return CommitResult.IMMEDIATE;
         }
     }
 }
