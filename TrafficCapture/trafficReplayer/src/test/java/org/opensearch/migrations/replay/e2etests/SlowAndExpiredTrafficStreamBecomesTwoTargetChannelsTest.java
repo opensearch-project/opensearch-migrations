@@ -6,6 +6,7 @@ import io.opentelemetry.sdk.metrics.data.LongPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
@@ -84,6 +85,7 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
     }
 
     @Test
+    @Tag("longTest")
     public void test() throws Exception {
         TestContext rc = TestContext.withTracking(false, true);
         var responseTracker = new TrackingResponseBuilder(3);

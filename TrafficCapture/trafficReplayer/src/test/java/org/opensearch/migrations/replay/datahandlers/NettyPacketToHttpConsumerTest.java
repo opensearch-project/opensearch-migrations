@@ -139,6 +139,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         "true, false",
         "true, true"
     })
+    @Tag("longTest")
     public void testHttpResponseIsSuccessfullyCaptured(boolean useTls, boolean largeResponse) throws Exception {
         try (var testServer = createTestServer(useTls, largeResponse)) {
             for (int i = 0; i < 1; ++i) {
@@ -177,6 +178,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             "true, true"})
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
+    @Tag("longTest")
     public void testThatPeerResetTriggersFinalizeFuture(boolean useTls, boolean withServerReadTimeout) throws Exception {
         final var RESPONSE_TIMEOUT_FOR_HUNG_TEST = Duration.ofMillis(500);
         testPeerResets(useTls, withServerReadTimeout, RESPONSE_TIMEOUT_FOR_HUNG_TEST,
@@ -248,6 +250,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         "true, false",
         "true, true"
     })
+    @Tag("longTest")
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls, boolean largeResponse)
             throws Exception {
         try (var testServer = SimpleNettyHttpServer.makeServer(useTls,
@@ -297,6 +300,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     @WrapWithNettyLeakDetection(repetitions = 1)
+    @Tag("longTest")
     public void testMetricCountsFor_testThatConnectionsAreKeptAliveAndShared(boolean useTls) throws Exception {
         testThatConnectionsAreKeptAliveAndShared(useTls, false);
         Thread.sleep(200); // let metrics settle down
