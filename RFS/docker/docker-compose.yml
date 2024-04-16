@@ -1,19 +1,19 @@
 version: '3.7'
 services:
 
-  # TODO: Sync gradle for RFS and C&R
-  # Temporarily this requires the user to first build the elasticsearch image from the TrafficCapture gradle project
-  # directory using a command like ./gradlew buildDockerImages
   elasticsearchsource:
-    image: 'migrations/elasticsearch_searchguard:latest'
+    image: 'migrations/elasticsearch_rfs_source:latest'
     networks:
       - migrations
     environment:
       - discovery.type=single-node
+      - path.repo=/snapshots
     ports:
       - '19200:9200'
+    volumes:
+      - snapshotStorage:/snapshots
 
-  # TODO: Add example command users can run to kickoff RFS after data is loaded on source
+  # Sample command to kick off RFS here: https://github.com/opensearch-project/opensearch-migrations/blob/main/RFS/README.md#using-docker
   reindex-from-snapshot:
     image: 'migrations/reindex_from_snapshot:latest'
     depends_on:
@@ -23,11 +23,14 @@ services:
         condition: service_started
     networks:
       - migrations
+    volumes:
+      - snapshotStorage:/snapshots
 
   opensearchtarget:
     image: 'opensearchproject/opensearch:2.11.1'
     environment:
       - discovery.type=single-node
+      - plugins.security.disabled=true
     networks:
       - migrations
     ports:
@@ -36,3 +39,7 @@ services:
 networks:
   migrations:
     driver: bridge
+
+volumes:
+  snapshotStorage:
+    driver: local

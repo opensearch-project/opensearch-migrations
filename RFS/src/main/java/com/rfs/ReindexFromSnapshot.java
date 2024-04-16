@@ -28,8 +28,11 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"-n", "--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
 
-        @Parameter(names = {"--snapshot-dir"}, description = "The absolute path to the source snapshot directory on local disk", required = false)
+        @Parameter(names = {"--snapshot-dir"}, description = "The absolute path to the existing source snapshot directory on local disk", required = false)
         public String snapshotDirPath = null;
+
+        @Parameter(names = {"--snapshot-local-repo-dir"}, description = "The absolute path to take and store a new snapshot on source, this location should be accessible by the source and this app", required = false)
+        public String snapshotLocalRepoDirPath = null;
 
         @Parameter(names = {"--s3-local-dir"}, description = "The absolute path to the directory on local disk to download S3 files to", required = false)
         public String s3LocalDirPath = null;
@@ -70,6 +73,10 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"--movement-type"}, description = "What you want to move - everything, metadata, or data.  Default: 'everything'", required = false, converter = MovementType.ArgsConverter.class)
         public MovementType movementType = MovementType.EVERYTHING;
 
+        //https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
+        @Parameter(names = {"--min-replicas"}, description = "The minimum number of replicas configured for migrated indices on the target. This can be useful for migrating to targets which use zonal deployments and require additional replicas to meet zone requirements", required = true)
+        public int minNumberOfReplicas;
+
         @Parameter(names = {"--template-whitelist"}, description = "List of template names to migrate. Note: For ES 6.8 this refers to legacy templates and for ES 7.10 this is index templates (e.g. 'posts_index_template1, posts_index_template2')", required = false)
         public List<String> templateWhitelist;
 
@@ -93,6 +100,7 @@ public class ReindexFromSnapshot {
 
         String snapshotName = arguments.snapshotName;
         Path snapshotDirPath = (arguments.snapshotDirPath != null) ? Paths.get(arguments.snapshotDirPath) : null;
+        Path snapshotLocalRepoDirPath = (arguments.snapshotLocalRepoDirPath != null) ? Paths.get(arguments.snapshotLocalRepoDirPath) : null;
         Path s3LocalDirPath = (arguments.s3LocalDirPath != null) ? Paths.get(arguments.s3LocalDirPath) : null;
         String s3RepoUri = arguments.s3RepoUri;
         String s3Region = arguments.s3Region;
@@ -103,6 +111,7 @@ public class ReindexFromSnapshot {
         String targetHost = arguments.targetHost;
         String targetUser = arguments.targetUser;
         String targetPass = arguments.targetPass;
+        int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
         ClusterVersion sourceVersion = arguments.sourceVersion;
         ClusterVersion targetVersion = arguments.targetVersion;
         List<String> templateWhitelist = arguments.templateWhitelist;
@@ -114,9 +123,6 @@ public class ReindexFromSnapshot {
 
         ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
-
-        // Should probably be passed in as an arguments
-        int awarenessAttributeDimensionality = 3; // https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
 
         // Sanity checks
         if (!((sourceVersion == ClusterVersion.ES_6_8) || (sourceVersion == ClusterVersion.ES_7_10))) {
@@ -133,12 +139,20 @@ public class ReindexFromSnapshot {
          * 2. A source host we'll take the snapshot from
          * 3. An S3 URI of an existing snapshot in S3
          * 
-         * If you provide the source host, you still need to provide the S3 URI, etc to write the snapshot to.
+         * If you provide the source host, you still need to provide the S3 details or the snapshotLocalRepoDirPath to write the snapshot to.
          */
         if (snapshotDirPath != null && (sourceHost != null || s3RepoUri != null)) {
             throw new IllegalArgumentException("If you specify a local directory to take the snapshot from, you cannot specify a source host or S3 URI");
-        } else if (sourceHost != null && (s3RepoUri == null || s3Region == null || s3LocalDirPath == null)) {
-            throw new IllegalArgumentException("If you specify a source host, you must also specify the S3 details as well");
+        } else if (sourceHost != null) {
+           if (s3RepoUri == null && s3Region == null && s3LocalDirPath == null && snapshotLocalRepoDirPath == null) {
+                throw new IllegalArgumentException(
+                    "If you specify a source host, you must also specify the S3 details or the snapshotLocalRepoDirPath to write the snapshot to as well");
+            }
+           if ((s3RepoUri != null || s3Region != null || s3LocalDirPath != null) &&
+               (s3RepoUri == null || s3Region == null || s3LocalDirPath == null)) {
+               throw new IllegalArgumentException(
+                   "You must specify all S3 details (repo URI, region, local directory path)");
+           }
         }
 
         SourceRepo repo;
@@ -146,12 +160,14 @@ public class ReindexFromSnapshot {
             repo = new FilesystemRepo(snapshotDirPath);
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
             repo = new S3Repo(s3LocalDirPath, s3RepoUri, s3Region);
+        } else if (snapshotLocalRepoDirPath != null) {
+            repo = new FilesystemRepo(snapshotLocalRepoDirPath);
         } else {
             throw new IllegalArgumentException("Could not construct a source repo from the available, user-supplied arguments");
         }
 
         // Set the transformer
-        Transformer transformer = TransformFunctions.getTransformer(sourceVersion, targetVersion, awarenessAttributeDimensionality);
+        Transformer transformer = TransformFunctions.getTransformer(sourceVersion, targetVersion, awarenessDimensionality);
 
         try {
 
@@ -161,7 +177,9 @@ public class ReindexFromSnapshot {
                 // ==========================================================================================================            
                 logger.info("==================================================================");
                 logger.info("Attempting to create the snapshot...");
-                S3SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceConnection, s3RepoUri, s3Region);
+                SnapshotCreator snapshotCreator = repo instanceof S3Repo
+                    ? new S3SnapshotCreator(snapshotName, sourceConnection, s3RepoUri, s3Region)
+                    : new FileSystemSnapshotCreator(snapshotName, sourceConnection, snapshotLocalRepoDirPath.toString());
                 snapshotCreator.registerRepo();
                 snapshotCreator.createSnapshot();
                 while (!snapshotCreator.isSnapshotFinished()) {
@@ -344,6 +362,10 @@ public class ReindexFromSnapshot {
                 }
 
                 logger.info("Documents reindexed successfully");
+
+                logger.info("Refreshing newly added documents");
+                DocumentReindexer.refreshAllDocuments(targetConnection);
+                logger.info("Refresh complete");
             }
             
         } catch (Exception e) {

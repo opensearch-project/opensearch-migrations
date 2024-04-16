@@ -19,18 +19,20 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         ObjectNode newRoot = mapper.createObjectNode();
 
         // Transform the original "templates", but put them into the legacy "templates" bucket on the target
-        ObjectNode templatesRoot = (ObjectNode) root.get("templates").deepCopy();
-        templatesRoot.fieldNames().forEachRemaining(templateName -> {
-            ObjectNode template = (ObjectNode) templatesRoot.get(templateName);
-            logger.info("Transforming template: " + templateName);
-            logger.debug("Original template: " + template.toString());
-            TransformFunctions.removeIntermediateMappingsLevels(template);
-            TransformFunctions.removeIntermediateIndexSettingsLevel(template); // run before fixNumberOfReplicas
-            TransformFunctions.fixReplicasForDimensionality(template, awarenessAttributeDimensionality);
-            logger.debug("Transformed template: " + template.toString());
-            templatesRoot.set(templateName, template);
-        });
-        newRoot.set("templates", templatesRoot);
+        if (root.get("templates") != null) {
+            ObjectNode templatesRoot = (ObjectNode) root.get("templates").deepCopy();
+            templatesRoot.fieldNames().forEachRemaining(templateName -> {
+                ObjectNode template = (ObjectNode) templatesRoot.get(templateName);
+                logger.info("Transforming template: " + templateName);
+                logger.debug("Original template: " + template.toString());
+                TransformFunctions.removeIntermediateMappingsLevels(template);
+                TransformFunctions.removeIntermediateIndexSettingsLevel(template); // run before fixNumberOfReplicas
+                TransformFunctions.fixReplicasForDimensionality(template, awarenessAttributeDimensionality);
+                logger.debug("Transformed template: " + template.toString());
+                templatesRoot.set(templateName, template);
+            });
+            newRoot.set("templates", templatesRoot);
+        }
 
         // Make empty index_templates
         ObjectNode indexTemplatesRoot = mapper.createObjectNode();

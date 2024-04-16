@@ -23,4 +23,10 @@ public class DocumentReindexer {
         RestClient client = new RestClient(targetConnection);
         client.put(path, body, false);
     }
+
+    public static void refreshAllDocuments(ConnectionDetails targetConnection) throws Exception {
+        // Send the request
+        RestClient client = new RestClient(targetConnection);
+        client.get("_refresh", false);
+    }
 }
