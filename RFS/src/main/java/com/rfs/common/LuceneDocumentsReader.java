@@ -27,7 +27,14 @@ public class LuceneDocumentsReader {
             for (int i = 0; i < reader.maxDoc(); i++) {
                 Document document = reader.document(i);
                 BytesRef source_bytes = document.getBinaryValue("_source");
-                String id = Uid.decodeId(reader.document(i).getBinaryValue("_id").bytes);
+                String id;
+                // TODO Improve handling of missing document id (https://opensearch.atlassian.net/browse/MIGRATIONS-1649)
+                try {
+                    id = Uid.decodeId(reader.document(i).getBinaryValue("_id").bytes);
+                } catch (Exception e) {
+                    logger.warn("Unable to parse Document id from Document");
+                    id = "unknown-id";
+                }
                 if (source_bytes == null || source_bytes.bytes.length == 0) { // Skip deleted documents
                     logger.info("Document " + id + " is deleted or doesn't have the _source field enabled");
                     continue;

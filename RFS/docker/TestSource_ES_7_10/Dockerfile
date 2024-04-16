@@ -1,5 +1,11 @@
 FROM docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
 
+RUN cd /etc/yum.repos.d/ && \
+    sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* && \
+    yum install -y python3.9 vim git && \
+    pip3 install opensearch-benchmark
+
 # Install the S3 Repo Plugin
 RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install repository-s3
 
@@ -7,6 +13,14 @@ RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install repositor
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
     unzip awscliv2.zip && \
     ./aws/install
+
+ARG EXISTING_DATA="no-data.tar.gz"
+
+RUN mkdir /snapshots && chown elasticsearch /snapshots
+COPY ./test-resources/${EXISTING_DATA} /usr/share/elasticsearch
+RUN tar -xzf /usr/share/elasticsearch/${EXISTING_DATA} -C /usr/share/elasticsearch/data && \
+    chown -R elasticsearch /usr/share/elasticsearch/data && \
+    rm /usr/share/elasticsearch/${EXISTING_DATA}
 
 # Install our custom entrypoint script
 COPY ./container-start.sh /usr/share/elasticsearch/container-start.sh
