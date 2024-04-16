@@ -18,6 +18,7 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.timeout.ReadTimeoutHandler;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
@@ -34,10 +35,12 @@ import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -54,6 +57,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public static final String SSL_HANDLER_NAME = "ssl";
     public static final String WRITE_COUNT_WATCHER_HANDLER_NAME = "writeCountWatcher";
     public static final String READ_COUNT_WATCHER_HANDLER_NAME = "readCountWatcher";
+
     /**
      * This is a future that chains work onto the channel.  If the value is ready, the future isn't waiting
      * on anything to happen for the channel.  If the future isn't done, something in the chain is still
@@ -65,9 +69,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     AggregatedRawResponse.Builder responseBuilder;
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
 
-    private static class ConnectionClosedListenerHandler extends ChannelDuplexHandler {
+    private static class ConnectionClosedListenerHandler extends ReadTimeoutHandler {
         private final IReplayContexts.ISocketContext socketContext;
-        ConnectionClosedListenerHandler(IReplayContexts.IChannelKeyContext channelKeyContext) {
+        ConnectionClosedListenerHandler(IReplayContexts.IChannelKeyContext channelKeyContext,
+                                        Duration timeout) {
+            super(timeout.toMillis(), TimeUnit.MILLISECONDS);
             socketContext = channelKeyContext.createSocketContext();
         }
         @Override
@@ -139,7 +145,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup,
                                                        SslContext sslContext,
                                                        URI serverUri,
-                                                       IReplayContexts.IChannelKeyContext channelKeyContext) {
+                                                       IReplayContexts.IChannelKeyContext channelKeyContext,
+                                                       Duration timeout) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
@@ -150,7 +157,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     @Override
                     protected void initChannel(@NonNull Channel ch) throws Exception {
                         ch.pipeline().addFirst(CONNECTION_CLOSE_HANDLER_NAME,
-                                new ConnectionClosedListenerHandler(channelKeyContext));
+                                new ConnectionClosedListenerHandler(channelKeyContext, timeout));
                     }
                 })
                 .channel(NioSocketChannel.class)
@@ -304,7 +311,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     writePacketAndUpdateFuture(ByteBuf packetData) {
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
-        final int readableBytes = packetData.readableBytes();
         channel.writeAndFlush(packetData)
                 .addListener((ChannelFutureListener) future -> {
                     Throwable cause = null;

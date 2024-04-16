@@ -171,7 +171,11 @@ public class HttpByteBufFormatter {
             }
         });
 
-        return channel.readInbound();
+        try {
+            return channel.readInbound();
+        } finally {
+            channel.finishAndReleaseAll();
+        }
     }
 
     public static FullHttpRequest parseHttpRequestFromBufs(Stream<ByteBuf> byteBufStream, boolean releaseByteBufs) {

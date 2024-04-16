@@ -42,16 +42,29 @@ public class TrafficStreamLimiter implements AutoCloseable {
 
     @SneakyThrows
     private void consumeFromQueue() {
-        while (!stopped.get()) {
-            var workItem = workQueue.take();
-            log.atDebug().setMessage(()->"liveTrafficStreamCostGate.permits: {} acquiring: {}")
-                    .addArgument(liveTrafficStreamCostGate.availablePermits())
-                    .addArgument(workItem.cost)
-                    .log();
-            liveTrafficStreamCostGate.acquire(workItem.cost);
-            log.atDebug().setMessage(()->"Acquired liveTrafficStreamCostGate (available=" +
-                    liveTrafficStreamCostGate.availablePermits()+") to process " + workItem.context).log();
-            workItem.task.accept(workItem);
+        WorkItem workItem = null;
+        try {
+            while (!stopped.get()) {
+                workItem = workQueue.take();
+                log.atDebug().setMessage(() -> "liveTrafficStreamCostGate.permits: {} acquiring: {}")
+                        .addArgument(liveTrafficStreamCostGate.availablePermits())
+                        .addArgument(workItem.cost)
+                        .log();
+                liveTrafficStreamCostGate.acquire(workItem.cost);
+                WorkItem finalWorkItem = workItem;
+                log.atDebug().setMessage(() -> "Acquired liveTrafficStreamCostGate (available=" +
+                        liveTrafficStreamCostGate.availablePermits() + ") to process " + finalWorkItem.context).log();
+                workItem.task.accept(workItem);
+                workItem = null;
+            }
+        } catch (InterruptedException e) {
+            if (!stopped.get()) {
+                WorkItem finalWorkItem = workItem;
+                log.atError().setMessage(()->"consumeFromQueue() was interrupted with " +
+                                (finalWorkItem != null ? "an active task and " : "") +
+                        workQueue.size() + " enqueued items").log();
+            }
+            throw e;
         }
     }
 

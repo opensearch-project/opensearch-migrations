@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.datatypes;
 import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.ArrayDeque;
+import java.util.Collection;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.TreeMap;
@@ -45,9 +46,8 @@ public class TimeToResponseFulfillmentFutureMap {
             return false;
         } else {
             return timeToRunnableMap.values().stream()
-                    .flatMap(d->d.stream())
-                    .filter(ct->ct.kind==ChannelTaskType.TRANSMIT)
-                    .findAny().isPresent();
+                    .flatMap(Collection::stream)
+                    .anyMatch(ct->ct.kind==ChannelTaskType.TRANSMIT);
         }
     }
 

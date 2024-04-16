@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
@@ -151,8 +152,9 @@ class TrafficReplayerTest extends InstrumentationTest {
 
     @Test
     public void testReader() throws Exception {
-        try (var tr = new TrafficReplayerTopLevel(rootContext,
-                new URI("http://localhost:9200"), null, false)) {
+        var uri = new URI("http://localhost:9200");
+        try (var tr = new RootReplayerConstructorExtensions(rootContext, uri, null, null,
+                RootReplayerConstructorExtensions.makeClientConnectionPool(uri))) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
             CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
                     new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null,
@@ -207,10 +209,11 @@ class TrafficReplayerTest extends InstrumentationTest {
 
     @Test
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
-        try (var tr = new TrafficReplayerTopLevel(rootContext,
-                new URI("http://localhost:9200"), null,
-                new TransformationLoader().getTransformerFactoryLoader("localhost"), false
-        )) {
+    var uri = new URI("http://localhost:9200");
+        try (var tr = new RootReplayerConstructorExtensions(rootContext,
+                uri, null,
+                new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                RootReplayerConstructorExtensions.makeClientConnectionPool(uri))) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
             var remainingAccumulations = new AtomicInteger();
             CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =

@@ -6,6 +6,7 @@ import com.beust.jcommander.ParameterException;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -129,6 +130,28 @@ public class TrafficReplayer {
 
 
         @Parameter(required = false,
+                names = "--transformer-config",
+                arity = 1,
+                description = "Configuration of message transformers.  Either as a string that identifies the " +
+                        "transformer that should be run (with default settings) or as json to specify options " +
+                        "as well as multiple transformers to run in sequence.  " +
+                        "For json, keys are the (simple) names of the loaded transformers and values are the " +
+                        "configuration passed to each of the transformers.")
+        String transformerConfig;
+        @Parameter(required = false,
+                names = "--transformer-config-file",
+                arity = 1,
+                description = "Path to the JSON configuration file of message transformers.")
+        String transformerConfigFile;
+        @Parameter(required = false,
+                names = "--user-agent",
+                arity = 1,
+                description = "For HTTP requests to the target cluster, append this string (after \"; \") to" +
+                        "the existing user-agent field or if the field wasn't present, simply use this value")
+        String userAgent;
+
+
+        @Parameter(required = false,
                 names = {"-i", "--input"},
                 arity=1,
                 description = "input file to read the request/response traces for the source cluster")
@@ -162,6 +185,14 @@ public class TrafficReplayer {
                 description = "Number of threads to use to send requests from.")
         int numClientThreads = 0;
 
+
+        // https://github.com/opensearch-project/opensearch-java/blob/main/java-client/src/main/java/org/opensearch/client/transport/httpclient5/ApacheHttpClient5TransportBuilder.java#L49-L54
+        @Parameter(required = false,
+                names = {"--target-response-timeout"},
+                arity = 1,
+                description = "Seconds to wait before timing out a replayed request to the target.")
+        int targetServerResponseTimeoutSeconds = 30;
+
         @Parameter(required = false,
             names = {"--kafka-traffic-brokers"},
             arity=1,
@@ -194,26 +225,6 @@ public class TrafficReplayer {
                 description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
                         "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
-        @Parameter(required = false,
-                names = "--transformer-config",
-                arity = 1,
-                description = "Configuration of message transformers.  Either as a string that identifies the " +
-                        "transformer that should be run (with default settings) or as json to specify options " +
-                        "as well as multiple transformers to run in sequence.  " +
-                        "For json, keys are the (simple) names of the loaded transformers and values are the " +
-                        "configuration passed to each of the transformers.")
-        String transformerConfig;
-        @Parameter(required = false,
-                names = "--transformer-config-file",
-                arity = 1,
-                description = "Path to the JSON configuration file of message transformers.")
-        String transformerConfigFile;
-        @Parameter(required = false,
-                names = "--user-agent",
-                arity = 1,
-                description = "For HTTP requests to the target cluster, append this string (after \"; \") to" +
-                        "the existing user-agent field or if the field wasn't present, simply use this value")
-        String userAgent;
     }
 
     private static Parameters parseArgs(String[] args) {
@@ -288,6 +299,7 @@ public class TrafficReplayer {
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "replay"),
                 contextTrackers);
 
+        ActiveContextMonitor activeContextMonitor = null;
         try (var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(topContext, params,
                 Duration.ofSeconds(params.lookaheadTimeSeconds));
              var authTransformer = buildAuthTransformerFactory(params))
@@ -299,14 +311,17 @@ public class TrafficReplayer {
             var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             var tr = new TrafficReplayerTopLevel(topContext, uri, authTransformer,
                     new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig),
-                    params.allowInsecureConnections, params.numClientThreads, params.maxConcurrentRequests,
-                    orderedRequestTracker);
-            var activeContextMonitor = new ActiveContextMonitor(
+                    TrafficReplayerTopLevel.makeClientConnectionPool(
+                            uri, params.allowInsecureConnections, params.numClientThreads,
+                            Duration.ofSeconds(params.targetServerResponseTimeoutSeconds)),
+                    new TrafficStreamLimiter(params.maxConcurrentRequests), orderedRequestTracker);
+            activeContextMonitor = new ActiveContextMonitor(
                     globalContextTracker, perContextTracker, orderedRequestTracker, 64,
                     cf->cf.formatAsString(TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
+            ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
             scheduledExecutorService.scheduleAtFixedRate(()->{
                 activeContextLogger.atInfo().setMessage(()->"Total requests outstanding: " + tr.requestWorkTracker.size()).log();
-                activeContextMonitor.run();
+                        finalActiveContextMonitor.run();
                 },
                     ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
@@ -318,6 +333,13 @@ public class TrafficReplayer {
             log.info("Done processing TrafficStreams");
         } finally {
             scheduledExecutorService.shutdown();
+            if (activeContextMonitor != null) {
+                var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent() ?
+                        Level.ERROR : Level.INFO;
+                activeContextLogger.atLevel(acmLevel).setMessage(()->"Outstanding work after shutdown...").log();
+                activeContextMonitor.run();
+                activeContextLogger.atLevel(acmLevel).setMessage(()->"[end of run]]").log();
+            }
         }
     }
 

@@ -75,7 +75,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         // do nothing - this datasource isn't transactional
         channelContextManager.releaseContextFor(trafficStreamKey.getTrafficStreamsContext().getLogicalEnclosingScope());
-        return CommitResult.Immediate;
+        return CommitResult.IMMEDIATE;
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.google.common.base.Strings;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
@@ -65,10 +66,10 @@ public class TrafficReplayerRunner {
         runReplayer(numExpectedRequests,
                 (rootContext, targetConnectionPoolPrefix) -> {
                     try {
-                        return new TrafficReplayerTopLevel(rootContext, endpoint,
+                        return new RootReplayerConstructorExtensions(rootContext, endpoint,
                                 new StaticAuthTransformerFactory("TEST"),
-                                new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()), true, 10, 10*1024,
-                                targetConnectionPoolPrefix);
+                                new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()),
+                                RootReplayerConstructorExtensions.makeClientConnectionPool(endpoint, targetConnectionPoolPrefix));
                     } catch (SSLException e) {
                         throw new RuntimeException(e);
                     }
