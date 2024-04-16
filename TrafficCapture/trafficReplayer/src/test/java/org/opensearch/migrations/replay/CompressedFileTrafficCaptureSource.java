@@ -36,7 +36,7 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     @Override
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         // do nothing
-        return CommitResult.Immediate;
+        return CommitResult.IMMEDIATE;
     }
 
     @Override

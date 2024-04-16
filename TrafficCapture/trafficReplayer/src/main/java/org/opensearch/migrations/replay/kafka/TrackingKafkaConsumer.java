@@ -197,7 +197,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             } finally {
                 resume();
             }
-            safeCommit(()->context.createCommitContext());
+            safeCommit(context::createCommitContext);
             lastTouchTimeRef.set(clock.instant());
         }
     }
@@ -244,9 +244,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public <T> Stream<T>
     getNextBatchOfRecords(ITrafficSourceContexts.IReadChunkContext context,
                           BiFunction<KafkaCommitOffsetData, ConsumerRecord<String,byte[]>, T> builder) {
-        safeCommit(()->context.createCommitContext());
+        safeCommit(context::createCommitContext);
         var records = safePollWithSwallowedRuntimeExceptions(context);
-        safeCommit(()->context.createCommitContext());
+        safeCommit(context::createCommitContext);
         return applyBuilder(builder, records);
     }
 
@@ -299,7 +299,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                     + ").  Dropping this commit request since the record would " +
                     "have been handled again by a current consumer within this process or another. Full key=" +
                     kafkaTsk).log();
-            return ITrafficCaptureSource.CommitResult.Ignored;
+            return ITrafficCaptureSource.CommitResult.IGNORED;
         }
 
         var p = kafkaTsk.getPartition();
@@ -315,12 +315,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
                 nextSetOfCommitsMap.put(k, v);
             }
-            return ITrafficCaptureSource.CommitResult.AfterNextRead;
+            return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
         }).orElseGet(() -> {
             synchronized (commitDataLock) {
                 addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
             }
-            return ITrafficCaptureSource.CommitResult.BlockedByOtherCommits;
+            return ITrafficCaptureSource.CommitResult.BLOCKED_BY_OTHER_COMMITS;
         });
     }
 

@@ -311,7 +311,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     writePacketAndUpdateFuture(ByteBuf packetData) {
         final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
                 ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
-        final int readableBytes = packetData.readableBytes();
         channel.writeAndFlush(packetData)
                 .addListener((ChannelFutureListener) future -> {
                     Throwable cause = null;

@@ -22,12 +22,12 @@ public class OrderedWorkerTracker<T> implements TrafficReplayerTopLevel.IStreama
     ConcurrentHashMap<UniqueReplayerRequestKey, TimeKeyAndFuture<T>> primaryMap = new ConcurrentHashMap<>();
     ConcurrentSkipListSet<TimeKeyAndFuture<T>> orderedSet =
             new ConcurrentSkipListSet<>(Comparator.comparingLong(TimeKeyAndFuture<T>::getNanoTimeKey)
-                    .thenComparingLong(i->System.identityHashCode(i)));
+                    .thenComparingLong(System::identityHashCode));
 
     @Override
     public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
                     DiagnosticTrackableCompletableFuture<String, T> completableFuture) {
-        var timedValue = new TimeKeyAndFuture(System.nanoTime(), completableFuture);
+        var timedValue = new TimeKeyAndFuture<>(System.nanoTime(), completableFuture);
         primaryMap.put(uniqueReplayerRequestKey, timedValue);
         orderedSet.add(timedValue);
     }
