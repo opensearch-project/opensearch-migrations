@@ -6,6 +6,9 @@ ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
 ENV PATH=${PATH}:/usr/share/elasticsearch/jdk/bin/
 
+# TODO: These yum packages are currently included in the base image and propagated to the final image for adhoc testing
+# with OSB, but should be placed in only the generateDatasetStage once we unify RFS and TC gradle setups and allow the Migration Console
+# to have this responsibility. Task here: https://opensearch.atlassian.net/browse/MIGRATIONS-1628
 RUN cd /etc/yum.repos.d/ && \
     sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
     sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
