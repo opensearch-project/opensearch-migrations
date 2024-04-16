@@ -22,12 +22,13 @@ jobs:
           approvers: ${{ steps.get_data.outputs.approvers }}
           minimum-approvals: 2
           issue-title: 'Release opensearch-migrations version ${{ steps.get_data.outputs.version }}'
-          issue-body: "Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION** : ${{ steps.get_data.outputs.version }} "
+          issue-body: "This release requires approval from at least two reviewers. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
           exclude-workflow-initiator-as-approver: true
       - name: Download Repo Tar
+        # Preface Traffic Capture version with 0. to signal interface immaturity
         run: |
           wget https://github.com/opensearch-project/opensearch-migrations/archive/refs/tags/${{ steps.get_data.outputs.version }}.tar.gz -O artifacts.tar.gz
-          (cd TrafficCapture && ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false && tar -C build -cvf traffic-capture-artifacts.tar.gz repository)
+          (cd TrafficCapture && ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf traffic-capture-artifacts.tar.gz repository)
       - name: Draft a release
         uses: softprops/action-gh-release@v2
         with:
