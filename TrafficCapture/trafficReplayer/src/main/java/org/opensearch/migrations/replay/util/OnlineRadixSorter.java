@@ -66,11 +66,15 @@ public class OnlineRadixSorter {
                 continueFuture.thenApply(v->{
                             log.atDebug().setMessage(()->"Increasing currentOffset to " + currentOffset +
                                     " for " + System.identityHashCode(this)).log();
-                            ++currentOffset;
-                            return null;
+                    items.remove();
+                    ++currentOffset;
+                    pullNextWorkItemOrDoNothing();
+                    return null;
                         }, () -> "Bumping currentOffset and checking if the next items should be signaled"));
         items.add(workBundle);
-        pullNextWorkItemOrDoNothing();
+        if (index == this.currentOffset) {
+            pullNextWorkItemOrDoNothing();
+        }
         return continueFuture;
     }
 
@@ -81,9 +85,6 @@ public class OnlineRadixSorter {
                     var firstSignal = indexedWork.signalingFuture.future.complete(null);
                     assert firstSignal : "expected only this function to signal completion of the signaling future " +
                             "and for it to only be called once";
-                    var oldHead = items.remove();
-                    assert oldHead == indexedWork;
-                    pullNextWorkItemOrDoNothing();
                 });
     }
 
