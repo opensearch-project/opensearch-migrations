@@ -15,6 +15,7 @@ import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -194,7 +195,7 @@ public class KafkaPrinter {
         }
 
         String baseOutputPath = params.outputDirectoryPath == null ? "./" : params.outputDirectoryPath;
-        baseOutputPath = !baseOutputPath.endsWith("/") ? baseOutputPath + "/" : baseOutputPath;
+        baseOutputPath = !baseOutputPath.endsWith(File.separator) ? baseOutputPath + File.separator : baseOutputPath;
         String uuid = UUID.randomUUID().toString();
         boolean separatePartitionOutputs = false;
         Map<Integer, CodedOutputStream> partitionOutputStreams = new HashMap<>();

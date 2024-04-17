@@ -110,7 +110,8 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
                                     " did not").log();
                             Thread.sleep(sleepAmount);
                         } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
+                            Thread.currentThread().interrupt();
+                            throw Lombok.sneakyThrow(e);
                         }
                         return false;
                     }

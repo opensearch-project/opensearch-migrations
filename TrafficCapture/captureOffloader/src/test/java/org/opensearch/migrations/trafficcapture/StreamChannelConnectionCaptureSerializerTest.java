@@ -208,8 +208,10 @@ class StreamChannelConnectionCaptureSerializerTest {
         var bb = Unpooled.buffer(0);
         serializer.addWriteEvent(REFERENCE_TIMESTAMP, bb);
         serializer.addWriteEvent(REFERENCE_TIMESTAMP, bb);
-        var future = serializer.flushCommitAndResetStream(true);
-        future.get();
+        Assertions.assertDoesNotThrow(()-> {
+                    var future = serializer.flushCommitAndResetStream(true);
+                    future.get();
+                });
         bb.release();
     }
 

@@ -3,12 +3,23 @@ plugins {
     id 'java'
     id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
+    id 'io.freefair.lombok' version '8.6'
 }
 
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import groovy.transform.Canonical
 
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
+
+@Canonical
+class DockerServiceProps {
+    String projectName = ""
+    String dockerImageName = ""
+    String inputDir = ""
+    Map<String, String> buildArgs = [:]
+    List<String> taskDependencies = []
+}
 
 repositories {
     mavenCentral()
@@ -38,6 +49,10 @@ clean.doFirst {
     delete project.file("./docker/build")
 }
 
+ext {
+    dataset = findProperty('dataset') ?: 'skip_dataset'
+}
+
 task demoPrintOutSnapshot (type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.rfs.DemoPrintOutSnapshot'
@@ -56,6 +71,30 @@ task copyDockerRuntimeJars (type: Copy) {
     include '*.jar'
 }
 
+DockerServiceProps[] dockerServices = [
+        new DockerServiceProps([projectName:"reindexFromSnapshot",
+                                dockerImageName:"reindex_from_snapshot",
+                                inputDir:"./docker",
+                                taskDependencies:["copyDockerRuntimeJars"]]),
+        new DockerServiceProps([projectName:"elasticsearchRFSSource",
+                                dockerImageName:"elasticsearch_rfs_source",
+                                inputDir:"./docker/TestSource_ES_7_10",
+                                buildArgs:['DATASET': "${project.ext.dataset}"]]),
+] as DockerServiceProps[]
+
+
+for (dockerService in dockerServices) {
+    task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
+        for (dep in dockerService.taskDependencies) {
+            dependsOn dep
+        }
+        inputDir = project.file(dockerService.inputDir)
+        buildArgs = dockerService.buildArgs
+        images.add("migrations/${dockerService.dockerImageName}:${version}")
+        images.add("migrations/${dockerService.dockerImageName}:latest")
+    }
+}
+
 // ./gradlew composeUp
 // ./gradlew composeDown
 dockerCompose {
@@ -64,12 +103,10 @@ dockerCompose {
 }
 
 // ./gradlew buildDockerImages
-task buildDockerImages (type: DockerBuildImage) {
-    dependsOn copyDockerRuntimeJars
-    def dockerImageName = "reindex_from_snapshot"
-    inputDir = project.file("./docker")
-    images.add("migrations/${dockerImageName}:${version}")
-    images.add("migrations/${dockerImageName}:latest")
+task buildDockerImages {
+    for (dockerService in dockerServices) {
+        dependsOn "buildDockerImage_${dockerService.projectName}"
+    }
 }
 
 tasks.getByName('composeUp')

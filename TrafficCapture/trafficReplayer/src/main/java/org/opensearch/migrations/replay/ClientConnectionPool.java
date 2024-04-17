@@ -12,6 +12,7 @@ import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -23,15 +24,18 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class ClientConnectionPool {
+
     private final URI serverUri;
     private final SslContext sslContext;
     public final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
+    private final Duration timeout;
 
     @EqualsAndHashCode
     @AllArgsConstructor
@@ -44,9 +48,14 @@ public class ClientConnectionPool {
         return new Key(connectionId, sessionNumber);
     }
 
-    public ClientConnectionPool(URI serverUri, SslContext sslContext, String targetConnectionPoolName, int numThreads) {
+    public ClientConnectionPool(@NonNull URI serverUri,
+                                SslContext sslContext,
+                                @NonNull String targetConnectionPoolName,
+                                int numThreads,
+                                @NonNull Duration timeout) {
         this.serverUri = serverUri;
         this.sslContext = sslContext;
+        this.timeout = timeout;
         this.eventLoopGroup =
                 new NioEventLoopGroup(numThreads, new DefaultThreadFactory(targetConnectionPoolName));
 
@@ -55,7 +64,7 @@ public class ClientConnectionPool {
         }));
     }
 
-    public ConnectionReplaySession buildConnectionReplaySession(final IReplayContexts.IChannelKeyContext channelKeyCtx) {
+    public ConnectionReplaySession buildConnectionReplaySession(IReplayContexts.IChannelKeyContext channelKeyCtx) {
         if (eventLoopGroup.isShuttingDown()) {
             throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
         }
@@ -74,7 +83,7 @@ public class ClientConnectionPool {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() -> {
                     var channelFuture = NettyPacketToHttpConsumer.createClientConnection(eventLoop,
-                            sslContext, serverUri, connectionContext);
+                            sslContext, serverUri, connectionContext, timeout);
                     return getCompletedChannelFutureAsCompletableFuture(connectionContext, channelFuture);
                 });
     }

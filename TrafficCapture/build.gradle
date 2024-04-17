@@ -35,7 +35,9 @@ subprojects {
 
 
                     group = 'org.opensearch.migrations.trafficcapture'
-                    version = '0.1.0'
+
+                    // support -Dbuild.version, but include default
+                    version = System.getProperty("build.version", "0.1.0")
 
                     // support -Dbuild.snapshot=false, but default to true
                     if (System.getProperty("build.snapshot", "true") == "true") {

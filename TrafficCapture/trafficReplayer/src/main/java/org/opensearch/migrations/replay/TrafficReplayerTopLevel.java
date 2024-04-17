@@ -85,79 +85,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public TrafficReplayerTopLevel(IRootReplayerContext context,
                                    URI serverUri,
                                    IAuthTransformerFactory authTransformerFactory,
-                                   boolean allowInsecureConnections)
-            throws SSLException {
-        this(context, serverUri, authTransformerFactory,
-                new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost()), allowInsecureConnections);
-    }
-
-    public TrafficReplayerTopLevel(IRootReplayerContext topContext,
-                                   URI uri,
-                                   IAuthTransformerFactory authTransformerFactory,
-                                   IJsonTransformer jsonTransformer,
-                                   boolean allowInsecureConnections)
-            throws SSLException {
-        this(topContext, uri, authTransformerFactory, jsonTransformer, allowInsecureConnections, 0,
-                1024);
-    }
-
-    public TrafficReplayerTopLevel(IRootReplayerContext topContext,
-                                   URI uri,
-                                   IAuthTransformerFactory authTransformer,
-                                   IJsonTransformer jsonTransformer,
-                                   boolean allowInsecureConnections,
-                                   int numClientThreads,
-                                   int maxConcurrentRequests) throws SSLException {
-        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections, numClientThreads,
-                maxConcurrentRequests, new ConcurrentHashMapWorkTracker<>());
-    }
-
-    public TrafficReplayerTopLevel(IRootReplayerContext topContext,
-                                   URI uri,
-                                   IAuthTransformerFactory authTransformer,
-                                   IJsonTransformer jsonTransformer,
-                                   boolean allowInsecureConnections,
-                                   int numClientThreads,
-                                   int maxConcurrentRequests,
-                                   IStreamableWorkTracker<Void> workTracker) throws SSLException {
-        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections,
-                numClientThreads, maxConcurrentRequests,
-                getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
-                workTracker);
-    }
-
-    public TrafficReplayerTopLevel(IRootReplayerContext topContext,
-                                   URI uri,
-                                   IAuthTransformerFactory authTransformer,
-                                   IJsonTransformer jsonTransformer,
-                                   boolean allowInsecureConnections,
-                                   int numClientThreads,
-                                   int maxConcurrentRequests,
-                                   String connectionPoolName) throws SSLException {
-        this(topContext, uri, authTransformer, jsonTransformer, allowInsecureConnections,
-                numClientThreads, maxConcurrentRequests,
-                connectionPoolName,
-                new ConcurrentHashMapWorkTracker<>());
-    }
-
-    public TrafficReplayerTopLevel(IRootReplayerContext context,
-                                   URI serverUri,
-                                   IAuthTransformerFactory authTransformerFactory,
-                                   IJsonTransformer jsonTransformer,
-                                   boolean allowInsecureConnections,
-                                   int numSendingThreads,
-                                   int maxConcurrentOutstandingRequests,
-                                   String connectionPoolName,
-                                   IStreamableWorkTracker<Void> workTracker) throws SSLException {
-        this(context, serverUri, authTransformerFactory, jsonTransformer,
-                new ClientConnectionPool(serverUri,
-                        loadSslContext(serverUri, allowInsecureConnections), connectionPoolName, numSendingThreads),
-                new TrafficStreamLimiter(maxConcurrentOutstandingRequests), workTracker);
-    }
-
-    public TrafficReplayerTopLevel(IRootReplayerContext context,
-                                   URI serverUri,
-                                   IAuthTransformerFactory authTransformerFactory,
                                    IJsonTransformer jsonTransformer,
                                    ClientConnectionPool clientConnectionPool,
                                    TrafficStreamLimiter trafficStreamLimiter,
@@ -169,7 +96,28 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         shutdownFutureRef = new AtomicReference<>();
     }
 
-    private static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
+    public static ClientConnectionPool makeClientConnectionPool(URI serverUri, boolean allowInsecureConnections,
+                                                                int numSendingThreads, Duration timeout)
+            throws SSLException {
+        return makeClientConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null, timeout);
+    }
+
+    public static ClientConnectionPool makeClientConnectionPool(URI serverUri,
+                                                                boolean allowInsecureConnections,
+                                                                int numSendingThreads,
+                                                                String connectionPoolName,
+                                                                Duration timeout) throws SSLException {
+        return new ClientConnectionPool(serverUri, loadSslContext(serverUri, allowInsecureConnections),
+                connectionPoolName != null ? connectionPoolName :
+                        getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
+                numSendingThreads, timeout);
+    }
+
+    public static String getTargetConnectionPoolName(int i) {
+        return TARGET_CONNECTION_POOL_NAME + (i == 0 ? "" : Integer.toString(i));
+    }
+
+    public static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
@@ -179,10 +127,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         } else {
             return null;
         }
-    }
-
-    private static String getTargetConnectionPoolName(int i) {
-        return TARGET_CONNECTION_POOL_NAME + (i == 0 ? "" : Integer.toString(i));
     }
 
     public void setupRunAndWaitForReplayToFinish(Duration observedPacketConnectionTimeout,

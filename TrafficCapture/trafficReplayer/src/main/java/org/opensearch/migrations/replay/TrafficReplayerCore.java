@@ -223,9 +223,8 @@ public abstract class TrafficReplayerCore {
                                       @NonNull Instant timestamp, @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
-            cf.map(f->f.whenComplete((v,t)->{
-                commitTrafficStreams(status, trafficStreamKeysBeingHeld);
-            }), ()->"closing the channel in the ReplayEngine");
+            cf.map(f->f.whenComplete((v,t) -> commitTrafficStreams(status, trafficStreamKeysBeingHeld)),
+                    ()->"closing the channel in the ReplayEngine");
         }
 
         @Override

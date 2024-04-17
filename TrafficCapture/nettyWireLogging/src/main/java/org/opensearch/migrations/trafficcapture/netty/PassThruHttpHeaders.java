@@ -31,6 +31,16 @@ public class PassThruHttpHeaders extends DefaultHttpHeaders {
         this.mapWithCaseInsensitiveHeaders = headersToPreserve.caseInsensitiveHeadersMap;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        throw new IllegalStateException("equals() is not supported for this stripped-down version of HttpHeaders");
+    }
+
+    @Override
+    public int hashCode() {
+        throw new IllegalStateException("hashCode() is not supported for this stripped-down version of HttpHeaders");
+    }
+
     private boolean headerNameShouldBeTracked(CharSequence name) {
         return mapWithCaseInsensitiveHeaders.contains(name);
     }

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
+import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
@@ -26,6 +27,8 @@ import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceC
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamCursorKey;
+import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
+import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
@@ -80,9 +83,10 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                                               int maxConcurrentOutstandingRequests,
                                               IJsonTransformer jsonTransformer,
                                               String targetConnectionPoolName) throws SSLException {
-            super(context, serverUri, authTransformerFactory,
-                    jsonTransformer, allowInsecureConnections, numSendingThreads, maxConcurrentOutstandingRequests,
-                    targetConnectionPoolName);
+            super(context, serverUri, authTransformerFactory, jsonTransformer,
+                    TrafficReplayerTopLevel.makeClientConnectionPool(serverUri, allowInsecureConnections, numSendingThreads,
+                            targetConnectionPoolName, Duration.ofSeconds(30)),
+                    new TrafficStreamLimiter(maxConcurrentOutstandingRequests), new OrderedWorkerTracker<>());
             this.maxWaitTime = maxWaitTime;
         }
 

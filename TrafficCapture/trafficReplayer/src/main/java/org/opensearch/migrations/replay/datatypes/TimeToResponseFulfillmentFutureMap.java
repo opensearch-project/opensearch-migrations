@@ -1,8 +1,5 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
-
 import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.ArrayDeque;
@@ -10,6 +7,9 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.TreeMap;
+
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 public class TimeToResponseFulfillmentFutureMap {
 

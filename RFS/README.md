@@ -78,29 +78,29 @@ RFS has support for packaging its java application as a Docker image by using th
 ```
 Also built into this Docker/Gradle support is the ability to spin up a testing RFS environment using Docker compose. This compose file can be seen [here](./docker/docker-compose.yml) and includes the RFS container, a source cluster container, and a target cluster container.
 
-This environment can be spun up with the Gradle command
+This environment can be spun up with the Gradle command, and use the optional `-Pdataset` flag to preload a dataset from the `generateDatasetStage` in the multi-stage Docker [here](docker/TestSource_ES_7_10/Dockerfile). This stage will take a few minutes to run on its first attempt if it is generating data, as it will be making requests with OSB. This will be cached for future runs.
 ```shell
-./gradlew composeUp
+./gradlew composeUp -Pdataset=default_osb_test_workloads
+
 ```
 And deleted with the Gradle command
 ```shell
 ./gradlew composeDown
 ```
 
-After the Docker compose containers are created the elasticsearch/opensearch source and target clusters can be interacted with like normal. For RFS testing, a user should load templates/indices/documents into the source cluster and take a snapshot before kicking off RFS.
+After the Docker compose containers are created the elasticsearch/opensearch source and target clusters can be interacted with like normal. For RFS testing, a user can also load custom templates/indices/documents into the source cluster before kicking off RFS.
 ```shell
 # To check indices on the source cluster
-curl https://localhost:19200/_cat/indices?v --insecure -u admin:admin
+curl http://localhost:19200/_cat/indices?v
 
 # To check indices on the target cluster
-curl https://localhost:29200/_cat/indices?v --insecure -u admin:admin
+curl http://localhost:29200/_cat/indices?v
 ```
 
-Once the user is ready, they can kick off the RFS migration by running the RFS java command with the proper arguments on the RFS container like below:
+To kick off RFS:
 ```shell
-docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name <snapshot-name> --snapshot-dir <snapshot-dir> --lucene-dir '/lucene' --target-host https://opensearchtarget:9200 --target-username admin --target-password admin --source-version es_7_10 --target-version os_2_11"
+docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name test-snapshot --snapshot-local-repo-dir /snapshots --min-replicas 0 --lucene-dir '/lucene' --source-host http://elasticsearchsource:9200 --target-host http://opensearchtarget:9200 --source-version es_7_10 --target-version os_2_11"
 ```
-
 
 ### Handling auth
 
