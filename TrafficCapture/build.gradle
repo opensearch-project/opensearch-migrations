@@ -12,6 +12,22 @@ allprojects {
 subprojects {
     apply plugin: 'java'
     apply plugin: 'maven-publish'
+
+    // TODO: Expand to do more static checking in more projects
+    if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
+        dependencies {
+            annotationProcessor group: 'com.google.errorprone', name: 'error_prone_core', version: '2.26.1'
+        }
+        tasks.named('compileJava', JavaCompile) {
+            if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
+                options.compilerArgs += [
+                        "-XDcompilePolicy=simple",
+                        "-Xplugin:ErrorProne -XepDisableAllChecks -Xep:MustBeClosed:ERROR -XepDisableWarningsInGeneratedCode",
+                ]
+            }
+        }
+    }
+
     task javadocJar(type: Jar, dependsOn: javadoc) {
         archiveClassifier.set('javadoc')
         from javadoc.destinationDir
