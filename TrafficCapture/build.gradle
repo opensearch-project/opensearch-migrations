@@ -107,9 +107,8 @@ allprojects {
             exclude project.property('excludeTests')
         }
         useJUnitPlatform {
-            systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
-            systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
-            systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
+            //  Disable parallel test execution, see MIGRATIONS-1666
+            systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         }
     }
 
@@ -124,11 +123,6 @@ allprojects {
     }
 
     task slowTest(type: Test) {
-        useJUnitPlatform {
-            // SlowTests currently use additional resource overhead, so halving core based parallelism
-            systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
-            systemProperty 'junit.jupiter.execution.parallel.config.dynamic.factor', '0.5'
-        }
         systemProperty 'disableMemoryLeakTests', 'false'
         jacoco {
             enabled = true

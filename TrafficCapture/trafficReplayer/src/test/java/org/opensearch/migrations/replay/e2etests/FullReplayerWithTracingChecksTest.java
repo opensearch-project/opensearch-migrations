@@ -5,6 +5,7 @@ import com.google.protobuf.Timestamp;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -50,6 +51,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     @ParameterizedTest
     @ValueSource(ints = {1, 2})
     @ResourceLock("TrafficReplayerRunner")
+    @Tag("longTest")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
         try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMinutes(10),

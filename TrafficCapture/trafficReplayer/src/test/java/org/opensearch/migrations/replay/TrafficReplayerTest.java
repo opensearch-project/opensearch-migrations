@@ -5,6 +5,7 @@ import com.google.protobuf.Timestamp;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -208,6 +209,7 @@ class TrafficReplayerTest extends InstrumentationTest {
     }
 
     @Test
+    @Tag("longTest")
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
     var uri = new URI("http://localhost:9200");
         try (var tr = new RootReplayerConstructorExtensions(rootContext,
