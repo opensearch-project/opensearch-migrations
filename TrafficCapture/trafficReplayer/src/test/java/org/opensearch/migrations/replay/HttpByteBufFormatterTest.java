@@ -146,7 +146,7 @@ public class HttpByteBufFormatterTest {
                                        HttpByteBufFormatter.HttpMessageType messageType,
                                        boolean usePooled) {
         var bbList = byteArrays.stream().map(b->TestUtilities.getByteBuf(b,usePooled)).collect(Collectors.toList());
-        var formattedString = HttpByteBufFormatter.httpPacketBufsToString(messageType, bbList.stream(), false);
+        var formattedString = HttpByteBufFormatter.httpPacketBufsToString(messageType, bbList.stream());
         bbList.forEach(bb->bb.release());
         return formattedString;
     }

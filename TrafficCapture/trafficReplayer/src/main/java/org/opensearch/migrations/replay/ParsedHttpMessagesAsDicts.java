@@ -1,14 +1,9 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.util.ReferenceCounted;
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import static org.opensearch.migrations.replay.util.ByteBufUtils.createCloseableByteBufStream;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.handler.codec.http.HttpHeaders;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -17,7 +12,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts.ITupleHandlingContext;
+import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 /**
  * TODO - This class will pull all bodies in as a byte[], even if that byte[] isn't
@@ -82,7 +82,7 @@ public class ParsedHttpMessagesAsDicts {
                         .map(d -> convertRequest(context, d)));
     }
 
-    public ParsedHttpMessagesAsDicts(IReplayContexts.ITupleHandlingContext context,
+    public ParsedHttpMessagesAsDicts(ITupleHandlingContext context,
                                      Optional<Map<String, Object>> sourceRequestOp1,
                                      Optional<Map<String, Object>> sourceResponseOp2,
                                      Optional<Map<String, Object>> targetRequestOp3,
@@ -100,11 +100,6 @@ public class ParsedHttpMessagesAsDicts {
                                              Optional<Map<String, Object>> targetResponseOp) {
         sourceResponseOp.ifPresent(r -> context.setSourceStatus((Integer) r.get(STATUS_CODE_KEY)));
         targetResponseOp.ifPresent(r -> context.setTargetStatus((Integer) r.get(STATUS_CODE_KEY)));
-    }
-
-
-    private static Stream<ByteBuf> byteToByteBufStream(List<byte[]> incoming) {
-        return incoming.stream().map(Unpooled::wrappedBuffer);
     }
 
     private static byte[] getBytesFromByteBuf(ByteBuf buf) {
@@ -138,17 +133,21 @@ public class ParsedHttpMessagesAsDicts {
                                                       @NonNull List<byte[]> data) {
         return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
-            var message = HttpByteBufFormatter.parseHttpRequestFromBufs(byteToByteBufStream(data), true);
-            try {
-                map.put("Request-URI", message.uri());
-                map.put("Method", message.method().toString());
-                map.put("HTTP-Version", message.protocolVersion().toString());
-                context.setMethod(message.method().toString());
-                context.setEndpoint(message.uri());
-                context.setHttpVersion(message.protocolVersion().toString());
-                return fillMap(map, message.headers(), message.content());
-            } finally {
-                Optional.ofNullable(message).ifPresent(ReferenceCounted::release);
+            try (var bufStream = createCloseableByteBufStream(data);
+                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpRequestFromBufs(bufStream))) {
+                var messageOp = messageHolder.get();
+                if (messageOp.isPresent()) {
+                    var message = messageOp.get();
+                    map.put("Request-URI", message.uri());
+                    map.put("Method", message.method().toString());
+                    map.put("HTTP-Version", message.protocolVersion().toString());
+                    context.setMethod(message.method().toString());
+                    context.setEndpoint(message.uri());
+                    context.setHttpVersion(message.protocolVersion().toString());
+                    return fillMap(map, message.headers(), message.content());
+                } else {
+                    return Map.of("Exception", "Message couldn't be parsed as a full http message");
+                }
             }
         });
     }
@@ -157,18 +156,19 @@ public class ParsedHttpMessagesAsDicts {
                                                        @NonNull List<byte[]> data, Duration latency) {
         return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
-            var message = HttpByteBufFormatter.parseHttpResponseFromBufs(byteToByteBufStream(data), true);
-            if (message == null) {
-                return Map.of("Exception", "Message couldn't be parsed as a full http message");
-            }
-            try {
-                map.put("HTTP-Version", message.protocolVersion());
-                map.put(STATUS_CODE_KEY, message.status().code());
-                map.put("Reason-Phrase", message.status().reasonPhrase());
-                map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
-                return fillMap(map, message.headers(), message.content());
-            } finally {
-                Optional.ofNullable(message).ifPresent(ReferenceCounted::release);
+            try (var bufStream = createCloseableByteBufStream(data);
+                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpResponseFromBufs(bufStream))) {
+                var messageOp = messageHolder.get();
+                if (messageOp.isPresent()) {
+                    var message = messageOp.get();
+                    map.put("HTTP-Version", message.protocolVersion());
+                    map.put(STATUS_CODE_KEY, message.status().code());
+                    map.put("Reason-Phrase", message.status().reasonPhrase());
+                    map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
+                    return fillMap(map, message.headers(), message.content());
+                } else {
+                        return Map.of("Exception", "Message couldn't be parsed as a full http message");
+                }
             }
         });
     }
