@@ -59,7 +59,7 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 'auth', version: '2.20.102'
     implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
     implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.20.127'
-    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.1.0'
+    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.9'
     implementation 'org.apache.commons:commons-compress:1.26.0'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
