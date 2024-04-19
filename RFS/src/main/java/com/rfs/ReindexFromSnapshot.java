@@ -88,6 +88,9 @@ public class ReindexFromSnapshot {
 
         @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
         public Level logLevel = Level.INFO;
+
+        @Parameter(names = {"--index_suffix"}, description = "An optional suffix to add to index names as they're transfered. Default: none", required = false)
+        public String indexSuffix = "";
     }
 
     public static void main(String[] args) throws InterruptedException {
@@ -118,6 +121,7 @@ public class ReindexFromSnapshot {
         List<String> componentTemplateWhitelist = arguments.componentTemplateWhitelist;
         MovementType movementType = arguments.movementType;
         Level logLevel = arguments.logLevel;
+        String indexSuffix = arguments.indexSuffix;
 
         Logging.setLevel(logLevel);
 
@@ -297,7 +301,7 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the indices...");
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
-                    String reindexName = indexMetadata.getName() + "_reindexed";
+                    String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
 
                     ObjectNode root = indexMetadata.toObjectNode();
@@ -355,7 +359,7 @@ public class ReindexFromSnapshot {
                         logger.info("Documents read successfully");
 
                         for (Document document : documents) {
-                            String targetIndex = indexMetadata.getName() + "_reindexed";
+                            String targetIndex = indexMetadata.getName() + indexSuffix;
                             DocumentReindexer.reindex(targetIndex, document, targetConnection);
                         }
                     }
