@@ -134,9 +134,8 @@ public class ParsedHttpMessagesAsDicts {
             var map = new LinkedHashMap<String, Object>();
             try (var bufStream = createCloseableByteBufStream(data);
                 var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpRequestFromBufs(bufStream))) {
-                var messageOp = messageHolder.get();
-                if (messageOp.isPresent()) {
-                    var message = messageOp.get();
+                var message = messageHolder.get();
+                if (message != null) {
                     map.put("Request-URI", message.uri());
                     map.put("Method", message.method().toString());
                     map.put("HTTP-Version", message.protocolVersion().toString());
@@ -157,9 +156,8 @@ public class ParsedHttpMessagesAsDicts {
             var map = new LinkedHashMap<String, Object>();
             try (var bufStream = createCloseableByteBufStream(data);
                 var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpResponseFromBufs(bufStream))) {
-                var messageOp = messageHolder.get();
-                if (messageOp.isPresent()) {
-                    var message = messageOp.get();
+                var message = messageHolder.get();
+                if (message != null) {
                     map.put("HTTP-Version", message.protocolVersion());
                     map.put(STATUS_CODE_KEY, message.status().code());
                     map.put("Reason-Phrase", message.status().reasonPhrase());

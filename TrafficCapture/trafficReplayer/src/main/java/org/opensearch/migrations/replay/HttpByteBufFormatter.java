@@ -95,9 +95,8 @@ public class HttpByteBufFormatter {
     public static String httpPacketsToPrettyPrintedString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
         boolean sortHeaders, String lineDelimiter) {
         try(var messageHolder = RefSafeHolder.create(parseHttpMessageFromBufs(msgType, byteBufStream))) {
-            final Optional<HttpMessage> httpMessageOp = messageHolder.get();
-            if (httpMessageOp.isPresent()) {
-                var httpMessage = httpMessageOp.get();
+            final HttpMessage httpMessage = messageHolder.get();
+            if (httpMessage != null) {
                 if (httpMessage instanceof FullHttpRequest) {
                     return prettyPrintNettyRequest((FullHttpRequest) httpMessage, sortHeaders, lineDelimiter);
                 } else if (httpMessage instanceof FullHttpResponse) {

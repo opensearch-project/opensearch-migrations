@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.util;
 
 import io.netty.util.ReferenceCountUtil;
-import java.util.Optional;
 import javax.annotation.Nullable;
 
 public class RefSafeHolder<T> implements AutoCloseable {
@@ -15,8 +14,8 @@ public class RefSafeHolder<T> implements AutoCloseable {
         return new RefSafeHolder<>(resource);
     }
 
-    public Optional<T> get() {
-        return Optional.ofNullable(resource);
+    public @Nullable T get() {
+        return resource;
     }
 
     @Override

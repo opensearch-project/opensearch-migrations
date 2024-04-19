@@ -73,8 +73,9 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     var messageHolder = RefSafeHolder.create(
                         HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
                             bufStream))) {
-                    Assertions.assertTrue(messageHolder.get().isPresent());
-                    var response = (FullHttpResponse) messageHolder.get().get();
+                    var message = messageHolder.get();
+                    Assertions.assertNotNull(message);
+                    var response = (FullHttpResponse) message;
                     Assertions.assertEquals(200, response.status().code());
                     var body = response.content();
                     Assertions.assertEquals(TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX +
