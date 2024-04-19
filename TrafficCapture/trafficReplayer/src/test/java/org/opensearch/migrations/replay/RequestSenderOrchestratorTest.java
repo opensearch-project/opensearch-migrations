@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+import static org.opensearch.migrations.replay.util.NettyUtils.createCloseableByteBufStream;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -16,7 +18,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
-import org.opensearch.migrations.replay.util.ByteBufUtils;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
@@ -68,7 +69,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 Assertions.assertNull(arr.error);
                 Assertions.assertTrue(arr.responseSizeInBytes > 0);
                 var packetBytesArr = arr.responsePackets.stream().map(SimpleEntry::getValue).collect(Collectors.toList());
-                try (var bufStream = ByteBufUtils.createCloseableByteBufStream(packetBytesArr);
+                try (var bufStream = createCloseableByteBufStream(packetBytesArr);
                     var messageHolder = RefSafeHolder.create(
                         HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
                             bufStream))) {

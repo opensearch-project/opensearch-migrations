@@ -1,6 +1,6 @@
 package org.opensearch.migrations.replay;
 
-import static org.opensearch.migrations.replay.util.ByteBufUtils.createCloseableByteBufStream;
+import static org.opensearch.migrations.replay.util.NettyUtils.createCloseableByteBufStream;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.http.HttpHeaders;

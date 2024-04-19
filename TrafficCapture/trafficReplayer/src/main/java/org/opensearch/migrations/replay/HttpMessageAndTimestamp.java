@@ -1,6 +1,6 @@
 package org.opensearch.migrations.replay;
 
-import static org.opensearch.migrations.replay.util.ByteBufUtils.createCloseableByteBufStream;
+import static org.opensearch.migrations.replay.util.NettyUtils.createCloseableByteBufStream;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;

@@ -6,12 +6,14 @@ import java.util.Collection;
 
 import java.util.stream.Stream;
 
-public interface ByteBufUtils {
-    static Stream<ByteBuf> createCloseableByteBufStream(Stream<byte[]> byteArrStream) {
+public final class NettyUtils {
+    public static Stream<ByteBuf> createCloseableByteBufStream(Stream<byte[]> byteArrStream) {
         return RefSafeStreamUtils.refSafeMap(byteArrStream, Unpooled::wrappedBuffer);
     }
 
-    static Stream<ByteBuf> createCloseableByteBufStream(Collection<byte[]> byteArrCollection) {
+    public static Stream<ByteBuf> createCloseableByteBufStream(Collection<byte[]> byteArrCollection) {
         return createCloseableByteBufStream(byteArrCollection.stream());
     }
+
+    private NettyUtils() {}
 }

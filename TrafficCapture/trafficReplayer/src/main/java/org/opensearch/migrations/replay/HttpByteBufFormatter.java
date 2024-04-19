@@ -21,7 +21,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.util.ByteBufUtils;
+import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 @Slf4j
@@ -70,7 +70,7 @@ public class HttpByteBufFormatter {
     public static String httpPacketBytesToString(HttpMessageType msgType, List<byte[]> byteArrs, String lineDelimiter) {
         // This isn't memory efficient,
         // but stringifying byte bufs through a full parse and reserializing them was already really slow!
-        try (var stream = ByteBufUtils.createCloseableByteBufStream(byteArrs)) {
+        try (var stream = NettyUtils.createCloseableByteBufStream(byteArrs)) {
             return httpPacketBufsToString(msgType, stream, lineDelimiter);
         }
     }
