@@ -17,5 +17,13 @@ public final class RefSafeStreamUtils {
         }).onClose(() -> refCountedTracker.forEach(ReferenceCounted::release));
     }
 
+    public static <T, R extends ReferenceCounted, U> U refSafeTransform(Stream<T> inputStream,
+        Function<T, R> transformCreatingReferenceTrackedObjects,
+        Function<Stream<R>, U> streamApplication) {
+        try (var mappedStream = refSafeMap(inputStream, transformCreatingReferenceTrackedObjects)) {
+            return streamApplication.apply(mappedStream);
+        }
+    }
+
     private RefSafeStreamUtils() {}
 }
