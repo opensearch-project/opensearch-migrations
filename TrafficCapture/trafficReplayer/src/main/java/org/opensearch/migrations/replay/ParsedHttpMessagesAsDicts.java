@@ -16,7 +16,6 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.IReplayContexts.ITupleHandlingContext;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 /**
@@ -82,7 +81,7 @@ public class ParsedHttpMessagesAsDicts {
                         .map(d -> convertRequest(context, d)));
     }
 
-    public ParsedHttpMessagesAsDicts(ITupleHandlingContext context,
+    public ParsedHttpMessagesAsDicts(IReplayContexts.ITupleHandlingContext context,
                                      Optional<Map<String, Object>> sourceRequestOp1,
                                      Optional<Map<String, Object>> sourceResponseOp2,
                                      Optional<Map<String, Object>> targetRequestOp3,
