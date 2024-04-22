@@ -38,6 +38,12 @@ dependencies {
     implementation 'org.apache.lucene:lucene-analyzers-common:8.11.3'
     implementation 'org.apache.lucene:lucene-backward-codecs:8.11.3'
     implementation 'software.amazon.awssdk:s3:2.25.16'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.10.2'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.2'
 }
 
 application {
@@ -111,3 +117,7 @@ task buildDockerImages {
 
 tasks.getByName('composeUp')
         .dependsOn(tasks.getByName('buildDockerImages'))
+
+test {
+    useJUnitPlatform()
+}
