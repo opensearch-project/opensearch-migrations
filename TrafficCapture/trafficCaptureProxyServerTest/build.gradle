@@ -54,6 +54,9 @@ dependencies {
         implementation('org.apache.tika:tika-core:1.28.4') {
             because 'mend security issue'
         }
+        implementation('com.jayway.jsonpath:json-path:2.9.0') {
+            because 'mend security issue'
+        }
     }
 }
 
