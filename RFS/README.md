@@ -7,10 +7,10 @@
         - [Using an existing S3 snapshot](#using-an-existing-s3-snapshot)
         - [Using a source cluster](#using-a-source-cluster)
         - [Using Docker](#using-docker)
+            - [Providing AWS permissions for S3 snapshot creation](#providing-aws-permissions-for-s3-snapshot-creation)
         - [Handling auth](#handling-auth)
     - [How to set up an ES 6.8 Source Cluster w/ an attached debugger](#how-to-set-up-an-es-68-source-cluster-w-an-attached-debugger)
     - [How to set up an ES 7.10 Source Cluster running in Docker](#how-to-set-up-an-es-710-source-cluster-running-in-docker)
-        - [Providing AWS permissions for S3 snapshot creation](#providing-aws-permissions-for-s3-snapshot-creation)
         - [Setting up the Cluster w/ some sample docs](#setting-up-the-cluster-w-some-sample-docs)
     - [How to set up an OS 2.11 Target Cluster](#how-to-set-up-an-os-211-target-cluster)
 
@@ -81,8 +81,8 @@ Also built into this Docker/Gradle support is the ability to spin up a testing R
 This environment can be spun up with the Gradle command, and use the optional `-Pdataset` flag to preload a dataset from the `generateDatasetStage` in the multi-stage Docker [here](docker/TestSource_ES_7_10/Dockerfile). This stage will take a few minutes to run on its first attempt if it is generating data, as it will be making requests with OSB. This will be cached for future runs.
 ```shell
 ./gradlew composeUp -Pdataset=default_osb_test_workloads
-
 ```
+
 And deleted with the Gradle command
 ```shell
 ./gradlew composeDown
@@ -91,15 +91,45 @@ And deleted with the Gradle command
 After the Docker compose containers are created the elasticsearch/opensearch source and target clusters can be interacted with like normal. For RFS testing, a user can also load custom templates/indices/documents into the source cluster before kicking off RFS.
 ```shell
 # To check indices on the source cluster
-curl http://localhost:19200/_cat/indices?v
+curl 'http://localhost:19200/_cat/indices?v'
 
 # To check indices on the target cluster
-curl http://localhost:29200/_cat/indices?v
+curl 'http://localhost:29200/_cat/indices?v'
 ```
 
 To kick off RFS:
 ```shell
 docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name test-snapshot --snapshot-local-repo-dir /snapshots --min-replicas 0 --lucene-dir '/lucene' --source-host http://elasticsearchsource:9200 --target-host http://opensearchtarget:9200 --source-version es_7_10 --target-version os_2_11"
+```
+
+#### Providing AWS permissions for S3 snapshot creation
+
+While the source cluster's container will have the `repository-s3` plugin installed out-of-the-box, to use it you'll need to provide AWS Credentials.  This plugin will either accept credential [from the Elasticsearch Keystore](https://www.elastic.co/guide/en/elasticsearch/plugins/7.10/repository-s3-client.html) or via the standard ENV variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`).  The issue w/ either approach in local testing is renewal of the timeboxed creds.  One possible solution is to use an IAM User, but that is generally frowned upon.  The approach we'll take here is to accept that the test cluster is temporary, so the creds can be as well.  Therefore, we can make an AWS IAM Role in our AWS Account with the creds it needs, assume it locally to generate the credential triple, and pipe that into the container using ENV variables.
+
+Start by making an AWS IAM Role (e.g. `arn:aws:iam::XXXXXXXXXXXX:role/testing-es-source-cluster-s3-access`) with S3 Full Access permissions in your AWS Account.  You can then get credentials with that identity good for up to one hour:
+
+```shell
+unset access_key && unset secret_key && unset session_token
+
+output=$(aws sts assume-role --role-arn "arn:aws:iam::XXXXXXXXXXXX:role/testing-es-source-cluster-s3-access" --role-session-name "ES-Source-Cluster")
+
+export access_key=$(echo $output | jq -r .Credentials.AccessKeyId)
+export secret_key=$(echo $output | jq -r .Credentials.SecretAccessKey)
+export session_token=$(echo $output | jq -r .Credentials.SessionToken)
+```
+
+The one hour limit is annoying but workable, given the only thing it's needed for is creating the snapshot at the very start of the RFS process.  This is primarily driven by the fact that IAM limits session durations to one hour when the role is assumed via another role (e.g. role chaining).  If your original creds in the AWS keyring are from an IAM User, etc, then this might not be a restriction for you and you can have up to 12 hours with the assumed creds.  Ideas on how to improve this would be greatly appreciated.
+
+Anyways, we pipe those ENV variables into the source cluster's container via the Docker Compose file, so you can just launch the test setup as normal: 
+
+```shell
+./gradlew composeUp -Pdataset=default_osb_test_workloads
+```
+
+If you need to renew the creds, you can just kill the existing source container, renew the creds, and spin up a new container.
+
+```
+./gradlew composeDown
 ```
 
 ### Handling auth
@@ -201,58 +231,7 @@ curl -X PUT "localhost:9200/_snapshot/fs_repository/global_state_snapshot?wait_f
 
 ## How to set up an ES 7.10 Source Cluster running in Docker
 
-The `./docker` directory contains a Dockerfile for an ES 7.10 cluster, which you can use for testing.  You can run it like so:
-
-```
-(cd ./docker/TestSource_ES_7_10; docker build . -t es-w-s3)
-
-docker run -d \
--p 9200:9200 \
--e discovery.type=single-node \
---name elastic-source \
-es-w-s3 \
-/bin/sh -c '/usr/local/bin/docker-entrypoint.sh eswrapper & wait -n'
-
-curl http://localhost:9200
-```
-
-### Providing AWS permissions for S3 snapshot creation
-
-While the container will have the `repository-s3` plugin installed out-of-the-box, to use it you'll need to provide AWS Credentials.  This plugin will either accept credential [from the Elasticsearch Keystore](https://www.elastic.co/guide/en/elasticsearch/plugins/7.10/repository-s3-client.html) or via the standard ENV variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`).  The issue w/ either approach in local testing is renewal of the timeboxed creds.  One possible solution is to use an IAM User, but that is generally frowned upon.  The approach we'll take here is to accept that the test cluster is temporary, so the creds can be as well.  Therefore, we can make an AWS IAM Role in our AWS Account with the creds it needs, assume it locally to generate the credential triple, and pipe that into the container using ENV variables.
-
-Start by making an AWS IAM Role (e.g. `arn:aws:iam::XXXXXXXXXXXX:role/testing-es-source-cluster-s3-access`) with S3 Full Access permissions in your AWS Account.  You can then get credentials with that identity good for up to one hour:
-
-```
-unset access_key && unset secret_key && unset session_token
-
-output=$(aws sts assume-role --role-arn "arn:aws:iam::XXXXXXXXXXXX:role/testing-es-source-cluster-s3-access" --role-session-name "ES-Source-Cluster")
-
-access_key=$(echo $output | jq -r .Credentials.AccessKeyId)
-secret_key=$(echo $output | jq -r .Credentials.SecretAccessKey)
-session_token=$(echo $output | jq -r .Credentials.SessionToken)
-```
-
-The one hour limit is annoying but workable, given the only thing it's needed for is creating the snapshot at the very start of the RFS process.  This is primarily driven by the fact that IAM limits session durations to one hour when the role is assumed via another role (e.g. role chaining).  If your original creds in the AWS keyring are from an IAM User, etc, then this might not be a restriction for you and you can have up to 12 hours with the assumed creds.  Ideas on how to improve this would be greatly appreciated.
-
-Anyways, you can then launch the container with those temporary credentials like so, using the :
-
-```
-docker run -d \
--p 9200:9200 \
--e discovery.type=single-node \
--e AWS_ACCESS_KEY_ID=$access_key \
--e AWS_SECRET_ACCESS_KEY=$secret_key \
--e AWS_SESSION_TOKEN=$session_token \
--v ~/.aws:/root/.aws:ro \
---name elastic-source \
-es-w-s3
-```
-
-If you need to renew the creds, you can just kill the existing source container, renew the creds, and spin up a new container.
-
-```
-docker stop elastic-source; docker rm elastic-source
-```
+It is recommended to use the Docker Compose setup described above in #using-docker
 
 ### Setting up the Cluster w/ some sample docs
 
