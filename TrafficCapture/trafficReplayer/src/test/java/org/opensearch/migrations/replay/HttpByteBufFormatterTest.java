@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import static org.opensearch.migrations.replay.util.RefSafeStreamUtils.refSafeTransform;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -8,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.replay.util.RefSafeStreamUtils;
 import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -146,7 +146,7 @@ public class HttpByteBufFormatterTest {
     private static String prettyPrintByteBufs(List<byte[]> byteArrays,
                                        HttpByteBufFormatter.HttpMessageType messageType,
                                        boolean usePooled) {
-        return refSafeTransform(byteArrays.stream(),
+        return RefSafeStreamUtils.refSafeTransform(byteArrays.stream(),
             b->TestUtilities.getByteBuf(b,usePooled),
             bbs -> HttpByteBufFormatter.httpPacketBufsToString(messageType, bbs));
 
