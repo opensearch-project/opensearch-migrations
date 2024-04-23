@@ -116,7 +116,11 @@ configurations.all {
             }
         }
         if (details.requested.group == 'io.netty') {
-            details.useVersion '4.1.100.Final'
+            if (details.requested.name == 'netty-codec-http') {
+                details.useVersion '4.1.108.Final'
+            } else {
+                details.useVersion '4.1.100.Final'
+            }
         }
     }
 }
