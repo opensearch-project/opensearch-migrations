@@ -110,6 +110,8 @@ allprojects {
             //  Disable parallel test execution, see MIGRATIONS-1666
             systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         }
+        systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
+        jvmArgs '-ea'
     }
 
     test {
