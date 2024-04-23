@@ -11,6 +11,7 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Object;
@@ -34,9 +35,9 @@ public class S3Repo implements SourceRepo {
         }
     }
 
-    private String findRepoFileUri() {
-        String bucketName = s3RepoUri.split("/")[2];
-        String prefix = s3RepoUri.split(bucketName + "/")[1];
+    protected String findRepoFileUri() {
+        String bucketName = getS3BucketName();
+        String prefix = getS3ObjectsPrefix();
 
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
                 .bucket(bucketName)
@@ -46,39 +47,47 @@ public class S3Repo implements SourceRepo {
         ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest);
 
         Optional<S3Object> highestVersionedIndexFile = listResponse.contents().stream()
-                .filter(s3Object -> s3Object.key().matches(".*/index-\\d+$")) // Regex to match index files
+                .filter(s3Object -> s3Object.key().matches(".*index-\\d+$")) // Regex to match index files
                 .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key())));
 
         return highestVersionedIndexFile
                 .map(s3Object -> "s3://" + bucketName + "/" + s3Object.key())
-                .orElse("No index files found in the specified directory.");
+                .orElse(null);
+    }
+
+    protected void ensureS3LocalDirectoryExists(Path localPath) throws IOException {
+        Files.createDirectories(localPath);
     }
 
     private void downloadFile(String s3Uri, Path localPath) throws IOException {
         logger.info("Downloading file from S3: " + s3Uri + " to " + localPath);
-        Files.createDirectories(localPath.getParent());
+        ensureS3LocalDirectoryExists(localPath.getParent());
 
         String bucketName = s3Uri.split("/")[2];
         String key = s3Uri.split(bucketName + "/")[1];
 
-        s3Client.getObject((req) -> req.bucket(bucketName).key(key), ResponseTransformer.toFile(localPath));
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(key)
+                .build();
+
+        s3Client.getObject(getObjectRequest, ResponseTransformer.toFile(localPath));
     }
 
-    public S3Repo(Path s3LocalDir, String s3Uri, String s3Region) {
-        this.s3LocalDir = s3LocalDir;
-
-        // Remove any trailing slash from the S3 URI
-        if (s3Uri.endsWith("/")) {
-            this.s3RepoUri = s3Uri.substring(0, s3Uri.length() - 1);
-        } else {
-            this.s3RepoUri = s3Uri;
-        }
-        
-        this.s3Region = s3Region;
-        this.s3Client = S3Client.builder()
-                .region(Region.of(this.s3Region))
+    public static S3Repo create(Path s3LocalDir, String s3Uri, String s3Region) {
+        S3Client s3Client = S3Client.builder()
+                .region(Region.of(s3Region))
                 .credentialsProvider(DefaultCredentialsProvider.create())
                 .build();
+
+        return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client);
+    }
+
+    public S3Repo(Path s3LocalDir, String s3Uri, String s3Region, S3Client s3Client) {
+        this.s3LocalDir = s3LocalDir;
+        this.s3RepoUri = s3Uri;        
+        this.s3Region = s3Region;
+        this.s3Client = s3Client;
     }
 
     public Path getRepoRootDir() {
@@ -88,7 +97,6 @@ public class S3Repo implements SourceRepo {
     public Path getSnapshotRepoDataFilePath() throws IOException {
         String repoFileS3Uri = findRepoFileUri();
         
-        // s3://bucket-name/path/to/index-1 => to/index-1
         String relativeFileS3Uri = repoFileS3Uri.substring(s3RepoUri.length() + 1);
 
         Path localFilePath = s3LocalDir.resolve(relativeFileS3Uri);
@@ -136,5 +144,21 @@ public class S3Repo implements SourceRepo {
         Path filePath = s3LocalDir.resolve(suffix);
         downloadFile(s3RepoUri + "/" + suffix, filePath);
         return filePath;
+    }
+
+    public String getS3BucketName() {
+         String[] parts = s3RepoUri.substring(5).split("/", 2);
+         return parts[0];
+    }
+
+    public String getS3ObjectsPrefix() {
+        String[] parts = s3RepoUri.substring(5).split("/", 2);
+        String prefix = parts.length > 1 ? parts[1] : "";
+
+        if (!prefix.isEmpty() && prefix.endsWith("/")) {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+
+        return prefix;
     }
 }

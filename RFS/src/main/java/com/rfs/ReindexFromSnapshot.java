@@ -163,7 +163,7 @@ public class ReindexFromSnapshot {
         if (snapshotDirPath != null) {
             repo = new FilesystemRepo(snapshotDirPath);
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
-            repo = new S3Repo(s3LocalDirPath, s3RepoUri, s3Region);
+            repo = S3Repo.create(s3LocalDirPath, s3RepoUri, s3Region);
         } else if (snapshotLocalRepoDirPath != null) {
             repo = new FilesystemRepo(snapshotLocalRepoDirPath);
         } else {
