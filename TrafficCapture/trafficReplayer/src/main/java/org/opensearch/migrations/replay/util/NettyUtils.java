@@ -9,13 +9,13 @@ import java.util.stream.Stream;
 
 public final class NettyUtils {
     @MustBeClosed
-    public static Stream<ByteBuf> createCloseableByteBufStream(Stream<byte[]> byteArrStream) {
+    public static Stream<ByteBuf> createRefCntNeutralCloseableByteBufStream(Stream<byte[]> byteArrStream) {
         return RefSafeStreamUtils.refSafeMap(byteArrStream, Unpooled::wrappedBuffer);
     }
 
     @MustBeClosed
-    public static Stream<ByteBuf> createCloseableByteBufStream(Collection<byte[]> byteArrCollection) {
-        return createCloseableByteBufStream(byteArrCollection.stream());
+    public static Stream<ByteBuf> createRefCntNeutralCloseableByteBufStream(Collection<byte[]> byteArrCollection) {
+        return createRefCntNeutralCloseableByteBufStream(byteArrCollection.stream());
     }
 
     private NettyUtils() {}

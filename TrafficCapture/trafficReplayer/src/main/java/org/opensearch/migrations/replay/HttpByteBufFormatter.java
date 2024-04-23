@@ -70,7 +70,7 @@ public class HttpByteBufFormatter {
     public static String httpPacketBytesToString(HttpMessageType msgType, List<byte[]> byteArrs, String lineDelimiter) {
         // This isn't memory efficient,
         // but stringifying byte bufs through a full parse and reserializing them was already really slow!
-        try (var stream = NettyUtils.createCloseableByteBufStream(byteArrs)) {
+        try (var stream = NettyUtils.createRefCntNeutralCloseableByteBufStream(byteArrs)) {
             return httpPacketBufsToString(msgType, stream, lineDelimiter);
         }
     }

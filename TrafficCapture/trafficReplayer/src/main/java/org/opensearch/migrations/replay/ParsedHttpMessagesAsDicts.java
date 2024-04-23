@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import static org.opensearch.migrations.replay.util.NettyUtils.createCloseableByteBufStream;
-
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.http.HttpHeaders;
 import java.time.Duration;
@@ -16,6 +14,7 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 /**
@@ -132,7 +131,7 @@ public class ParsedHttpMessagesAsDicts {
                                                       @NonNull List<byte[]> data) {
         return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
-            try (var bufStream = createCloseableByteBufStream(data);
+            try (var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(data);
                 var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpRequestFromBufs(bufStream))) {
                 var message = messageHolder.get();
                 if (message != null) {
@@ -154,7 +153,7 @@ public class ParsedHttpMessagesAsDicts {
                                                        @NonNull List<byte[]> data, Duration latency) {
         return makeSafeMap(context, () -> {
             var map = new LinkedHashMap<String, Object>();
-            try (var bufStream = createCloseableByteBufStream(data);
+            try (var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(data);
                 var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpResponseFromBufs(bufStream))) {
                 var message = messageHolder.get();
                 if (message != null) {

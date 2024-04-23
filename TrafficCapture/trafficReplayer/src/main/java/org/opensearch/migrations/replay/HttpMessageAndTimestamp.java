@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import static org.opensearch.migrations.replay.util.NettyUtils.createCloseableByteBufStream;
-
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Lombok;
@@ -14,6 +12,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.opensearch.migrations.replay.util.NettyUtils;
 
 @Slf4j
 @EqualsAndHashCode(exclude = "currentSegmentBytes")
@@ -66,7 +65,7 @@ public class HttpMessageAndTimestamp {
     }
 
     public String format(Optional<HttpByteBufFormatter.HttpMessageType> messageTypeOp) {
-        try (var bufStream = createCloseableByteBufStream(packetBytes)) {
+        try (var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(packetBytes)) {
             var packetBytesAsStr = messageTypeOp.map(mt-> HttpByteBufFormatter.httpPacketBytesToString(mt, packetBytes,
                     HttpByteBufFormatter.LF_LINE_DELIMITER))
                 .orElseGet(()-> HttpByteBufFormatter.httpPacketBufsToString(bufStream, Utils.MAX_PAYLOAD_SIZE_TO_PRINT));
