@@ -136,7 +136,7 @@ export class MigrationServiceCore extends Stack {
                 // and  "[ERROR] 2024-12-31 23:59:59..."
                 // and  "2024-12-31 23:59:59..."
                 multilinePattern: "^(\\[[A-Z ]{1,5}\\] )?\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}",
-                // Log appenders are non-blocking so defer async behavior to them
+                // Defer buffering behavior to log4j2 for greater flexibility
                 mode: AwsLogDriverMode.BLOCKING,
             }),
             ulimits: props.ulimits
