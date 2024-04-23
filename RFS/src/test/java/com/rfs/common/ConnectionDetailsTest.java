@@ -13,11 +13,11 @@ import org.junit.jupiter.params.provider.MethodSource;
 public class ConnectionDetailsTest {
     static Stream<Arguments> happyPathArgs() {
         return Stream.of(
-            Arguments.of("https://localhost:9200", "username", "pass", "https://localhost:9200", "username", "pass", ConnectionDetails.Protocol.HTTPS, "localhost", "9200"),
-            Arguments.of("http://localhost:9200", "username", "pass", "http://localhost:9200", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", "9200"),
-            Arguments.of("http://localhost:9200", null, null, "http://localhost:9200", null, null, ConnectionDetails.Protocol.HTTP, "localhost", "9200"),
+            Arguments.of("https://localhost:9200", "username", "pass", "https://localhost:9200", "username", "pass", ConnectionDetails.Protocol.HTTPS, "localhost", 9200),
+            Arguments.of("http://localhost:9200", "username", "pass", "http://localhost:9200", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", 9200),
+            Arguments.of("http://localhost:9200", null, null, "http://localhost:9200", null, null, ConnectionDetails.Protocol.HTTP, "localhost", 9200),
             Arguments.of("http://localhost", "username", "pass", "http://localhost", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", null),
-            Arguments.of("http://localhost:9200/longer/path", "username", "pass", "http://localhost:9200/longer/path", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", "9200"),
+            Arguments.of("http://localhost:9200/longer/path", "username", "pass", "http://localhost:9200/longer/path", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", 9200),
             Arguments.of(null, "username", "pass", null, "username", "pass", null, null, null)
         );
     }

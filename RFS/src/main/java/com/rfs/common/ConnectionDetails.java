@@ -17,7 +17,7 @@ public class ConnectionDetails {
     public final String url;
     public final Protocol protocol;
     public final String hostName;
-    public final String port;
+    public final int port;
     public final String username;
     public final String password;
     public final AuthType authType;
@@ -39,7 +39,7 @@ public class ConnectionDetails {
 
         if (url == null) {
             hostName = null;
-            port = null;
+            port = -1;
             protocol = null;
         } else {
             // Parse the URL to get the protocol, host name, and port
@@ -50,8 +50,8 @@ public class ConnectionDetails {
 
             hostName = urlParts[1].split(":")[0];
 
-            String [] portParts = urlParts[1].split(":");
-            port = portParts.length == 1 ? null : portParts[1].split("/")[0];
+            String[] portParts = urlParts[1].split(":");
+            port = portParts.length == 1 ? -1 : Integer.parseInt(portParts[1].split("/")[0]);
 
             if (urlParts[0].equals("http")) {
                 protocol = Protocol.HTTP;

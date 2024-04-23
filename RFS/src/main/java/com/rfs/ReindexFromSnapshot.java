@@ -14,6 +14,7 @@ import org.apache.lucene.document.Document;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
+import reactor.core.publisher.Flux;
 
 import com.rfs.common.*;
 import com.rfs.transformers.*;
@@ -355,18 +356,13 @@ public class ReindexFromSnapshot {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 
-                        List<Document> documents = LuceneDocumentsReader.readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
-                        logger.info("Documents read successfully");
-
-                        for (Document document : documents) {
-                            String targetIndex = indexMetadata.getName() + indexSuffix;
-                            DocumentReindexer.reindex(targetIndex, document, targetConnection);
-                        }
+                        Flux<Document> documents = LuceneDocumentsReader.readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
+                        String targetIndex = indexMetadata.getName() + indexSuffix;
+                        DocumentReindexer.reindex(targetIndex, documents, targetConnection);
+                        
+                        logger.info("Shard reindexing completed");
                     }
                 }
-
-                logger.info("Documents reindexed successfully");
-
                 logger.info("Refreshing newly added documents");
                 DocumentReindexer.refreshAllDocuments(targetConnection);
                 logger.info("Refresh complete");
