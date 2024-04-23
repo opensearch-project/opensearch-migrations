@@ -5,7 +5,7 @@ buildscript {
 }
 
 plugins {
-    id "io.freefair.lombok" version "8.0.1"
+    id 'io.freefair.lombok'
 }
 
 dependencies {
@@ -20,7 +20,7 @@ dependencies {
     testImplementation testFixtures(project(path: ':trafficReplayer'))
 
     testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    testImplementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
+    testImplementation group: 'io.netty', name: 'netty-all', version: versions.netty
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.9.3'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-params', version:'5.9.3'
     testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'

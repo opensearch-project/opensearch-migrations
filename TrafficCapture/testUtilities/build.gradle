@@ -22,7 +22,7 @@ plugins {
     id 'org.opensearch.migrations.java-library-conventions'
 //    id "com.github.spotbugs" version "4.7.3"
 //    id 'checkstyle'
-    id "io.freefair.lombok" version "8.0.1"
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
 }
 
@@ -46,7 +46,7 @@ dependencies {
 
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
     testFixturesImplementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
-    testFixturesImplementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
+    testFixturesImplementation group: 'io.netty', name: 'netty-all', version: versions.netty
     testFixturesImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
     testFixturesImplementation group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: '1.74'
     testFixturesImplementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.74'

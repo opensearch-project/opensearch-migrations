@@ -4,7 +4,7 @@
 
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id("io.freefair.lombok") version "8.0.1"
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
 }
 
@@ -20,7 +20,7 @@ sourceSets {
     }
 }
 dependencies {
-    api group: 'io.netty', name: 'netty-buffer', version: '4.1.100.Final'
+    api group: 'io.netty', name: 'netty-buffer', version: versions.netty
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')

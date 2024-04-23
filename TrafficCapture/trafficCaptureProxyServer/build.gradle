@@ -4,7 +4,7 @@
 
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
-    id("io.freefair.lombok") version "8.0.1"
+    id 'io.freefair.lombok'
 }
 
 configurations {
@@ -28,7 +28,7 @@ dependencies {
     implementation project(':captureKafkaOffloader')
     implementation project(':coreUtilities')
 
-    implementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
+    implementation group: 'io.netty', name: 'netty-all', version: versions.netty
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
