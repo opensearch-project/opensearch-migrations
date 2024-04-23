@@ -37,6 +37,11 @@ dependencies {
     implementation 'org.apache.lucene:lucene-core:8.11.3'
     implementation 'org.apache.lucene:lucene-analyzers-common:8.11.3'
     implementation 'org.apache.lucene:lucene-backward-codecs:8.11.3'
+
+    implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
+    implementation 'io.projectreactor.netty:reactor-netty-core' 
+    implementation 'io.projectreactor.netty:reactor-netty-http'
+}
     implementation 'software.amazon.awssdk:s3:2.25.16'
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'

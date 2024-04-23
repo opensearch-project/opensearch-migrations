@@ -34,7 +34,7 @@ public class RestClient {
     }
 
     public Response get(String path, boolean quietLogging) throws Exception {
-        String urlString = connectionDetails.host + "/" + path;
+        String urlString = connectionDetails.url + "/" + path;
         
         URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -76,7 +76,7 @@ public class RestClient {
     }
     
     public Response put(String path, String body, boolean quietLogging) throws Exception {
-        String urlString = connectionDetails.host + "/" + path;
+        String urlString = connectionDetails.url + "/" + path;
         
         URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();

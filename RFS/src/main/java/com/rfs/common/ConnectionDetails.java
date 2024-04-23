@@ -9,13 +9,21 @@ public class ConnectionDetails {
         NONE
     }
 
-    public final String host;
+    public static enum Protocol {
+        HTTP,
+        HTTPS
+    }
+
+    public final String url;
+    public final Protocol protocol;
+    public final String hostName;
+    public final String port;
     public final String username;
     public final String password;
     public final AuthType authType;
 
-    public ConnectionDetails(String host, String username, String password) {
-        this.host = host; // http://localhost:9200
+    public ConnectionDetails(String url, String username, String password) {
+        this.url = url; // http://localhost:9200
 
         // If the username is provided, the password must be as well, and vice versa
         if ((username == null && password != null) || (username != null && password == null)) {
@@ -28,5 +36,30 @@ public class ConnectionDetails {
 
         this.username = username;
         this.password = password;
+
+        if (url == null) {
+            hostName = null;
+            port = null;
+            protocol = null;
+        } else {
+            // Parse the URL to get the protocol, host name, and port
+            String[] urlParts = url.split("://");
+            if (urlParts.length != 2) {
+                throw new IllegalArgumentException("Invalid URL format");
+            }
+
+            hostName = urlParts[1].split(":")[0];
+
+            String [] portParts = urlParts[1].split(":");
+            port = portParts.length == 1 ? null : portParts[1].split("/")[0];
+
+            if (urlParts[0].equals("http")) {
+                protocol = Protocol.HTTP;
+            } else if (urlParts[0].equals("https")) {
+                protocol = Protocol.HTTPS;
+            } else {
+                throw new IllegalArgumentException("Invalid protocol");
+            }
+        }        
     }
 }

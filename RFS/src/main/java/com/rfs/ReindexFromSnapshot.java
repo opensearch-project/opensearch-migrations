@@ -125,7 +125,7 @@ public class ReindexFromSnapshot {
 
         Logging.setLevel(logLevel);
 
-        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
+        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);        
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         // Sanity checks
