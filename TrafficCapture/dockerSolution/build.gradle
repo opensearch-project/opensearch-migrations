@@ -14,6 +14,11 @@ def calculateDockerHash = { projectName ->
 dependencies {
     implementation project(':trafficCaptureProxyServer')
     implementation project(':trafficReplayer')
+    constraints {
+        implementation('software.amazon.awssdk:secretsmanager:2.25.19') {
+            because 'mend security issue'
+        }
+    }
 }
 
 def dockerFilesForExternalServices = [

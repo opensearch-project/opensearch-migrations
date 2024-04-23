@@ -46,6 +46,11 @@ dependencies {
     testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.7'
     testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.7'
     testImplementation group: 'org.testcontainers', name: 'toxiproxy', version: '1.19.7'
+    constraints {
+        testImplementation('org.apache.commons:commons-compress:1.26.0') {
+            because 'mend security issue'
+        }
+    }
 }
 
 tasks.withType(Tar){
