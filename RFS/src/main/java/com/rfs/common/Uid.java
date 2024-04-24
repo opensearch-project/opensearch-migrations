@@ -10,9 +10,9 @@ import org.apache.lucene.util.BytesRef;
  * See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/mapper/Uid.java#L32
  */
 public class Uid {
-    private static final int UTF8 = 0xff;
-    private static final int NUMERIC = 0xfe;
-    private static final int BASE64_ESCAPE = 0xfd;
+    public static final int UTF8 = 0xff;
+    public static final int NUMERIC = 0xfe;
+    public static final int BASE64_ESCAPE = 0xfd;
 
     private static String decodeNumericId(byte[] idBytes, int offset, int len) {
         assert Byte.toUnsignedInt(idBytes[offset]) == NUMERIC;
