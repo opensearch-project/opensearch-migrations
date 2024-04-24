@@ -1,5 +1,5 @@
 import {Construct} from "constructs";
-import {Stack, StackProps} from "aws-cdk-lib";
+import {Duration, Stack, StackProps} from "aws-cdk-lib";
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -170,6 +170,7 @@ export class StackComposer {
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
+        const trafficReplayerMaxUptime = this.getContextForType('trafficReplayerMaxUptime', 'string', defaultValues, contextJSON);
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
         const trafficReplayerUserAgentSuffix = this.getContextForType('trafficReplayerUserAgentSuffix', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
@@ -448,6 +449,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                maxUptime: trafficReplayerMaxUptime ? Duration.parse(trafficReplayerMaxUptime) : undefined,
                 ...props,
             })
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,

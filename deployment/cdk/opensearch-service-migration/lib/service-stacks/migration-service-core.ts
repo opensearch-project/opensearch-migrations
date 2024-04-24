@@ -13,10 +13,11 @@ import {
     Ulimit,
     OperatingSystemFamily,
     Volume,
-    AwsLogDriverMode
+    AwsLogDriverMode,
+    ContainerDependencyCondition
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
-import {RemovalPolicy, Stack} from "aws-cdk-lib";
+import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
@@ -46,7 +47,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly taskCpuUnits?: number,
     readonly taskMemoryLimitMiB?: number,
     readonly taskInstanceCount?: number,
-    readonly ulimits?: Ulimit[]
+    readonly ulimits?: Ulimit[],
+    readonly maxUptime?: Duration
 }
 
 export class MigrationServiceCore extends Stack {
@@ -145,6 +147,38 @@ export class MigrationServiceCore extends Stack {
         if (props.mountPoints) {
             serviceContainer.addMountPoints(...props.mountPoints)
         }
+
+        if (props.maxUptime) {
+            let maxUptimeSeconds = Math.max(props.maxUptime.toSeconds(), Duration.minutes(5).toSeconds());
+            let startupPeriodSeconds = 30;
+            // Add a separate container to monitor and fail healthcheck after a given maxUptime
+            const maxUptimeContainer = serviceTaskDef.addContainer("MaxUptimeContainer", {
+                image: ContainerImage.fromRegistry("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"), 
+                memoryLimitMiB: 64, 
+                entryPoint: [
+                    "/bin/sh",
+                    "-c",
+                    "sleep infinity"
+                ],
+                essential: true,
+                healthCheck: {
+                    command: [
+                        "CMD-SHELL",
+                        "UPTIME=$(awk '{print int($1)}' /proc/uptime); " +
+                        `test $UPTIME -gt ${startupPeriodSeconds} && ` +
+                        `test $UPTIME -lt ${maxUptimeSeconds}`
+                    ],
+                    timeout: Duration.seconds(2),
+                    retries: 1,
+                    startPeriod: Duration.seconds(startupPeriodSeconds * 2)
+                }
+            });
+            maxUptimeContainer.addContainerDependencies({
+                container: serviceContainer,
+                condition: ContainerDependencyCondition.START,
+            });
+        }
+
 
         let cloudMapOptions: CloudMapOptions|undefined = undefined
         if (props.serviceDiscoveryEnabled) {
