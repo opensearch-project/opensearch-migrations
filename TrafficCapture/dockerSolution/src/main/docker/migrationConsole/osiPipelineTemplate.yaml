@@ -1,0 +1,42 @@
+version: "2"
+pipeline_configurations:
+  aws:
+    secrets:
+      source-secret-config:
+        secret_id: "test-osi-secret-source"
+        region: <AWS_REGION_PLACEHOLDER>
+        sts_role_arn: <SOURCE_STS_ROLE_ARN_PLACEHOLDER>
+
+# NOTE: Placeholder values will be automatically populated and do not need to be changed
+historical-data-migration:
+
+  # Source cluster configuration
+  source:
+    opensearch:
+      hosts:
+      - <SOURCE_CLUSTER_ENDPOINT_PLACEHOLDER>
+      indices:
+        # Indices to exclude - exclude system indices by default
+        exclude:
+        - index_name_regex: \.*
+      #disable_authentication: true
+      username: "admin"
+      password: "${{aws_secrets:source-secret-config:password}}"
+      #connection:
+      #  insecure: true
+      #aws:
+      #  region: <AWS_REGION_PLACEHOLDER>
+      #  sts_role_arn: <SOURCE_STS_ROLE_ARN_PLACEHOLDER>
+
+  # Target cluster configuration
+  sink:
+  - opensearch:
+      hosts:
+      - <TARGET_CLUSTER_ENDPOINT_PLACEHOLDER>
+      # Derive index name from record metadata
+      index: ${getMetadata("opensearch-index")}
+      # Use the same document ID as the source cluster document
+      document_id: ${getMetadata("opensearch-document_id")}
+      aws:
+        region: <AWS_REGION_PLACEHOLDER>
+        sts_role_arn: <TARGET_STS_ROLE_ARN_PLACEHOLDER>
