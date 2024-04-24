@@ -63,7 +63,7 @@ class TestLuceneDocumentsReader extends LuceneDocumentsReader {
 
 public class LuceneDocumentsReaderTest {
     @Test
-    void testReadDocuments() {
+    void ReadDocuments_AsExpected() {
         // Use the TestLuceneDocumentsReader to get the mocked documents
         Flux<Document> documents = new TestLuceneDocumentsReader().readDocuments(Paths.get("/fake/path"), "testIndex", 1);
 
