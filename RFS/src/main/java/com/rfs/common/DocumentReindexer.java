@@ -35,7 +35,7 @@ public class DocumentReindexer {
         documentStream
             .map(DocumentReindexer::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
             .buffer(MAX_BATCH_SIZE) // Collect until you hit the batch size
-            .map(DocumentReindexer::convertToBulkJson)  // Assemble the bulk request body from the parts
+            .map(DocumentReindexer::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
             .flatMap(bulkJson -> sendBulkRequest(client, targetUrl, bulkJson)) // Send the request
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(5)))
             .subscribe(
@@ -52,7 +52,7 @@ public class DocumentReindexer {
         return action + "\n" + source;
     }
 
-    private static String convertToBulkJson(List<String> bulkSections) {
+    private static String convertToBulkRequestBody(List<String> bulkSections) {
         logger.info(bulkSections.size() + " documents in current bulk request");
         StringBuilder builder = new StringBuilder();
         for (String section : bulkSections) {
