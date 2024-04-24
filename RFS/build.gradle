@@ -70,7 +70,7 @@ task demoPrintOutSnapshot (type: JavaExec) {
     mainClass = 'com.rfs.DemoPrintOutSnapshot'
 }
 
-task copyDockerRuntimeJars (type: Copy) {
+task copyDockerRuntimeJars (type: Sync) {
     description = 'Copy runtime JARs and app jar to docker build directory'
 
     // Define the destination directory
