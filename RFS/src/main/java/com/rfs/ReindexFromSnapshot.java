@@ -356,10 +356,10 @@ public class ReindexFromSnapshot {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 
-                        Flux<Document> documents = LuceneDocumentsReader.readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
+                        Flux<Document> documents = new LuceneDocumentsReader().readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
                         String targetIndex = indexMetadata.getName() + indexSuffix;
                         DocumentReindexer.reindex(targetIndex, documents, targetConnection);
-                        
+
                         logger.info("Shard reindexing completed");
                     }
                 }

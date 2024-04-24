@@ -1,5 +1,8 @@
 package com.rfs.common;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+
 /**
  * Stores the connection details (assuming basic auth) for an Elasticsearch/OpenSearch cluster
  */
@@ -42,20 +45,19 @@ public class ConnectionDetails {
             port = -1;
             protocol = null;
         } else {
-            // Parse the URL to get the protocol, host name, and port
-            String[] urlParts = url.split("://");
-            if (urlParts.length != 2) {
-                throw new IllegalArgumentException("Invalid URL format");
+            URI uri;
+            try {
+                uri = new URI(url);
+            } catch (URISyntaxException e) {
+                throw new IllegalArgumentException("Invalid URL format", e);
             }
 
-            hostName = urlParts[1].split(":")[0];
+            hostName = uri.getHost();
+            port = uri.getPort(); // Default port can be set here if -1
 
-            String[] portParts = urlParts[1].split(":");
-            port = portParts.length == 1 ? -1 : Integer.parseInt(portParts[1].split("/")[0]);
-
-            if (urlParts[0].equals("http")) {
+            if (uri.getScheme().equals("http")) {
                 protocol = Protocol.HTTP;
-            } else if (urlParts[0].equals("https")) {
+            } else if (uri.getScheme().equals("https")) {
                 protocol = Protocol.HTTPS;
             } else {
                 throw new IllegalArgumentException("Invalid protocol");

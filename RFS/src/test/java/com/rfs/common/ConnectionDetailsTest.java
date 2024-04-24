@@ -16,9 +16,9 @@ public class ConnectionDetailsTest {
             Arguments.of("https://localhost:9200", "username", "pass", "https://localhost:9200", "username", "pass", ConnectionDetails.Protocol.HTTPS, "localhost", 9200),
             Arguments.of("http://localhost:9200", "username", "pass", "http://localhost:9200", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", 9200),
             Arguments.of("http://localhost:9200", null, null, "http://localhost:9200", null, null, ConnectionDetails.Protocol.HTTP, "localhost", 9200),
-            Arguments.of("http://localhost", "username", "pass", "http://localhost", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", null),
+            Arguments.of("http://localhost", "username", "pass", "http://localhost", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", -1),
             Arguments.of("http://localhost:9200/longer/path", "username", "pass", "http://localhost:9200/longer/path", "username", "pass", ConnectionDetails.Protocol.HTTP, "localhost", 9200),
-            Arguments.of(null, "username", "pass", null, "username", "pass", null, null, null)
+            Arguments.of(null, "username", "pass", null, "username", "pass", null, null, -1)
         );
     }
 
@@ -26,7 +26,7 @@ public class ConnectionDetailsTest {
     @MethodSource("happyPathArgs")
     void ConnectionDetails_HappyPath_AsExpected(String url, String username, String password,
             String expectedUrl, String expectedUsername, String expectedPassword,
-            ConnectionDetails.Protocol expectedProtocal, String expectedHostName, String expectedPort) {
+            ConnectionDetails.Protocol expectedProtocal, String expectedHostName, int expectedPort) {
         ConnectionDetails details = new ConnectionDetails(url, username, password);
         assertEquals(expectedUrl, details.url);
         assertEquals(expectedUsername, details.username);

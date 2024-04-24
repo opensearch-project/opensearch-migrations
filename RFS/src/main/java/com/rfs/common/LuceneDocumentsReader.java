@@ -15,17 +15,21 @@ import reactor.core.publisher.Flux;
 public class LuceneDocumentsReader {
     private static final Logger logger = LogManager.getLogger(LuceneDocumentsReader.class);
 
-    public static Flux<Document> readDocuments(Path luceneFilesBasePath, String indexName, int shardId) {
+    public Flux<Document> readDocuments(Path luceneFilesBasePath, String indexName, int shardId) {
         Path indexDirectoryPath = luceneFilesBasePath.resolve(indexName).resolve(String.valueOf(shardId));
 
         return Flux.using(
-            () -> DirectoryReader.open(FSDirectory.open(indexDirectoryPath)),
+            () -> openIndexReader(indexDirectoryPath),
             reader -> {
                 logger.info(reader.maxDoc() + " documents found in the current Lucene index");
 
                 return Flux.range(0, reader.maxDoc()) // Extract all the Documents in the IndexReader
-                           .map(i -> getDocument(reader, i))
-                           .cast(Document.class);
+                .handle((i, sink) -> {
+                    Document doc = getDocument(reader, i);
+                    if (doc != null) { // Skip malformed docs
+                        sink.next(doc);
+                    }
+                }).cast(Document.class);
             },
             reader -> { // Close the IndexReader when done
                 try {
@@ -34,16 +38,20 @@ public class LuceneDocumentsReader {
                     logger.error("Failed to close IndexReader", e);
                 }
             }
-        ).filter(doc -> doc != null); // Skip docs that failed to read
+        );
     }
 
-    private static Document getDocument(IndexReader reader, int docId) {
+    protected IndexReader openIndexReader(Path indexDirectoryPath) throws IOException {
+        return DirectoryReader.open(FSDirectory.open(indexDirectoryPath));
+    }
+
+    protected Document getDocument(IndexReader reader, int docId) {
         try {
             Document document = reader.document(docId);
             BytesRef source_bytes = document.getBinaryValue("_source");
             String id;
             try {
-                id = Uid.decodeId(reader.document(docId).getBinaryValue("_id").bytes);
+                id = Uid.decodeId(document.getBinaryValue("_id").bytes);
             } catch (Exception e) {
                 StringBuilder errorMessage = new StringBuilder();
                 errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
