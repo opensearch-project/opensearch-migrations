@@ -77,4 +77,8 @@ public class FilesystemRepo implements SourceRepo {
         Path filePath = shardDirPath.resolve(blobName);
         return filePath;
     }
+
+    public void prepBlobFiles(ShardMetadata.Data shardMetadata) throws IOException {
+        // No work necessary for local filesystem
+    }
 }

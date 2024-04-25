@@ -25,6 +25,11 @@ repositories {
     mavenCentral()
 }
 
+ext {
+    awsSdkVersion = '2.25.16'
+    dataset = findProperty('dataset') ?: 'skip_dataset'
+}
+
 dependencies {
     implementation 'com.beust:jcommander:1.81'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.2'
@@ -41,7 +46,11 @@ dependencies {
     implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
     implementation 'io.projectreactor.netty:reactor-netty-core' 
     implementation 'io.projectreactor.netty:reactor-netty-http'
-    implementation 'software.amazon.awssdk:s3:2.25.16'
+
+    implementation platform("software.amazon.awssdk:bom:$awsSdkVersion")
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:s3-transfer-manager'
+    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.18'
 
     testImplementation 'io.projectreactor:reactor-test:3.6.5'
     testImplementation 'org.apache.logging.log4j:log4j-core:2.23.1'
@@ -59,10 +68,6 @@ application {
 // Cleanup additional docker build directory
 clean.doFirst {
     delete project.file("./docker/build")
-}
-
-ext {
-    dataset = findProperty('dataset') ?: 'skip_dataset'
 }
 
 task demoPrintOutSnapshot (type: JavaExec) {
