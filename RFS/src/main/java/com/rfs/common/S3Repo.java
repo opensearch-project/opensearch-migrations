@@ -172,6 +172,7 @@ public class S3Repo implements SourceRepo {
 
         String blobFilesS3Prefix = s3RepoUri.key + "indices/" + shardMetadata.getIndexId() + "/" + shardMetadata.getShardId() + "/";
 
+        logger.info("Downloading blob files from S3: s3://" + s3RepoUri.bucketName + "/" + blobFilesS3Prefix + " to " + shardDirPath);
         DirectoryDownload directoryDownload = transferManager.downloadDirectory(
             DownloadDirectoryRequest.builder()
                 .destination(shardDirPath)
@@ -183,7 +184,9 @@ public class S3Repo implements SourceRepo {
         // Wait for the transfer to complete
         CompletedDirectoryDownload completedDirectoryDownload = directoryDownload.completionFuture().join();
 
+        logger.info("Blob file download(s) complete");
+
         // Print out any failed downloads
-        completedDirectoryDownload.failedTransfers().forEach(logger::warn);
+        completedDirectoryDownload.failedTransfers().forEach(logger::error);
     }
 }
