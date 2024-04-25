@@ -2,11 +2,20 @@ package org.opensearch.migrations.replay.util;
 
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.lucene.document.IntRange;
 import org.opensearch.migrations.replay.datatypes.FutureTransformer;
 
+import java.util.ArrayDeque;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.Optional;
-import java.util.PriorityQueue;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * This provides a simple implementation to sort incoming elements that are ordered by a sequence
@@ -28,16 +37,26 @@ import java.util.PriorityQueue;
 public class OnlineRadixSorter {
     @AllArgsConstructor
     private static class IndexedWork {
-        public final int index;
-        public final DiagnosticTrackableCompletableFuture<String,Void> signalingFuture;
-        public final DiagnosticTrackableCompletableFuture<String,Void> workCompletedFuture;
+        public final DiagnosticTrackableCompletableFuture<String,Void> signalingToStartFuture;
+        public DiagnosticTrackableCompletableFuture<String,? extends Object> workCompletedFuture;
+        public final DiagnosticTrackableCompletableFuture<String,Void> signalWorkCompletedFuture;
+
+        public <T> DiagnosticTrackableCompletableFuture<String,T>
+        addWorkFuture(FutureTransformer<T> processor, int index) {
+            var rval = processor.apply(signalingToStartFuture)
+                    .whenComplete((v,t)->
+                            signalWorkCompletedFuture.future.complete(null),
+                            ()->"Caller-task completion for idx=" + index);
+            workCompletedFuture = rval;
+            return rval;
+        }
     }
 
-    private final PriorityQueue<IndexedWork> items;
+    private final SortedMap<Integer,IndexedWork> items;
     int currentOffset;
 
     public OnlineRadixSorter(int startingOffset) {
-        items = new PriorityQueue<>(Comparator.comparingInt(iw->iw.index));
+        items = new TreeMap<>();
         currentOffset = startingOffset;
     }
 
@@ -54,41 +73,47 @@ public class OnlineRadixSorter {
      * @return
      */
     public <T> DiagnosticTrackableCompletableFuture<String,T>
-    addFutureForWork(int index, FutureTransformer<T> processor) {
-        var signalFuture = new StringTrackableCompletableFuture<Void>("OnlineRadixSorter signal future #" + index);
-        var continueFuture = processor.apply(signalFuture);
-
-        // purposefully use getDeferredFutureThroughHandle to do type erasure on T to get it back to Void
-        // since the caller is creating a DCF<T> for their needs.  However, type T will only come up again
-        // as per the work that was set within the processor.  There's no benefit to making the underlying
-        // datastore aware of that T, hence the erasure.
-        var workBundle = new IndexedWork(index, signalFuture,
-                continueFuture.thenApply(v->{
-                            log.atDebug().setMessage(()->"Increasing currentOffset to " + currentOffset +
-                                    " for " + System.identityHashCode(this)).log();
-                    items.remove();
+    addFutureForWork(final int index, FutureTransformer<T> processor) {
+        var oldWorkItem = items.get(index);
+        if (oldWorkItem == null) {
+            if (index < currentOffset) {
+                throw new IllegalArgumentException("index (" + index + ")" +
+                        " must be > last processed item (" + currentOffset + ")");
+            }
+            for (int nextKey = Math.max(currentOffset, items.isEmpty() ? 0 : items.lastKey()+1);
+                 nextKey<=index;
+                 ++nextKey) {
+                int finalNextKey = nextKey;
+                var signalFuture = items.isEmpty() ?
+                        new StringTrackableCompletableFuture<Void>(
+                                CompletableFuture.completedFuture(null), "unlinked signaling future") :
+                        items.get(items.lastKey()).signalWorkCompletedFuture
+                                .thenAccept(v-> {},
+                                        ()->"Kickoff for slot #" + finalNextKey);
+                oldWorkItem = new IndexedWork(signalFuture, null,
+                        new StringTrackableCompletableFuture<Void>(()->"Work to finish for slot #" + finalNextKey +
+                                " is awaiting [" + getAwaitingTextUpTo(index) + "]"));
+                oldWorkItem.signalWorkCompletedFuture.whenComplete((v,t)->{
                     ++currentOffset;
-                    pullNextWorkItemOrDoNothing();
-                    return null;
-                        }, () -> "Bumping currentOffset and checking if the next items should be signaled"));
-        items.add(workBundle);
-        if (index == this.currentOffset) {
-            pullNextWorkItemOrDoNothing();
+                    items.remove(finalNextKey);
+                    }, ()->"cleaning up spent work for idx #" + finalNextKey);
+                items.put(nextKey, oldWorkItem);
+            }
         }
-        return continueFuture;
+        return oldWorkItem.addWorkFuture(processor, index);
     }
 
-    private void pullNextWorkItemOrDoNothing() {
-        Optional.ofNullable(items.isEmpty() ? null : items.peek())
-                .filter(indexedWork -> indexedWork.index == currentOffset)
-                .ifPresent(indexedWork -> {
-                    var firstSignal = indexedWork.signalingFuture.future.complete(null);
-                    assert firstSignal : "expected only this function to signal completion of the signaling future " +
-                            "and for it to only be called once";
-                });
+    public String getAwaitingTextUpTo(int upTo) {
+        return "slotsOutstanding:" +
+                IntStream.range(0, upTo-currentOffset)
+                .map(i->upTo-i-1)
+                .mapToObj(i -> Optional.ofNullable(items.get(i))
+                        .flatMap(wi->Optional.ofNullable(wi.workCompletedFuture))
+                        .map(ignored->"")
+                        .orElse(i+""))
+                .filter(s->!s.isEmpty())
+                .collect(Collectors.joining(","));
     }
-
-    public boolean hasPending() { return !items.isEmpty(); }
 
     @Override
     public String toString() {
@@ -99,6 +124,8 @@ public class OnlineRadixSorter {
         sb.append('}');
         return sb.toString();
     }
+
+    public boolean hasPending() { return !items.isEmpty(); }
 
     public long numPending() {
         return items.size();

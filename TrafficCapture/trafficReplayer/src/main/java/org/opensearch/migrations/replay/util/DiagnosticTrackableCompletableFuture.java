@@ -163,9 +163,8 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     }
 
     public <U> DiagnosticTrackableCompletableFuture<D, U>
-    handle(@NonNull BiFunction<? super T, Throwable, ? extends U> fn,
-                             @NonNull  Supplier<D> diagnosticSupplier) {
-        CompletableFuture<U> newCf = this.future.handle(fn::apply);
+    handle(@NonNull BiFunction<? super T, Throwable, ? extends U> fn, @NonNull  Supplier<D> diagnosticSupplier) {
+        CompletableFuture<U> newCf = this.future.handle(fn);
         return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
     }
 

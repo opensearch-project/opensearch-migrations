@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
@@ -118,6 +119,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 lastEndTime.plus(Duration.ofMillis(100)));
 
         Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledRequests.size());
+        var reversedScheduledRequests = new ArrayList<>(scheduledRequests);
+        Collections.reverse(reversedScheduledRequests);
         for (int i = 0; i < scheduledRequests.size(); ++i) {
             for (int j = 0; j<NUM_PACKETS+1; ++j) {
                 var pktConsumer = connectionToConsumerMap.get((long)i);
@@ -126,8 +129,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 int finalI = i;
                 int finalJ = j;
                 log.atInfo().setMessage(() -> "cf @ " + finalI + "," + finalJ + " =\n" +
-                        scheduledRequests.stream().map(sr-> getParentsDiagnosticString(sr, ""))
-                                .collect(Collectors.joining("\n")))
+                                reversedScheduledRequests.stream().map(sr-> getParentsDiagnosticString(sr, ""))
+                                        .collect(Collectors.joining("\n---\n")))
                         .log();
                 pktConsumer.consumeIsReady.release();
             }
