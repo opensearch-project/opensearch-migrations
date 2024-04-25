@@ -6,6 +6,7 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
@@ -135,7 +136,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                                                  Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws InterruptedException, ExecutionException {
 
-        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool);
+        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool, NettyPacketToHttpConsumer::new);
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
 
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =

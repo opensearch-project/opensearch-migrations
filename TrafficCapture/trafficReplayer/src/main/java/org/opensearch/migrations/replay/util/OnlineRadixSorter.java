@@ -55,7 +55,7 @@ public class OnlineRadixSorter {
      */
     public <T> DiagnosticTrackableCompletableFuture<String,T>
     addFutureForWork(int index, FutureTransformer<T> processor) {
-        var signalFuture = new StringTrackableCompletableFuture<Void>("signaling future");
+        var signalFuture = new StringTrackableCompletableFuture<Void>("OnlineRadixSorter signal future #" + index);
         var continueFuture = processor.apply(signalFuture);
 
         // purposefully use getDeferredFutureThroughHandle to do type erasure on T to get it back to Void

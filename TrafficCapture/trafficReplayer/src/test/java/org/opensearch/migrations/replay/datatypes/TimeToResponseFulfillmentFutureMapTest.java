@@ -27,7 +27,7 @@ class TimeToResponseFulfillmentFutureMapTest {
             if (t == null) {
                 break;
             }
-            t.getValue().scheduleFuture.future.complete(null);
+            t.scheduleFuture.future.complete(null);
             timeMap.removeFirstItem();
         }
         lastWorkFuture.get();

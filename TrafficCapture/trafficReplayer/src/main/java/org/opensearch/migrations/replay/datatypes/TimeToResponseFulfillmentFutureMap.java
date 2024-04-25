@@ -1,12 +1,9 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import java.time.Instant;
-import java.util.AbstractMap;
 import java.util.ArrayDeque;
-import java.util.Collection;
-import java.util.Map;
+import java.util.Deque;
 import java.util.StringJoiner;
-import java.util.TreeMap;
 
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
@@ -14,41 +11,31 @@ import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 public class TimeToResponseFulfillmentFutureMap {
 
     public static class FutureWorkPoint {
+        public final Instant startTime;
         public final DiagnosticTrackableCompletableFuture<String, Void> scheduleFuture;
         private final ChannelTaskType channelTaskType;
         public FutureWorkPoint(Instant forTime, ChannelTaskType taskType) {
+            startTime = forTime;
             scheduleFuture = new StringTrackableCompletableFuture<>("scheduled start for " + forTime);
             channelTaskType = taskType;
         }
     }
 
-    TreeMap<Instant, ArrayDeque<FutureWorkPoint>> timeToRunnableMap = new TreeMap<>();
+    Deque<FutureWorkPoint> timeToRunnableMap = new ArrayDeque<>();
 
     public FutureWorkPoint appendTaskTrigger(Instant start, ChannelTaskType taskType) {
-        assert timeToRunnableMap.keySet().stream().allMatch(t->!t.isAfter(start));
-        var existing = timeToRunnableMap.computeIfAbsent(start, k->new ArrayDeque<>());
+        assert timeToRunnableMap.stream().map(fwp->fwp.startTime).allMatch(t->!t.isAfter(start));
         var fpp = new FutureWorkPoint(start, taskType);
-        existing.offer(fpp);
+        timeToRunnableMap.offer(fpp);
         return fpp;
     }
 
-    public Map.Entry<Instant, FutureWorkPoint> peekFirstItem() {
-        var e = timeToRunnableMap.firstEntry();
-        return e == null ? null : new AbstractMap.SimpleEntry<>(e.getKey(), e.getValue().peek());
+    public FutureWorkPoint peekFirstItem() {
+        return timeToRunnableMap.peekFirst();
     }
 
     public Instant removeFirstItem() {
-        var e = timeToRunnableMap.firstEntry();
-        if (e != null) {
-            var q = e.getValue();
-            q.remove();
-            if (q.isEmpty()) {
-                timeToRunnableMap.remove(e.getKey());
-            }
-            return e.getKey();
-        } else {
-            return null;
-        }
+        return timeToRunnableMap.isEmpty() ? null : timeToRunnableMap.pop().startTime;
     }
 
     public boolean isEmpty() {
@@ -59,14 +46,12 @@ public class TimeToResponseFulfillmentFutureMap {
         if (timeToRunnableMap.isEmpty()) {
             return false;
         } else {
-            return timeToRunnableMap.values().stream()
-                    .flatMap(Collection::stream)
-                    .anyMatch(fwp->fwp.channelTaskType==ChannelTaskType.TRANSMIT);
+            return timeToRunnableMap.stream().anyMatch(fwp->fwp.channelTaskType==ChannelTaskType.TRANSMIT);
         }
     }
 
     public long calculateSizeSlowly() {
-        return timeToRunnableMap.values().stream().map(ArrayDeque::size).mapToInt(x->x).sum();
+        return timeToRunnableMap.size();
     }
 
     @Override
@@ -78,11 +63,11 @@ public class TimeToResponseFulfillmentFutureMap {
         if (timeToRunnableMap.isEmpty()) {
             return "";
         } else if (timeToRunnableMap.size() == 1) {
-            return timeToRunnableMap.firstKey().toString();
+            return timeToRunnableMap.peekFirst().startTime.toString();
         } else {
             return new StringJoiner("...")
-                    .add(timeToRunnableMap.firstKey().toString())
-                    .add(timeToRunnableMap.lastKey().toString())
+                    .add(timeToRunnableMap.peekFirst().startTime.toString())
+                    .add(timeToRunnableMap.peekLast().toString())
                     .toString();
         }
     }

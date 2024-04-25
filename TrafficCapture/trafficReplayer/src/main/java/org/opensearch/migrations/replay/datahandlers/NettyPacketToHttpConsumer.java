@@ -288,7 +288,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         System.identityHashCode(packetData) + "): " + httpContext() + ": " +
                         packetData.toString(StandardCharsets.UTF_8)).log();
                 return writePacketAndUpdateFuture(packetData).whenComplete((v2,t2)->{
-                    log.atDebug().setMessage(()->"finished writing " + httpContext() + " t=" + t2).log();
+                    log.atTrace().setMessage(()->"finished writing " + httpContext() + " t=" + t2).log();
                 }, ()->"");
             } else {
                 log.atWarn().setMessage(()-> httpContext().getReplayerRequestKey() +
