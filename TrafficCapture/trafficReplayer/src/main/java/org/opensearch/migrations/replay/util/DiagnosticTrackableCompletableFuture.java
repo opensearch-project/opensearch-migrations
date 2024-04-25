@@ -6,8 +6,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
-import java.util.AbstractMap;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -40,9 +38,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
     protected AtomicReference<DiagnosticTrackableCompletableFuture<D,T>> innerComposedPendingCompletableFutureReference;
     @Getter
     public final Supplier<D> diagnosticSupplier;
-    // TODO: Clear this once it has been completed to prevemt chains with
-    //  thousands/millions of items that are no longer needed
-    protected final DiagnosticTrackableCompletableFuture<D, ?> dependencyDiagnosticFuture;
+    protected final AtomicReference<DiagnosticTrackableCompletableFuture<D, ?>> parentDiagnosticFutureRef;
 
     private DiagnosticTrackableCompletableFuture() {
         throw new IllegalCallerException();
@@ -73,12 +69,51 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
             DiagnosticTrackableCompletableFuture<D,?> parentFuture) {
         this.future = future;
         this.diagnosticSupplier = diagnosticSupplier;
-        this.dependencyDiagnosticFuture = parentFuture;
+        this.parentDiagnosticFutureRef = new AtomicReference<>();
+        setParentDiagnosticFuture(parentFuture);
     }
 
     public DiagnosticTrackableCompletableFuture(@NonNull CompletableFuture<T> future,
                                                 @NonNull Supplier<D> diagnosticSupplier) {
         this(future, diagnosticSupplier, null);
+    }
+
+    public DiagnosticTrackableCompletableFuture<D, ?> getParentDiagnosticFuture() {
+        var p = parentDiagnosticFutureRef.get();
+        if (future.isDone() && p != null) {
+            p.setParentDiagnosticFuture(null);
+        }
+        return p;
+    }
+
+    protected void setParentDiagnosticFuture(DiagnosticTrackableCompletableFuture<D,?> parent) {
+        if (parent == null) {
+            parentDiagnosticFutureRef.set(null);
+            return;
+        }
+        var wasSet = parentDiagnosticFutureRef.compareAndSet(null, parent);
+        if (!wasSet) {
+            throw new IllegalStateException("dependencyDiagnosticFutureRef was already set to " +
+                    parentDiagnosticFutureRef.get());
+        }
+        // the parent is a pretty good breadcrumb for the current stack... but the grandparent of the most recently
+        // finished ancestor begins to have diminished value immediately, so cut the ancestry tree at this point
+        future.whenComplete((v, t) -> {
+            Optional.ofNullable(getParentDiagnosticFuture())
+                    .ifPresent(p->p.setParentDiagnosticFuture(null));
+        });
+    }
+
+    /**
+     * @throws IllegalStateException if the dependentFuture has already been passed to this method
+     * before or if it has already been marked as completed or was initialized with a parent.
+     */
+    public DiagnosticTrackableCompletableFuture<D,T>
+    propagateCompletionToDependentFuture(DiagnosticTrackableCompletableFuture<D,?> dependentFuture,
+                                         BiConsumer<CompletableFuture<T>, CompletableFuture<?>> consume,
+                                         @NonNull Supplier<D> diagnosticSupplier) {
+        dependentFuture.setParentDiagnosticFuture(this);
+        return this.whenComplete((v,t) -> consume.accept(this.future, dependentFuture.future), diagnosticSupplier);
     }
 
     public DiagnosticTrackableCompletableFuture<D,T> getInnerComposedPendingCompletableFuture() {
@@ -197,7 +232,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
                 .takeWhile(x -> x == 1)
                 .mapToObj(i -> {
                     var dcf = chainHeadReference.get();
-                    chainHeadReference.set(dcf.dependencyDiagnosticFuture);
+                    chainHeadReference.set(dcf.getParentDiagnosticFuture());
                     return dcf;
                 });
     }

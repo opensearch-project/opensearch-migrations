@@ -2,17 +2,11 @@ package org.opensearch.migrations.replay.util;
 
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.lucene.document.IntRange;
 import org.opensearch.migrations.replay.datatypes.FutureTransformer;
 
-import java.util.ArrayDeque;
-import java.util.Comparator;
-import java.util.Deque;
 import java.util.Optional;
 import java.util.SortedMap;
-import java.util.SortedSet;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -43,10 +37,9 @@ public class OnlineRadixSorter {
 
         public <T> DiagnosticTrackableCompletableFuture<String,T>
         addWorkFuture(FutureTransformer<T> processor, int index) {
-            var rval = processor.apply(signalingToStartFuture)
-                    .whenComplete((v,t)->
-                            signalWorkCompletedFuture.future.complete(null),
-                            ()->"Caller-task completion for idx=" + index);
+            var rval = processor.apply(signalingToStartFuture).propagateCompletionToDependentFuture(signalWorkCompletedFuture,
+                    (processedCf, dependentCf) -> dependentCf.complete(null),
+                    ()->"Caller-task completion for idx=" + index);
             workCompletedFuture = rval;
             return rval;
         }
@@ -86,7 +79,8 @@ public class OnlineRadixSorter {
                 int finalNextKey = nextKey;
                 var signalFuture = items.isEmpty() ?
                         new StringTrackableCompletableFuture<Void>(
-                                CompletableFuture.completedFuture(null), "unlinked signaling future") :
+                                CompletableFuture.completedFuture(null),
+                                "unlinked signaling future for slot #" + finalNextKey) :
                         items.get(items.lastKey()).signalWorkCompletedFuture
                                 .thenAccept(v-> {},
                                         ()->"Kickoff for slot #" + finalNextKey);

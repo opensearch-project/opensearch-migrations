@@ -85,7 +85,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
     public void testFutureGraphBuildout() throws Exception {
         final int NUM_REQUESTS_TO_SCHEDULE = 2;
         final int NUM_REPEATS = 1;
-        final int NUM_PACKETS = 1;
+        final int NUM_PACKETS = 3;
 
         var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(new URI("http://localhost"),
                 false, 1, "testFutureGraphBuildout targetConnectionPool",
@@ -150,7 +150,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                                 getParentsDiagnosticString(idf, indent+" ") + "\n" + indent + ">\n")
                         .orElse("") +
                         indent + dcf.diagnosticSupplier.get() +
-                        "[" + System.identityHashCode(dcf) + "]" +
+                        " [" + System.identityHashCode(dcf) + "]" +
                         ": " + dcf.isDone())
                 .collect(Collectors.joining(";\n"));
     }

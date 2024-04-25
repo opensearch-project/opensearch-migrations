@@ -63,10 +63,11 @@ class StringTrackableCompletableFutureTest {
         Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[^]<-" + id1 + "A[^]", stcf3.toString());
         Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[11]<-" + id1 + "A[1]",
                 stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
+        // A is clipped because of grandparent culling
         notifyAndCheckNewDiagnosticValue(stcf3, notifier3,
-                id3 + "C[^]<-" + id2  +"B[^]<-" + id1 + "A[^]");
+                id3 + "C[^]<-" + id2  +"B[^]");
         Assertions.assertEquals(id1 + "A[^]", stcf1.toString());
-        Assertions.assertEquals(id2 + "B[^]<-" + id1 + "A[^]", stcf2.toString());
+        Assertions.assertEquals(id2 + "B[^]", stcf2.toString());
 
     }
 
