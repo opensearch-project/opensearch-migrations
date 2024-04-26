@@ -313,9 +313,9 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             // COS checked for unbounded limit above
             int availableCOSSpace = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
             int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : byteBuffer.limit() - byteBuffer.position();
-            ByteBuffer bb = byteBuffer.slice();
+            ByteBuffer bb = byteBuffer.duplicate();
             bb.limit(chunkBytes);
-            bb = bb.slice();
+            bb = bb.duplicate();
             byteBuffer.position(byteBuffer.position() + chunkBytes);
             addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, timestamp, bb);
             int minExpectedSpaceAfterObservation = availableCOSSpace - chunkBytes - trafficStreamOverhead;

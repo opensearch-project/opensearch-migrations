@@ -210,7 +210,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     var body = response.content();
                     Assertions.assertEquals(TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX +
                                     TestHttpServerContext.getUriForIthRequest(i / NUM_REPEATS),
-                        body.duplicate().toString(StandardCharsets.UTF_8));
+                        body.toString(StandardCharsets.UTF_8));
                 }
             }
             closeFuture.get();

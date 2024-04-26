@@ -370,18 +370,18 @@ class StreamChannelConnectionCaptureSerializerTest {
                     "Unknown outputStreamHolder sent back to StreamManager: " + outputStreamHolder);
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
-            log.trace("Getting ready to flush for " + osh);
-            log.trace("Bytes written so far... " + StandardCharsets.UTF_8.decode(osh.getByteBuffer().duplicate()));
+            log.atTrace().log(() -> "Getting ready to flush for " + osh);
+            log.atTrace().log(() -> "Bytes written so far... " + StandardCharsets.UTF_8.decode(osh.getByteBuffer().duplicate()));
 
             return CompletableFuture.runAsync(() -> {
                 try {
                     osh.getOutputStream().flush();
-                    log.trace("Just flushed for " + osh.getOutputStream());
+                    log.atTrace().log(() -> "Just flushed for " + osh.getOutputStream());
                     var bb = osh.getByteBuffer();
                     bb.position(0);
                     var bytesWritten = osh.getOutputStream().getTotalBytesWritten();
                     bb.limit(bytesWritten);
-                    log.trace("Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
+                    log.atTrace().log(() -> "Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
                     outputBuffers.add(bb);
                 } catch (IOException e) {
                     throw Lombok.sneakyThrow(e);
