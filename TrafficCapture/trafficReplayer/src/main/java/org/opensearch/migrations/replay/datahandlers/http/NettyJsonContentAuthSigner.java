@@ -12,11 +12,11 @@ import java.util.List;
 public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     IAuthTransformer.StreamingFullMessageTransformer signer;
     HttpJsonMessageWithFaultingPayload httpMessage;
-    List<HttpContent> receivedHttpContents;
+    List<HttpContent> httpContentsBuffer;
 
     public NettyJsonContentAuthSigner(IAuthTransformer.StreamingFullMessageTransformer signer) {
         this.signer = signer;
-        this.receivedHttpContents = new ArrayList<>();
+        this.httpContentsBuffer = new ArrayList<>();
     }
 
     @Override
@@ -24,23 +24,36 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
             httpMessage = (HttpJsonMessageWithFaultingPayload) msg;
         } else if (msg instanceof HttpContent) {
-            receivedHttpContents.add(((HttpContent) msg).retainedDuplicate());
             var httpContent = (HttpContent) msg;
+            httpContentsBuffer.add(httpContent);
             signer.consumeNextPayloadPart(httpContent.content().nioBuffer());
             if  (msg instanceof LastHttpContent) {
-                finalizeSignature(ctx);
+                signer.finalizeSignature(httpMessage);
+                flushDownstream(ctx);
             }
         } else {
             super.channelRead(ctx, msg);
         }
     }
 
-    private void finalizeSignature(ChannelHandlerContext ctx) {
-        signer.finalizeSignature(httpMessage);
-        ctx.fireChannelRead(httpMessage);
-        receivedHttpContents.stream().forEach(content->{
-            ctx.fireChannelRead(content);
-            content.content().release();
-        });
+    private void flushDownstream(ChannelHandlerContext ctx) {
+        if(httpMessage != null) {
+            ctx.fireChannelRead(httpMessage);
+            httpMessage = null;
+        }
+        httpContentsBuffer.forEach(ctx::fireChannelRead);
+        httpContentsBuffer.clear();
+    }
+
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        flushDownstream(ctx);
+        super.handlerRemoved(ctx);
+    }
+
+    @Override
+    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        flushDownstream(ctx);
+        super.channelUnregistered(ctx);
     }
 }
