@@ -52,4 +52,17 @@ class OnlineRadixSorterTest {
         Assertions.assertEquals("", add(radixSorter, dcfMap, receiverList, 7));
         receiverList.clear();
     }
+
+    @Test
+    void testGetAwaitingStrings() {
+        var radixSorter = new OnlineRadixSorter(1);
+        radixSorter.addFutureForWork(4, x -> x);
+        Assertions.assertEquals("slotsOutstanding: >4,3-1", radixSorter.getAwaitingText());
+        radixSorter.addFutureForWork(6, x -> x);
+        Assertions.assertEquals("slotsOutstanding: >6,5,3-1", radixSorter.getAwaitingText());
+        for (int i = 9; i < 20; ++i) {
+            radixSorter.addFutureForWork(i, x -> x);
+        }
+        Assertions.assertEquals("slotsOutstanding: >19,8-7,5,3-1", radixSorter.getAwaitingText());
+    }
 }

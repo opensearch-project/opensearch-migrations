@@ -1,14 +1,15 @@
 package org.opensearch.migrations.replay.util;
 
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.FutureTransformer;
+import org.opensearch.migrations.utils.SequentialSpanCompressingReducer;
 
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
@@ -26,14 +27,18 @@ import java.util.stream.IntStream;
  * is responsible for setting up any work necessary when the future is signaled (compose, whenComplete, etc)
  * and returning the resultant future.  That resultant future's completion will block the OnlineRadixSorter
  * instance from proceeding to signal any subsequent signals.
+ *
+ * This class is NOT thread safe and is only meant to be called from a single thread.
  */
 @Slf4j
 public class OnlineRadixSorter {
+
     @AllArgsConstructor
+    @Getter
     private static class IndexedWork {
-        public final DiagnosticTrackableCompletableFuture<String,Void> signalingToStartFuture;
-        public DiagnosticTrackableCompletableFuture<String,? extends Object> workCompletedFuture;
-        public final DiagnosticTrackableCompletableFuture<String,Void> signalWorkCompletedFuture;
+        private final DiagnosticTrackableCompletableFuture<String,Void> signalingToStartFuture;
+        private DiagnosticTrackableCompletableFuture<String,? extends Object> workCompletedFuture;
+        private final DiagnosticTrackableCompletableFuture<String,Void> signalWorkCompletedFuture;
 
         public <T> DiagnosticTrackableCompletableFuture<String,T>
         addWorkFuture(FutureTransformer<T> processor, int index) {
@@ -86,7 +91,7 @@ public class OnlineRadixSorter {
                                         ()->"Kickoff for slot #" + finalNextKey);
                 oldWorkItem = new IndexedWork(signalFuture, null,
                         new StringTrackableCompletableFuture<Void>(()->"Work to finish for slot #" + finalNextKey +
-                                " is awaiting [" + getAwaitingTextUpTo(index) + "]"));
+                                " is awaiting [" + getAwaitingText() + "]"));
                 oldWorkItem.signalWorkCompletedFuture.whenComplete((v,t)->{
                     ++currentOffset;
                     items.remove(finalNextKey);
@@ -97,16 +102,18 @@ public class OnlineRadixSorter {
         return oldWorkItem.addWorkFuture(processor, index);
     }
 
-    public String getAwaitingTextUpTo(int upTo) {
-        return "slotsOutstanding:" +
+    public String getAwaitingText() {
+        final var upTo = items.lastKey();
+        return "slotsOutstanding: >" + (upTo) + "," +
                 IntStream.range(0, upTo-currentOffset)
-                .map(i->upTo-i-1)
-                .mapToObj(i -> Optional.ofNullable(items.get(i))
-                        .flatMap(wi->Optional.ofNullable(wi.workCompletedFuture))
-                        .map(ignored->"")
-                        .orElse(i+""))
-                .filter(s->!s.isEmpty())
-                .collect(Collectors.joining(","));
+                        .map(i->upTo-i-1)
+                        .filter(i->Optional.ofNullable(items.get(i))
+                                .flatMap(wi->Optional.ofNullable(wi.workCompletedFuture))
+                                .isEmpty())
+                        .boxed()
+                        .reduce(new SequentialSpanCompressingReducer(-1), SequentialSpanCompressingReducer::addNext,
+                                (c, d) -> { throw new IllegalStateException("parallel streams aren't allowed"); })
+                        .getFinalAccumulation();
     }
 
     @Override

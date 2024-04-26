@@ -1,5 +1,7 @@
 package org.opensearch.migrations;
 
+import lombok.AllArgsConstructor;
+
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collector;
