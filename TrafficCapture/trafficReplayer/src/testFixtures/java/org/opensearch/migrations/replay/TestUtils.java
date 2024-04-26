@@ -118,7 +118,7 @@ public class TestUtils {
     private static String getStringFromContent(FullHttpRequest fullRequest) throws IOException {
         try (var baos = new ByteArrayOutputStream()) {
             var bb = fullRequest.content();
-            bb.readBytes(baos, bb.readableBytes());
+            bb.duplicate().readBytes(baos, bb.readableBytes());
             return baos.toString(StandardCharsets.UTF_8);
         }
     }

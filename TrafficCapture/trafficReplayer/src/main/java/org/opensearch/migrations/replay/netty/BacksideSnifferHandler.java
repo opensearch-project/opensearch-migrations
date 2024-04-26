@@ -25,9 +25,8 @@ public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         var bb = (ByteBuf) msg;
         byte[] output = new byte[bb.readableBytes()];
-        bb.readBytes(output);
+        bb.duplicate().readBytes(output);
         aggregatedRawResponseBuilder.addResponsePacket(output);
-        bb.resetReaderIndex();
         ctx.fireChannelRead(msg);
     }
 }

@@ -20,11 +20,11 @@ public class TransformedPackets implements AutoCloseable {
     public int size() { return data.size(); }
 
     public Stream<ByteBuf> streamUnretained() {
-        return data.stream().map(ByteBuf::slice);
+        return data.stream().map(ByteBuf::duplicate);
     }
 
     public Stream<ByteBuf> streamRetained() {
-        return data.stream().map(ByteBuf::retainedSlice);
+        return data.stream().map(ByteBuf::retainedDuplicate);
     }
 
     public Stream<byte[]> asByteArrayStream() {
