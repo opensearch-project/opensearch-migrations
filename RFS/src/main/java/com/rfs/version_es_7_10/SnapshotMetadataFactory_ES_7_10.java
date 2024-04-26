@@ -13,6 +13,7 @@ public class SnapshotMetadataFactory_ES_7_10 implements com.rfs.common.SnapshotM
      * 
      * [1] https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/snapshots/SnapshotInfo.java#L583
      */
+    @Override
     public SnapshotMetadata.Data fromJsonNode(JsonNode root) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode objectNodeRoot = (ObjectNode) root;
@@ -20,6 +21,7 @@ public class SnapshotMetadataFactory_ES_7_10 implements com.rfs.common.SnapshotM
         return snapshotMetadata;
     }
 
+    @Override
     public SmileFactory getSmileFactory() {
         return ElasticsearchConstants_ES_7_10.SMILE_FACTORY;
     }

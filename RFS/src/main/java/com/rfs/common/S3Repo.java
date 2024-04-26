@@ -26,7 +26,8 @@ import java.util.Optional;
 
 public class S3Repo implements SourceRepo {
     private static final Logger logger = LogManager.getLogger(S3Repo.class);
-    private static final double S3_TARGET_THROUGHPUT_GIBPS = 10.0; // Arbitrarily chosen
+    private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
+    private static final long S3_MAX_MEMORY_BYTES = 1024L * 1024 * 1024; // Arbitrarily chosen
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
 
     private final Path s3LocalDir;
@@ -89,7 +90,9 @@ public class S3Repo implements SourceRepo {
         S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
                                                    .credentialsProvider(DefaultCredentialsProvider.create())
                                                    .region(Region.of(s3Region))
+                                                   .retryConfiguration(r -> r.numRetries(3))
                                                    .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
+                                                   .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
                                                    .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
                                                    .build();
 
@@ -103,10 +106,12 @@ public class S3Repo implements SourceRepo {
         this.s3Client = s3Client;
     }
 
+    @Override
     public Path getRepoRootDir() {
         return s3LocalDir;
     }
 
+    @Override
     public Path getSnapshotRepoDataFilePath() throws IOException {
         S3Uri repoFileS3Uri = findRepoFileUri();
         
@@ -118,6 +123,7 @@ public class S3Repo implements SourceRepo {
         return localFilePath;
     }
 
+    @Override
     public Path getGlobalMetadataFilePath(String snapshotId) throws IOException {
         String suffix = "meta-" + snapshotId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
@@ -126,6 +132,7 @@ public class S3Repo implements SourceRepo {
         return filePath;
     }
 
+    @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) throws IOException {
         String suffix = "snap-" + snapshotId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
@@ -134,6 +141,7 @@ public class S3Repo implements SourceRepo {
         return filePath;
     }
 
+    @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) throws IOException {
         String suffix = "indices/" + indexId + "/meta-" + indexFileId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
@@ -142,12 +150,14 @@ public class S3Repo implements SourceRepo {
         return filePath;
     }
 
+    @Override
     public Path getShardDirPath(String indexId, int shardId) throws IOException {
         String suffix = "indices/" + indexId + "/" + shardId;
         Path shardDirPath = s3LocalDir.resolve(suffix);
         return shardDirPath;
     }
 
+    @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) throws IOException {
         String suffix = "indices/" + indexId + "/" + shardId + "/snap-" + snapshotId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
@@ -156,6 +166,7 @@ public class S3Repo implements SourceRepo {
         return filePath;
     }
 
+    @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) throws IOException {
         String suffix = "indices/" + indexId + "/" + shardId + "/" + blobName;
         Path filePath = s3LocalDir.resolve(suffix);
@@ -164,6 +175,7 @@ public class S3Repo implements SourceRepo {
         return filePath;
     }
 
+    @Override
     public void prepBlobFiles(ShardMetadata.Data shardMetadata) throws IOException {
         S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build();
         
