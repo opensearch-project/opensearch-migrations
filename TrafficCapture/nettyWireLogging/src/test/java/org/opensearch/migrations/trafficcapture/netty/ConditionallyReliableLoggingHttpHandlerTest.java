@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.extern.slf4j.Slf4j;
@@ -28,8 +29,6 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.opensearch.migrations.trafficcapture.netty.TestStreamManager.consumeIntoArray;
-
 @Slf4j
 public class ConditionallyReliableLoggingHttpHandlerTest {
 
@@ -48,7 +47,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
             // we wrote the correct data to the downstream handler/channel
             var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteArrayInputStream(consumeIntoArray((ByteBuf) m)))
+                    .map(m -> new ByteBufInputStream((ByteBuf) m, true))
                     .collect(Collectors.toList())))
                     .readAllBytes();
             Assertions.assertArrayEquals(fullTrafficBytes, outputData);
@@ -132,7 +131,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             Assertions.assertEquals(0, streamMgr.flushCount.get());
             // we wrote the correct data to the downstream handler/channel
             var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteArrayInputStream(consumeIntoArray((ByteBuf) m)))
+                    .map(m -> new ByteBufInputStream((ByteBuf) m, true))
                     .collect(Collectors.toList())))
                     .readAllBytes();
             log.info("outputdata = " + new String(outputData, StandardCharsets.UTF_8));
@@ -161,7 +160,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
             // we wrote the correct data to the downstream handler/channel
             var consumedData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteArrayInputStream(consumeIntoArray((ByteBuf) m)))
+                    .map(m -> new ByteBufInputStream((ByteBuf) m))
                     .collect(Collectors.toList())))
                     .readAllBytes();
             log.info("captureddata = " + new String(consumedData, StandardCharsets.UTF_8));

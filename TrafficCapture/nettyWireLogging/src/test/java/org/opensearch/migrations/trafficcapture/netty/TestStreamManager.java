@@ -18,13 +18,6 @@ class TestStreamManager extends OrderedStreamLifecyleManager implements AutoClos
   AtomicReference<ByteBuffer> byteBufferAtomicReference = new AtomicReference<>();
   AtomicInteger flushCount = new AtomicInteger();
 
-  static byte[] consumeIntoArray(ByteBuf m) {
-      var bArr = new byte[m.readableBytes()];
-      m.readBytes(bArr);
-      m.release();
-      return bArr;
-  }
-
   @Override
   public void close() {
   }
