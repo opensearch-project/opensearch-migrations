@@ -1,4 +1,4 @@
-FROM opensearchproject/data-prepper:2.5.0
+FROM public.ecr.aws/opensearchproject/data-prepper:2.5.0
 COPY python/requirements.txt .
 
 # Install dependencies to local user directory

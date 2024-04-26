@@ -1,5 +1,6 @@
 # Using same base image as other Java containers in this repo
-FROM openjdk:11-jre
+FROM public.ecr.aws/amazoncorretto/amazoncorretto:11-al2023-headless
+
 # Requires Gradle to genearte runtime jars initially
 COPY ./build/runtimeJars /rfs-app/jars
 WORKDIR /rfs-app

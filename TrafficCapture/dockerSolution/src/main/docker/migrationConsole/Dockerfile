@@ -1,13 +1,15 @@
-FROM ubuntu:jammy
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
-ENV DEBIAN_FRONTEND noninteractive
+RUN dnf update -y
+RUN dnf install -y python3.9 python3-pip python3-devel \
+        java-11-amazon-corretto-devel java-11-amazon-corretto \
+        wget gcc glibc-devel git vim jq unzip less curl-minimal
+RUN pip3 install setuptools
+RUN pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli
-RUN mkdir /root/kafka-tools
-RUN mkdir /root/kafka-tools/aws
+RUN mkdir -p /root/kafka-tools/aws
 
+# Set working directory
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
 RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz

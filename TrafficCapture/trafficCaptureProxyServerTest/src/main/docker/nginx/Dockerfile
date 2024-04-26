@@ -1,4 +1,4 @@
-FROM nginx:1.25.1
+FROM public.ecr.aws/nginx/nginx:1.25-bookworm
 
 # Installing VIM for the sake of users who would like to exec shells in the webserver container.
 RUN apt-get update
