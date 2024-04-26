@@ -1,9 +1,11 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.handler.codec.base64.Base64;
+import io.netty.handler.codec.base64.Base64Dialect;
 import io.netty.handler.codec.http.HttpHeaders;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,18 +102,16 @@ public class ParsedHttpMessagesAsDicts {
         targetResponseOp.ifPresent(r -> context.setTargetStatus((Integer) r.get(STATUS_CODE_KEY)));
     }
 
-    private static byte[] getBytesFromByteBuf(ByteBuf buf) {
-        var bytes = new byte[buf.readableBytes()];
-        buf.getBytes(buf.readerIndex(), bytes);
-        return bytes;
-    }
-
     private static Map<String, Object> fillMap(LinkedHashMap<String, Object> map,
                                                HttpHeaders headers, ByteBuf content) {
-        String base64body = Base64.getEncoder().encodeToString(getBytesFromByteBuf(content));
-        map.put("body", base64body);
-        headers.entries().stream().forEach(kvp -> map.put(kvp.getKey(), kvp.getValue()));
-        return map;
+        try (var encodedBufHolder = RefSafeHolder.create(Base64.encode(content, false, Base64Dialect.STANDARD))) {
+            var encodedBuf = encodedBufHolder.get();
+            assert encodedBuf != null : "Base64.encode should not return null";
+            String base64body = encodedBuf.toString(StandardCharsets.UTF_8);
+            map.put("body", base64body);
+            headers.entries().forEach(kvp -> map.put(kvp.getKey(), kvp.getValue()));
+            return map;
+        }
     }
 
     private static Map<String, Object> makeSafeMap(@NonNull IReplayContexts.ITupleHandlingContext context,
