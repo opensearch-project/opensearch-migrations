@@ -9,6 +9,7 @@ import com.rfs.common.ShardMetadata;
 
 public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
 
+    @Override
     public ShardMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         SimpleModule module = new SimpleModule();
@@ -31,6 +32,7 @@ public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
         );
     }
 
+    @Override
     public SmileFactory getSmileFactory() {
         return ElasticsearchConstants_ES_6_8.SMILE_FACTORY;
     }

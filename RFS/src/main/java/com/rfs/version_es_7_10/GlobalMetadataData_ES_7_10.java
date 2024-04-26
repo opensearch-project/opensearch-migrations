@@ -9,6 +9,7 @@ public class GlobalMetadataData_ES_7_10 implements com.rfs.common.GlobalMetadata
         this.root = root;
     }
 
+    @Override
     public ObjectNode toObjectNode() throws Exception {
         return root;
     }

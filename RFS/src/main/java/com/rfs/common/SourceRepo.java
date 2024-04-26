@@ -12,4 +12,10 @@ public interface SourceRepo {
     public Path getShardDirPath(String indexId, int shardId) throws IOException;
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) throws IOException;
     public Path getBlobFilePath(String indexId, int shardId, String blobName) throws IOException;
+
+    /*
+    * Performs any work necessary to facilitate access to a given shard's blob files.  Depending on the implementation,
+    * may involve no work at all, bulk downloading objects from a remote source, or any other operations.
+    */
+    public void prepBlobFiles(ShardMetadata.Data shardMetadata) throws IOException;
 }

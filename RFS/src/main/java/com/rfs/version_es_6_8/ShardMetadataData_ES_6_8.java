@@ -60,42 +60,52 @@ public class ShardMetadataData_ES_6_8 implements com.rfs.common.ShardMetadata.Da
         this.files = convertedFiles;
     }
 
+    @Override
     public String getSnapshotName() {
         return snapshotName;
     }
 
+    @Override
     public String getIndexName() {
         return indexName;
     }
 
+    @Override
     public String getIndexId() {
         return indexId;
     }
 
+    @Override
     public int getShardId() {
         return shardId;
     }
 
+    @Override
     public int getIndexVersion() {
         return indexVersion;
     }
 
+    @Override
     public long getStartTime() {
         return startTime;
     }
 
+    @Override
     public long getTime() {
         return time;
     }
 
+    @Override
     public int getNumberOfFiles() {
         return numberOfFiles;
     }
 
+    @Override
     public long getTotalSize() {
         return totalSize;
     }
 
+    @Override
     public List<ShardMetadata.FileInfo> getFiles() {
         List<ShardMetadata.FileInfo> convertedFiles = new ArrayList<>(files);
         return convertedFiles;
@@ -194,39 +204,48 @@ public class ShardMetadataData_ES_6_8 implements com.rfs.common.ShardMetadata.Da
             this.numberOfParts = numberOfParts;
         }
 
+        @Override
         public String getName() {
             return name;
         }
 
+        @Override
         public String getPhysicalName() {
             return physicalName;
         }
 
+        @Override
         public long getLength() {
             return length;
         }
 
+        @Override
         public String getChecksum() {
             return checksum;
         }
 
+        @Override
         public long getPartSize() {
             return partSize;
         }
 
+        @Override
         public String getWrittenBy() {
             return writtenBy;
         }
 
+        @Override
         public BytesRef getMetaHash() {
             return metaHash;
         }
 
+        @Override
         public long getNumberOfParts() {
             return numberOfParts;
         }
 
         // The Snapshot file may be split into multiple blobs; use this to find the correct file name
+        @Override
         public String partName(long part) {
             if (numberOfParts > 1) {
                 return name + ".part" + part;
