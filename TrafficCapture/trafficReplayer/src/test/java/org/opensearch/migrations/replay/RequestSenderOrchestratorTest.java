@@ -1,9 +1,15 @@
 package org.opensearch.migrations.replay;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufHolder;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.AbstractMap.SimpleEntry;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -14,6 +20,8 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.NettyUtils;
+import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -196,18 +204,19 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 var arr = cf.get();
                 Assertions.assertNull(arr.error);
                 Assertions.assertTrue(arr.responseSizeInBytes > 0);
-                var httpMessage = HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
-                        arr.responsePackets.stream().map(kvp -> Unpooled.wrappedBuffer(kvp.getValue())), false);
-                try {
-                    var response = (FullHttpResponse) httpMessage;
+                var packetBytesArr = arr.responsePackets.stream().map(SimpleEntry::getValue).collect(Collectors.toList());
+                try (var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(packetBytesArr);
+                    var messageHolder = RefSafeHolder.create(
+                        HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
+                            bufStream))) {
+                    var message = messageHolder.get();
+                    Assertions.assertNotNull(message);
+                    var response = (FullHttpResponse) message;
                     Assertions.assertEquals(200, response.status().code());
                     var body = response.content();
                     Assertions.assertEquals(TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX +
                                     TestHttpServerContext.getUriForIthRequest(i / NUM_REPEATS),
-                            body.duplicate().toString(StandardCharsets.UTF_8));
-                } finally {
-                    Optional.ofNullable((httpMessage instanceof ByteBufHolder) ? (ByteBufHolder) httpMessage : null)
-                            .ifPresent(bbh -> bbh.content().release());
+                        body.duplicate().toString(StandardCharsets.UTF_8));
                 }
             }
             closeFuture.get();
@@ -217,8 +226,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
     private List<ByteBuf> makeRequest(int i) {
         // uncomment/swap for a simpler test case to run
         return //List.of(Unpooled.wrappedBuffer(getRequestString(i).getBytes()));
-               TestHttpServerContext.getRequestString(i).chars()
-                       .mapToObj(c->Unpooled.wrappedBuffer(new byte[]{(byte) c})) // TODO refCnt issue
+               TestHttpServerContext.getRequestString(i).chars().mapToObj(c->Unpooled.wrappedBuffer(new byte[]{(byte) c}))
                        .collect(Collectors.toList());
     }
 }

@@ -50,16 +50,19 @@ dependencies {
     implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"${resilience4jVersion}"
     implementation group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"${resilience4jVersion}"
     implementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
+
     implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.6.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.23.1'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.23.1'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.23.1'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.13'
+    implementation group: 'com.lmax', name: 'disruptor', version: '4.0.0'
+
     implementation group: 'software.amazon.awssdk', name: 'arns', version: '2.20.102'
     implementation group: 'software.amazon.awssdk', name: 'auth', version: '2.20.102'
     implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
-    implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.20.127'
-    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.1.0'
+    implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.25.19'
+    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.0.3'
     implementation 'org.apache.commons:commons-compress:1.26.0'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
@@ -86,9 +89,19 @@ dependencies {
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.7'
     testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.7'
     testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.7'
+
     testImplementation group: 'org.mockito', name:'mockito-core', version:'4.6.1'
     testImplementation group: 'org.mockito', name:'mockito-junit-jupiter', version:'4.6.1'
     testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine', version:'5.x.x'
+
+    constraints {
+        testImplementation('org.apache.commons:commons-compress:1.26.0') {
+            because 'mend security issue'
+        }
+        implementation('io.netty:netty-codec-http:4.1.108.Final') {
+            because 'mend security issue'
+        }
+    }
 }
 
 configurations.all {
@@ -106,7 +119,11 @@ configurations.all {
             }
         }
         if (details.requested.group == 'io.netty') {
-            details.useVersion '4.1.100.Final'
+            if (details.requested.name == 'netty-codec-http') {
+                details.useVersion '4.1.108.Final'
+            } else {
+                details.useVersion '4.1.100.Final'
+            }
         }
     }
 }
@@ -119,11 +136,4 @@ jar {
     manifest {
         attributes 'Main-Class': application.mainClass
     }
-}
-
-// TODO: Fix Parallel Execution for junit trafficReplayer tests
-//  with resourceSharing of TrafficReplayerRunner to eliminate forking and rely on threads
-slowTest {
-    forkEvery(1)
-    maxParallelForks = Runtime.runtime.availableProcessors()
 }

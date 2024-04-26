@@ -166,6 +166,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
 
     @Test
     @ResourceLock("TrafficReplayerRunner")
+    @Tag("longTest")
     public void testSingleStreamWithCloseIsCommitted() throws Throwable {
         var random = new Random(1);
         try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),

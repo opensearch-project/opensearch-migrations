@@ -54,7 +54,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             if (targetResponseDuration != null) { sj.add("targetResponseDuration=").add(targetResponseDuration+""); }
             Optional.ofNullable(targetRequestData).ifPresent(d-> sj.add("targetRequestData=")
                     .add(d.isClosed() ? "CLOSED" : HttpByteBufFormatter.httpPacketBufsToString(
-                            HttpByteBufFormatter.HttpMessageType.REQUEST, d.streamUnretained(), false, LF_LINE_DELIMITER)));
+                            HttpByteBufFormatter.HttpMessageType.REQUEST, d.streamUnretained(), LF_LINE_DELIMITER)));
             Optional.ofNullable(targetResponseData).filter(d->!d.isEmpty()).ifPresent(d -> sj.add("targetResponseData=")
                     .add(HttpByteBufFormatter.httpPacketBytesToString(HttpByteBufFormatter.HttpMessageType.RESPONSE, d, LF_LINE_DELIMITER)));
             sj.add("transformStatus=").add(transformationStatus+"");

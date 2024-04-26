@@ -1,6 +1,6 @@
 package org.opensearch.migrations.common
 
-import org.gradle.api.tasks.Copy
+import org.gradle.api.tasks.Sync
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
 
@@ -27,7 +27,9 @@ class CommonUtils {
         copyArtifact(project, projectName, projectName, destDir)
     }
     static def copyArtifact(Project project, String artifactProjectName, String destProjectName, String destDir) {
-        project.task("copyArtifact_${destProjectName}", type: Copy) {
+        // Sync performs a copy, while also deleting items from the destination directory that are not in the source directory
+        // In our case, jars of old versions were getting "stuck" and causing conflicts when the program was run
+        project.task("copyArtifact_${destProjectName}", type: Sync) {
             dependsOn ":${artifactProjectName}:build"
             dependsOn ":${artifactProjectName}:jar"
             if (destProjectName == "trafficCaptureProxyServerTest") {

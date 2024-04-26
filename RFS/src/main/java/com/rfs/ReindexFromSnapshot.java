@@ -14,6 +14,7 @@ import org.apache.lucene.document.Document;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
+import reactor.core.publisher.Flux;
 
 import com.rfs.common.*;
 import com.rfs.transformers.*;
@@ -88,6 +89,9 @@ public class ReindexFromSnapshot {
 
         @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
         public Level logLevel = Level.INFO;
+
+        @Parameter(names = {"--index_suffix"}, description = "An optional suffix to add to index names as they're transfered. Default: none", required = false)
+        public String indexSuffix = "";
     }
 
     public static void main(String[] args) throws InterruptedException {
@@ -118,10 +122,11 @@ public class ReindexFromSnapshot {
         List<String> componentTemplateWhitelist = arguments.componentTemplateWhitelist;
         MovementType movementType = arguments.movementType;
         Level logLevel = arguments.logLevel;
+        String indexSuffix = arguments.indexSuffix;
 
         Logging.setLevel(logLevel);
 
-        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
+        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);        
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         // Sanity checks
@@ -159,7 +164,7 @@ public class ReindexFromSnapshot {
         if (snapshotDirPath != null) {
             repo = new FilesystemRepo(snapshotDirPath);
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
-            repo = new S3Repo(s3LocalDirPath, s3RepoUri, s3Region);
+            repo = S3Repo.create(s3LocalDirPath, s3RepoUri, s3Region);
         } else if (snapshotLocalRepoDirPath != null) {
             repo = new FilesystemRepo(snapshotLocalRepoDirPath);
         } else {
@@ -297,7 +302,7 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the indices...");
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
-                    String reindexName = indexMetadata.getName() + "_reindexed";
+                    String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
 
                     ObjectNode root = indexMetadata.toObjectNode();
@@ -351,18 +356,13 @@ public class ReindexFromSnapshot {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 
-                        List<Document> documents = LuceneDocumentsReader.readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
-                        logger.info("Documents read successfully");
+                        Flux<Document> documents = new LuceneDocumentsReader().readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
+                        String targetIndex = indexMetadata.getName() + indexSuffix;
+                        DocumentReindexer.reindex(targetIndex, documents, targetConnection);
 
-                        for (Document document : documents) {
-                            String targetIndex = indexMetadata.getName() + "_reindexed";
-                            DocumentReindexer.reindex(targetIndex, document, targetConnection);
-                        }
+                        logger.info("Shard reindexing completed");
                     }
                 }
-
-                logger.info("Documents reindexed successfully");
-
                 logger.info("Refreshing newly added documents");
                 DocumentReindexer.refreshAllDocuments(targetConnection);
                 logger.info("Refresh complete");

@@ -12,6 +12,22 @@ allprojects {
 subprojects {
     apply plugin: 'java'
     apply plugin: 'maven-publish'
+
+    // TODO: Expand to do more static checking in more projects
+    if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
+        dependencies {
+            annotationProcessor group: 'com.google.errorprone', name: 'error_prone_core', version: '2.26.1'
+        }
+        tasks.named('compileJava', JavaCompile) {
+            if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
+                options.compilerArgs += [
+                        "-XDcompilePolicy=simple",
+                        "-Xplugin:ErrorProne -XepDisableAllChecks -Xep:MustBeClosed:ERROR -XepDisableWarningsInGeneratedCode",
+                ]
+            }
+        }
+    }
+
     task javadocJar(type: Jar, dependsOn: javadoc) {
         archiveClassifier.set('javadoc')
         from javadoc.destinationDir
@@ -107,10 +123,11 @@ allprojects {
             exclude project.property('excludeTests')
         }
         useJUnitPlatform {
-            systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
-            systemProperty 'junit.jupiter.execution.parallel.mode.default', "concurrent"
-            systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
+            //  Disable parallel test execution, see MIGRATIONS-1666
+            systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         }
+        systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
+        jvmArgs '-ea'
     }
 
     test {
@@ -124,11 +141,6 @@ allprojects {
     }
 
     task slowTest(type: Test) {
-        useJUnitPlatform {
-            // SlowTests currently use additional resource overhead, so halving core based parallelism
-            systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
-            systemProperty 'junit.jupiter.execution.parallel.config.dynamic.factor', '0.5'
-        }
         systemProperty 'disableMemoryLeakTests', 'false'
         jacoco {
             enabled = true
