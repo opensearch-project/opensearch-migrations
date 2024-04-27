@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay.util;
 
 import lombok.Getter;
 import lombok.NonNull;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -17,7 +16,6 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -215,16 +213,6 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
 
     public boolean isDone() { return future.isDone(); }
 
-    @Override
-    public String toString() {
-        return formatAsString(x->null);
-    }
-
-    public String formatAsString(@NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
-        return walkParentsAsStream().map(kvp->formatFutureWithDiagnostics(kvp, resultFormatter))
-                .collect(Collectors.joining("<-"));
-    }
-
     public Stream<DiagnosticTrackableCompletableFuture<D,?>> walkParentsAsStream() {
         AtomicReference<DiagnosticTrackableCompletableFuture<D,?>> chainHeadReference =
                 new AtomicReference<>(this);
@@ -237,30 +225,16 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
                 });
     }
 
-    @SneakyThrows
-    protected String formatFutureWithDiagnostics(
-            @NonNull DiagnosticTrackableCompletableFuture<D,?> dcf,
-            @NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
-        var diagnosticInfo = dcf.diagnosticSupplier.get();
-        var isDone = dcf.isDone();
-        return "[" + System.identityHashCode(dcf) + "] " + diagnosticInfo +
-                (isDone ? formatWithDefault(resultFormatter, dcf) :
-                        getPendingString(dcf, resultFormatter));
+    @Override
+    public String toString() {
+        return formatAsString(x->null);
     }
 
-    private static <D> String
-    getPendingString(DiagnosticTrackableCompletableFuture<D,?> dcf,
-                     Function<DiagnosticTrackableCompletableFuture<D,?>, String> resultFormatter) {
-        return Optional.ofNullable(dcf.innerComposedPendingCompletableFutureReference)
-                .map(r -> (DiagnosticTrackableCompletableFuture<D, ?>) r.get())
-                .map(df -> " --[[" + df.formatAsString(resultFormatter) + " ]] ")
-                .orElse("[…]");
+    public String formatAsString(@NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
+        return DiagnosticTrackableCompletableFutureStringFormatter.format(this, resultFormatter);
     }
 
-    private static <D> String formatWithDefault(
-            @NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> formatter,
-            DiagnosticTrackableCompletableFuture<D,?> df) {
-        var str = formatter.apply(df);
-        return "[" + (str == null ? "^" : str) + "]";
+    public String formatAsJson(@NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
+        return DiagnosticTrackableCompletableFutureJsonFormatter.format(this, resultFormatter);
     }
 }

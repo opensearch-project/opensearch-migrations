@@ -8,18 +8,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
+import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutureJsonFormatter;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
-import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 import software.amazon.awssdk.arns.Arn;
@@ -33,13 +32,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.Iterator;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 @Slf4j
 public class TrafficReplayer {
@@ -317,7 +313,7 @@ public class TrafficReplayer {
                     new TrafficStreamLimiter(params.maxConcurrentRequests), orderedRequestTracker);
             activeContextMonitor = new ActiveContextMonitor(
                     globalContextTracker, perContextTracker, orderedRequestTracker, 64,
-                    cf->cf.formatAsString(TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
+                    cf-> DiagnosticTrackableCompletableFutureJsonFormatter.format(cf, TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
             ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
             scheduledExecutorService.scheduleAtFixedRate(()->{
                 activeContextLogger.atInfo().setMessage(()->"Total requests outstanding: " + tr.requestWorkTracker.size()).log();

@@ -31,44 +31,93 @@ class StringTrackableCompletableFutureTest {
             return 1;
         }),
                 ()->"A");
-        var id1 = "[" + System.identityHashCode(stcf1) + "] ";
-        Assertions.assertEquals(id1 + "A[…]", stcf1.toString());
+        final var id1 = System.identityHashCode(stcf1);
+        final var id1Bktd = "[" + id1 + "] ";
+        Assertions.assertEquals(id1Bktd + "A[…]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf1));
 
         var stcf2 = stcf1.map(f->f.thenApplyAsync(x->{
             sneakyWait(notifier2);
             return x*10+1;
         }),
                 ()->"B");
-        var id2 = "[" + System.identityHashCode(stcf2) + "] ";
-        Assertions.assertEquals(id2 + "B[…]<-" + id1 + "A[…]", stcf2.toString());
+        final var id2 = System.identityHashCode(stcf2);
+        final var id2Bktd = "[" + id2 + "] ";
+        Assertions.assertEquals(id2Bktd + "B[…]<-" + id1Bktd + "A[…]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf2));
 
         var stcf3 = stcf2.map(f->f.thenApplyAsync(x->{
                     sneakyWait(notifier3);
                     return x*10+1;
                 }),
                 ()->"C");
-        var id3 = "[" + System.identityHashCode(stcf3) + "] ";
+        final var id3 = System.identityHashCode(stcf3);
+        final var id3Bktd = "[" + id3 + "] ";
 
-        Assertions.assertEquals(id1 + "A[…]", stcf1.toString());
-        Assertions.assertEquals(id2 + "B[…]<-" + id1 + "A[…]", stcf2.toString());
-        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[…]<-" + id1 + "A[…]", stcf3.toString());
+        Assertions.assertEquals(id1Bktd + "A[…]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf1));
+        Assertions.assertEquals(id2Bktd + "B[…]<-" + id1Bktd + "A[…]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf2));
+        Assertions.assertEquals(id3Bktd + "C[…]<-" + id2Bktd + "B[…]<-" + id1Bktd + "A[…]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf3));
 
-        notifyAndCheckNewDiagnosticValue(stcf1, notifier1, id1 + "A[^]");
-        Assertions.assertEquals(id2 + "B[…]<-" + id1 + "A[^]", stcf2.toString());
-        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[…]<-" + id1 + "A[^]", stcf3.toString());
-        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[…]<-" + id1 + "A[1]",
+        Assertions.assertEquals("[{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"…\"}]",
+                DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf1));
+        Assertions.assertEquals("[" +
+                "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"…\"}]", DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf2));
+        Assertions.assertEquals("[" +
+                "{\"idHash\":" + id3 + ",\"label\":\"C\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"…\"}]", DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf3));
+
+
+        notifyAndWaitForGet(stcf1, notifier1);
+        Assertions.assertEquals(id1Bktd + "A[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf1));
+        Assertions.assertEquals(id2Bktd + "B[…]<-" + id1Bktd + "A[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf2));
+        Assertions.assertEquals(id3Bktd + "C[…]<-" + id2Bktd + "B[…]<-" + id1Bktd + "A[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf3));
+        Assertions.assertEquals(id3Bktd + "C[…]<-" + id2Bktd + "B[…]<-" + id1Bktd + "A[1]",
                 stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
-        notifyAndCheckNewDiagnosticValue(stcf2, notifier2, id2 + "B[^]<-" + id1 + "A[^]");
-        Assertions.assertEquals(id1 + "A[^]", stcf1.toString());
-        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[^]<-" + id1 + "A[^]", stcf3.toString());
-        Assertions.assertEquals(id3 + "C[…]<-" + id2 + "B[11]<-" + id1 + "A[1]",
+
+        Assertions.assertEquals("[{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]",
+                DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf1));
+        Assertions.assertEquals("[" +
+                "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]", DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf2));
+        Assertions.assertEquals("[" +
+                "{\"idHash\":" + id3 + ",\"label\":\"C\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]", DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf3));
+
+        notifyAndWaitForGet(stcf2, notifier2);
+        Assertions.assertEquals(id2Bktd + "B[^]<-" + id1Bktd + "A[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf2));
+        Assertions.assertEquals(id1Bktd + "A[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf1));
+        Assertions.assertEquals(id3Bktd + "C[…]<-" + id2Bktd + "B[^]<-" + id1Bktd + "A[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf3));
+        Assertions.assertEquals(id3Bktd + "C[…]<-" + id2Bktd + "B[11]<-" + id1Bktd + "A[1]",
                 stcf3.formatAsString(StringTrackableCompletableFutureTest::formatCompletableFuture));
+
+
+
+        Assertions.assertEquals("[{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]",
+                DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf1));
+        Assertions.assertEquals("[" +
+                "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"^\"}," +
+                "{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]", DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf2));
+        Assertions.assertEquals("[" +
+                "{\"idHash\":" + id3 + ",\"label\":\"C\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"^\"}," +
+                "{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]", DiagnosticTrackableCompletableFutureJsonFormatter.format(stcf3));
+        Assertions.assertEquals("[" +
+                "{\"idHash\":" + id3 + ",\"label\":\"C\",\"value\":\"…\"}," +
+                "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"11\"}," +
+                "{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"1\"}]",
+                stcf3.formatAsJson(StringTrackableCompletableFutureTest::formatCompletableFuture));
+
         // A is clipped because of grandparent culling
-        notifyAndCheckNewDiagnosticValue(stcf3, notifier3,
-                id3 + "C[^]<-" + id2  +"B[^]");
-        Assertions.assertEquals(id1 + "A[^]", stcf1.toString());
-        Assertions.assertEquals(id2 + "B[^]", stcf2.toString());
+        notifyAndWaitForGet(stcf3, notifier3);
+        Assertions.assertEquals(id3Bktd + "C[^]<-" + id2Bktd  +"B[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf3));
+        Assertions.assertEquals(id1Bktd + "A[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf1));
+        Assertions.assertEquals(id2Bktd + "B[^]", DiagnosticTrackableCompletableFutureStringFormatter.format(stcf2));
 
+        Assertions.assertEquals("[" +
+                        "{\"idHash\":" + id3 + ",\"label\":\"C\",\"value\":\"111\"}," +
+                        "{\"idHash\":" + id2 + ",\"label\":\"B\",\"value\":\"11\"}]",
+                stcf3.formatAsJson(StringTrackableCompletableFutureTest::formatCompletableFuture));
     }
 
     public static String formatCompletableFuture(DiagnosticTrackableCompletableFuture<String,?> cf) {
@@ -82,10 +131,9 @@ class StringTrackableCompletableFutureTest {
         }
     }
 
-    private void notifyAndCheckNewDiagnosticValue(DiagnosticTrackableCompletableFuture<String, Integer> stcf,
-                                                  CompletableFuture lockObject, String expectedValue) throws Exception {
+    private void notifyAndWaitForGet(DiagnosticTrackableCompletableFuture<String, Integer> stcf,
+                                     CompletableFuture lockObject) throws Exception {
         notify(lockObject);
         stcf.get();
-        Assertions.assertEquals(expectedValue, stcf.toString());
     }
 }
