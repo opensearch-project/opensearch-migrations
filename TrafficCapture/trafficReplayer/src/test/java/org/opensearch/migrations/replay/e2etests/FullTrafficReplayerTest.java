@@ -300,9 +300,9 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource(value = {
-//            "3,false",
-//            "-1,false",
-//            "3,true",
+            "3,false",
+            "-1,false",
+            "3,true",
             "-1,true",
     })
     @Tag("longTest")

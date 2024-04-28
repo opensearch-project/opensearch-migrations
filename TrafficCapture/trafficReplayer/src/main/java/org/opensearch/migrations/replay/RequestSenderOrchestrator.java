@@ -244,8 +244,8 @@ public class RequestSenderOrchestrator {
             return consumeFuture.thenCompose(cf ->
                     NettyToCompletableFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop,
                                     Duration.between(now(), startAt.plus(interval.multipliedBy(counter.get()))))
-                    .getDeferredFutureThroughHandle((v,t)-> sendSendingRestOfPackets(packetReceiver, eventLoop,
-                                iterator, startAt, interval, counter), () -> "sending next packet"),
+                    .thenCompose(v -> sendSendingRestOfPackets(packetReceiver, eventLoop, iterator,
+                            startAt, interval, counter), () -> "sending next packet"),
                             () -> "recursing, once ready");
         } else {
             return consumeFuture.getDeferredFutureThroughHandle((v,t) -> packetReceiver.finalizeRequest(),

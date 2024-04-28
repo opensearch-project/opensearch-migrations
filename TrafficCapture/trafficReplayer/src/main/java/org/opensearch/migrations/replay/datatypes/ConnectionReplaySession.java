@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay.datatypes;
 
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -13,13 +12,7 @@ import org.opensearch.migrations.replay.util.OnlineRadixSorter;
 import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.io.IOException;
-import java.util.Comparator;
-import java.util.Map;
-import java.util.Optional;
-import java.util.PriorityQueue;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -61,7 +54,7 @@ public class ConnectionReplaySession {
     }
 
     public DiagnosticTrackableCompletableFuture<String, ChannelFuture>
-    getFutureThatReturnsChannelFuture(boolean requireActiveChannel) {
+    getFutureThatReturnsChannelFutureInAnyState(boolean requireActiveChannel) {
         StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture =
                 new StringTrackableCompletableFuture<>("procuring a connection");
         eventLoop.submit(() -> {
@@ -113,6 +106,6 @@ public class ConnectionReplaySession {
     }
 
     public long calculateSizeSlowly() {
-        return schedule.calculateSizeSlowly() + scheduleSequencer.size();
+        return (long) schedule.timeToRunnableMap.size() + scheduleSequencer.size();
     }
 }

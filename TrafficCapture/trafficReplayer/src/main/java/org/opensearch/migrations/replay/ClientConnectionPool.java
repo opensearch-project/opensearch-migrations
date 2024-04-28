@@ -8,25 +8,21 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContext;
-import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.Future;
 import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.NettyToCompletableFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 @Slf4j
 public class ClientConnectionPool {
@@ -81,41 +77,24 @@ public class ClientConnectionPool {
     private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
     getResilientClientChannelProducer(EventLoop eventLoop, IReplayContexts.IChannelKeyContext connectionContext) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
-                .get(() -> {
-                    var channelFuture = NettyPacketToHttpConsumer.createClientConnection(eventLoop,
-                            sslContext, serverUri, connectionContext, timeout);
-                    return getCompletedChannelFutureAsCompletableFuture(connectionContext, channelFuture);
-                });
-    }
-
-    public static StringTrackableCompletableFuture<ChannelFuture>
-    getCompletedChannelFutureAsCompletableFuture(IReplayContexts.IChannelKeyContext connectionContext,
-                                                 ChannelFuture channelFuture) {
-        var clientConnectionChannelCreatedFuture =
-                new StringTrackableCompletableFuture<ChannelFuture>("waiting for createClientConnection to finish");
-        channelFuture.addListener(f -> {
-            log.atInfo().setMessage(()->
-                    "New network connection result for " + connectionContext + "=" + f.isSuccess()).log();
-            if (f.isSuccess()) {
-                clientConnectionChannelCreatedFuture.future.complete(channelFuture);
-            } else {
-                clientConnectionChannelCreatedFuture.future.completeExceptionally(f.cause());
-            }
-        });
-        return clientConnectionChannelCreatedFuture;
+                .get(() ->
+                        NettyPacketToHttpConsumer.createClientConnection(eventLoop,
+                                        sslContext, serverUri, connectionContext, timeout)
+                                .whenComplete((v,t)-> {
+                                    if (t == null) {
+                                        log.atDebug().setMessage(() -> "New network connection result for " +
+                                                connectionContext + " =" + v).log();
+                                    } else {
+                                        log.atInfo().setMessage(() -> "got exception for " + connectionContext)
+                                                .setCause(t).log();
+                                    }
+                                }, () -> "waiting for createClientConnection to finish"));
     }
 
     public CompletableFuture<Void> shutdownNow() {
         CompletableFuture<Void> shutdownFuture = new CompletableFuture<>();
         connectionId2ChannelCache.invalidateAll();
-        eventLoopGroup.shutdownGracefully().addListener(f->{
-            if (f.isSuccess()) {
-                shutdownFuture.complete(null);
-            } else {
-                shutdownFuture.completeExceptionally(f.cause());
-            }
-        });
-        return shutdownFuture;
+        return NettyToCompletableFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
     }
     
     public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
@@ -143,25 +122,16 @@ public class ClientConnectionPool {
 
     private DiagnosticTrackableCompletableFuture<String, Channel>
     closeClientConnectionChannel(ConnectionReplaySession channelAndFutureWork) {
-        var channelClosedFuture =
-                new StringTrackableCompletableFuture<Channel>("Waiting for closeFuture() on channel");
-
-        channelAndFutureWork.getFutureThatReturnsChannelFuture(false)
-                .thenAccept(channelFuture-> {
-                    if (channelFuture == null) {
-                        return;
-                    }
+        return channelAndFutureWork.getFutureThatReturnsChannelFutureInAnyState(false)
+                .thenCompose(channelFuture-> {
                     log.atTrace().setMessage(() -> "closing channel " + channelFuture.channel() +
                             "(" + channelAndFutureWork.getChannelKeyContext() + ")...").log();
-                    channelFuture.channel().close()
-                            .addListener(closeFuture -> {
+                    return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(
+                            channelFuture.channel().close(),
+                                    "calling channel.close()")
+                            .thenApply(v -> {
                                 log.atTrace().setMessage(() -> "channel.close() has finished for " +
-                                        channelAndFutureWork.getChannelKeyContext()).log();
-                                if (closeFuture.isSuccess()) {
-                                    channelClosedFuture.future.complete(channelFuture.channel());
-                                } else {
-                                    channelClosedFuture.future.completeExceptionally(closeFuture.cause());
-                                }
+                                        channelAndFutureWork.getChannelKeyContext() + " with value=" + v).log();
                                 if (channelAndFutureWork.hasWorkRemaining()) {
                                     log.atWarn().setMessage(() ->
                                             "Work items are still remaining for this connection session" +
@@ -170,19 +140,9 @@ public class ClientConnectionPool {
                                                     ").  " + channelAndFutureWork.calculateSizeSlowly() +
                                                     " requests that were enqueued won't be run").log();
                                 }
-                                var schedule = channelAndFutureWork.schedule;
-                                while (channelAndFutureWork.schedule.hasPendingTransmissions()) {
-                                    var scheduledItemToKill = schedule.peekFirstItem();
-                                    schedule.removeFirstItem();
-                                }
-                            });
-                }, () -> "calling channel.close()")
-                .exceptionally(t->{
-                    log.atWarn().setMessage(()->"client connection encountered an exception while closing")
-                            .setCause(t).log();
-                    channelClosedFuture.future.completeExceptionally(t);
-                    return null;
-                }, () -> "handling any potential exceptions");
-        return channelClosedFuture;
+                                channelAndFutureWork.schedule.clear();
+                                return channelFuture.channel();
+                            }, () -> "clearing work");
+                }, () -> "");
     }
 }

@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -316,7 +317,8 @@ public class TrafficReplayer {
                     cf-> DiagnosticTrackableCompletableFutureJsonFormatter.format(cf, TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
             ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
             scheduledExecutorService.scheduleAtFixedRate(()->{
-                activeContextLogger.atInfo().setMessage(()->"Total requests outstanding: " + tr.requestWorkTracker.size()).log();
+                activeContextLogger.atInfo().setMessage(()->"Total requests outstanding at " + Instant.now() +
+                        ": " + tr.requestWorkTracker.size()).log();
                         finalActiveContextMonitor.run();
                 },
                     ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);

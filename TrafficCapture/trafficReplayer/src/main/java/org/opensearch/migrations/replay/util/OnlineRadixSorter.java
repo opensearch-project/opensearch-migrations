@@ -72,13 +72,13 @@ public class OnlineRadixSorter {
      */
     public <T> DiagnosticTrackableCompletableFuture<String,T>
     addFutureForWork(final int index, FutureTransformer<T> processor) {
-        var oldWorkItem = items.get(index);
-        if (oldWorkItem == null) {
+        var workItem = items.get(index);
+        if (workItem == null) {
             if (index < currentOffset) {
                 throw new IllegalArgumentException("index (" + index + ")" +
                         " must be > last processed item (" + currentOffset + ")");
             }
-            for (int nextKey = Math.max(currentOffset, items.isEmpty() ? 0 : items.lastKey()+1);
+            for (int nextKey = Math.max(currentOffset, items.isEmpty() ? Integer.MIN_VALUE : items.lastKey()+1);
                  nextKey<=index;
                  ++nextKey) {
                 int finalNextKey = nextKey;
@@ -86,20 +86,20 @@ public class OnlineRadixSorter {
                         new StringTrackableCompletableFuture<Void>(
                                 CompletableFuture.completedFuture(null),
                                 "unlinked signaling future for slot #" + finalNextKey) :
-                        items.get(items.lastKey()).signalWorkCompletedFuture
+                        items.get(finalNextKey-1).signalWorkCompletedFuture
                                 .thenAccept(v-> {},
                                         ()->"Kickoff for slot #" + finalNextKey);
-                oldWorkItem = new IndexedWork(signalFuture, null,
+                workItem = new IndexedWork(signalFuture, null,
                         new StringTrackableCompletableFuture<Void>(()->"Work to finish for slot #" + finalNextKey +
                                 " is awaiting [" + getAwaitingText() + "]"));
-                oldWorkItem.signalWorkCompletedFuture.whenComplete((v,t)->{
+                workItem.signalWorkCompletedFuture.whenComplete((v,t)->{
                     ++currentOffset;
                     items.remove(finalNextKey);
                     }, ()->"cleaning up spent work for idx #" + finalNextKey);
-                items.put(nextKey, oldWorkItem);
+                items.put(nextKey, workItem);
             }
         }
-        return oldWorkItem.addWorkFuture(processor, index);
+        return workItem.addWorkFuture(processor, index);
     }
 
     public String getAwaitingText() {

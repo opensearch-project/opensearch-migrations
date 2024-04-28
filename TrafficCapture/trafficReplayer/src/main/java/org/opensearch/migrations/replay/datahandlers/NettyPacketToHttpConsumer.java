@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.datahandlers;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -19,8 +18,10 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
+import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.NettyToCompletableFutureBinders;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringHandler;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
@@ -41,7 +42,6 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
@@ -89,43 +89,40 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var parentContext = ctx.createTargetRequestContext();
         this.setCurrentMessageContext(parentContext.createHttpSendingContext());
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
-        this.activeChannelFuture = new StringTrackableCompletableFuture<>(
-                () -> "incoming connection is ready for " + replaySession);
-        var initialFuture = this.activeChannelFuture;
-
-        log.atDebug().setMessage(() ->
-                "C'tor: incoming session=" + replaySession).log();
-        activateLiveChannel(initialFuture);
+        log.atDebug().setMessage(() -> "C'tor: incoming session=" + replaySession).log();
+        this.activeChannelFuture = activateLiveChannel();
     }
 
-    private void activateLiveChannel(DiagnosticTrackableCompletableFuture<String, Void> initialFuture) {
-        replaySession.getFutureThatReturnsChannelFuture(true).thenAccept(channelFuture-> {
-            channelFuture.addListener(connectFuture -> {
-                final var ctx = replaySession.getChannelKeyContext();
-                if (connectFuture.isSuccess()) {
-                    final var c = channelFuture.channel();
-                    if (c.isActive()) {
-                        this.channel = c;
-                        initializeChannelPipeline();
-                        log.atDebug().setMessage(()->"Channel initialized for " + ctx + " signaling future").log();
-                        initialFuture.future.complete(null);
-                    } else {
-                        // this may loop forever - until the event loop is shutdown
-                        // (see the ClientConnectionPool::shutdownNow())
-                        ctx.addFailedChannelCreation();
-                        log.atWarn().setMessage(()->"Channel wasn't active, trying to create another for this request")
-                                .log();
-                        activateLiveChannel(initialFuture);
-                    }
-                } else {
-                    ctx.addFailedChannelCreation();
-                    ctx.addTraceException(channelFuture.cause(), true);
-                    log.atWarn().setMessage(()->"error creating channel, not retrying")
-                            .setCause(connectFuture.cause()).log();
-                    initialFuture.future.completeExceptionally(connectFuture.cause());
-                }
-            });
-        }, () -> "creating an alive connection");
+    private DiagnosticTrackableCompletableFuture<String, Void> activateLiveChannel() {
+        final var ctx = replaySession.getChannelKeyContext();
+        return replaySession.getFutureThatReturnsChannelFutureInAnyState(true)
+                .thenCompose(channelFuture -> NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(channelFuture,
+                                        "waiting for newly acquired channel to be ready")
+                                .getDeferredFutureThroughHandle((connectFuture,t)->{
+                                    if (t != null) {
+                                        ctx.addFailedChannelCreation();
+                                        ctx.addTraceException(channelFuture.cause(), true);
+                                        log.atWarn().setMessage(()->"error creating channel, not retrying")
+                                                .setCause(t).log();
+                                        throw Lombok.sneakyThrow(t);
+                                    }
+
+                                    final var c = channelFuture.channel();
+                                    if (c.isActive()) {
+                                        this.channel = c;
+                                        initializeChannelPipeline();
+                                        log.atDebug().setMessage(()->"Channel initialized for " + ctx + " signaling future").log();
+                                        return StringTrackableCompletableFuture.completedFuture(null, ()->"Done");
+                                    } else {
+                                        // this may recurse forever - until the event loop is shutdown
+                                        // (see the ClientConnectionPool::shutdownNow())
+                                        ctx.addFailedChannelCreation();
+                                        log.atWarn().setMessage(()->"Channel wasn't active, trying to create another for this request")
+                                                .log();
+                                        return activateLiveChannel();
+                                    }
+                                }, () -> "acting on ready channelFuture to retry if inactive or to return"),
+                        () -> "taking newly acquired channel and making it active");
     }
 
     private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> &
@@ -142,11 +139,12 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
 
-    public static ChannelFuture createClientConnection(EventLoopGroup eventLoopGroup,
-                                                       SslContext sslContext,
-                                                       URI serverUri,
-                                                       IReplayContexts.IChannelKeyContext channelKeyContext,
-                                                       Duration timeout) {
+    public static DiagnosticTrackableCompletableFuture<String,ChannelFuture>
+    createClientConnection(EventLoopGroup eventLoopGroup,
+                           SslContext sslContext,
+                           URI serverUri,
+                           IReplayContexts.IChannelKeyContext channelKeyContext,
+                           Duration timeout) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
@@ -165,38 +163,29 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
         var outboundChannelFuture = b.connect(host, port);
 
-        var rval = new DefaultChannelPromise(outboundChannelFuture.channel());
-        outboundChannelFuture.addListener((ChannelFutureListener) connectFuture -> {
-            if (connectFuture.isSuccess()) {
-                final var channel  = connectFuture.channel();
-                log.atTrace().setMessage(()-> channelKeyContext.getChannelKey() +
-                        " Done setting up client channel & it was successful for " + channel).log();
-                var pipeline = channel.pipeline();
-                if (sslContext != null) {
-                    var sslEngine = sslContext.newEngine(channel.alloc());
-                    sslEngine.setUseClientMode(true);
-                    var sslHandler = new SslHandler(sslEngine);
-                    addLoggingHandlerLast(pipeline, "A");
-                    pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
-                    sslHandler.handshakeFuture().addListener(handshakeFuture -> {
-                        if (handshakeFuture.isSuccess()) {
-                            rval.setSuccess();
+        return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(outboundChannelFuture, "")
+                .thenCompose(voidVal-> {
+                    if (outboundChannelFuture.isSuccess()) {
+                        final var channel = outboundChannelFuture.channel();
+                        log.atTrace().setMessage(() -> channelKeyContext.getChannelKey() +
+                                " Done setting up client channel & it was successful for " + channel).log();
+                        var pipeline = channel.pipeline();
+                        if (sslContext != null) {
+                            var sslEngine = sslContext.newEngine(channel.alloc());
+                            sslEngine.setUseClientMode(true);
+                            var sslHandler = new SslHandler(sslEngine);
+                            addLoggingHandlerLast(pipeline, "A");
+                            pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
+                            return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(sslHandler.handshakeFuture(),
+                                    ()->"")
+                                    .thenApply(voidVal2->outboundChannelFuture, ()->"");
                         } else {
-                            rval.setFailure(handshakeFuture.cause());
+                            return StringTrackableCompletableFuture.completedFuture(outboundChannelFuture, ()->"");
                         }
-                    });
-                } else {
-                    rval.setSuccess();
-                }
-            } else {
-                // Close the connection if the connection attempt has failed.
-                log.atWarn().setCause(connectFuture.cause())
-                        .setMessage(() -> channelKeyContext.getChannelKey() + " CONNECT future was not successful, " +
-                        "so setting the channel future's result to an exception").log();
-                rval.setFailure(connectFuture.cause());
-            }
-        });
-        return rval;
+                    } else {
+                        return StringTrackableCompletableFuture.failedFuture(outboundChannelFuture.cause(), ()->"");
+                    }
+                }, () -> "");
     }
 
     private static boolean channelIsInUse(Channel c) {
@@ -309,37 +298,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
     private DiagnosticTrackableCompletableFuture<String, Void>
     writePacketAndUpdateFuture(ByteBuf packetData) {
-        final var completableFuture = new DiagnosticTrackableCompletableFuture<String, Void>(new CompletableFuture<>(),
-                ()->"CompletableFuture that will wait for the netty future to fill in the completion value");
-        channel.writeAndFlush(packetData)
-                .addListener((ChannelFutureListener) future -> {
-                    Throwable cause = null;
-                    try {
-                        if (!future.isSuccess()) {
-                            log.atWarn().setMessage(()-> httpContext().getReplayerRequestKey() + "closing outbound channel " +
-                                    "because WRITE future was not successful " + future.cause() + " hash=" +
-                                    System.identityHashCode(packetData) + " will be sending the exception to " +
-                                    completableFuture).log();
-                            future.channel().close(); // close the backside
-                            cause = future.cause();
-                        }
-                    } catch (Exception e) {
-                        cause = e;
-                    }
-                    if (cause == null) {
-                        log.atTrace().setMessage(()->"Previously returned CompletableFuture packet write was " +
-                                "successful: " + packetData + " hash=" + System.identityHashCode(packetData)).log();
-                        completableFuture.future.complete(null);
-                    } else {
-                        log.atInfo().setMessage(()->"Previously returned CompletableFuture packet write had " +
-                                " an exception :" + packetData + " hash=" + System.identityHashCode(packetData)).log();
-                        completableFuture.future.completeExceptionally(cause);
-                        channel.close();
-                    }
-                });
-        log.atTrace().setMessage(()->"Writing packet data=" + packetData +
-                ".  Created future for writing data="+completableFuture).log();
-        return completableFuture;
+        return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(channel.writeAndFlush(packetData),
+                "CompletableFuture that will wait for the netty future to fill in the completion value");
     }
 
     @Override

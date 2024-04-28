@@ -10,6 +10,7 @@ import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
 
 public class TimeToResponseFulfillmentFutureMap {
 
+
     public static class FutureWorkPoint {
         public final Instant startTime;
         public final DiagnosticTrackableCompletableFuture<String, Void> scheduleFuture;
@@ -42,6 +43,10 @@ public class TimeToResponseFulfillmentFutureMap {
         return timeToRunnableMap.isEmpty();
     }
 
+    public void clear() {
+        timeToRunnableMap.clear();
+    }
+
     public boolean hasPendingTransmissions() {
         if (timeToRunnableMap.isEmpty()) {
             return false;
@@ -50,13 +55,9 @@ public class TimeToResponseFulfillmentFutureMap {
         }
     }
 
-    public long calculateSizeSlowly() {
-        return timeToRunnableMap.size();
-    }
-
     @Override
     public String toString() {
-        return "[" + this.calculateSizeSlowly() + "]: {" + formatBookends() + "}";
+        return "[" + (long) timeToRunnableMap.size() + "]: {" + formatBookends() + "}";
     }
 
     private String formatBookends() {

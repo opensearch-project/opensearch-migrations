@@ -12,6 +12,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class NettyToCompletableFutureBinders {
+
+    private NettyToCompletableFutureBinders() {}
+
     public static CompletableFuture<Void>
     bindNettyFutureToCompletableFuture(Future<?> nettyFuture, CompletableFuture<Void> cf) {
         nettyFuture.addListener(f -> {
@@ -54,7 +57,7 @@ public class NettyToCompletableFutureBinders {
     bindNettyScheduleToCompletableFuture(EventLoop eventLoop, Duration delay) {
         var delayMs = Math.max(0, delay.toMillis());
         return bindNettyFutureToTrackableFuture(eventLoop.schedule(() -> {}, delayMs, TimeUnit.MILLISECONDS),
-                "scheduling to run next send at " + delay + " in " + delayMs +" ms (clipped)");
+                "scheduling to run next send in " + delay + " (clipped: " + delayMs + "ms)");
     }
 
     public static CompletableFuture<Void>

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opensearch.migrations.NettyToCompletableFutureBinders;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
@@ -149,10 +150,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var channelContext = httpContext.getChannelKeyContext();
                 var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("test")).next();
                 var replaySession = new ConnectionReplaySession(eventLoop, channelContext,
-                        () -> ClientConnectionPool.getCompletedChannelFutureAsCompletableFuture(
-                                httpContext.getChannelKeyContext(),
-                                NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
-                                        testServer.localhostEndpoint(), channelContext, REGULAR_RESPONSE_TIMEOUT)));
+                        () -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
+                                testServer.localhostEndpoint(), channelContext, REGULAR_RESPONSE_TIMEOUT));
                 var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
                 nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
                 var aggregatedResponse = nphc.finalizeRequest().get();
