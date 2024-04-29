@@ -6,7 +6,6 @@ import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 
 import java.util.function.IntSupplier;
-import java.util.function.Supplier;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
@@ -276,8 +275,12 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         writeByteStringToCurrentStream(dataFieldNumber, str);
     }
 
-    private void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buffer) throws IOException {
-        var byteBuffer = buffer.nioBuffer();
+    void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buf) throws IOException {
+        addDataMessage(captureFieldNumber, dataFieldNumber, timestamp, buf.nioBuffer());
+    }
+
+    void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuffer nioBuffer) throws IOException {
+        var readOnlyDataBuffer = nioBuffer.asReadOnlyBuffer();
         int segmentFieldNumber;
         int segmentDataFieldNumber;
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
@@ -294,43 +297,42 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         // when considering the case of a message that does not need segments or for the case of a smaller segment created
         // from a much larger message
         int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp,
-            segmentFieldNumber, segmentDataFieldNumber, byteBuffer);
-        int trafficStreamOverhead = messageAndOverheadBytesLeft - byteBuffer.capacity();
+            segmentFieldNumber, segmentDataFieldNumber, readOnlyDataBuffer);
+        int trafficStreamOverhead = messageAndOverheadBytesLeft - readOnlyDataBuffer.capacity();
 
         // Ensure that space for at least one data byte and overhead exists, otherwise a flush is necessary.
         flushIfNeeded(() -> (trafficStreamOverhead + 1));
 
         // If our message is empty or can fit in the current CodedOutputStream no chunking is needed, and we can continue
         var spaceLeft = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
-        if (byteBuffer.limit() == 0 || spaceLeft == -1 || messageAndOverheadBytesLeft <= spaceLeft) {
+        if (readOnlyDataBuffer.limit() == 0 || spaceLeft == -1 || messageAndOverheadBytesLeft <= spaceLeft) {
             int minExpectedSpaceAfterObservation = spaceLeft - messageAndOverheadBytesLeft;
-            addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, byteBuffer);
+            addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, readOnlyDataBuffer);
             observationSizeSanityCheck(minExpectedSpaceAfterObservation, captureFieldNumber);
             return;
         }
 
-        while(byteBuffer.position() < byteBuffer.limit()) {
+        while(readOnlyDataBuffer.position() < readOnlyDataBuffer.limit()) {
             // COS checked for unbounded limit above
             int availableCOSSpace = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
-            int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : byteBuffer.limit() - byteBuffer.position();
-            ByteBuffer bb = byteBuffer.duplicate();
+            int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : readOnlyDataBuffer.limit() - readOnlyDataBuffer.position();
+            ByteBuffer bb = readOnlyDataBuffer.slice();
             bb.limit(chunkBytes);
-            bb = bb.duplicate();
-            byteBuffer.position(byteBuffer.position() + chunkBytes);
+            bb = bb.slice();
+            readOnlyDataBuffer.position(readOnlyDataBuffer.position() + chunkBytes);
             addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, timestamp, bb);
             int minExpectedSpaceAfterObservation = availableCOSSpace - chunkBytes - trafficStreamOverhead;
             observationSizeSanityCheck(minExpectedSpaceAfterObservation, segmentFieldNumber);
             // 1 to N-1 chunked messages
-            if (byteBuffer.position() < byteBuffer.limit()) {
+            if (readOnlyDataBuffer.position() < readOnlyDataBuffer.limit()) {
                 flushCommitAndResetStream(false);
                 messageAndOverheadBytesLeft = messageAndOverheadBytesLeft - chunkBytes;
             }
         }
         writeEndOfSegmentMessage(timestamp);
-
     }
 
-    private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, int dataCountFieldNumber, int dataCount,
+    void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, int dataCountFieldNumber, int dataCount,
         Instant timestamp, java.nio.ByteBuffer byteBuffer) throws IOException {
         int dataSize = 0;
         int segmentCountSize = 0;

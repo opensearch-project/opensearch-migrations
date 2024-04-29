@@ -198,6 +198,25 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     @Test
+    public void testWriteIsHandledForBufferAllocatedLargerThanWritten()
+        throws IOException, ExecutionException, InterruptedException {
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, getEstimatedTrafficStreamByteSize(1, 200));
+
+        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(100);
+        byteBuffer.limit(50);
+        byteBuffer.putInt(1);
+
+        serializer.addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, WriteObservation.DATA_FIELD_NUMBER, REFERENCE_TIMESTAMP, byteBuffer);
+        var future = serializer.flushCommitAndResetStream(true);
+        future.get();
+
+        var outputBuffersList = new ArrayList<>(outputBuffersCreated);
+        TrafficStream reconstitutedTrafficStream = TrafficStream.parseFrom(outputBuffersList.get(0));
+        Assertions.assertEquals(1, reconstitutedTrafficStream.getSubStream(0).getWrite().getData().size());
+    }
+
+    @Test
     public void testWithLimitlessCodedOutputStreamHolder()
         throws IOException, ExecutionException, InterruptedException {
 
