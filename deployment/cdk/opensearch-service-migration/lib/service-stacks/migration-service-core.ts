@@ -151,7 +151,7 @@ export class MigrationServiceCore extends Stack {
             const namespace = PrivateDnsNamespace.fromPrivateDnsNamespaceAttributes(this, "PrivateDNSNamespace", {
                 namespaceName: `migration.${props.stage}.local`,
                 namespaceId: namespaceId,
-                namespaceArn: `arn:aws:servicediscovery:${props.env?.region}:${props.env?.account}:namespace/${namespaceId}`
+                namespaceArn: `arn:aws:servicediscovery:${this.region}:${this.account}:namespace/${namespaceId}`
             })
             cloudMapOptions = {
                 name: props.serviceName,

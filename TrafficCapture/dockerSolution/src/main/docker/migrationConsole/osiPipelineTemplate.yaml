@@ -1,11 +1,11 @@
 version: "2"
-pipeline_configurations:
-  aws:
-    secrets:
-      source-secret-config:
-        secret_id: "test-osi-secret-source"
-        region: <AWS_REGION_PLACEHOLDER>
-        sts_role_arn: <SOURCE_STS_ROLE_ARN_PLACEHOLDER>
+#pipeline_configurations:
+#  aws:
+#    secrets:
+#      source-secret-config:
+#        secret_id: "test-osi-secret-source"
+#        region: <AWS_REGION_PLACEHOLDER>
+#        sts_role_arn: <SOURCE_STS_ROLE_ARN_PLACEHOLDER>
 
 # NOTE: Placeholder values will be automatically populated and do not need to be changed
 historical-data-migration:
@@ -20,13 +20,13 @@ historical-data-migration:
         exclude:
         - index_name_regex: \.*
       #disable_authentication: true
-      username: "admin"
-      password: "${{aws_secrets:source-secret-config:password}}"
+      #username: "admin"
+      #password: "${{aws_secrets:source-secret-config:password}}"
       #connection:
       #  insecure: true
-      #aws:
-      #  region: <AWS_REGION_PLACEHOLDER>
-      #  sts_role_arn: <SOURCE_STS_ROLE_ARN_PLACEHOLDER>
+      aws:
+        region: <AWS_REGION_PLACEHOLDER>
+        sts_role_arn: <SOURCE_STS_ROLE_ARN_PLACEHOLDER>
 
   # Target cluster configuration
   sink:

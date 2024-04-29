@@ -5,20 +5,24 @@ import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
+import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
+import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
+import {RemovalPolicy} from "aws-cdk-lib";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
+    readonly migrationsSolutionVersion: string,
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly otelCollectorEnabled: boolean
+    readonly otelCollectorEnabled: boolean,
+    readonly migrationConsoleEnableOSI: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -52,6 +56,47 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         return [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy]
     }
 
+    configureOpenSearchIngestionPipelineRole(stage: string, deployId: string) {
+        const osiPipelineRole = new Role(this, 'osisPipelineRole', {
+            assumedBy: new ServicePrincipal('osis-pipelines.amazonaws.com'),
+            description: 'OpenSearch Ingestion Pipeline role for OpenSearch Migrations'
+        });
+        // Add policy to allow access to Opensearch domains
+        osiPipelineRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ["es:DescribeDomain", "es:ESHttp*"],
+            resources: [`arn:aws:es:${this.region}:${this.account}:domain/*`]
+        }))
+
+        new StringParameter(this, 'SSMParameterOSIPipelineRoleArn', {
+            description: 'OpenSearch Migration Parameter for OpenSearch Ingestion Pipeline Role ARN',
+            parameterName: `/migration/${stage}/${deployId}/osiPipelineRoleArn`,
+            stringValue: osiPipelineRole.roleArn
+        });
+    }
+
+    createOpenSearchIngestionManagementPolicy(): PolicyStatement {
+        const allMigrationPipelineArn = `arn:aws:osis:${this.region}:${this.account}:pipeline/*`
+        const osiManagementPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [allMigrationPipelineArn],
+            conditions: {
+                'Null': {
+                    'aws:TagKeys': 'false'
+                },
+                'ForAllValues:StringEquals': {
+                    'aws:TagKeys': [
+                        'migration_deployment'
+                    ]
+                }
+            },
+            actions: [
+                "osis:*"
+            ]
+        })
+        return osiManagementPolicy
+    }
+
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
         let securityGroups = [
@@ -81,7 +126,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             readOnly: false,
             sourceVolume: volumeName
         }
-        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${props.env?.region}:${props.env?.account}:file-system/${volumeId}`
+        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
         const replayerOutputMountPolicy = new PolicyStatement( {
             effect: Effect.ALLOW,
             resources: [replayerOutputEFSArn],
@@ -91,7 +136,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const ecsClusterArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:service/migration-${props.stage}-ecs-cluster`
+        const ecsClusterArn = `arn:aws:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
         const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
         const reindexFromSnapshotServiceArn = `${ecsClusterArn}/migration-${props.stage}-reindex-from-snapshot`
         const updateReplayerServicePolicy = new PolicyStatement({
@@ -112,14 +157,23 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        const getSSMParamsPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/migration/${props.stage}/${props.defaultDeployId}/*`],
+            actions: [
+                "ssm:GetParameters"
+            ]
+        })
+
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
-            "MIGRATION_STAGE": props.stage
+            "MIGRATION_STAGE": props.stage,
+            "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, artifactS3PublishPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, artifactS3PublishPolicy, getSSMParamsPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
@@ -147,6 +201,21 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             })
             servicePolicies.push(fetchMigrationTaskRunPolicy)
             servicePolicies.push(fetchMigrationPassRolePolicy)
+        }
+
+        if (props.migrationConsoleEnableOSI) {
+            servicePolicies.push(this.createOpenSearchIngestionManagementPolicy())
+            this.configureOpenSearchIngestionPipelineRole(props.stage, props.defaultDeployId)
+            const osiLogGroup = new LogGroup(this, 'OSILogGroup',  {
+                retention: RetentionDays.ONE_MONTH,
+                removalPolicy: RemovalPolicy.DESTROY,
+                logGroupName: `/migration/${props.stage}/${props.defaultDeployId}/openSearchIngestion`
+            });
+            new StringParameter(this, 'SSMParameterOSIPipelineLogGroupName', {
+                description: 'OpenSearch Migration Parameter for OpenSearch Ingestion Pipeline Log Group Name',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osiPipelineLogGroupName`,
+                stringValue: osiLogGroup.logGroupName
+            });
         }
 
         this.createService({

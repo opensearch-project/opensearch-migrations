@@ -17,6 +17,10 @@ SOURCE_STS_ROLE_ARN_PLACEHOLDER = "<SOURCE_STS_ROLE_ARN_PLACEHOLDER>"
 TARGET_STS_ROLE_ARN_PLACEHOLDER = "<TARGET_STS_ROLE_ARN_PLACEHOLDER>"
 
 
+class MissingEnvironmentVariable(Exception):
+    pass
+
+
 def _initialize_logging():
     root_logger = logging.getLogger()
     root_logger.handlers = []  # Make sure we're starting with a clean slate
@@ -30,6 +34,13 @@ def _initialize_logging():
     root_logger.addHandler(console_handler)
 
 
+def validate_environment():
+    env_vars = ['AWS_REGION', 'MIGRATION_SOLUTION_VERSION', 'MIGRATION_STAGE', 'MIGRATION_DOMAIN_ENDPOINT']
+    for i in env_vars:
+        if os.environ.get(i) is None:
+            raise MissingEnvironmentVariable(f"Required environment variable '{i}' not found")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Script to control migration OSI pipeline operations.")
     subparsers = parser.add_subparsers(dest="subcommand")
@@ -41,6 +52,13 @@ def parse_args():
                                      default=DEFAULT_PIPELINE_NAME)
     parser_create_pipeline_command = subparsers.add_parser('create-pipeline',
                                                            help='Operation to create an OSI pipeline')
+    parser_create_pipeline_command.add_argument('--source-endpoint',
+                                                type=str,
+                                                help='The source cluster endpoint to use for the OSI pipeline',
+                                                required=True)
+    parser_create_pipeline_command.add_argument('--target-endpoint',
+                                                type=str,
+                                                help='The target cluster endpoint to use for the OSI pipeline')
     parser_create_pipeline_command.add_argument('--name', type=str, help='The name of the OSI pipeline',
                                                 default=DEFAULT_PIPELINE_NAME)
     return parser.parse_args()
@@ -68,15 +86,13 @@ def get_private_subnets(vpc_id):
     return private_subnets
 
 
-def construct_pipeline_config(pipeline_config_file_path: str):
-    region: str = os.environ.get("AWS_REGION")
+def construct_pipeline_config(pipeline_config_file_path: str, region: str, source_endpoint: str, target_endpoint: str, osi_pipeline_role_arn: str):
     pipeline_config = Path(pipeline_config_file_path).read_text()
-    pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, "http://opense-clust-qdZr6y0XiExC-3a3b2a6d93316d7a.elb.us-west-2.amazonaws.com:9200")
-    #pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, "https://vpc-test-es-source-osi-qd5nmp6ol7anmvom5bnpta6mfe.us-west-2.es.amazonaws.com")
-    pipeline_config = pipeline_config.replace(TARGET_ENDPOINT_PLACEHOLDER, "https://vpc-opensearch-cluster-aws-integ-k7fmj5yryuxbxovs3laua64k5y.us-west-2.es.amazonaws.com")
+    pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, source_endpoint)
+    pipeline_config = pipeline_config.replace(TARGET_ENDPOINT_PLACEHOLDER, target_endpoint)
     pipeline_config = pipeline_config.replace(AWS_REGION_PLACEHOLDER, region)
-    pipeline_config = pipeline_config.replace(SOURCE_STS_ROLE_ARN_PLACEHOLDER, "arn:aws:iam::594430375790:role/OpenSearchIngestionPipelineRole")
-    pipeline_config = pipeline_config.replace(TARGET_STS_ROLE_ARN_PLACEHOLDER, "arn:aws:iam::594430375790:role/OpenSearchIngestionPipelineRole")
+    pipeline_config = pipeline_config.replace(SOURCE_STS_ROLE_ARN_PLACEHOLDER, osi_pipeline_role_arn)
+    pipeline_config = pipeline_config.replace(TARGET_STS_ROLE_ARN_PLACEHOLDER, osi_pipeline_role_arn)
     return pipeline_config
 
 
@@ -94,13 +110,19 @@ def stop_pipeline(osi_client, pipeline_name: str):
     )
 
 
-def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str):
+def create_pipeline(osi_client, pipeline_name: str, pipeline_config_path: str, source_endpoint: str, target_endpoint: str):
     logger.info(f"Creating pipeline: {pipeline_name}")
-    vpc_id_key = "/migration/aws-integ/default/vpcId"
-    target_sg_id_key = "/migration/aws-integ/default/osAccessSecurityGroupId"
-    source_sg_id_key = "/migration/aws-integ/default/serviceConnectSecurityGroupId"
+    region = os.environ.get("AWS_REGION")
+    solution_version = os.environ.get("MIGRATION_SOLUTION_VERSION")
+    stage = os.environ.get("MIGRATION_STAGE")
+    vpc_id_key = f"/migration/{stage}/default/vpcId"
+    target_sg_id_key = f"/migration/{stage}/default/osAccessSecurityGroupId"
+    source_sg_id_key = f"/migration/{stage}/default/serviceConnectSecurityGroupId"
+    osi_pipeline_role_key = f"/migration/{stage}/default/osiPipelineRoleArn"
+    osi_log_group_key = f"/migration/{stage}/default/osiPipelineLogGroupName"
     ssm_client = boto3.client('ssm')
-    param_response = ssm_client.get_parameters(Names=[vpc_id_key, target_sg_id_key, source_sg_id_key])
+    param_response = ssm_client.get_parameters(Names=[vpc_id_key, target_sg_id_key, source_sg_id_key,
+                                                      osi_pipeline_role_key, osi_log_group_key])
     parameters = param_response['Parameters']
     param_dict = {}
     for param in parameters:
@@ -109,31 +131,31 @@ def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str):
     security_groups = [param_dict[target_sg_id_key], param_dict[source_sg_id_key]]
     subnet_ids = get_private_subnets(vpc_id)
 
-    response = osi_client.create_pipeline(
+    pipeline_config = construct_pipeline_config(pipeline_config_path, region, source_endpoint, target_endpoint,
+                                                param_dict[osi_pipeline_role_key])
+
+    osi_client.create_pipeline(
         PipelineName=pipeline_name,
         MinUnits=2,
         MaxUnits=4,
         PipelineConfigurationBody=pipeline_config,
         LogPublishingOptions={
-            'IsLoggingEnabled': False,
-            # TODO provide
-            #'CloudWatchLogDestination': {
-            #    'LogGroup': 'string'
-            #}
+            'IsLoggingEnabled': True,
+            'CloudWatchLogDestination': {
+                'LogGroup': param_dict[osi_log_group_key]
+            }
         },
         VpcOptions={
             'SubnetIds': subnet_ids,
             'SecurityGroupIds': security_groups
         },
         BufferOptions={
-            # TODO review
             'PersistentBufferEnabled': False
         },
         Tags=[
             {
                 'Key': 'migration_deployment',
-                # TODO pass in
-                'Value': '1.0.3'
+                'Value': solution_version
             },
         ]
     )
@@ -143,6 +165,7 @@ if __name__ == "__main__":
     args = parse_args()
     _initialize_logging()
     logger.info(f"Incoming args: {args}")
+    validate_environment()
 
     client = boto3.client('osis')
 
@@ -151,6 +174,5 @@ if __name__ == "__main__":
     elif args.subcommand == "stop-pipeline":
         stop_pipeline(client, args.name)
     elif args.subcommand == "create-pipeline":
-        pipeline_config_loaded = construct_pipeline_config(DEFAULT_PIPELINE_CONFIG_PATH)
-        #print(pipeline_config_loaded)
-        create_pipeline(client, args.name, pipeline_config_loaded)
+        target_cluster_endpoint = args.target_endpoint if args.target_endpoint is not None else os.environ.get("MIGRATION_DOMAIN_ENDPOINT")
+        create_pipeline(client, args.name, DEFAULT_PIPELINE_CONFIG_PATH, args.source_endpoint, target_cluster_endpoint)
