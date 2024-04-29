@@ -18,38 +18,38 @@ class OnlineRadixSorterTest {
     }
 
     private static String add(OnlineRadixSorterForIntegratedKeys<Integer> sorter,
-                              Map<Integer, DiagnosticTrackableCompletableFuture<String,Void>> m,
+                              Map<Integer, TrackedFuture<String,Void>> m,
                               ArrayList<Integer> receivedItems, int v) {
-        var dcf = sorter.add(v, () -> receivedItems.add(v));
-        if (m != null) { m.put(v, dcf); }
-        log.atInfo().setMessage(()->"after adding work... "+dcf).log();
+        var future = sorter.add(v, () -> receivedItems.add(v));
+        if (m != null) { m.put(v, future); }
+        log.atInfo().setMessage(()->"after adding work... "+future).log();
         return stringify(receivedItems.stream());
     }
 
     @Test
     void testOnlineRadixSorter_inOrder() {
         var radixSorter = new OnlineRadixSorterForIntegratedKeys(1, i -> (int) i);
-        Assertions.assertEquals("1", add(radixSorter, null, new ArrayList<Integer>(), 1));
-        Assertions.assertEquals("2", add(radixSorter, null, new ArrayList<Integer>(), 2));
-        Assertions.assertEquals("3", add(radixSorter, null, new ArrayList<Integer>(), 3));
+        Assertions.assertEquals("1", add(radixSorter, null, new ArrayList<>(), 1));
+        Assertions.assertEquals("2", add(radixSorter, null, new ArrayList<>(), 2));
+        Assertions.assertEquals("3", add(radixSorter, null, new ArrayList<>(), 3));
     }
 
     @Test
     void testOnlineRadixSorter_outOfOrder() {
         var radixSorter = new OnlineRadixSorterForIntegratedKeys(1, i->(int) i);
         var receiverList = new ArrayList<Integer>();
-        var dcfMap = new HashMap<Integer,DiagnosticTrackableCompletableFuture<String,Void>>();
-        Assertions.assertEquals("", add(radixSorter, dcfMap, receiverList, 3));
-        Assertions.assertEquals("", add(radixSorter, dcfMap, receiverList, 4));
-        Assertions.assertEquals("1", add(radixSorter, dcfMap, receiverList, 1));
-        log.atInfo().setMessage(()->"after adding work for '1'... dcf[3]=" + dcfMap.get(3)).log();
-        log.atInfo().setMessage(()->"after adding work for '1'... dcf[4]=" + dcfMap.get(4)).log();
+        var futureMap = new HashMap<Integer, TrackedFuture<String,Void>>();
+        Assertions.assertEquals("", add(radixSorter, futureMap, receiverList, 3));
+        Assertions.assertEquals("", add(radixSorter, futureMap, receiverList, 4));
+        Assertions.assertEquals("1", add(radixSorter, futureMap, receiverList, 1));
+        log.atInfo().setMessage(()->"after adding work for '1'... future[3]=" + futureMap.get(3)).log();
+        log.atInfo().setMessage(()->"after adding work for '1'... future[4]=" + futureMap.get(4)).log();
         receiverList.clear();
-        Assertions.assertEquals("2,3,4", add(radixSorter, dcfMap, receiverList, 2));
+        Assertions.assertEquals("2,3,4", add(radixSorter, futureMap, receiverList, 2));
         receiverList.clear();
-        Assertions.assertEquals("5", add(radixSorter, dcfMap, receiverList, 5));
+        Assertions.assertEquals("5", add(radixSorter, futureMap, receiverList, 5));
         receiverList.clear();
-        Assertions.assertEquals("", add(radixSorter, dcfMap, receiverList, 7));
+        Assertions.assertEquals("", add(radixSorter, futureMap, receiverList, 7));
         receiverList.clear();
     }
 

@@ -5,27 +5,26 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadPoolExecutor;
 
 @Slf4j
-class DiagnosticTrackableCompletableFutureTest {
+class TrackedFutureTest {
 
     @Test
     public void test() throws Exception {
         final int ITERATIONS = 5;
-        DiagnosticTrackableCompletableFuture<String, String> base =
-                new StringTrackableCompletableFuture<>("initial future");
-        var dcf = base;
-        var dcfSemaphore = new Semaphore(0);
+        TrackedFuture<String, String> base =
+                new TextTrackedFuture<>("initial future");
+        var tf = base;
+        var tfSemaphore = new Semaphore(0);
         var observerSemaphore = new Semaphore(0);
         for (int i = 0; i< ITERATIONS; ++i) {
             int finalI = i;
-            var lastDcf = dcf;
-            dcf = dcf.thenApply(v->{
+            var lastTf = tf;
+            tf = tf.thenApply(v->{
                 try {
                     observerSemaphore.release();
-                    dcfSemaphore.acquire();
-                    log.atInfo().setMessage(()->"dcf[" + finalI+"]"+lastDcf).log();
+                    tfSemaphore.acquire();
+                    log.atInfo().setMessage(()->"tf[" + finalI+"]"+lastTf).log();
                 } catch (InterruptedException e) {
                     throw Lombok.sneakyThrow(e);
                 }
@@ -33,14 +32,14 @@ class DiagnosticTrackableCompletableFutureTest {
             }, ()->"run for "+ finalI);
         }
         base.future.completeAsync(()->"");
-        DiagnosticTrackableCompletableFuture<String, String> finalDcf = dcf;
+        TrackedFuture<String, String> finalTf = tf;
         for (int i=0; i<ITERATIONS; ++i) {
             observerSemaphore.acquire();
-            dcfSemaphore.release();
+            tfSemaphore.release();
             Thread.sleep(10);
             int finalI = i;
-            log.atInfo().setMessage(()->"top dcf after " + finalI + " releases="+ finalDcf).log();
+            log.atInfo().setMessage(()->"top tf after " + finalI + " releases="+ finalTf).log();
         }
-        log.atInfo().setMessage(()->"final dcf after any ancestor culls=" + finalDcf).log();
+        log.atInfo().setMessage(()->"final tf after any ancestor culls=" + finalTf).log();
     }
 }

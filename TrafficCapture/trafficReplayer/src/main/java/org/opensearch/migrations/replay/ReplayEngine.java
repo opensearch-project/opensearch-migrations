@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -101,8 +101,8 @@ public class ReplayEngine {
         return totalCountOfScheduledTasksOutstanding.get() > 0;
     }
 
-    private <T> DiagnosticTrackableCompletableFuture<String, T>
-    hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp,
+    private <T> TrackedFuture<String, T>
+    hookWorkFinishingUpdates(TrackedFuture<String, T> future, Instant timestamp,
                              Object stringableKey, String taskDescription) {
         return future.map(f->f
                         .whenComplete((v,t)->Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
@@ -124,9 +124,9 @@ public class ReplayEngine {
                 ") to run at " + start + " incremented tasksOutstanding to "+ newCount).log();
     }
 
-    public <T> DiagnosticTrackableCompletableFuture<String, T>
+    public <T> TrackedFuture<String, T>
     scheduleTransformationWork(IReplayContexts.IReplayerHttpTransactionContext requestCtx, Instant originalStart,
-                               Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
+                               Supplier<TrackedFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "processing";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
@@ -136,7 +136,7 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(result, originalStart, requestCtx, label);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
+    public TrackedFuture<String, AggregatedRawResponse>
     scheduleRequest(IReplayContexts.IReplayerHttpTransactionContext ctx,
                     Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
@@ -154,7 +154,7 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, Void>
+    public TrackedFuture<String, Void>
     closeConnection(int channelInteractionNum,
                     IReplayContexts.IChannelKeyContext ctx,
                     int channelSessionNumber, Instant timestamp) {

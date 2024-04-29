@@ -4,12 +4,10 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
-import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpResponseDecoder;
@@ -21,7 +19,7 @@ import io.netty.handler.timeout.ReadTimeoutHandler;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.NettyToCompletableFutureBinders;
+import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringHandler;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
@@ -29,8 +27,8 @@ import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
@@ -63,7 +61,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      * on anything to happen for the channel.  If the future isn't done, something in the chain is still
      * pending.
      */
-    DiagnosticTrackableCompletableFuture<String,Void> activeChannelFuture;
+    TrackedFuture<String,Void> activeChannelFuture;
     ConnectionReplaySession replaySession;
     private Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
@@ -93,10 +91,10 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         this.activeChannelFuture = activateLiveChannel();
     }
 
-    private DiagnosticTrackableCompletableFuture<String, Void> activateLiveChannel() {
+    private TrackedFuture<String, Void> activateLiveChannel() {
         final var ctx = replaySession.getChannelKeyContext();
         return replaySession.getFutureThatReturnsChannelFutureInAnyState(true)
-                .thenCompose(channelFuture -> NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(channelFuture,
+                .thenCompose(channelFuture -> NettyFutureBinders.bindNettyFutureToTrackableFuture(channelFuture,
                                         "waiting for newly acquired channel to be ready")
                                 .getDeferredFutureThroughHandle((connectFuture,t)->{
                                     if (t != null) {
@@ -112,7 +110,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                                         this.channel = c;
                                         initializeChannelPipeline();
                                         log.atDebug().setMessage(()->"Channel initialized for " + ctx + " signaling future").log();
-                                        return StringTrackableCompletableFuture.completedFuture(null, ()->"Done");
+                                        return TextTrackedFuture.completedFuture(null, ()->"Done");
                                     } else {
                                         // this may recurse forever - until the event loop is shutdown
                                         // (see the ClientConnectionPool::shutdownNow())
@@ -139,7 +137,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
 
-    public static DiagnosticTrackableCompletableFuture<String,ChannelFuture>
+    public static TrackedFuture<String,ChannelFuture>
     createClientConnection(EventLoopGroup eventLoopGroup,
                            SslContext sslContext,
                            URI serverUri,
@@ -163,7 +161,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
         var outboundChannelFuture = b.connect(host, port);
 
-        return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(outboundChannelFuture, "")
+        return NettyFutureBinders.bindNettyFutureToTrackableFuture(outboundChannelFuture, "")
                 .thenCompose(voidVal-> {
                     if (outboundChannelFuture.isSuccess()) {
                         final var channel = outboundChannelFuture.channel();
@@ -176,14 +174,14 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                             var sslHandler = new SslHandler(sslEngine);
                             addLoggingHandlerLast(pipeline, "A");
                             pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
-                            return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(sslHandler.handshakeFuture(),
+                            return NettyFutureBinders.bindNettyFutureToTrackableFuture(sslHandler.handshakeFuture(),
                                     ()->"")
                                     .thenApply(voidVal2->outboundChannelFuture, ()->"");
                         } else {
-                            return StringTrackableCompletableFuture.completedFuture(outboundChannelFuture, ()->"");
+                            return TextTrackedFuture.completedFuture(outboundChannelFuture, ()->"");
                         }
                     } else {
-                        return StringTrackableCompletableFuture.failedFuture(outboundChannelFuture.cause(), ()->"");
+                        return TextTrackedFuture.failedFuture(outboundChannelFuture.cause(), ()->"");
                     }
                 }, () -> "");
     }
@@ -270,7 +268,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
 
 
     @Override
-    public DiagnosticTrackableCompletableFuture<String,Void> consumeBytes(ByteBuf packetData) {
+    public TrackedFuture<String,Void> consumeBytes(ByteBuf packetData) {
         activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
             if (channelException == null) {
                 log.atTrace().setMessage(()->"outboundChannelFuture is ready. Writing packets (hash=" +
@@ -284,7 +282,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         "outbound channel was not set up successfully, NOT writing bytes hash=" +
                         System.identityHashCode(packetData)).log();
                 channel.close();
-                return DiagnosticTrackableCompletableFuture.Factory.failedFuture(channelException, ()->"exception");
+                return TrackedFuture.Factory.failedFuture(channelException, ()->"exception");
             }
         }, ()->"consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
         log.atTrace().setMessage(()->"Setting up write of packetData["+packetData+"] hash=" +
@@ -296,14 +294,14 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return getParentContext().getLogicalEnclosingScope();
     }
 
-    private DiagnosticTrackableCompletableFuture<String, Void>
+    private TrackedFuture<String, Void>
     writePacketAndUpdateFuture(ByteBuf packetData) {
-        return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(channel.writeAndFlush(packetData),
+        return NettyFutureBinders.bindNettyFutureToTrackableFuture(channel.writeAndFlush(packetData),
                 "CompletableFuture that will wait for the netty future to fill in the completion value");
     }
 
     @Override
-    public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
+    public TrackedFuture<String,AggregatedRawResponse>
     finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v,t)-> {
                     log.atDebug().setMessage(()->"finalization running since all prior work has completed for " +
@@ -314,7 +312,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     }
 
                     var future = new CompletableFuture<AggregatedRawResponse>();
-                    var rval = new DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>(future,
+                    var rval = new TrackedFuture<String,AggregatedRawResponse>(future,
                             ()->"NettyPacketToHttpConsumer.finalizeRequest()");
                     if (t == null) {
                         var responseWatchHandler =

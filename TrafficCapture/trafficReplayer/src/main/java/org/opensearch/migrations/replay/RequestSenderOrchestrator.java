@@ -3,17 +3,16 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.EventLoop;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.NettyToCompletableFutureBinders;
+import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ChannelTask;
 import org.opensearch.migrations.replay.datatypes.ChannelTaskType;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -29,24 +28,24 @@ import java.util.stream.Stream;
 @Slf4j
 public class RequestSenderOrchestrator {
 
-    public DiagnosticTrackableCompletableFuture<String,Void>
+    public TrackedFuture<String,Void>
     bindNettyScheduleToCompletableFuture(EventLoop eventLoop, Instant timestamp) {
-        return NettyToCompletableFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, getDelayFromNowMs(timestamp));
+        return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, getDelayFromNowMs(timestamp));
     }
 
-    public StringTrackableCompletableFuture<Void>
+    public TextTrackedFuture<Void>
     bindNettyScheduleToCompletableFuture(EventLoop eventLoop,
                                          Instant timestamp,
-                                         DiagnosticTrackableCompletableFuture<String, Void> existingFuture) {
+                                         TrackedFuture<String, Void> existingFuture) {
         var delayMs = getDelayFromNowMs(timestamp);
-        NettyToCompletableFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, delayMs, existingFuture.future);
-        return new StringTrackableCompletableFuture<>(existingFuture.future,
+        NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, delayMs, existingFuture.future);
+        return new TextTrackedFuture<>(existingFuture.future,
                 "scheduling to run next send at " + timestamp + " in " + delayMs + "ms");
     }
 
     public CompletableFuture<Void>
     bindNettyScheduleToCompletableFuture(EventLoop eventLoop, Instant timestamp, CompletableFuture<Void> cf) {
-        return NettyToCompletableFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop,
+        return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop,
                 getDelayFromNowMs(timestamp), cf);
     }
 
@@ -64,9 +63,9 @@ public class RequestSenderOrchestrator {
         this.packetConsumerFactory = packetConsumerFactory;
     }
 
-    public <T> DiagnosticTrackableCompletableFuture<String, T>
+    public <T> TrackedFuture<String, T>
     scheduleWork(IReplayContexts.IReplayerHttpTransactionContext ctx, Instant timestamp,
-                 Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
+                 Supplier<TrackedFuture<String,T>> task) {
         var connectionSession = clientConnectionPool.getCachedSession(ctx.getChannelKeyContext(),
                 ctx.getReplayerRequestKey().sourceRequestIndexSessionIdentifier);
         log.atDebug().setMessage(()->"Scheduling work for "+ctx.getConnectionId()+" at time "+timestamp).log();
@@ -90,12 +89,12 @@ public class RequestSenderOrchestrator {
             if (scheduleFailure == null) {
                 return task.get();
             } else {
-                return StringTrackableCompletableFuture.failedFuture(scheduleFailure, ()->"netty scheduling failure");
+                return TextTrackedFuture.failedFuture(scheduleFailure, ()->"netty scheduling failure");
             }
         }, ()->"The scheduled callback is running work for " + ctx);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
+    public TrackedFuture<String, AggregatedRawResponse>
     scheduleRequest(UniqueReplayerRequestKey requestKey, IReplayContexts.IReplayerHttpTransactionContext ctx,
                     Instant start, Duration interval, Stream<ByteBuf> packets) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
@@ -111,10 +110,10 @@ public class RequestSenderOrchestrator {
                         connectionReplaySession, start, interval, packets));
     }
 
-    public DiagnosticTrackableCompletableFuture<String,Void> scheduleClose(IReplayContexts.IChannelKeyContext ctx,
-                                                                           int sessionNumber,
-                                                                           int channelInteractionNum,
-                                                                           Instant timestamp) {
+    public TrackedFuture<String,Void> scheduleClose(IReplayContexts.IChannelKeyContext ctx,
+                                                    int sessionNumber,
+                                                    int channelInteractionNum,
+                                                    Instant timestamp) {
         var channelKey = ctx.getChannelKey();
         var channelInteraction = new IndexedChannelInteraction(channelKey, channelInteractionNum);
         log.atDebug().setMessage(() -> "Scheduling CLOSE for " + channelInteraction + " at time " + timestamp).log();
@@ -131,14 +130,14 @@ public class RequestSenderOrchestrator {
      * have been called.  This method isn't concerned with scheduling items to run at a specific time, that is
      * left up to the callback.
      */
-    private <T> DiagnosticTrackableCompletableFuture<String, T>
+    private <T> TrackedFuture<String, T>
     submitUnorderedWorkToEventLoop(IReplayContexts.IChannelKeyContext ctx,
                                    int sessionNumber,
                                    int channelInteractionNumber,
-                                   Function<ConnectionReplaySession, DiagnosticTrackableCompletableFuture<String,T>>
+                                   Function<ConnectionReplaySession, TrackedFuture<String,T>>
                                            onSessionCallback) {
         final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
-        return NettyToCompletableFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
+        return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
                 .getDeferredFutureThroughHandle((v,t) -> {
                     log.atTrace().setMessage(() -> "adding work item at slot " +
                             channelInteractionNumber + " for " + replaySession.getChannelKeyContext() + " with " +
@@ -149,7 +148,7 @@ public class RequestSenderOrchestrator {
                 }, () -> "Waiting for sequencer to finish for slot " + channelInteractionNumber);
     }
 
-    private DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
+    private TrackedFuture<String,AggregatedRawResponse>
     scheduleSendRequestOnConnectionReplaySession(IReplayContexts.IReplayerHttpTransactionContext ctx,
                                                  ConnectionReplaySession connectionReplaySession,
                                                  Instant startTime,
@@ -169,7 +168,7 @@ public class RequestSenderOrchestrator {
                         }, ()->"sending packets for request")));
     }
 
-    private DiagnosticTrackableCompletableFuture<String, Void>
+    private TrackedFuture<String, Void>
     scheduleCloseOnConnectionReplaySession(IReplayContexts.IChannelKeyContext ctx,
                                            ConnectionReplaySession connectionReplaySession,
                                            Instant timestamp,
@@ -179,14 +178,14 @@ public class RequestSenderOrchestrator {
         var diagnosticCtx = new IndexedChannelInteraction(ctx.getChannelKey(), channelInteractionNum);
         return scheduleOnConnectionReplaySession(diagnosticCtx, connectionReplaySession, timestamp,
                 new ChannelTask<>(ChannelTaskType.CLOSE,
-                        dcf -> dcf.whenComplete((v,t) -> {
+                        tf -> tf.whenComplete((v,t) -> {
                             log.trace("Calling closeConnection at slot " + channelInteraction);
                             clientConnectionPool.closeConnection(ctx, connectionReplaySessionNum);
                         }, () -> "Close connection")
                 ));
     }
 
-    private <T> DiagnosticTrackableCompletableFuture<String,T>
+    private <T> TrackedFuture<String,T>
     scheduleOnConnectionReplaySession(IndexedChannelInteraction channelInteraction,
                                       ConnectionReplaySession channelFutureAndRequestSchedule,
                                       Instant atTime,
@@ -228,7 +227,7 @@ public class RequestSenderOrchestrator {
         return Duration.ofMillis(Math.max(0, Duration.between(now(), to).toMillis()));
     }
 
-    private DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse>
+    private TrackedFuture<String,AggregatedRawResponse>
     sendSendingRestOfPackets(IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
                              EventLoop eventLoop,
                              Iterator<ByteBuf> iterator,
@@ -241,8 +240,8 @@ public class RequestSenderOrchestrator {
 
         var consumeFuture = packetReceiver.consumeBytes(iterator.next());
         if (iterator.hasNext()) {
-            return consumeFuture.thenCompose(cf ->
-                    NettyToCompletableFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop,
+            return consumeFuture.thenCompose(tf ->
+                    NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop,
                                     Duration.between(now(), startAt.plus(interval.multipliedBy(counter.get()))))
                     .thenCompose(v -> sendSendingRestOfPackets(packetReceiver, eventLoop, iterator,
                             startAt, interval, counter), () -> "sending next packet"),

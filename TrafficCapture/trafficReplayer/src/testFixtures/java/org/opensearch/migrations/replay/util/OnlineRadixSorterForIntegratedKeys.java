@@ -21,7 +21,7 @@ public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter {
         this.radixResolver = radixResolver;
     }
 
-    public DiagnosticTrackableCompletableFuture<String, Void> add(T item, Runnable sortedItemVisitor) {
+    public TrackedFuture<String, Void> add(T item, Runnable sortedItemVisitor) {
         return super.addFutureForWork(radixResolver.applyAsInt(item), signalFuture->signalFuture.map(
                 f->f.whenComplete((v,t)->sortedItemVisitor.run()),
                 ()->"OnlineRadixSorterForIntegratedKeys.addFutureForWork"));

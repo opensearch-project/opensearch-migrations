@@ -30,15 +30,15 @@ import java.util.stream.Stream;
  * @param <T> The type of value of the underlying (internal) CompletableFuture's result
  */
 @Slf4j
-public class DiagnosticTrackableCompletableFuture<D, T> {
+public class TrackedFuture<D, T> {
 
     public final CompletableFuture<T> future;
-    protected AtomicReference<DiagnosticTrackableCompletableFuture<D,T>> innerComposedPendingCompletableFutureReference;
+    protected AtomicReference<TrackedFuture<D,T>> innerComposedPendingCompletableFutureReference;
     @Getter
     public final Supplier<D> diagnosticSupplier;
-    protected final AtomicReference<DiagnosticTrackableCompletableFuture<D, ?>> parentDiagnosticFutureRef;
+    protected final AtomicReference<TrackedFuture<D, ?>> parentDiagnosticFutureRef;
 
-    private DiagnosticTrackableCompletableFuture() {
+    private TrackedFuture() {
         throw new IllegalCallerException();
     }
 
@@ -48,35 +48,35 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
      */
     public static class Factory {
         private Factory() {}
-        public static <T, D> DiagnosticTrackableCompletableFuture<D, T>
+        public static <T, D> TrackedFuture<D, T>
         failedFuture(@NonNull Throwable e, @NonNull Supplier<D> diagnosticSupplier) {
-            return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.failedFuture(e),
+            return new TrackedFuture<>(CompletableFuture.failedFuture(e),
                     diagnosticSupplier, null);
         }
 
-        public static <U, D> DiagnosticTrackableCompletableFuture<D, U>
+        public static <U, D> TrackedFuture<D, U>
         completedFuture(U v, @NonNull Supplier<D> diagnosticSupplier) {
-            return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.completedFuture(v), diagnosticSupplier,
+            return new TrackedFuture<>(CompletableFuture.completedFuture(v), diagnosticSupplier,
                     null);
         }
     }
 
-    private DiagnosticTrackableCompletableFuture(
+    private TrackedFuture(
             @NonNull CompletableFuture<T> future,
             @NonNull Supplier<D> diagnosticSupplier,
-            DiagnosticTrackableCompletableFuture<D,?> parentFuture) {
+            TrackedFuture<D,?> parentFuture) {
         this.future = future;
         this.diagnosticSupplier = diagnosticSupplier;
         this.parentDiagnosticFutureRef = new AtomicReference<>();
         setParentDiagnosticFuture(parentFuture);
     }
 
-    public DiagnosticTrackableCompletableFuture(@NonNull CompletableFuture<T> future,
-                                                @NonNull Supplier<D> diagnosticSupplier) {
+    public TrackedFuture(@NonNull CompletableFuture<T> future,
+                         @NonNull Supplier<D> diagnosticSupplier) {
         this(future, diagnosticSupplier, null);
     }
 
-    public DiagnosticTrackableCompletableFuture<D, ?> getParentDiagnosticFuture() {
+    public TrackedFuture<D, ?> getParentDiagnosticFuture() {
         var p = parentDiagnosticFutureRef.get();
         if (future.isDone() && p != null) {
             p.setParentDiagnosticFuture(null);
@@ -84,7 +84,7 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         return p;
     }
 
-    protected void setParentDiagnosticFuture(DiagnosticTrackableCompletableFuture<D,?> parent) {
+    protected void setParentDiagnosticFuture(TrackedFuture<D,?> parent) {
         if (parent == null) {
             parentDiagnosticFutureRef.set(null);
             return;
@@ -96,67 +96,66 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         }
         // the parent is a pretty good breadcrumb for the current stack... but the grandparent of the most recently
         // finished ancestor begins to have diminished value immediately, so cut the ancestry tree at this point
-        future.whenComplete((v, t) -> {
-            Optional.ofNullable(getParentDiagnosticFuture())
-                    .ifPresent(p->p.setParentDiagnosticFuture(null));
-        });
+        future.whenComplete((v, t) ->
+            Optional.ofNullable(getParentDiagnosticFuture()).ifPresent(p->p.setParentDiagnosticFuture(null))
+        );
     }
 
     /**
      * @throws IllegalStateException if the dependentFuture has already been passed to this method
      * before or if it has already been marked as completed or was initialized with a parent.
      */
-    public DiagnosticTrackableCompletableFuture<D,T>
-    propagateCompletionToDependentFuture(DiagnosticTrackableCompletableFuture<D,?> dependentFuture,
+    public TrackedFuture<D,T>
+    propagateCompletionToDependentFuture(TrackedFuture<D,?> dependentFuture,
                                          BiConsumer<CompletableFuture<T>, CompletableFuture<?>> consume,
                                          @NonNull Supplier<D> diagnosticSupplier) {
         dependentFuture.setParentDiagnosticFuture(this);
         return this.whenComplete((v,t) -> consume.accept(this.future, dependentFuture.future), diagnosticSupplier);
     }
 
-    public DiagnosticTrackableCompletableFuture<D,T> getInnerComposedPendingCompletableFuture() {
+    public TrackedFuture<D,T> getInnerComposedPendingCompletableFuture() {
         return Optional.ofNullable(innerComposedPendingCompletableFutureReference)
                 .map(AtomicReference::get).orElse(null);
     }
 
-    public <U> DiagnosticTrackableCompletableFuture<D, U>
+    public <U> TrackedFuture<D, U>
     map(@NonNull Function<CompletableFuture<T>, CompletableFuture<U>> fn,
         @NonNull Supplier<D> diagnosticSupplier) {
         var newCf = fn.apply(future);
-        return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
+        return new TrackedFuture<>(newCf, diagnosticSupplier, this);
     }
 
-    public DiagnosticTrackableCompletableFuture<D, Void>
+    public TrackedFuture<D, Void>
     thenAccept(Consumer<T> fn, @NonNull Supplier<D> diagnosticSupplier) {
-        return this.map(dcf->dcf.thenAccept(fn), diagnosticSupplier);
+        return this.map(cf->cf.thenAccept(fn), diagnosticSupplier);
     }
 
-    public <U> DiagnosticTrackableCompletableFuture<D, U>
+    public <U> TrackedFuture<D, U>
     thenApply(Function<T,U> fn, @NonNull Supplier<D> diagnosticSupplier) {
-        return this.map(dcf->dcf.thenApply(fn), diagnosticSupplier);
+        return this.map(cf->cf.thenApply(fn), diagnosticSupplier);
     }
 
-    public DiagnosticTrackableCompletableFuture<D, T>
+    public TrackedFuture<D, T>
     exceptionally(Function<Throwable, T> fn, @NonNull Supplier<D> diagnosticSupplier) {
         return this.map(cf->cf.exceptionally(fn), diagnosticSupplier);
     }
 
-    public DiagnosticTrackableCompletableFuture<D, T>
+    public TrackedFuture<D, T>
     whenComplete(BiConsumer<? super T, Throwable> fn, @NonNull Supplier<D> diagnosticSupplier) {
         return map(cf->cf.whenComplete(fn::accept), diagnosticSupplier);
     }
 
-    public <U> DiagnosticTrackableCompletableFuture<D, U>
-    thenCompose(@NonNull Function<? super T, ? extends DiagnosticTrackableCompletableFuture<D, U>> fn,
+    public <U> TrackedFuture<D, U>
+    thenCompose(@NonNull Function<? super T, ? extends TrackedFuture<D, U>> fn,
                 @NonNull Supplier<D> diagnosticSupplier) {
-        var innerComposedCompletableFutureReference = new AtomicReference<DiagnosticTrackableCompletableFuture<D,U>>();
+        var innerComposedCompletableFutureReference = new AtomicReference<TrackedFuture<D,U>>();
         var newCf = this.future.thenCompose(v->{
             var innerFuture = fn.apply(v);
             innerComposedCompletableFutureReference.set(innerFuture);
             return innerFuture.future;
         });
         var wrappedDiagnosticFuture =
-                new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
+                new TrackedFuture<>(newCf, diagnosticSupplier, this);
         wrappedDiagnosticFuture.innerComposedPendingCompletableFutureReference = innerComposedCompletableFutureReference;
         wrappedDiagnosticFuture.future.whenComplete((v2,t2)->innerComposedCompletableFutureReference.set(null));
         return wrappedDiagnosticFuture;
@@ -175,12 +174,12 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
      * @return
      * @param <U>
      */
-    public <U> DiagnosticTrackableCompletableFuture<D, U>
+    public <U> TrackedFuture<D, U>
     getDeferredFutureThroughHandle(
-            @NonNull BiFunction<? super T, Throwable, ? extends DiagnosticTrackableCompletableFuture<D, U>> fn,
+            @NonNull BiFunction<? super T, Throwable, ? extends TrackedFuture<D, U>> fn,
             @NonNull  Supplier<D> diagnosticSupplier) {
-        var innerComposedCompletableFutureReference = new AtomicReference<DiagnosticTrackableCompletableFuture<D,U>>();
-        CompletableFuture<? extends DiagnosticTrackableCompletableFuture<D, U>> handledFuture =
+        var innerComposedCompletableFutureReference = new AtomicReference<TrackedFuture<D,U>>();
+        CompletableFuture<? extends TrackedFuture<D, U>> handledFuture =
                 this.future.handle((v, t)->{
                     var innerFuture = fn.apply(v,t);
                     innerComposedCompletableFutureReference.set(innerFuture);
@@ -188,17 +187,17 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
                 });
         var newCf = handledFuture.thenCompose(wcf->wcf.future);
         var wrappedDiagnosticFuture =
-                new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
+                new TrackedFuture<>(newCf, diagnosticSupplier, this);
         wrappedDiagnosticFuture.innerComposedPendingCompletableFutureReference = innerComposedCompletableFutureReference;
         // TODO: Add a count to how many futures have been completed and are falling away?
         wrappedDiagnosticFuture.future.whenComplete((v2,t2)->innerComposedCompletableFutureReference.set(null));
         return wrappedDiagnosticFuture;
     }
 
-    public <U> DiagnosticTrackableCompletableFuture<D, U>
+    public <U> TrackedFuture<D, U>
     handle(@NonNull BiFunction<? super T, Throwable, ? extends U> fn, @NonNull  Supplier<D> diagnosticSupplier) {
         CompletableFuture<U> newCf = this.future.handle(fn);
-        return new DiagnosticTrackableCompletableFuture<>(newCf, diagnosticSupplier, this);
+        return new TrackedFuture<>(newCf, diagnosticSupplier, this);
     }
 
     public T get() throws ExecutionException, InterruptedException {
@@ -213,15 +212,15 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
 
     public boolean isDone() { return future.isDone(); }
 
-    public Stream<DiagnosticTrackableCompletableFuture<D,?>> walkParentsAsStream() {
-        AtomicReference<DiagnosticTrackableCompletableFuture<D,?>> chainHeadReference =
+    public Stream<TrackedFuture<D,?>> walkParentsAsStream() {
+        AtomicReference<TrackedFuture<D,?>> chainHeadReference =
                 new AtomicReference<>(this);
         return IntStream.generate(() -> chainHeadReference.get() != null ? 1 : 0)
                 .takeWhile(x -> x == 1)
                 .mapToObj(i -> {
-                    var dcf = chainHeadReference.get();
-                    chainHeadReference.set(dcf.getParentDiagnosticFuture());
-                    return dcf;
+                    var trackedFuture = chainHeadReference.get();
+                    chainHeadReference.set(trackedFuture.getParentDiagnosticFuture());
+                    return trackedFuture;
                 });
     }
 
@@ -230,11 +229,11 @@ public class DiagnosticTrackableCompletableFuture<D, T> {
         return formatAsString(x->null);
     }
 
-    public String formatAsString(@NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
-        return DiagnosticTrackableCompletableFutureStringFormatter.format(this, resultFormatter);
+    public String formatAsString(@NonNull Function<TrackedFuture<D,?>,String> resultFormatter) {
+        return TrackedFutureStringFormatter.format(this, resultFormatter);
     }
 
-    public String formatAsJson(@NonNull Function<DiagnosticTrackableCompletableFuture<D,?>,String> resultFormatter) {
-        return DiagnosticTrackableCompletableFutureJsonFormatter.format(this, resultFormatter);
+    public String formatAsJson(@NonNull Function<TrackedFuture<D,?>,String> resultFormatter) {
+        return TrackedFutureJsonFormatter.format(this, resultFormatter);
     }
 }

@@ -7,9 +7,9 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 
 import java.io.IOException;
 import java.util.function.Supplier;
@@ -35,7 +35,7 @@ public class ConnectionReplaySession {
     public final EventLoop eventLoop;
     public final OnlineRadixSorter scheduleSequencer;
     @Getter
-    private Supplier<DiagnosticTrackableCompletableFuture<String, ChannelFuture>> channelFutureFutureFactory;
+    private Supplier<TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory;
     private ChannelFuture cachedChannel; // only can be accessed from the eventLoop thread
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
@@ -43,7 +43,7 @@ public class ConnectionReplaySession {
 
     @SneakyThrows
     public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext,
-                                   Supplier<DiagnosticTrackableCompletableFuture<String, ChannelFuture>>
+                                   Supplier<TrackedFuture<String, ChannelFuture>>
                                            channelFutureFutureFactory)
     {
         this.eventLoop = eventLoop;
@@ -53,10 +53,10 @@ public class ConnectionReplaySession {
         this.channelFutureFutureFactory = channelFutureFutureFactory;
     }
 
-    public DiagnosticTrackableCompletableFuture<String, ChannelFuture>
+    public TrackedFuture<String, ChannelFuture>
     getFutureThatReturnsChannelFutureInAnyState(boolean requireActiveChannel) {
-        StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture =
-                new StringTrackableCompletableFuture<>("procuring a connection");
+        TextTrackedFuture<ChannelFuture> eventLoopFuture =
+                new TextTrackedFuture<>("procuring a connection");
         eventLoop.submit(() -> {
             if (!requireActiveChannel || (cachedChannel != null && cachedChannel.channel().isActive())) {
                 eventLoopFuture.future.complete(cachedChannel);
@@ -68,12 +68,12 @@ public class ConnectionReplaySession {
     }
 
     private void createNewChannelFuture(boolean requireActiveChannel,
-                                       StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture) {
+                                       TextTrackedFuture<ChannelFuture> eventLoopFuture) {
         createNewChannelFuture(requireActiveChannel, MAX_CHANNEL_CREATE_RETRIES, eventLoopFuture);
     }
 
     private void createNewChannelFuture(boolean requireActiveChannel, int retries,
-                                        StringTrackableCompletableFuture<ChannelFuture> eventLoopFuture)
+                                        TextTrackedFuture<ChannelFuture> eventLoopFuture)
     {
         channelFutureFutureFactory.get().future.whenComplete((v,t)-> {
             if (requireActiveChannel && retries > 0 && (t == null || exceptionIsRetryable(t))) {

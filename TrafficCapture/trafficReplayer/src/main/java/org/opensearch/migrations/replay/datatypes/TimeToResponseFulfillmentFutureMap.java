@@ -5,19 +5,19 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.StringJoiner;
 
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 
 public class TimeToResponseFulfillmentFutureMap {
 
 
     public static class FutureWorkPoint {
         public final Instant startTime;
-        public final DiagnosticTrackableCompletableFuture<String, Void> scheduleFuture;
+        public final TrackedFuture<String, Void> scheduleFuture;
         private final ChannelTaskType channelTaskType;
         public FutureWorkPoint(Instant forTime, ChannelTaskType taskType) {
             startTime = forTime;
-            scheduleFuture = new StringTrackableCompletableFuture<>("scheduled start for " + forTime);
+            scheduleFuture = new TextTrackedFuture<>("scheduled start for " + forTime);
             channelTaskType = taskType;
         }
     }

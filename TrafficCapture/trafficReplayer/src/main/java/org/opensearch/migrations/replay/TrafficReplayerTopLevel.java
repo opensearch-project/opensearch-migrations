@@ -9,11 +9,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.slf4j.event.Level;
@@ -44,17 +43,17 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
 
     public interface IStreamableWorkTracker<T> extends IWorkTracker<T> {
-        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, T>>>
+        public Stream<Map.Entry<UniqueReplayerRequestKey, TrackedFuture<String, T>>>
         getRemainingItems();
     }
 
     static class ConcurrentHashMapWorkTracker<T> implements IStreamableWorkTracker<T> {
-        ConcurrentHashMap<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,T>> map =
+        ConcurrentHashMap<UniqueReplayerRequestKey, TrackedFuture<String,T>> map =
                 new ConcurrentHashMap<>();
 
         @Override
         public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
-                        DiagnosticTrackableCompletableFuture<String, T> completableFuture) {
+                        TrackedFuture<String, T> completableFuture) {
             map.put(uniqueReplayerRequestKey, completableFuture);
         }
 
@@ -73,13 +72,13 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             return map.size();
         }
 
-        public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,T>>>
+        public Stream<Map.Entry<UniqueReplayerRequestKey, TrackedFuture<String,T>>>
         getRemainingItems() {
             return map.entrySet().stream();
         }
     }
 
-    private final AtomicReference<StringTrackableCompletableFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
+    private final AtomicReference<TextTrackedFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
 
@@ -238,16 +237,16 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
 
         var workTracker = (IStreamableWorkTracker<Void>) requestWorkTracker;
-        Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>>[]
+        Map.Entry<UniqueReplayerRequestKey, TrackedFuture<String, TransformedTargetRequestAndResponse>>[]
                 allRemainingWorkArray = workTracker.getRemainingItems().toArray(Map.Entry[]::new);
         writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
 
         // remember, this block is ONLY for the leftover items.  Lots of other items have been processed
         // and were removed from the live map (hopefully)
-        DiagnosticTrackableCompletableFuture<String, TransformedTargetRequestAndResponse>[] allCompletableFuturesArray =
+        TrackedFuture<String, TransformedTargetRequestAndResponse>[] allCompletableFuturesArray =
                 Arrays.stream(allRemainingWorkArray)
-                        .map(Map.Entry::getValue).toArray(DiagnosticTrackableCompletableFuture[]::new);
-        var allWorkFuture = StringTrackableCompletableFuture.allOf(allCompletableFuturesArray,
+                        .map(Map.Entry::getValue).toArray(TrackedFuture[]::new);
+        var allWorkFuture = TextTrackedFuture.allOf(allCompletableFuturesArray,
                 () -> "TrafficReplayer.AllWorkFinished");
         try {
             if (allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, allWorkFuture)) {
@@ -292,8 +291,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     protected static void writeStatusLogsForRemainingWork(Level logLevel,
                                                           Map.Entry<UniqueReplayerRequestKey,
-                                                                  DiagnosticTrackableCompletableFuture<String,
-                                                                          TransformedTargetRequestAndResponse>>[]
+                                                                  TrackedFuture<String,
+                                                                                                                                            TransformedTargetRequestAndResponse>>[]
                                                                   allRemainingWorkArray) {
         log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
         if (log.isInfoEnabled()) {
@@ -309,7 +308,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
-    static String formatWorkItem(DiagnosticTrackableCompletableFuture<String, ?> cf) {
+    static String formatWorkItem(TrackedFuture<String, ?> cf) {
         try {
             var resultValue = cf.get();
             if (resultValue instanceof TransformedTargetRequestAndResponse) {
@@ -350,8 +349,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         });
         Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f -> f.cancel(true));
         var shutdownWasSignalledFuture = error == null ?
-                StringTrackableCompletableFuture.<Void>completedFuture(null, () -> "TrafficReplayer shutdown") :
-                StringTrackableCompletableFuture.<Void>failedFuture(error, () -> "TrafficReplayer shutdown");
+                TextTrackedFuture.<Void>completedFuture(null, () -> "TrafficReplayer shutdown") :
+                TextTrackedFuture.<Void>failedFuture(error, () -> "TrafficReplayer shutdown");
         while (!allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, shutdownWasSignalledFuture)) {
             var otherRemainingWorkObj = allRemainingWorkFutureOrShutdownSignalRef.get();
             if (otherRemainingWorkObj != null) {

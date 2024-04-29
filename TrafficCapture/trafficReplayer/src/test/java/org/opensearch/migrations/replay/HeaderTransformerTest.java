@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -53,7 +53,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
                 .collect(Collectors.toList());
 
         var referenceStringBuilder = new StringBuilder();
-        DiagnosticTrackableCompletableFuture<String,Void> allConsumesFuture =
+        TrackedFuture<String,Void> allConsumesFuture =
                 TestUtils.chainedDualWriteHeaderAndPayloadParts(transformingHandler,
                         stringParts,
                         referenceStringBuilder,
@@ -119,7 +119,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
         var stringParts = IntStream.range(0, 1).mapToObj(i-> TestUtils.makeRandomString(r, 10)).map(o->(String)o)
                 .collect(Collectors.toList());
 
-        DiagnosticTrackableCompletableFuture<String,Void> allConsumesFuture =
+        TrackedFuture<String,Void> allConsumesFuture =
                 TestUtils.chainedDualWriteHeaderAndPayloadParts(transformingHandler,
                         stringParts,
                         referenceStringBuilder,

@@ -2,8 +2,8 @@ package org.opensearch.migrations;
 
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -11,9 +11,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-public class NettyToCompletableFutureBinders {
+public class NettyFutureBinders {
 
-    private NettyToCompletableFutureBinders() {}
+    private NettyFutureBinders() {}
 
     public static CompletableFuture<Void>
     bindNettyFutureToCompletableFuture(Future<?> nettyFuture, CompletableFuture<Void> cf) {
@@ -32,28 +32,28 @@ public class NettyToCompletableFutureBinders {
         return bindNettyFutureToCompletableFuture(nettyFuture, new CompletableFuture<>());
     }
 
-    public static DiagnosticTrackableCompletableFuture<String, Void>
+    public static TrackedFuture<String, Void>
     bindNettyFutureToTrackableFuture(Future<?> nettyFuture, String label) {
-        return new StringTrackableCompletableFuture<>(bindNettyFutureToCompletableFuture(nettyFuture), label);
+        return new TextTrackedFuture<>(bindNettyFutureToCompletableFuture(nettyFuture), label);
     }
 
-    public static DiagnosticTrackableCompletableFuture<String, Void>
+    public static TrackedFuture<String, Void>
     bindNettyFutureToTrackableFuture(Future<?> nettyFuture, Supplier<String> labelProvider) {
-        return new StringTrackableCompletableFuture<>(bindNettyFutureToCompletableFuture(nettyFuture), labelProvider);
+        return new TextTrackedFuture<>(bindNettyFutureToCompletableFuture(nettyFuture), labelProvider);
     }
 
-    public static DiagnosticTrackableCompletableFuture<String, Void>
+    public static TrackedFuture<String, Void>
     bindNettyFutureToTrackableFuture(Function<Runnable, Future<?>> nettyFutureGenerator, String label) {
         return bindNettyFutureToTrackableFuture(nettyFutureGenerator.apply(() -> {
         }), label);
     }
 
-    public static DiagnosticTrackableCompletableFuture<String, Void>
+    public static TrackedFuture<String, Void>
     bindNettySubmitToTrackableFuture(EventLoop eventLoop) {
         return bindNettyFutureToTrackableFuture(eventLoop::submit, "waiting for event loop submission");
     }
 
-    public static DiagnosticTrackableCompletableFuture<String, Void>
+    public static TrackedFuture<String, Void>
     bindNettyScheduleToCompletableFuture(EventLoop eventLoop, Duration delay) {
         var delayMs = Math.max(0, delay.toMillis());
         return bindNettyFutureToTrackableFuture(eventLoop.schedule(() -> {}, delayMs, TimeUnit.MILLISECONDS),

@@ -14,11 +14,11 @@ import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.NettyToCompletableFutureBinders;
+import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.net.URI;
 import java.time.Duration;
@@ -74,7 +74,7 @@ public class ClientConnectionPool {
                 ()->getResilientClientChannelProducer(eventLoop, channelKeyCtx));
     }
 
-    private DiagnosticTrackableCompletableFuture<String, ChannelFuture>
+    private TrackedFuture<String, ChannelFuture>
     getResilientClientChannelProducer(EventLoop eventLoop, IReplayContexts.IChannelKeyContext connectionContext) {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() ->
@@ -94,7 +94,7 @@ public class ClientConnectionPool {
     public CompletableFuture<Void> shutdownNow() {
         CompletableFuture<Void> shutdownFuture = new CompletableFuture<>();
         connectionId2ChannelCache.invalidateAll();
-        return NettyToCompletableFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
+        return NettyFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
     }
     
     public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
@@ -120,13 +120,13 @@ public class ClientConnectionPool {
         return crs;
     }
 
-    private DiagnosticTrackableCompletableFuture<String, Channel>
+    private TrackedFuture<String, Channel>
     closeClientConnectionChannel(ConnectionReplaySession channelAndFutureWork) {
         return channelAndFutureWork.getFutureThatReturnsChannelFutureInAnyState(false)
                 .thenCompose(channelFuture-> {
                     log.atTrace().setMessage(() -> "closing channel " + channelFuture.channel() +
                             "(" + channelAndFutureWork.getChannelKeyContext() + ")...").log();
-                    return NettyToCompletableFutureBinders.bindNettyFutureToTrackableFuture(
+                    return NettyFutureBinders.bindNettyFutureToTrackableFuture(
                             channelFuture.channel().close(),
                                     "calling channel.close()")
                             .thenApply(v -> {

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+
+import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.util.function.Function;
 
@@ -9,5 +10,5 @@ import java.util.function.Function;
  * chained to its logical parent dependency.
  */
 public interface FutureTransformer<U> extends
-        Function<DiagnosticTrackableCompletableFuture<String,Void>, DiagnosticTrackableCompletableFuture<String,U>> {
+        Function<TrackedFuture<String,Void>, TrackedFuture<String,U>> {
 }

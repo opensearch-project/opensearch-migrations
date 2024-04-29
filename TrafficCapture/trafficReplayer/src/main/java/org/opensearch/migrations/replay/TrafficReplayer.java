@@ -8,7 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutureJsonFormatter;
+import org.opensearch.migrations.replay.util.TrackedFutureJsonFormatter;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -314,7 +314,7 @@ public class TrafficReplayer {
                     new TrafficStreamLimiter(params.maxConcurrentRequests), orderedRequestTracker);
             activeContextMonitor = new ActiveContextMonitor(
                     globalContextTracker, perContextTracker, orderedRequestTracker, 64,
-                    cf-> DiagnosticTrackableCompletableFutureJsonFormatter.format(cf, TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
+                    cf-> TrackedFutureJsonFormatter.format(cf, TrafficReplayerTopLevel::formatWorkItem), activeContextLogger);
             ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
             scheduledExecutorService.scheduleAtFixedRate(()->{
                 activeContextLogger.atInfo().setMessage(()->"Total requests outstanding at " + Instant.now() +

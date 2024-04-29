@@ -19,27 +19,21 @@ import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 @Slf4j
@@ -58,9 +52,9 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         }
 
         @Override
-        public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+        public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
             var index = calls.getAndIncrement();
-            return new StringTrackableCompletableFuture<>(CompletableFuture.supplyAsync(()->{
+            return new TextTrackedFuture<>(CompletableFuture.supplyAsync(()->{
                 try {
                     lastCheckIsReady.release();
                     log.atDebug().setMessage(()->"trying to acquire semaphore for packet #"+index+" and id="+id).log();
@@ -74,9 +68,9 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         }
 
         @Override
-        public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse> finalizeRequest() {
+        public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
             var index = calls.getAndIncrement();
-            return new StringTrackableCompletableFuture<>(CompletableFuture.supplyAsync(()->{
+            return new TextTrackedFuture<>(CompletableFuture.supplyAsync(()->{
                 try {
                     lastCheckIsReady.release();
                     log.atDebug().setMessage(()->"trying to acquire semaphore for finalize and id="+id).log();
@@ -103,7 +97,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 connectionToConsumerMap.get(c.getSourceRequestIndex()));
         var baseTime = Instant.EPOCH;
         Instant lastEndTime = baseTime;
-        var scheduledRequests = new ArrayList<DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>>();
+        var scheduledRequests = new ArrayList<TrackedFuture<String, AggregatedRawResponse>>();
         for (int i = 0; i < NUM_REQUESTS_TO_SCHEDULE; ++i) {
             connectionToConsumerMap.put((long)i, new BlockingPacketConsumer(i));
             var requestContext = rootContext.getTestConnectionRequestContext(i);
@@ -151,15 +145,15 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         closeFuture.get();
     }
 
-    private String getParentsDiagnosticString(DiagnosticTrackableCompletableFuture<String, ?> cf, String indent) {
+    private String getParentsDiagnosticString(TrackedFuture<String, ?> cf, String indent) {
         return cf.walkParentsAsStream()
-                .map(dcf->Optional.ofNullable(dcf.getInnerComposedPendingCompletableFuture())
+                .map(tf->Optional.ofNullable(tf.getInnerComposedPendingCompletableFuture())
                         .map(idf->indent + "<\n" +
                                 getParentsDiagnosticString(idf, indent+" ") + "\n" + indent + ">\n")
                         .orElse("") +
-                        indent + dcf.diagnosticSupplier.get() +
-                        " [" + System.identityHashCode(dcf) + "]" +
-                        ": " + dcf.isDone())
+                        indent + tf.diagnosticSupplier.get() +
+                        " [" + System.identityHashCode(tf) + "]" +
+                        ": " + tf.isDone())
                 .collect(Collectors.joining(";\n"));
     }
 
@@ -180,7 +174,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     new RequestSenderOrchestrator(clientConnectionPool, NettyPacketToHttpConsumer::new);
             var baseTime = Instant.now();
             Instant lastEndTime = baseTime;
-            var scheduledItems = new ArrayList<DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>>();
+            var scheduledItems = new ArrayList<TrackedFuture<String, AggregatedRawResponse>>();
             for (int i = 0; i < NUM_REQUESTS_TO_SCHEDULE; ++i) {
                 var requestContext = rootContext.getTestConnectionRequestContext(i);
                 // half the time schedule at the same time as the last one, the other half, 10ms later than the previous

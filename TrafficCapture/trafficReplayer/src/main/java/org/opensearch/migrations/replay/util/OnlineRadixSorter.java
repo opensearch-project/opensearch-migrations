@@ -36,15 +36,16 @@ public class OnlineRadixSorter {
     @AllArgsConstructor
     @Getter
     private static class IndexedWork {
-        private final DiagnosticTrackableCompletableFuture<String,Void> signalingToStartFuture;
-        private DiagnosticTrackableCompletableFuture<String,? extends Object> workCompletedFuture;
-        private final DiagnosticTrackableCompletableFuture<String,Void> signalWorkCompletedFuture;
+        private final TrackedFuture<String,Void> signalingToStartFuture;
+        private TrackedFuture<String,? extends Object> workCompletedFuture;
+        private final TrackedFuture<String,Void> signalWorkCompletedFuture;
 
-        public <T> DiagnosticTrackableCompletableFuture<String,T>
+        public <T> TrackedFuture<String,T>
         addWorkFuture(FutureTransformer<T> processor, int index) {
-            var rval = processor.apply(signalingToStartFuture).propagateCompletionToDependentFuture(signalWorkCompletedFuture,
-                    (processedCf, dependentCf) -> dependentCf.complete(null),
-                    ()->"Caller-task completion for idx=" + index);
+            var rval = processor.apply(signalingToStartFuture)
+                    .propagateCompletionToDependentFuture(signalWorkCompletedFuture, (processedCf, dependentCf) ->
+                                    dependentCf.complete(null),
+                            ()->"Caller-task completion for idx=" + index);
             workCompletedFuture = rval;
             return rval;
         }
@@ -70,7 +71,7 @@ public class OnlineRadixSorter {
      * @param processor
      * @return
      */
-    public <T> DiagnosticTrackableCompletableFuture<String,T>
+    public <T> TrackedFuture<String,T>
     addFutureForWork(final int index, FutureTransformer<T> processor) {
         var workItem = items.get(index);
         if (workItem == null) {
@@ -83,14 +84,14 @@ public class OnlineRadixSorter {
                  ++nextKey) {
                 int finalNextKey = nextKey;
                 var signalFuture = items.isEmpty() ?
-                        new StringTrackableCompletableFuture<Void>(
+                        new TextTrackedFuture<Void>(
                                 CompletableFuture.completedFuture(null),
                                 "unlinked signaling future for slot #" + finalNextKey) :
                         items.get(finalNextKey-1).signalWorkCompletedFuture
                                 .thenAccept(v-> {},
                                         ()->"Kickoff for slot #" + finalNextKey);
                 workItem = new IndexedWork(signalFuture, null,
-                        new StringTrackableCompletableFuture<Void>(()->"Work to finish for slot #" + finalNextKey +
+                        new TextTrackedFuture<Void>(()->"Work to finish for slot #" + finalNextKey +
                                 " is awaiting [" + getAwaitingText() + "]"));
                 workItem.signalWorkCompletedFuture.whenComplete((v,t)->{
                     ++currentOffset;
