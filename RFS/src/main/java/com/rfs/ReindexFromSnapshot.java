@@ -358,12 +358,17 @@ public class ReindexFromSnapshot {
 
                         Flux<Document> documents = new LuceneDocumentsReader().readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
                         String targetIndex = indexMetadata.getName() + indexSuffix;
-                        DocumentReindexer.reindex(targetIndex, documents, targetConnection);
 
-                        logger.info("Shard reindexing completed");
+                        int targetShardId = shardId; // Define in local context for the lambda
+                        DocumentReindexer.reindex(targetIndex, documents, targetConnection)
+                            .doOnError(error -> logger.error("Error during reindexing: " + error))
+                            .doOnSuccess(done -> logger.info("Reindexing completed for index " + targetIndex + ", shard " + targetShardId))
+                            // Wait for the shard reindexing to complete before proceeding; fine in this demo script, but
+                            // shouldn't be done quite this way in the real RFS Worker.
+                            .block();
                     }
                 }
-                logger.info("Refreshing newly added documents");
+                logger.info("Refreshing target cluster to reflect newly added documents");
                 DocumentReindexer.refreshAllDocuments(targetConnection);
                 logger.info("Refresh complete");
             }

@@ -18,7 +18,7 @@ public class DocumentReindexer {
     private static final Logger logger = LogManager.getLogger(DocumentReindexer.class);
     private static final int MAX_BATCH_SIZE = 1000; // Arbitrarily chosen
 
-    public static void reindex(String indexName, Flux<Document> documentStream, ConnectionDetails targetConnection) throws Exception {
+    public static Mono<Void> reindex(String indexName, Flux<Document> documentStream, ConnectionDetails targetConnection) throws Exception {
         String targetUrl = "/" + indexName + "/_bulk";
         HttpClient client = HttpClient.create()
             .host(targetConnection.hostName)
@@ -32,16 +32,19 @@ public class DocumentReindexer {
                 }
             });
 
-        documentStream
+        return documentStream
             .map(DocumentReindexer::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
             .buffer(MAX_BATCH_SIZE) // Collect until you hit the batch size
+            .doOnNext(bulk -> logger.info(bulk.size() + " documents in current bulk request"))
             .map(DocumentReindexer::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
-            .flatMap(bulkJson -> sendBulkRequest(client, targetUrl, bulkJson)) // Send the request
+            .flatMap(bulkJson -> sendBulkRequest(client, targetUrl, bulkJson) // Send the request
+                .doOnSuccess(unused -> logger.debug("Batch succeeded"))
+                .doOnError(error -> logger.error("Batch failed", error))
+                .onErrorResume(e -> Mono.empty()) // Prevent the error from stopping the entire stream
+            )
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(5)))
-            .subscribe(
-                response -> logger.info("Batch uploaded successfully"),
-                error -> logger.error("Failed to upload batch", error)
-            );
+            .doOnComplete(() -> logger.debug("All batches processed"))
+            .then();
     }
 
     private static String convertDocumentToBulkSection(Document document) {
@@ -53,7 +56,6 @@ public class DocumentReindexer {
     }
 
     private static String convertToBulkRequestBody(List<String> bulkSections) {
-        logger.info(bulkSections.size() + " documents in current bulk request");
         StringBuilder builder = new StringBuilder();
         for (String section : bulkSections) {
             builder.append(section).append("\n");
@@ -65,26 +67,13 @@ public class DocumentReindexer {
         return client.post()
                 .uri(url)
                 .send(Flux.just(Unpooled.wrappedBuffer(bulkJson.getBytes())))
-                .responseSingle((res, content) -> 
-                    content.asString()  // Convert the response content to a string
-                    .map(body -> new BulkResponseDetails(res.status().code(), body))  // Map both status code and body into a response details object
-                )
+                .responseSingle((res, content) -> content.asString().map(body -> new BulkResponseDetails(res.status().code(), body)))
                 .flatMap(responseDetails -> {
-                    // Something bad happened with our request, log it
-                    if (responseDetails.hasBadStatusCode()) {
-                        logger.error(responseDetails.getFailureMessage());
+                    if (responseDetails.hasBadStatusCode() || responseDetails.hasFailedOperations()) {
+                        return Mono.error(new RuntimeException(responseDetails.getFailureMessage()));
                     }
-                    // Some of the bulk operations failed, log it
-                    else if (responseDetails.hasFailedOperations()) {
-                        logger.error(responseDetails.getFailureMessage());
-                    }
-                    return Mono.just(responseDetails);
-                })
-                .doOnError(err -> {
-                    // We weren't even able to complete the request, log it
-                    logger.error("Bulk request failed", err);
-                })
-                .then();
+                    return Mono.empty();
+                });
     }
 
     public static void refreshAllDocuments(ConnectionDetails targetConnection) throws Exception {
