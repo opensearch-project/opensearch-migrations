@@ -5,7 +5,7 @@ import lombok.Getter;
 
 @AllArgsConstructor
 @Getter
-public class ChannelTask {
+public class ChannelTask<T> {
     public final ChannelTaskType kind;
-    public final Runnable runnable;
+    public final FutureTransformer<T> runnable;
 }

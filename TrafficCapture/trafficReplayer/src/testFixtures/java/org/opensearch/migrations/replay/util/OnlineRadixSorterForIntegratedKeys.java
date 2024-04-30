@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.util;
 
-import java.util.function.Consumer;
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.function.ToIntFunction;
 
 /**
@@ -10,7 +11,8 @@ import java.util.function.ToIntFunction;
  *
  * @param <T>
  */
-public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter<T> {
+@Slf4j
+public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter {
 
     ToIntFunction<T> radixResolver;
 
@@ -19,7 +21,9 @@ public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter<T> 
         this.radixResolver = radixResolver;
     }
 
-    public void add(T item, Consumer<T> sortedItemVisitor) {
-        super.add(radixResolver.applyAsInt(item), item, sortedItemVisitor);
+    public TrackedFuture<String, Void> add(T item, Runnable sortedItemVisitor) {
+        return super.addFutureForWork(radixResolver.applyAsInt(item), signalFuture->signalFuture.map(
+                f->f.whenComplete((v,t)->sortedItemVisitor.run()),
+                ()->"OnlineRadixSorterForIntegratedKeys.addFutureForWork"));
     }
 }

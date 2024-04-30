@@ -74,7 +74,7 @@ class ActiveContextMonitorTest {
                 addContexts(compositeTracker, rc);
                 final var idx = i;
                 orderedWorkerTracker.put(rc.getReplayerRequestKey(),
-                        new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "dummy #" + idx));
+                        new TrackedFuture<>(new CompletableFuture<>(), () -> "dummy #" + idx));
             }
             Thread.sleep(10);
             acm.run();
@@ -108,7 +108,7 @@ class ActiveContextMonitorTest {
                 addContexts(compositeTracker, rc);
                 final var idx = i;
                 orderedWorkerTracker.put(rc.getReplayerRequestKey(),
-                        new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "dummy #" + idx));
+                        new TrackedFuture<>(new CompletableFuture<>(), () -> "dummy #" + idx));
             }
             var startTime = System.nanoTime();
             acm.logTopOpenActivities(false);
@@ -126,7 +126,7 @@ class ActiveContextMonitorTest {
                 var rc = testContext.getTestConnectionRequestContext(i+TRANCHE_SIZE);
                 addContexts(compositeTracker, rc);
                 orderedWorkerTracker.put(rc.getReplayerRequestKey(),
-                        new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), () -> "dummy obj"));
+                        new TrackedFuture<>(new CompletableFuture<>(), () -> "dummy obj"));
             }
 
             acm.logTopOpenActivities(false);
@@ -170,7 +170,7 @@ class ActiveContextMonitorTest {
         try (var testContext = TestContext.noOtelTracking()) {
             var requestContext1 = testContext.getTestConnectionRequestContext(0);
             orderedWorkerTracker.put(requestContext1.getReplayerRequestKey(),
-                    new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), ()->"dummy 1"));
+                    new TrackedFuture<>(new CompletableFuture<>(), ()->"dummy 1"));
 
             addContexts(compositeTracker, requestContext1);
             Thread.sleep(20);
@@ -179,7 +179,7 @@ class ActiveContextMonitorTest {
 
             var requestContext2 = testContext.getTestConnectionRequestContext(0);
             orderedWorkerTracker.put(requestContext2.getReplayerRequestKey(),
-                    new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), ()->"dummy 2"));
+                    new TrackedFuture<>(new CompletableFuture<>(), ()->"dummy 2"));
 
             addContexts(compositeTracker, requestContext2);
             Thread.sleep(20);
@@ -188,7 +188,7 @@ class ActiveContextMonitorTest {
 
             var requestContext3 = testContext.getTestConnectionRequestContext(0);
             orderedWorkerTracker.put(requestContext3.getReplayerRequestKey(),
-                    new DiagnosticTrackableCompletableFuture<>(new CompletableFuture<>(), ()->"dummy 3"));
+                    new TrackedFuture<>(new CompletableFuture<>(), ()->"dummy 3"));
 
             addContexts(compositeTracker, requestContext3);
             Thread.sleep(20);
