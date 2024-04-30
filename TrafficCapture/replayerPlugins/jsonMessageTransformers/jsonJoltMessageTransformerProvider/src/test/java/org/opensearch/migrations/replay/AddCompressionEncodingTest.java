@@ -67,7 +67,7 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
 
         EmbeddedChannel channel = new EmbeddedChannel(
             new HttpServerCodec(),
-            new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
+            new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
         );
 
         channel.writeInbound(Unpooled.wrappedBuffer(testPacketCapture.getBytesCaptured()));
