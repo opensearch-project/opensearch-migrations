@@ -33,6 +33,7 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation group: 'com.lmax', name: 'disruptor'
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation 'com.google.protobuf:protobuf-java:3.22.2'

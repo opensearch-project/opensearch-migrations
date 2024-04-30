@@ -19,14 +19,17 @@ public class IndexMetadataData_ES_6_8 implements com.rfs.common.IndexMetadata.Da
         this.indexName = indexName;
     }
 
+    @Override
     public ObjectNode getAliases() {
         return (ObjectNode) root.get("aliases");
     }
 
+    @Override
     public String getId() {
         return indexId;
     }
 
+    @Override
     public ObjectNode getMappings() {
         if (mappings != null) {
             return mappings;
@@ -39,14 +42,17 @@ public class IndexMetadataData_ES_6_8 implements com.rfs.common.IndexMetadata.Da
         return mappings;
     }
 
+    @Override
     public String getName() {
         return indexName;
     }
 
+    @Override
     public int getNumberOfShards() {
         return this.getSettings().get("index").get("number_of_shards").asInt();
     }   
 
+    @Override
     public ObjectNode getSettings() {
         if (settings != null) {
             return settings;
@@ -61,6 +67,7 @@ public class IndexMetadataData_ES_6_8 implements com.rfs.common.IndexMetadata.Da
         return settings;
     }
 
+    @Override
     public ObjectNode toObjectNode() {
         return root;
     }

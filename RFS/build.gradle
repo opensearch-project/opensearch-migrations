@@ -25,6 +25,11 @@ repositories {
     mavenCentral()
 }
 
+ext {
+    awsSdkVersion = '2.25.16'
+    dataset = findProperty('dataset') ?: 'skip_dataset'
+}
+
 dependencies {
     implementation 'com.beust:jcommander:1.81'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.2'
@@ -37,8 +42,18 @@ dependencies {
     implementation 'org.apache.lucene:lucene-core:8.11.3'
     implementation 'org.apache.lucene:lucene-analyzers-common:8.11.3'
     implementation 'org.apache.lucene:lucene-backward-codecs:8.11.3'
-    implementation 'software.amazon.awssdk:s3:2.25.16'
 
+    implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
+    implementation 'io.projectreactor.netty:reactor-netty-core' 
+    implementation 'io.projectreactor.netty:reactor-netty-http'
+
+    implementation platform("software.amazon.awssdk:bom:$awsSdkVersion")
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:s3-transfer-manager'
+    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.18'
+
+    testImplementation 'io.projectreactor:reactor-test:3.6.5'
+    testImplementation 'org.apache.logging.log4j:log4j-core:2.23.1'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'
     testImplementation 'org.junit.jupiter:junit-jupiter-params:5.10.2'
     testImplementation 'org.mockito:mockito-core:5.11.0'
@@ -55,16 +70,12 @@ clean.doFirst {
     delete project.file("./docker/build")
 }
 
-ext {
-    dataset = findProperty('dataset') ?: 'skip_dataset'
-}
-
 task demoPrintOutSnapshot (type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.rfs.DemoPrintOutSnapshot'
 }
 
-task copyDockerRuntimeJars (type: Copy) {
+task copyDockerRuntimeJars (type: Sync) {
     description = 'Copy runtime JARs and app jar to docker build directory'
 
     // Define the destination directory
@@ -120,4 +131,13 @@ tasks.getByName('composeUp')
 
 test {
     useJUnitPlatform()
+
+    testLogging {
+        exceptionFormat = 'full'
+        events "failed"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        showStandardStreams = true
+    }
 }
