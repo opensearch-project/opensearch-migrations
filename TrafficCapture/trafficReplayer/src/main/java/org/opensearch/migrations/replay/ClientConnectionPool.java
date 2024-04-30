@@ -18,6 +18,7 @@ import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.net.URI;
@@ -124,6 +125,12 @@ public class ClientConnectionPool {
     closeClientConnectionChannel(ConnectionReplaySession channelAndFutureWork) {
         return channelAndFutureWork.getFutureThatReturnsChannelFutureInAnyState(false)
                 .thenCompose(channelFuture-> {
+                    if (channelFuture == null) {
+                        log.atTrace().setMessage(() -> "Asked to close channel for " +
+                                channelAndFutureWork.getChannelKeyContext() + " but the channel wasn't found.  " +
+                                "It may have already been reset.").log();
+                        return TextTrackedFuture.completedFuture(null, ()->"");
+                    }
                     log.atTrace().setMessage(() -> "closing channel " + channelFuture.channel() +
                             "(" + channelAndFutureWork.getChannelKeyContext() + ")...").log();
                     return NettyFutureBinders.bindNettyFutureToTrackableFuture(
